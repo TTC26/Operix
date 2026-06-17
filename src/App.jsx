@@ -2682,6 +2682,15 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
 
 // ─── Vouchers ──────────────────────────────────────────────────
 
+const VOUCHER_ACCOUNT_HEADS = [
+  'Cash', 'Bank', 'Petty Cash',
+  'Accounts Payable', 'Accounts Receivable',
+  'Sales', 'Purchase', 'Expenses',
+  'Salaries & Wages', 'Rent', 'Utilities',
+  'Office Supplies', 'Travel & Transport',
+  'Professional Fees', 'Loan', 'Capital', 'Other',
+];
+
 function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, userRole }) {
   const [tab, setTab] = useState('payment');
   const [showForm, setShowForm] = useState(false);
@@ -5994,6 +6003,87 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           <ProductionOrderForm order={editing} boms={boms} items={items} onSave={(o) => { saveOrder(o); setCreating(false); setEditing(null); }} onClose={() => { setCreating(false); setEditing(null); }} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
+  const [form, setForm] = useState({
+    id: order?.id || '',
+    number: order?.number || '',
+    bomId: order?.bomId || '',
+    quantity: order?.quantity || 1,
+    startDate: order?.startDate || new Date().toISOString().split('T')[0],
+    targetDate: order?.targetDate || '',
+    status: order?.status || 'planned',
+    notes: order?.notes || '',
+  });
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  function handleSave() {
+    if (!form.bomId) return alert('Please select a BOM');
+    if (!form.number) return alert('Please enter an order number');
+    onSave({ ...form, quantity: parseFloat(form.quantity) || 1, updatedAt: new Date().toISOString() });
+  }
+
+  const selectedBom = boms.find(b => b.id === form.bomId);
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Order Number *</label>
+        <input value={form.number} onChange={e => set('number', e.target.value)} style={styles.input} placeholder="PO-001" />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>BOM / Product *</label>
+        <select value={form.bomId} onChange={e => set('bomId', e.target.value)} style={styles.input}>
+          <option value="">— Select BOM —</option>
+          {boms.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Quantity</label>
+        <input type="number" min="1" value={form.quantity} onChange={e => set('quantity', e.target.value)} style={styles.input} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Status</label>
+        <select value={form.status} onChange={e => set('status', e.target.value)} style={styles.input}>
+          {['planned','in_progress','qc_pending','completed','failed'].map(s => (
+            <option key={s} value={s}>{s.replace('_', ' ')}</option>
+          ))}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Start Date</label>
+        <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} style={styles.input} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Target Date</label>
+        <input type="date" value={form.targetDate} onChange={e => set('targetDate', e.target.value)} style={styles.input} />
+      </div>
+      <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+        <label style={styles.label}>Notes</label>
+        <textarea value={form.notes} onChange={e => set('notes', e.target.value)} style={{ ...styles.input, minHeight: 70 }} placeholder="Optional notes..." />
+      </div>
+      {selectedBom && (
+        <div style={{ gridColumn: '1 / -1', background: '#F8F5EE', borderRadius: 8, padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 6 }}>BOM Components ({selectedBom.components?.length || 0} items)</div>
+          {(selectedBom.components || []).map((c, i) => {
+            const item = items.find(it => it.id === c.itemId);
+            return (
+              <div key={i} style={{ fontSize: 12, color: '#555', display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid #EAE6DB' }}>
+                <span>{item?.name || c.itemId}</span>
+                <span style={{ color: '#888' }}>{(c.qty * form.quantity).toFixed(2)} {c.unit || item?.unit || ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={handleSave}>Save Order</button>
+      </div>
     </div>
   );
 }
