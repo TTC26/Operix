@@ -1579,7 +1579,10 @@ function SidebarFooter({ syncStatus, user, userRole, onLogout, view, setView }) 
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
-      <div style={styles.workspaceBox}>
+      </div>
+    </div>
+  );
+}
 
 // ─── DocEditor ─────────────────────────────────────────────────
 
@@ -4024,7 +4027,59 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
 }
 
 // ─── Pay Slip Print ───────────────────────────────────────────────────────────
-function PaySlipPrint({ run, businessInfo, onClose })
+function PaySlipPrint({ run, businessInfo, onClose }) {
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
+  const fmt = (n) => currency(n, cc.currency);
+  return (
+    <div style={{ padding: 32, fontFamily: 'Inter, sans-serif', maxWidth: 600, margin: '0 auto' }} className="print-area">
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 20 }}>{businessInfo.name}</div>
+          <div style={{ fontSize: 12, color: '#888' }}>{businessInfo.address}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>Pay Slip</div>
+          <div style={{ fontSize: 12, color: '#888' }}>{run?.month} {run?.year}</div>
+        </div>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
+        <thead>
+          <tr style={{ background: '#1E2A4A', color: '#fff' }}>
+            <th style={{ padding: '8px 12px', textAlign: 'left' }}>Employee</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Basic</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Allowances</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Deductions</th>
+            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Net Pay</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(run?.entries || []).map((e, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid #EAE6DB' }}>
+              <td style={{ padding: '8px 12px' }}>{e.name}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.basic)}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.allowances)}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.deductions)}</td>
+              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(e.net)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ fontWeight: 700, borderTop: '2px solid #1E2A4A' }}>
+            <td style={{ padding: '8px 12px' }}>Total</td>
+            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.basic||0),0))}</td>
+            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.allowances||0),0))}</td>
+            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.deductions||0),0))}</td>
+            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(run?.totalNet||0)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }} className="no-print">
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}><Printer size={14} /> Print</button>
+        <button onClick={onClose} style={{ padding: '8px 20px', background: '#eee', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Close</button>
+      </div>
+    </div>
+  );
+}
 
 // ─── ServiceOrders ─────────────────────────────────────────────
 
