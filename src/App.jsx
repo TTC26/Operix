@@ -1264,11 +1264,6 @@ function ConvertDropdown({ doc, onConvert }) {
 
 // ─── Sidebar ───────────────────────────────────────────────────
 
-Plus, FileText, Truck, FileSignature, FileMinus, Users, Package,
-  LayoutDashboard, LogOut, Cloud, CloudOff, Shield, Factory,
-  ClipboardList, CheckCircle, Wrench, BookOpen, ChevronDown, ChevronRight, Briefcase,
-} from 'lucide-react';
-
 // Which views belong to each section (for auto-expand when child is active)
 const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents'],
