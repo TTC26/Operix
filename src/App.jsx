@@ -2563,6 +2563,74 @@ function PettyCashForm({ entry, onSave, onClose }) {
   );
 }
 
+function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
+  // Build running balance
+  let balance = parseFloat(openingBalance) || 0;
+  const ledger = (rows || []).map(e => {
+    const debit  = parseFloat(e.debit)  || 0;
+    const credit = parseFloat(e.credit) || 0;
+    balance = balance - debit + credit;
+    return { ...e, debit, credit, runningBalance: balance };
+  });
+  const fmt = (n) => '₹' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+
+  return (
+    <div>
+      <div className="no-print" onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 998 }} />
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
+        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+      </div>
+      <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+        {/* Header */}
+        <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
+            <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PETTY CASH STATEMENT</div>
+            <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>Printed: {new Date().toLocaleDateString('en-IN')}</div>
+          </div>
+        </div>
+        {/* Opening balance */}
+        <div style={{ fontSize: 13, marginBottom: 14, color: '#555' }}>
+          Opening Balance: <strong style={{ color: '#1E2A4A' }}>{fmt(openingBalance)}</strong>
+        </div>
+        {/* Table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#F8F5EE' }}>
+              {['Date','Voucher No','Description','Category','Paid To','Debit','Credit','Balance'].map(h => (
+                <th key={h} style={{ padding: '7px 10px', textAlign: h === 'Date' || h === 'Voucher No' || h === 'Description' || h === 'Category' || h === 'Paid To' ? 'left' : 'right', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ledger.map((e, i) => (
+              <tr key={e.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF7' }}>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.date}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.voucherNo}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#1E2A4A' }}>{e.description}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.category}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.paidTo}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', color: e.debit ? '#B91C1C' : '#ccc' }}>{e.debit ? fmt(e.debit) : '—'}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', color: e.credit ? '#1A7A3E' : '#ccc' }}>{e.credit ? fmt(e.credit) : '—'}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', fontWeight: 600, color: e.runningBalance >= 0 ? '#1E2A4A' : '#B91C1C' }}>{fmt(e.runningBalance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {/* Closing balance */}
+        <div style={{ marginTop: 20, textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#1E2A4A', borderTop: '2px solid #1E2A4A', paddingTop: 10 }}>
+          Closing Balance: {fmt(ledger.length ? ledger[ledger.length - 1].runningBalance : openingBalance)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Single Voucher Print ────────────────────────────────────────────────────
 
 function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
