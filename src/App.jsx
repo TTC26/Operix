@@ -1187,14 +1187,6 @@ function StatusBadge({ status }) {
   return <span style={{ ...styles.badge, background: s.bg, color: s.color }}>{s.label}</span>;
 }
 
-function downloadCSV(filename, headers, rows) {
-  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = filename;
-  a.click();
-}
-
 function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc }) {
   return (
     <div style={styles.page}>
@@ -2457,7 +2449,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
         <PettyCashForm entry={editing} onSave={saveEntry} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printVoucher && (
-        <VoucherPrintModal entry={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
+        <PettyCashVoucherPrint entry={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
       )}
       {showStatement && (
         <StatementPanel rows={rows} openingBalance={pettyCash.openingBalance ?? 0} businessInfo={businessInfo} onClose={() => setShowStatement(false)} />
@@ -2550,7 +2542,7 @@ function PettyCashForm({ entry, onSave, onClose }) {
 
 // ─── Single Voucher Print ────────────────────────────────────────────────────
 
-function VoucherPrintModal({ entry, businessInfo, onClose }) {
+function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
   return (
     <Modal title="Petty Cash Voucher" onClose={onClose}>
       {/* print-area INSIDE the no-print overlay — visibility:visible overrides the hidden parent */}
@@ -4993,9 +4985,6 @@ function TaxReport({ documents, customers, businessInfo }) {
 
 // ── Bin Card ──────────────────────────────────────────────────────────────────
 // ─── Enquiry Module ──────────────────────────────────────────────────────────
-
-const ENQ_STATUSES = ['Open', 'Quoted', 'Won', 'Lost'];
-const ENQ_STATUS_COLOR = { Open: '#1E7A9A', Quoted: '#C9A24B', Won: '#3D7A5C', Lost: '#B5453A' };
 
 // ─── Engineering ───────────────────────────────────────────────
 
