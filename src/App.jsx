@@ -240,7 +240,11 @@ function Modal({ children, onClose, title, wide }) {
           <span className="serif" style={{ fontSize: 17, fontWeight: 600, color: '#fff' }}>{title}</span>
           <button onClick={onClose} style={{ ...styles.iconBtn, color: '#fff', opacity: 0.8 }}><X size={18} /></button>
         </div>
-        <div style={{ padding: '20px 24px 24px' }}>
+        <div style={{ padding: '20px 24px 24px' }}>{children}</div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Auth ──────────────────────────────────────────────────────
 
@@ -5837,7 +5841,26 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           return (
             <div key={o.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
-                <div style={styl
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{o.number} — {bom?.name || 'Unknown BOM'}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{o.quantity} units · {o.startDate || ''}</div>
+              </div>
+              <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace('_',' ')}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>
+                <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {(creating || editing) && (
+        <Modal title={editing ? 'Edit Production Order' : 'New Production Order'} onClose={() => { setCreating(false); setEditing(null); }} wide>
+          <ProductionOrderForm order={editing} boms={boms} items={items} onSave={(o) => { saveOrder(o); setCreating(false); setEditing(null); }} onClose={() => { setCreating(false); setEditing(null); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
 
 // ─── Enquiry ───────────────────────────────────────────────────
 
