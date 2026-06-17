@@ -1579,8 +1579,7 @@ function SidebarFooter({ syncStatus, user, userRole, onLogout, view, setView }) 
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
-      </div>
-    </div>
+    </>
   );
 }
 
