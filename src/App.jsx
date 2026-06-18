@@ -6705,11 +6705,12 @@ export default function App() {
           setUserRole('admin');
         }
         setUser(firebaseUser);
+        setAuthReady(true);
       } else {
         setUser(null);
         setOwnerUid(null);
+        setAuthReady(true);
       }
-      setAuthReady(true);
     });
   }, []);
 
@@ -6800,12 +6801,18 @@ export default function App() {
     setDocuments((ds) => ds.filter((d) => d.id !== docId));
   }
 
-  function saveDoc(doc) {
-    const isNew = !doc.id || !documents.find((d) => d.id === doc.id);
+  // DocEditor calls onSave(status, rejectionNote?) — activeDoc holds the full doc
+  function saveDoc(status, rejectionNote = '') {
+    if (!activeDoc) return;
+    const id = activeDoc.id || crypto.randomUUID();
+    const isNew = !documents.find((d) => d.id === id);
     const saved = {
-      ...doc,
+      ...activeDoc,
+      id,
+      status,
+      rejectionNote: rejectionNote || activeDoc.rejectionNote || '',
       updatedAt: Date.now(),
-      ...(isNew ? { id: doc.id || crypto.randomUUID(), createdAt: Date.now() } : {}),
+      ...(isNew ? { createdAt: Date.now() } : {}),
     };
     setDocuments(isNew
       ? [...documents, saved]
@@ -6821,7 +6828,8 @@ export default function App() {
       customerSnapshot: srcDoc.customerSnapshot,
       items: (srcDoc.items || []).map((it) => ({ ...it, id: crypto.randomUUID() })),
       notes: srcDoc.notes || '',
-      linkedFrom: srcDoc.id,
+      // Store as object so DocEditor can display "Based on Invoice INV-001"
+      linkedFrom: { id: srcDoc.id, docType: srcDoc.type, docNumber: srcDoc.number },
     });
     setView('doceditor');
   }
