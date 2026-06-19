@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, Package, Paperclip, Pencil, Plus, Printer, Search, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword } from './firebase';
 
 
@@ -59,23 +59,52 @@ const CONVERT_TO = {
 };
 
 // ─── Default item row ─────────────────────────────────────────────────────────
-const EMPTY_ITEM_ROW = () => ({
-  id: crypto.randomUUID(),
-  itemId: '', name: '', hsn: '',
-  qty: 1, rate: 0, gst: 18,
-  packages: 1, netWeight: 0, grossWeight: 0, dimensions: '',
-});
+// Pass businessInfo to pick up the user's configured tax rate; falls back to country default
+const EMPTY_ITEM_ROW = (businessInfo) => {
+  const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india;
+  const defaultGst = (businessInfo && businessInfo.taxRate !== undefined) ? businessInfo.taxRate : cc.defaultTaxRate;
+  return {
+    id: crypto.randomUUID(),
+    itemId: '', name: '', hsn: '',
+    qty: 1, rate: 0, gst: defaultGst,
+    packages: 1, netWeight: 0, grossWeight: 0, dimensions: '',
+  };
+};
+
+// ─── Number to words (Indian system) ─────────────────────────────────────────
+function numToWords(n) {
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
+    'Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function seg(x) {
+    if (x < 20) return ones[x];
+    if (x < 100) return tens[Math.floor(x/10)] + (x%10 ? ' '+ones[x%10] : '');
+    return ones[Math.floor(x/100)] + ' Hundred' + (x%100 ? ' '+seg(x%100) : '');
+  }
+  n = Math.round(n);
+  if (!n) return 'Zero';
+  let r = '';
+  const cr = Math.floor(n/10000000); n %= 10000000;
+  const lk = Math.floor(n/100000);   n %= 100000;
+  const th = Math.floor(n/1000);     n %= 1000;
+  if (cr) r += seg(cr) + ' Crore ';
+  if (lk) r += seg(lk) + ' Lakh ';
+  if (th) r += seg(th) + ' Thousand ';
+  if (n)  r += seg(n);
+  return r.trim();
+}
 
 // ─── Blank document factory ───────────────────────────────────────────────────
-const blankDoc = (type) => ({
+const blankDoc = (type, businessInfo) => ({
   id: crypto.randomUUID(),
   type,
   number: '',
   date: new Date().toISOString().slice(0, 10),
   customerId: '',
   customerSnapshot: null,
-  items: [EMPTY_ITEM_ROW()],
+  items: [EMPTY_ITEM_ROW(businessInfo)],
   notes: '',
+  dueDate: '',
   placeOfSupply: '',
   refNumber: '',
   status: 'draft',
@@ -93,33 +122,53 @@ const blankDoc = (type) => ({
 });
 
 // ─── Country config ───────────────────────────────────────────────────────────
+// hasTax: false → hides all tax columns, totals, GSTR/VAT reports, tax ID fields
 const COUNTRY_CONFIG = {
-  india: { label: 'India 🇮🇳', currency: '₹',    taxLabel: 'GST', taxIdLabel: 'GSTIN', taxIdPlaceholder: '33AAAAA0000A1Z5',  locale: 'en-IN', splitTax: true  },
-  uae:   { label: 'UAE 🇦🇪',   currency: 'AED ',  taxLabel: 'VAT', taxIdLabel: 'TRN',   taxIdPlaceholder: '100123456700003',   locale: 'en-AE', splitTax: false },
-  other: { label: 'Other 🌍',  currency: '$',     taxLabel: 'Tax', taxIdLabel: 'Tax ID', taxIdPlaceholder: '',                  locale: 'en-US', splitTax: false },
+  india:       { label: 'India',          flag: '🇮🇳', currency: '₹',     taxLabel: 'GST',  taxIdLabel: 'GSTIN',       taxIdPlaceholder: '22AAAAA0000A1Z5',  locale: 'en-IN', hasTax: true,  splitTax: true,  defaultTaxRate: 18, stateLabel: 'State'   },
+  uae:         { label: 'UAE',            flag: '🇦🇪', currency: 'AED ',  taxLabel: 'VAT',  taxIdLabel: 'TRN',         taxIdPlaceholder: '100123456700003',  locale: 'en-AE', hasTax: true,  splitTax: false, defaultTaxRate: 5,  stateLabel: 'Emirate' },
+  saudi:       { label: 'Saudi Arabia',   flag: '🇸🇦', currency: 'SAR ',  taxLabel: 'VAT',  taxIdLabel: 'VAT No.',     taxIdPlaceholder: '300000000000003',  locale: 'ar-SA', hasTax: true,  splitTax: false, defaultTaxRate: 15, stateLabel: 'Region'  },
+  bahrain:     { label: 'Bahrain',        flag: '🇧🇭', currency: 'BHD ',  taxLabel: 'VAT',  taxIdLabel: 'VAT No.',     taxIdPlaceholder: '',                 locale: 'ar-BH', hasTax: true,  splitTax: false, defaultTaxRate: 10, stateLabel: 'Governorate' },
+  oman:        { label: 'Oman',           flag: '🇴🇲', currency: 'OMR ',  taxLabel: 'VAT',  taxIdLabel: 'VAT No.',     taxIdPlaceholder: '',                 locale: 'ar-OM', hasTax: true,  splitTax: false, defaultTaxRate: 5,  stateLabel: 'Governorate' },
+  kuwait:      { label: 'Kuwait',         flag: '🇰🇼', currency: 'KWD ',  taxLabel: '',     taxIdLabel: 'CR No.',      taxIdPlaceholder: '',                 locale: 'ar-KW', hasTax: false, splitTax: false, defaultTaxRate: 0,  stateLabel: 'Governorate' },
+  qatar:       { label: 'Qatar',          flag: '🇶🇦', currency: 'QAR ',  taxLabel: '',     taxIdLabel: 'CR No.',      taxIdPlaceholder: '',                 locale: 'ar-QA', hasTax: false, splitTax: false, defaultTaxRate: 0,  stateLabel: 'Municipality' },
+  uk:          { label: 'United Kingdom', flag: '🇬🇧', currency: '£',     taxLabel: 'VAT',  taxIdLabel: 'VAT No.',     taxIdPlaceholder: 'GB000000000',      locale: 'en-GB', hasTax: true,  splitTax: false, defaultTaxRate: 20, stateLabel: 'County'  },
+  usa:         { label: 'United States',  flag: '🇺🇸', currency: '$',     taxLabel: 'Tax',  taxIdLabel: 'EIN',         taxIdPlaceholder: '00-0000000',       locale: 'en-US', hasTax: false, splitTax: false, defaultTaxRate: 0,  stateLabel: 'State'   },
+  singapore:   { label: 'Singapore',      flag: '🇸🇬', currency: 'S$',    taxLabel: 'GST',  taxIdLabel: 'GST Reg No.', taxIdPlaceholder: 'M90000001A',       locale: 'en-SG', hasTax: true,  splitTax: false, defaultTaxRate: 9,  stateLabel: 'Region'  },
+  australia:   { label: 'Australia',      flag: '🇦🇺', currency: 'A$',    taxLabel: 'GST',  taxIdLabel: 'ABN',         taxIdPlaceholder: '51 824 753 556',   locale: 'en-AU', hasTax: true,  splitTax: false, defaultTaxRate: 10, stateLabel: 'State'   },
+  malaysia:    { label: 'Malaysia',       flag: '🇲🇾', currency: 'RM ',   taxLabel: 'SST',  taxIdLabel: 'SST No.',     taxIdPlaceholder: '',                 locale: 'ms-MY', hasTax: true,  splitTax: false, defaultTaxRate: 6,  stateLabel: 'State'   },
+  canada:      { label: 'Canada',         flag: '🇨🇦', currency: 'CA$',   taxLabel: 'GST',  taxIdLabel: 'Business No.',taxIdPlaceholder: '123456789RT0001',  locale: 'en-CA', hasTax: true,  splitTax: false, defaultTaxRate: 5,  stateLabel: 'Province'},
+  other:       { label: 'Other',          flag: '🌍',  currency: '$',     taxLabel: 'Tax',  taxIdLabel: 'Tax ID',      taxIdPlaceholder: '',                 locale: 'en-US', hasTax: false, splitTax: false, defaultTaxRate: 0,  stateLabel: 'State'   },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function currency(n, sym) {
-  if (isNaN(n)) n = 0;
+function currency(n, sym, locale) {
+  if (isNaN(n) || n == null) n = 0;
   const s = sym !== undefined ? sym : '₹';
-  return s + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const loc = locale || 'en-IN';
+  return s + Number(n).toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Returns a formatter bound to the business's country — use this everywhere
+function makeFmt(businessInfo) {
+  const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india;
+  return (n) => currency(n, cc.currency, cc.locale);
 }
 
 function computeTotals(doc, sellerState, country) {
   let subtotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
-  const cc = COUNTRY_CONFIG[country || 'india'];
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
-  doc.items.forEach((it) => {
+  (doc.items || []).forEach((it) => {
     const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
     subtotal += amt;
-    const taxAmt = amt * (Number(it.gst) || 0) / 100;
-    if (cc.splitTax) {
-      if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
-      else { igst += taxAmt; }
-    } else {
-      vat += taxAmt;
+    if (cc.hasTax) {
+      const taxAmt = amt * (Number(it.gst) || 0) / 100;
+      if (cc.splitTax) {
+        if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
+        else { igst += taxAmt; }
+      } else {
+        vat += taxAmt;
+      }
     }
   });
   const totalTax = cgst + sgst + igst + vat;
@@ -183,7 +232,7 @@ const styles = {
   secondaryBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#F5F3EE', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 16px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   ghostBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 14px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   iconBtn: { background: 'none', border: 'none', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', cursor: 'pointer' },
-  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13 },
+  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13, position: 'relative', overflow: 'visible' },
   previewHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   previewBrand: { fontSize: 19, fontWeight: 600, color: '#1E2A4A' },
   previewSmall: { fontSize: 12, color: '#888780', marginTop: 2, lineHeight: 1.5 },
@@ -476,7 +525,7 @@ function CustomersList({ customers, setEditing, setCustomers, documents }) {
             <div key={c.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
                 <div style={styles.docRowTitle}>{c.name}</div>
-                <div style={styles.docRowSub}>{c.address} · GSTIN {c.gstin || '—'} · {c.state}</div>
+                <div style={styles.docRowSub}>{c.address}{c.gstin ? ` · ${c.gstin}` : ''} · {c.state}</div>
               </div>
               <div style={styles.muted}>{count} docs</div>
               <button onClick={() => setEditing(c)} style={styles.ghostBtn}>Edit</button>
@@ -489,14 +538,67 @@ function CustomersList({ customers, setEditing, setCustomers, documents }) {
   );
 }
 
-function CustomerModal({ customer, onSave, onClose }) {
+function TaxIdVerifyButton({ taxId, country }) {
+  const [status, setStatus] = useState(null); // null | 'valid' | 'invalid' | 'checking'
+  function verifyFormat() {
+    if (!taxId) { setStatus('invalid'); return; }
+    let ok = false;
+    if (country === 'india') {
+      // GSTIN: 15 chars, format: 2 digits + 5 letters + 4 digits + 1 letter + 1 alphanumeric + Z + 1 alphanumeric
+      ok = /^[0-3][0-9][A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(taxId.toUpperCase());
+    } else if (country === 'uae') {
+      // TRN: exactly 15 digits
+      ok = /^[0-9]{15}$/.test(taxId.replace(/\s/g, ''));
+    } else {
+      ok = taxId.length > 3;
+    }
+    setStatus(ok ? 'valid' : 'invalid');
+  }
+  function openPortal() {
+    if (country === 'india') window.open('https://services.gst.gov.in/services/searchtp', '_blank');
+    else if (country === 'uae') window.open('https://www.tax.gov.ae/en/services/vat.verification.aspx', '_blank');
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+      <button type="button" onClick={verifyFormat} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>
+        ✓ Validate format
+      </button>
+      {(country === 'india' || country === 'uae') && (
+        <button type="button" onClick={openPortal} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12, color: '#1A56DB' }}>
+          🔗 Verify on portal
+        </button>
+      )}
+      {status === 'valid' && <span style={{ color: '#1A7A3E', fontSize: 12, fontWeight: 600 }}>✓ Format valid</span>}
+      {status === 'invalid' && <span style={{ color: '#B5453A', fontSize: 12, fontWeight: 600 }}>✗ Invalid format</span>}
+    </div>
+  );
+}
+
+function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
   const [form, setForm] = useState(customer);
+  const country = businessInfo.country || 'india';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.india;
+  const stateLabel = cc.stateLabel || 'State';
+  const fields = [
+    { key: 'name',    label: 'Name' },
+    ...(cc.hasTax ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
+    { key: 'address', label: 'Address' },
+    { key: 'state',   label: stateLabel },
+    { key: 'phone',   label: 'Phone' },
+    { key: 'email',   label: 'Email' },
+  ];
   return (
     <Modal onClose={onClose} title={customer.id ? 'Edit customer' : 'Add customer'}>
-      {['name', 'address', 'gstin', 'state', 'phone', 'email'].map((f) => (
-        <div key={f} style={styles.formGroup}>
-          <label style={styles.label}>{f === 'gstin' ? 'Tax ID (GSTIN / TRN)' : f.charAt(0).toUpperCase() + f.slice(1)}</label>
-          <input value={form[f] || ''} onChange={(e) => setForm((p) => ({ ...p, [f]: e.target.value }))} style={styles.input} />
+      {fields.map(({ key, label, isTax }) => (
+        <div key={key} style={styles.formGroup}>
+          <label style={styles.label}>{label}</label>
+          <input
+            value={form[key] || ''}
+            onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+            style={styles.input}
+            placeholder={isTax ? cc.taxIdPlaceholder : ''}
+          />
+          {isTax && <TaxIdVerifyButton taxId={form[key]} country={country} />}
         </div>
       ))}
       <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save customer</button>
@@ -522,7 +624,7 @@ function VendorsList({ vendors, setEditing, setVendors, documents }) {
             <div key={v.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
                 <div style={styles.docRowTitle}>{v.name}</div>
-                <div style={styles.docRowSub}>{v.address} · GSTIN {v.gstin || '—'} · {v.state}</div>
+                <div style={styles.docRowSub}>{v.address}{v.gstin ? ` · ${v.gstin}` : ''} · {v.state}</div>
               </div>
               <div style={styles.muted}>{count} docs</div>
               <button onClick={() => setEditing(v)} style={styles.ghostBtn}>Edit</button>
@@ -540,14 +642,26 @@ function VendorsList({ vendors, setEditing, setVendors, documents }) {
 // STOCK TRACKING COMPONENTS
 // ─────────────────────────────────────────────
 
-function VendorModal({ vendor, onSave, onClose }) {
+function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
   const [form, setForm] = useState(vendor);
+  const country = businessInfo.country || 'india';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.india;
+  const stateLabel = cc.stateLabel || 'State';
+  const fields = [
+    { key: 'name',    label: 'Name' },
+    ...(cc.hasTax ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
+    { key: 'address', label: 'Address' },
+    { key: 'state',   label: stateLabel },
+    { key: 'phone',   label: 'Phone' },
+    { key: 'email',   label: 'Email' },
+  ];
   return (
     <Modal onClose={onClose} title={vendor.id ? 'Edit vendor' : 'Add vendor'}>
-      {['name', 'address', 'gstin', 'state', 'phone', 'email'].map((f) => (
-        <div key={f} style={styles.formGroup}>
-          <label style={styles.label}>{f === 'gstin' ? 'Tax ID (GSTIN / TRN)' : f.charAt(0).toUpperCase() + f.slice(1)}</label>
-          <input value={form[f]} onChange={(e) => setForm((p) => ({ ...p, [f]: e.target.value }))} style={styles.input} />
+      {fields.map(({ key, label, isTax }) => (
+        <div key={key} style={styles.formGroup}>
+          <label style={styles.label}>{label}</label>
+          <input value={form[key] || ''} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))} style={styles.input} placeholder={isTax ? cc.taxIdPlaceholder : ''} />
+          {isTax && <TaxIdVerifyButton taxId={form[key]} country={country} />}
         </div>
       ))}
       <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save vendor</button>
@@ -557,14 +671,15 @@ function VendorModal({ vendor, onSave, onClose }) {
 
 // ─── Items ─────────────────────────────────────────────────────
 
-function ItemsList({ items, setEditing, setItems }) {
+function ItemsList({ items, setEditing, setItems, businessInfo }) {
+  const fmt = makeFmt(businessInfo);
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Items & services</h1>
-        <p style={styles.muted}>Saved items auto-fill price, HSN code and GST rate on documents.</p>
+        <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
       </div>
-      <button onClick={() => setEditing({ name: '', hsn: '', purchaseRate: 0, saleRate: 0, gst: 18 })} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+      <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
       <div style={{ ...styles.list, marginTop: 16 }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
         {items.map((it) => (
@@ -574,8 +689,8 @@ function ItemsList({ items, setEditing, setItems }) {
               <div style={styles.docRowSub}>HSN {it.hsn || '—'} · Tax {it.gst}%</div>
             </div>
             <div style={{ textAlign: 'right', marginRight: 8 }}>
-              <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{currency(it.purchaseRate ?? it.rate ?? 0)}</span></div>
-              <div style={{ fontSize: 11, color: '#888780' }}>Sell: <span style={{ color: '#1A7A3E', fontWeight: 600 }}>{currency(it.saleRate ?? it.rate ?? 0)}</span></div>
+              <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
+              <div style={{ fontSize: 11, color: '#888780' }}>Sell: <span style={{ color: '#1A7A3E', fontWeight: 600 }}>{fmt(it.saleRate ?? it.rate ?? 0)}</span></div>
             </div>
             <button onClick={() => setEditing(it)} style={styles.ghostBtn}>Edit</button>
             <button onClick={() => setItems((is) => is.filter((x) => x.id !== it.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
@@ -586,9 +701,10 @@ function ItemsList({ items, setEditing, setItems }) {
   );
 }
 
-function ItemModal({ item, onSave, onClose }) {
+function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
   const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.other;
   return (
     <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
       <div style={styles.formGroup}>
@@ -615,13 +731,15 @@ function ItemModal({ item, onSave, onClose }) {
           <input type="number" value={form.saleRate ?? form.rate ?? 0} onChange={e => set('saleRate', Number(e.target.value))} style={styles.input} placeholder="0.00" />
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ ...styles.formGroup, flex: 1 }}>
-          <label style={styles.label}>GST %</label>
-          <input type="number" value={form.gst} onChange={e => set('gst', Number(e.target.value))} style={styles.input} />
+      {cc.hasTax && (
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ ...styles.formGroup, flex: 1 }}>
+            <label style={styles.label}>{cc.taxLabel} %</label>
+            <input type="number" value={form.gst ?? (businessInfo.taxRate ?? cc.defaultTaxRate)} onChange={e => set('gst', Number(e.target.value))} style={styles.input} />
+          </div>
+          <div style={{ ...styles.formGroup, flex: 1 }} />
         </div>
-        <div style={{ ...styles.formGroup, flex: 1 }} />
-      </div>
+      )}
       <div style={{ borderTop: '1px solid #EAE6DB', paddingTop: 14, marginTop: 4 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: '#C9A24B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Stock Settings</div>
         <div style={{ display: 'flex', gap: 12 }}>
@@ -762,6 +880,8 @@ function SettingsView({ businessInfo, setBusinessInfo }) {
     { id: 'executive', label: 'Executive', desc: 'Dark navy header, gold badge',     swatch: 'linear-gradient(135deg,#1E2A4A,#3B4F7A)' },
     { id: 'elegant',   label: 'Elegant',   desc: 'Side accent bar, serif type',      swatch: 'linear-gradient(135deg,#C9A24B 8px,#FAF8F4 8px)' },
     { id: 'fresh',     label: 'Fresh',     desc: 'Soft teal header, airy feel',      swatch: 'linear-gradient(135deg,#E8F5EE,#1A7A3E 200%)' },
+    { id: 'formal',    label: 'Formal',    desc: 'Bordered Indian invoice, T&C',     swatch: 'linear-gradient(135deg,#fff 50%,#eee 50%)' },
+    { id: 'prestige',  label: 'Prestige',  desc: 'Formal with navy band & gold',     swatch: 'linear-gradient(135deg,#1E2A4A 60%,#C9A24B 100%)' },
   ];
 
   return (
@@ -771,17 +891,25 @@ function SettingsView({ businessInfo, setBusinessInfo }) {
         <p style={styles.muted}>This appears on every document you create.</p>
       </div>
       <div style={{ maxWidth: 480 }}>
-        {['name', 'address', 'gstin', 'state', 'phone', 'email', 'website'].map((f) => {
-          const cc2 = COUNTRY_CONFIG[form.country || 'india'];
-          const lbl = f === 'gstin' ? cc2.taxIdLabel : f === 'state' ? (form.country === 'uae' ? 'Emirate' : 'State') : f === 'website' ? 'Website' : f.charAt(0).toUpperCase() + f.slice(1);
-          return (
-            <div key={f} style={styles.formGroup}>
-              <label style={styles.label}>{lbl}</label>
-              <input value={form[f] || ''} onChange={(e) => setForm((p) => ({ ...p, [f]: e.target.value }))}
-                placeholder={f === 'gstin' ? cc2.taxIdPlaceholder : f === 'website' ? 'https://www.yourcompany.com' : ''} style={styles.input} />
+        {(() => {
+          const cc2 = COUNTRY_CONFIG[form.country || 'india'] || COUNTRY_CONFIG.other;
+          const fields = [
+            { key: 'name',    label: 'Business Name' },
+            { key: 'address', label: 'Address' },
+            ...(cc2.hasTax ? [{ key: 'gstin', label: cc2.taxIdLabel, placeholder: cc2.taxIdPlaceholder }] : []),
+            { key: 'state',   label: cc2.stateLabel || 'State' },
+            { key: 'phone',   label: 'Phone' },
+            { key: 'email',   label: 'Email' },
+            { key: 'website', label: 'Website', placeholder: 'https://www.yourcompany.com' },
+          ];
+          return fields.map(({ key, label, placeholder }) => (
+            <div key={key} style={styles.formGroup}>
+              <label style={styles.label}>{label}</label>
+              <input value={form[key] || ''} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+                placeholder={placeholder || ''} style={styles.input} />
             </div>
-          );
-        })}
+          ));
+        })()}
 
         <div style={styles.formGroup}>
           <label style={styles.label}>Company logo</label>
@@ -799,16 +927,88 @@ function SettingsView({ businessInfo, setBusinessInfo }) {
 
         <div style={styles.formGroup}>
           <label style={styles.label}>Country / Region</label>
-          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <select
+            value={form.country || 'india'}
+            onChange={(e) => {
+              const newCountry = e.target.value;
+              const newCc = COUNTRY_CONFIG[newCountry] || COUNTRY_CONFIG.other;
+              setForm((p) => ({ ...p, country: newCountry, taxRate: newCc.defaultTaxRate }));
+            }}
+            style={{ ...styles.input, cursor: 'pointer' }}
+          >
             {Object.entries(COUNTRY_CONFIG).map(([id, cfg]) => (
-              <button key={id} onClick={() => setForm((p) => ({ ...p, country: id }))}
-                style={{ ...styles.templateCard, flex: 1, ...(form.country === id ? styles.templateCardActive : {}) }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: '#1E2A4A', marginBottom: 2 }}>{cfg.label}</div>
-                <div style={{ fontSize: 11, color: '#888780' }}>{cfg.taxLabel} · {cfg.currency.trim()}</div>
-              </button>
+              <option key={id} value={id}>
+                {cfg.flag} {cfg.label} — {cfg.currency.trim()}{cfg.hasTax ? ` · ${cfg.taxLabel}` : ' · No tax'}
+              </option>
             ))}
-          </div>
+          </select>
+          {/* Country info pills */}
+          {(() => {
+            const sel = COUNTRY_CONFIG[form.country || 'india'] || COUNTRY_CONFIG.other;
+            const rate = form.taxRate !== undefined ? form.taxRate : sel.defaultTaxRate;
+            return (
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{ background: '#EEF5F0', color: '#1A7A3E', borderRadius: 12, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>
+                  {sel.flag} {sel.label}
+                </span>
+                <span style={{ background: '#F0EEF9', color: '#4A3F8A', borderRadius: 12, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>
+                  {sel.currency.trim()}
+                </span>
+                {sel.hasTax ? (
+                  <span style={{ background: '#FEF3CD', color: '#92400E', borderRadius: 12, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>
+                    {sel.taxLabel} {rate}%
+                  </span>
+                ) : (
+                  <span style={{ background: '#E5F4ED', color: '#1A7A3E', borderRadius: 12, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>
+                    ✓ No tax
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
+
+        {/* Tax rate field — only shown for tax-enabled countries */}
+        {(() => {
+          const sel = COUNTRY_CONFIG[form.country || 'india'] || COUNTRY_CONFIG.other;
+          if (!sel.hasTax) return null;
+          const rate = form.taxRate !== undefined ? form.taxRate : sel.defaultTaxRate;
+          return (
+            <div style={styles.formGroup}>
+              <label style={styles.label}>
+                {sel.taxLabel} Rate (%)
+                <span style={{ marginLeft: 8, fontSize: 11, color: '#888780', fontWeight: 400 }}>
+                  — applies to new documents only; past documents keep their saved rates
+                </span>
+              </label>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1, maxWidth: 160 }}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={rate}
+                    onChange={(e) => setForm((p) => ({ ...p, taxRate: parseFloat(e.target.value) || 0 }))}
+                    style={{ ...styles.input, paddingRight: 36 }}
+                  />
+                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: '#888780', fontSize: 14, fontWeight: 600 }}>%</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, taxRate: sel.defaultTaxRate }))}
+                  style={{ ...styles.ghostBtn, fontSize: 12, padding: '6px 12px', color: '#888780' }}
+                  title={`Reset to ${sel.taxLabel} standard rate (${sel.defaultTaxRate}%)`}
+                >
+                  Reset to {sel.defaultTaxRate}%
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 4 }}>
+                Standard {sel.taxLabel} rate for {sel.label}: <strong>{sel.defaultTaxRate}%</strong>. Edit only if your business uses a different rate (e.g. zero-rated, reduced rate).
+              </div>
+            </div>
+          );
+        })()}
 
         <div style={styles.formGroup}>
           <label style={styles.label}>Company type</label>
@@ -884,7 +1084,7 @@ function SettingsView({ businessInfo, setBusinessInfo }) {
 
 // ─── Staff ─────────────────────────────────────────────────────
 
-function StaffPage({ ownerUid }) {
+function StaffPage({ ownerUid, employees = [] }) {
   const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -986,6 +1186,7 @@ function StaffPage({ ownerUid }) {
       {addingStaff && (
         <StaffModal
           ownerUid={ownerUid}
+          employees={employees}
           onSaved={() => { setAddingStaff(false); loadStaff(); }}
           onClose={() => setAddingStaff(false)}
         />
@@ -994,16 +1195,27 @@ function StaffPage({ ownerUid }) {
   );
 }
 
-function StaffModal({ ownerUid, onSaved, onClose }) {
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'sales' });
+function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
+  const [form, setForm] = useState({ empId: '', name: '', email: '', password: '', role: 'sales' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
 
+  function handleEmpSelect(empId) {
+    if (!empId) {
+      setForm((f) => ({ ...f, empId: '', name: '' }));
+      return;
+    }
+    const emp = employees.find((e) => e.id === empId);
+    if (emp) {
+      setForm((f) => ({ ...f, empId: emp.id, name: emp.name || '' }));
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    const { name, email, password, role } = form;
+    const { name, email, password, role, empId } = form;
     if (!name.trim() || !email.trim() || !password.trim()) {
       setError('Please fill in all fields.');
       return;
@@ -1014,13 +1226,18 @@ function StaffModal({ ownerUid, onSaved, onClose }) {
     }
     setBusy(true);
     try {
-      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role);
+      const emp = employees.find((e) => e.id === empId);
+      const empNo = emp ? (emp.employeeId || emp.empNo || '') : '';
+      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role, empId, empNo);
       onSaved();
     } catch (err) {
       const code = (err && err.code) || '';
+      const msg = (err && err.message) || '';
       if (code.includes('email-already-in-use')) setError('An account with this email already exists.');
       else if (code.includes('invalid-email')) setError('Invalid email address.');
-      else setError('Could not create account. Please try again.');
+      else if (code.includes('weak-password')) setError('Password is too weak. Use at least 6 characters.');
+      else if (msg === 'timeout') setError('Request timed out. Check your internet connection and try again.');
+      else setError('Could not create account (' + (code || msg || 'unknown') + '). Please try again.');
     } finally {
       setBusy(false);
     }
@@ -1029,6 +1246,19 @@ function StaffModal({ ownerUid, onSaved, onClose }) {
   return (
     <Modal onClose={onClose} title="Add staff member">
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {employees.length > 0 && (
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Link to employee (optional)</label>
+            <select value={form.empId} onChange={(e) => handleEmpSelect(e.target.value)} style={styles.input}>
+              <option value="">— Select employee —</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.employeeId || emp.empNo ? `[${emp.employeeId || emp.empNo}] ` : ''}{emp.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div style={styles.formGroup}>
           <label style={styles.label}>Full name</label>
           <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} style={styles.input} placeholder="e.g. Ravi Kumar" />
@@ -1064,34 +1294,36 @@ function StaffModal({ ownerUid, onSaved, onClose }) {
 function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading' }) {
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = companyType === 'manufacturing' || companyType === 'both';
+  const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
+  const cur = (n) => currency(n, cc.currency);
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
-        <h1 className="serif" style={styles.h1}>Good day, {businessInfo.name.split(' ')[0]}</h1>
+        <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
         <p style={styles.muted}>Here's what's happening across your business.</p>
       </div>
 
       <div style={styles.dashSection}>Sales</div>
       <div style={styles.statGrid}>
-        <StatCard label="Total invoiced" value={currency(stats.totalRevenue)} accent="#1E2A4A" />
-        <StatCard label="Outstanding (receivable)" value={currency(stats.outstanding)} accent="#B5453A" />
+        <StatCard label="Total invoiced" value={cur(stats.totalRevenue)} accent="#1E2A4A" />
+        <StatCard label="Outstanding (receivable)" value={cur(stats.outstanding)} accent="#B5453A" />
         <StatCard label="Quotations" value={stats.counts.quotation || 0} accent="#C9A24B" sub="created" />
         <StatCard label="Delivery notes" value={stats.counts.delivery || 0} accent="#3D7A5C" sub="created" />
       </div>
 
       <div style={styles.dashSection}>Purchase</div>
       <div style={styles.statGrid}>
-        <StatCard label="Total purchases" value={currency(stats.totalPurchases)} accent="#6B5BAE" />
-        <StatCard label="Payable to vendors" value={currency(stats.payable)} accent="#8A6FD6" />
+        <StatCard label="Total purchases" value={cur(stats.totalPurchases)} accent="#6B5BAE" />
+        <StatCard label="Payable to vendors" value={cur(stats.payable)} accent="#8A6FD6" />
         <StatCard label="Purchase orders" value={stats.counts.purchase || 0} accent="#6B5BAE" sub="raised" />
         <StatCard label="Vendors" value={vendors.length} accent="#555" sub="registered" />
       </div>
 
       <div style={styles.dashSection}>Accounts</div>
       <div style={styles.statGrid}>
-        <StatCard label="Cash received" value={currency(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
-        <StatCard label="Cash paid" value={currency(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
-        <StatCard label="Petty cash balance" value={currency(stats.pcBalance)} accent="#C9A24B" />
+        <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
+        <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
+        <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
         <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
       </div>
 
@@ -1168,7 +1400,7 @@ function DocRow({ doc, customers, vendors, onClick, businessInfo }) {
         <div style={styles.docRowSub}>{party ? party.name : (t.party === 'vendor' ? 'No vendor' : 'No customer')} · {t.label}</div>
       </div>
       <div style={styles.docRowDate}>{doc.date}</div>
-      <div className="serif" style={styles.docRowAmount}>{currency(totals.grandTotal)}</div>
+      <div className="serif" style={styles.docRowAmount}>{makeFmt(businessInfo)(totals.grandTotal)}</div>
       <StatusBadge status={doc.status} />
     </div>
   );
@@ -1176,15 +1408,67 @@ function DocRow({ doc, customers, vendors, onClick, businessInfo }) {
 
 function StatusBadge({ status }) {
   const map = {
-    draft:     { bg: '#EEEDE6', color: '#5F5E5A', label: 'Draft' },
-    submitted: { bg: '#E6EEF9', color: '#2255A0', label: 'Pending review' },
-    verified:  { bg: '#EDE6F9', color: '#5B2DA0', label: 'Verified' },
+    draft:     { bg: '#EEEDE6', color: '#5F5E5A', label: 'Preparing' },
+    submitted: { bg: '#E6EEF9', color: '#2255A0', label: 'Forwarded' },
+    verified:  { bg: '#E6EEF9', color: '#2255A0', label: 'Forwarded' },  // legacy alias
     approved:  { bg: '#EAF3DE', color: '#3B6D11', label: 'Approved' },
     rejected:  { bg: '#FBEAE7', color: '#B5453A', label: 'Rejected' },
     paid:      { bg: '#D6F0E0', color: '#1A5C35', label: 'Paid' },
   };
   const s = map[status] || map.draft;
   return <span style={{ ...styles.badge, background: s.bg, color: s.color }}>{s.label}</span>;
+}
+
+// ── Shared approval action buttons used across all modules ──────────────────
+// item must have .status and .rejectionNote fields
+// onUpdate(patch) updates just those fields on the item
+function ApprovalActions({ item, onUpdate, userRole, compact = false }) {
+  const [rejectMode, setRejectMode] = React.useState(false);
+  const [note, setNote] = React.useState('');
+  const status = item?.status || 'draft';
+  const isApprover = userRole === 'admin' || userRole === 'manager';
+
+  if (rejectMode) return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input value={note} onChange={e => setNote(e.target.value)}
+        placeholder="Reason for rejection…" autoFocus
+        style={{ border: '1px solid #E08A7D', borderRadius: 6, padding: '4px 8px', fontSize: 12, width: 180 }} />
+      <button style={{ ...styles.primaryBtn, background: '#B5453A', fontSize: 12, padding: '4px 10px' }}
+        onClick={() => { onUpdate({ status: 'rejected', rejectionNote: note }); setRejectMode(false); setNote(''); }}>
+        Confirm
+      </button>
+      <button style={styles.iconBtn} onClick={() => { setRejectMode(false); setNote(''); }}><X size={13}/></button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Preparer: draft or rejected → can forward */}
+      {(status === 'draft' || status === 'rejected') && (
+        <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '3px 9px', color: '#2255A0', borderColor: '#2255A0', background: '#EEF1F8' }}
+          onClick={() => onUpdate({ status: 'submitted', rejectionNote: '' })}>
+          Forward →
+        </button>
+      )}
+      {/* Approver: forwarded → approve or reject */}
+      {status === 'submitted' && isApprover && (
+        <>
+          <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '3px 9px', color: '#B5453A', borderColor: '#B5453A', background: '#FBEAE7' }}
+            onClick={() => setRejectMode(true)}>
+            Reject
+          </button>
+          <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '3px 9px', color: '#3B6D11', borderColor: '#3B6D11', background: '#EAF3DE' }}
+            onClick={() => onUpdate({ status: 'approved', rejectionNote: '' })}>
+            ✓ Approve
+          </button>
+        </>
+      )}
+      {/* Rejected note */}
+      {status === 'rejected' && item.rejectionNote && !compact && (
+        <span style={{ fontSize: 11, color: '#B5453A', fontStyle: 'italic' }}>"{item.rejectionNote}"</span>
+      )}
+    </div>
+  );
 }
 
 function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc }) {
@@ -1356,11 +1640,34 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   }
 
   const Brand = () => (
-    <div style={styles.brand}>
-      <div style={styles.brandMark}>O</div>
-      <div>
-        <div className="serif" style={styles.brandName}>Operix</div>
-        <div style={styles.brandSub}>Business Suite</div>
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 10, marginBottom: 6 }}>
+      {/* Top row: logo + settings + logout */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
+        <div style={styles.brandMark}>O</div>
+        <div style={{ flex: 1 }}>
+          <div className="serif" style={styles.brandName}>Operix</div>
+          <div style={styles.brandSub}>Business Suite</div>
+        </div>
+        {/* Settings icon — admin only */}
+        {userRole === 'admin' && (
+          <button
+            title="Business Settings"
+            onClick={() => setView('settings')}
+            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#C9A24B' : '#6B7494', display: 'flex', alignItems: 'center' }}>
+            <Settings size={16} strokeWidth={1.8} />
+          </button>
+        )}
+        {/* Logout icon */}
+        <button
+          title="Log out"
+          onClick={onLogout}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#6B7494', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+          <LogOut size={16} strokeWidth={1.8} />
+        </button>
+      </div>
+      {/* Signed in as */}
+      <div style={{ padding: '0 14px', fontSize: 11, color: '#6B7494', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {user?.email}
       </div>
     </div>
   );
@@ -1378,8 +1685,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
       {/* Sales */}
       <Section sectionKey="sales" label="Sales">
-        <NavBtn id="customers"  label="Customers"    icon={Users} />
-        <NavBtn id="enquiries"  label="Enquiries"    icon={FileSignature} />
+        <NavBtn id="customers"       label="Customers"         icon={Users} />
+        <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
+        <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
         <CreateBtn docKey="quotation" />
       </Section>
 
@@ -1389,9 +1697,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <CreateBtn docKey="creditnote" />
         <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
         <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
-        {(!country || country === 'india') && <NavBtn id="gstr1"     label="GSTR-1 Report" icon={FileText} />}
-        {country === 'uae'   && <NavBtn id="vatreport"  label="VAT Return"    icon={FileText} />}
-        {country === 'other' && <NavBtn id="taxreport"  label="Tax Report"    icon={FileText} />}
+        {country === 'india'  && <NavBtn id="gstr1"     label="GSTR-1 Report" icon={FileText} />}
+        {(country === 'uae' || country === 'saudi' || country === 'bahrain' || country === 'oman') && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+        {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
       </Section>
 
       {/* Purchase — hidden for service companies */}
@@ -1452,7 +1760,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {/* Admin */}
       {userRole === 'admin' && (
         <Section sectionKey="admin" label="Admin">
-          <NavBtn id="staff" label="Staff" icon={Shield} />
+          <NavBtn id="staff"         label="Staff"          icon={Shield} />
+          <NavBtn id="contracts"     label="Contracts"      icon={FileSignature} />
+          <NavBtn id="termslibrary"  label="Terms Library"  icon={BookOpen} />
         </Section>
       )}
 
@@ -1561,27 +1871,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   );
 }
 
-function SidebarFooter({ syncStatus, user, userRole, onLogout, view, setView }) {
+function SidebarFooter({ syncStatus }) {
   return (
     <>
       <div style={{ flex: 1 }} />
-      {/* Settings link — admin only */}
-      {userRole === 'admin' && (
-        <button
-          onClick={() => setView('settings')}
-          style={{ ...styles.navItem, ...(view === 'settings' ? styles.navItemActive : {}), marginBottom: 2 }}
-        >
-          <Settings size={17} strokeWidth={1.8} /> Business Settings
-        </button>
-      )}
-      {/* Signed-in user info */}
-      <div style={{ padding: '10px 16px', borderTop: '1px solid #2A3550', marginTop: 4 }}>
-        <div style={{ fontSize: 11, color: '#A9B0C9', marginBottom: 4 }}>Signed in as</div>
-        <div style={{ fontSize: 12, color: '#E8E4DC', fontWeight: 500, marginBottom: 8, wordBreak: 'break-all' }}>{user?.email}</div>
-        <button onClick={onLogout} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px', color: '#A9B0C9', borderColor: '#2A3550' }}>
-          Log out
-        </button>
-      </div>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
         {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span></>}
@@ -1589,6 +1882,96 @@ function SidebarFooter({ syncStatus, user, userRole, onLogout, view, setView }) 
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
     </>
+  );
+}
+
+// ─── HSN Search ────────────────────────────────────────────────
+
+const COMMON_HSN = [
+  { code: '1001', desc: 'Wheat and meslin' },
+  { code: '1006', desc: 'Rice' },
+  { code: '2201', desc: 'Water (including natural / artificial mineral water)' },
+  { code: '2710', desc: 'Petroleum oils and oils from bituminous minerals' },
+  { code: '3004', desc: 'Medicaments (medicines)' },
+  { code: '3401', desc: 'Soap and organic surface-active products' },
+  { code: '3923', desc: 'Plastic articles for the conveyance or packing of goods' },
+  { code: '4016', desc: 'Other articles of vulcanised rubber' },
+  { code: '4901', desc: 'Printed books, brochures, leaflets' },
+  { code: '6101', desc: 'Men\'s overcoats, car-coats, cloaks' },
+  { code: '6109', desc: 'T-shirts, singlets and other vests' },
+  { code: '6403', desc: 'Footwear with outer soles of rubber/plastics, leather uppers' },
+  { code: '7108', desc: 'Gold (unwrought or semi-manufactured)' },
+  { code: '7113', desc: 'Jewellery and parts thereof, of precious metal' },
+  { code: '7323', desc: 'Table, kitchen or other household articles of iron / steel' },
+  { code: '8414', desc: 'Air or vacuum pumps, fans, ventilating hoods' },
+  { code: '8415', desc: 'Air conditioning machines' },
+  { code: '8418', desc: 'Refrigerators, freezers and other refrigerating equipment' },
+  { code: '8443', desc: 'Printing machinery; inkjet printing machines' },
+  { code: '8450', desc: 'Household or laundry type washing machines' },
+  { code: '8471', desc: 'Automatic data processing machines (computers)' },
+  { code: '8517', desc: 'Telephone sets; smartphones' },
+  { code: '8518', desc: 'Microphones, loudspeakers, headphones' },
+  { code: '8528', desc: 'Monitors and projectors; TV reception apparatus' },
+  { code: '8703', desc: 'Motor cars and vehicles for transport of persons' },
+  { code: '8704', desc: 'Motor vehicles for transport of goods' },
+  { code: '9403', desc: 'Other furniture and parts thereof' },
+  { code: '9503', desc: 'Tricycles, scooters, toy cars and similar wheeled toys' },
+  // SAC codes (services)
+  { code: '9954', desc: 'Construction services' },
+  { code: '9961', desc: 'Services in wholesale trade' },
+  { code: '9962', desc: 'Services in retail trade' },
+  { code: '9971', desc: 'Financial and related services' },
+  { code: '9972', desc: 'Real estate services' },
+  { code: '9973', desc: 'Leasing or rental services' },
+  { code: '9981', desc: 'Research and development services' },
+  { code: '9982', desc: 'Legal and accounting services' },
+  { code: '9983', desc: 'Other professional/technical/business services' },
+  { code: '9984', desc: 'Telecommunications and IT services' },
+  { code: '9985', desc: 'Support services' },
+  { code: '9986', desc: 'Agricultural support services' },
+  { code: '9987', desc: 'Maintenance, repair and installation services' },
+  { code: '9988', desc: 'Manufacturing services on physical inputs owned by others' },
+  { code: '9989', desc: 'Other manufacturing services' },
+  { code: '9991', desc: 'Public administration and other services' },
+  { code: '9992', desc: 'Education services' },
+  { code: '9993', desc: 'Human health and social care services' },
+  { code: '9994', desc: 'Sewage and waste collection, treatment and disposal' },
+  { code: '9995', desc: 'Services of membership organisations' },
+  { code: '9996', desc: 'Recreational, cultural and sporting services' },
+  { code: '9997', desc: 'Other services' },
+];
+
+function HsnSearchModal({ onSelect, onClose }) {
+  const [q, setQ] = useState('');
+  const results = q.length < 2 ? COMMON_HSN.slice(0, 20) : COMMON_HSN.filter(h =>
+    h.code.startsWith(q) || h.desc.toLowerCase().includes(q.toLowerCase())
+  );
+  return (
+    <Modal onClose={onClose} title="HSN / SAC Code Lookup">
+      <div style={{ marginBottom: 10 }}>
+        <input
+          autoFocus
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search by code or description…"
+          style={{ ...styles.input, width: '100%' }}
+        />
+      </div>
+      <div style={{ maxHeight: 320, overflowY: 'auto', fontSize: 13 }}>
+        {results.length === 0 && <div style={styles.emptyBox}>No results. <a href="https://www.cbic-gst.gov.in/gst-goods-services-rates.html" target="_blank" rel="noreferrer" style={{ color: '#1A56DB' }}>Search on CBIC portal →</a></div>}
+        {results.map(h => (
+          <div key={h.code} onClick={() => onSelect(h.code)} style={{ display: 'flex', gap: 12, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', borderBottom: '1px solid #F0EDE6' }}
+            onMouseEnter={e => e.currentTarget.style.background = '#F5F3EE'}
+            onMouseLeave={e => e.currentTarget.style.background = ''}>
+            <span style={{ fontWeight: 700, color: '#1E2A4A', minWidth: 52, flexShrink: 0 }}>{h.code}</span>
+            <span style={{ color: '#555' }}>{h.desc}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: '#888780' }}>
+        Can't find your code? <a href="https://www.cbic-gst.gov.in/gst-goods-services-rates.html" target="_blank" rel="noreferrer" style={{ color: '#1A56DB' }}>Search full CBIC database →</a>
+      </div>
+    </Modal>
   );
 }
 
@@ -1600,19 +1983,22 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const partyList = isVendorDoc ? vendors : customers;
   const totals = computeTotals(doc, businessInfo.state, businessInfo.country);
   const customer = partyList.find((c) => c.id === doc.customerId);
+  const displayParty = customer || doc.customerSnapshot; // fallback to snapshot when live record unavailable
   const template = businessInfo.template || 'classic';
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
+  const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
 
   // Field editing rules
   const isApproved = doc.status === 'approved';
-  const inReview = doc.status === 'submitted' || doc.status === 'verified';
+  const isForwarded = doc.status === 'submitted' || doc.status === 'verified';
+  const inReview = isForwarded; // alias for layout checks below
+  // Editable if: admin/manager always, or any role when doc is in draft/rejected (preparing stage)
   const isEditable =
-    userRole === 'admin' ||
-    ((userRole === 'sales' || userRole === 'purchase' || userRole === 'manager') &&
-      (doc.status === 'draft' || doc.status === 'rejected'));
+    userRole === 'admin' || userRole === 'manager' ||
+    (doc.status === 'draft' || doc.status === 'rejected');
 
   function handleReject() {
     onSave('rejected', rejectionNote);
@@ -1648,7 +2034,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   }
 
   function addRow() {
-    setDoc((d) => ({ ...d, items: [...d.items, EMPTY_ITEM_ROW()] }));
+    setDoc((d) => ({ ...d, items: [...d.items, EMPTY_ITEM_ROW(businessInfo)] }));
   }
 
   function removeRow(rowId) {
@@ -1705,44 +2091,41 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           }} style={styles.ghostBtn}><Download size={15} /> Export CSV</button>
           <button onClick={() => window.print()} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
 
-          {/* STAFF (sales/purchase): draft or rejected → can submit */}
-          {(userRole === 'sales' || userRole === 'purchase') && (doc.status === 'draft' || doc.status === 'rejected') && (
+          {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
+          {userRole !== 'admin' && (doc.status === 'draft' || doc.status === 'rejected') && (
             <>
-              <button onClick={() => onSave('draft')} style={styles.ghostBtn}>Save draft</button>
-              <button onClick={() => onSave('submitted')} style={styles.primaryBtn}>Submit for review</button>
+              <button onClick={() => onSave('draft')} style={styles.ghostBtn}>Save</button>
+              <button onClick={() => onSave('submitted')} style={styles.primaryBtn}>Forward for Approval →</button>
             </>
           )}
 
-          {/* MANAGER: submitted → verify or reject */}
-          {userRole === 'manager' && doc.status === 'submitted' && !rejectMode && (
-            <>
-              <button onClick={() => setRejectMode(true)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}>Reject</button>
-              <button onClick={() => onSave('verified')} style={styles.primaryBtn}>Verify ✓</button>
-            </>
-          )}
-          {/* Manager own drafts */}
-          {userRole === 'manager' && (doc.status === 'draft' || doc.status === 'rejected') && (
-            <>
-              <button onClick={() => onSave('draft')} style={styles.ghostBtn}>Save draft</button>
-              <button onClick={() => onSave('submitted')} style={styles.primaryBtn}>Submit for review</button>
-            </>
+          {/* ── PREPARER: forwarded — locked, can only view ── */}
+          {userRole !== 'admin' && isForwarded && (
+            <span style={{ fontSize: 13, color: '#2255A0', fontStyle: 'italic' }}>⏳ Forwarded — awaiting approval</span>
           )}
 
-          {/* ADMIN: all statuses — always has reject + approve/save */}
-          {userRole === 'admin' && !rejectMode && (
+          {/* ── ADMIN / MANAGER: forwarded or any editable status ── */}
+          {(userRole === 'admin' || userRole === 'manager') && !rejectMode && (
             <>
-              {doc.status !== 'rejected' && (
+              {/* Can always save as draft */}
+              {!isApproved && <button onClick={() => onSave('draft')} style={styles.ghostBtn}>Save Draft</button>}
+              {/* Reject button — shown when forwarded */}
+              {isForwarded && (
                 <button onClick={() => setRejectMode(true)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}>Reject</button>
               )}
-              <button onClick={() => onSave('draft')} style={styles.ghostBtn}>Save draft</button>
-              {doc.status !== 'approved'
-                ? <button onClick={() => onSave('approved')} style={{ ...styles.primaryBtn, background: '#3D7A5C' }}>Approve ✓</button>
+              {/* Approve — shown when forwarded; Save changes when already approved */}
+              {!isApproved
+                ? isForwarded && <button onClick={() => onSave('approved')} style={{ ...styles.primaryBtn, background: '#3D7A5C' }}>Approve ✓</button>
                 : <button onClick={() => onSave('approved')} style={styles.primaryBtn}>Save changes</button>
               }
+              {/* Admin can also forward their own drafts */}
+              {userRole === 'admin' && doc.status === 'draft' && (
+                <button onClick={() => onSave('approved')} style={{ ...styles.primaryBtn, background: '#3D7A5C' }}>Approve ✓</button>
+              )}
             </>
           )}
 
-          {/* Reject reason inline panel */}
+          {/* ── Reject inline panel ── */}
           {rejectMode && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FBEAE7', padding: '6px 10px', borderRadius: 8 }}>
               <input
@@ -1752,7 +2135,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 style={{ ...styles.input, width: 220, padding: '5px 10px', fontSize: 13 }}
                 autoFocus
               />
-              <button onClick={handleReject} style={{ ...styles.primaryBtn, background: '#B5453A', padding: '6px 14px' }}>Confirm reject</button>
+              <button onClick={handleReject} style={{ ...styles.primaryBtn, background: '#B5453A', padding: '6px 14px' }}>Confirm Reject</button>
               <button onClick={() => { setRejectMode(false); setRejectionNote(''); }} style={styles.iconBtn}><X size={15} /></button>
             </div>
           )}
@@ -1776,9 +2159,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
       {/* Approval status banner for locked docs */}
       {(inReview || isApproved) && (
         <div style={{ background: isApproved ? '#EAF3DE' : '#E6EEF9', border: `1px solid ${isApproved ? '#B8D9A0' : '#B0C8E9'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: isApproved ? '#3B6D11' : '#2255A0' }} className="no-print">
-          {doc.status === 'submitted' && '⏳ Awaiting manager verification'}
-          {doc.status === 'verified' && '✓ Verified by manager — awaiting admin approval'}
-          {doc.status === 'approved' && (userRole === 'admin' ? '✓ Approved — you can edit this document' : '✓ Approved and locked')}
+          {isForwarded && '⏳ Forwarded for approval — awaiting admin/manager action'}
+          {doc.status === 'approved' && (userRole === 'admin' || userRole === 'manager' ? '✓ Approved — you can edit this document' : '✓ Approved and locked')}
         </div>
       )}
 
@@ -1794,9 +2176,15 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <input type="date" value={doc.date} onChange={(e) => update('date', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
             <div style={{ ...styles.formGroup, flex: 1 }}>
-              <label style={styles.label}>{cc.splitTax ? 'Place of supply (state)' : 'Country / Emirate'}</label>
-              <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              <label style={styles.label}>Due date</label>
+              <input type="date" value={doc.dueDate || ''} onChange={(e) => update('dueDate', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
+            {cc.hasTax && (
+              <div style={{ ...styles.formGroup, flex: 1 }}>
+                <label style={styles.label}>{cc.splitTax ? 'Place of supply (state)' : 'Place of supply'}</label>
+                <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              </div>
+            )}
           </div>
 
           <div style={styles.formGroup}>
@@ -1929,9 +2317,94 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           })()}
 
           <div style={styles.formGroup}>
-            <label style={styles.label}>Notes / terms</label>
-            <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 70, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+            <label style={styles.label}>Notes</label>
+            <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 60, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="Additional notes for this document…" />
           </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Terms &amp; Conditions
+              <span style={{ marginLeft: 8, fontSize: 11, color: '#B0AC9F', fontWeight: 400 }}>per document</span>
+            </label>
+            <textarea
+              value={doc.terms || ''}
+              onChange={(e) => update('terms', e.target.value)}
+              style={{ ...styles.input, minHeight: 70, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }}
+              readOnly={!isEditable}
+              placeholder={businessInfo.terms || 'e.g. Payment due within 30 days. Goods once sold cannot be returned.'}
+            />
+            {isEditable && businessInfo.terms && !doc.terms && (
+              <button
+                type="button"
+                onClick={() => update('terms', businessInfo.terms)}
+                style={{ ...styles.ghostBtn, fontSize: 11.5, marginTop: 4, padding: '3px 10px', color: '#888780' }}
+              >
+                ↓ Copy from profile defaults
+              </button>
+            )}
+          </div>
+
+          {/* Items shortcut — Add line button in left panel */}
+          {doc.type !== 'packing_list' && (
+            <div style={{ borderTop: '1px solid #EAE6DB', paddingTop: 12, marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{ ...styles.label, marginBottom: 0 }}>
+                  Line items <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600, marginLeft: 6 }}>{doc.items.length}</span>
+                </label>
+                {isEditable && (
+                  <button onClick={addRow} style={{ ...styles.primaryBtn, fontSize: 12, padding: '5px 12px' }}>
+                    <Plus size={13} /> Add item
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                {doc.items.map((it, i) => (
+                  <div key={it.id} style={{ background: '#FAFAF8', borderRadius: 6, padding: '6px 8px', fontSize: 12 }}>
+                    {isEditable && items.length > 0 && (
+                      <select
+                        value={it.itemId || ''}
+                        onChange={(e) => selectItem(it.id, e.target.value)}
+                        style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 4, fontSize: 11, padding: '3px 6px', marginBottom: 5, background: '#fff', color: '#1E2A4A' }}
+                      >
+                        <option value="">— Select from items master —</option>
+                        {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: '#B0AC9F', minWidth: 18, fontSize: 11 }}>{i + 1}</span>
+                      <input
+                        value={it.name}
+                        onChange={(e) => updateItem(it.id, 'name', e.target.value)}
+                        placeholder="Item description"
+                        readOnly={!isEditable}
+                        style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 12, color: '#1E2A4A', outline: 'none', cursor: isEditable ? 'text' : 'default' }}
+                      />
+                      <input
+                        type="number"
+                        value={it.qty}
+                        onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)}
+                        readOnly={!isEditable}
+                        style={{ width: 36, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
+                        title="Qty"
+                      />
+                      <span style={{ color: '#ccc', fontSize: 10 }}>×</span>
+                      <input
+                        type="number"
+                        value={it.rate}
+                        onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)}
+                        readOnly={!isEditable}
+                        style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
+                        title="Rate"
+                      />
+                      {isEditable && (
+                        <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Mark as paid — admin only, after approval */}
           {userRole === 'admin' && doc.status === 'approved' && doc.type === 'invoice' && (
@@ -1946,6 +2419,21 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         </div>
 
         <div style={styles.preview} className="print-area">
+          {/* ── DRAFT watermark — visible on screen + print when not approved ── */}
+          {doc.status !== 'approved' && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              pointerEvents: 'none', zIndex: 9, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+            }}>
+              <span className="draft-watermark" style={{
+                fontSize: 110, fontWeight: 900, letterSpacing: 12,
+                color: 'rgba(185, 28, 28, 0.10)',
+                transform: 'rotate(-35deg)', userSelect: 'none',
+                whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif',
+              }}>DRAFT</span>
+            </div>
+          )}
           {(() => {
             const logoStyle = { width: 64, height: 64, objectFit: 'contain', borderRadius: 8, display: 'block' };
             const logoWrap = (dark) => businessInfo.logo ? (
@@ -1968,8 +2456,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             if (!template || template === 'classic') return (
               <>
                 <div style={styles.previewHeader}>
-                  <div style={styles.previewBrandRow}>{logo}{brandInfo}</div>
-                  <div style={{ textAlign: 'right' }}>
+                  <div style={{ ...styles.previewBrandRow, flex: 1, minWidth: 0 }}>{logo}{brandInfo}</div>
+                  <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                     <div className="serif" style={{ ...styles.previewDocType, color: t.color }}>{t.label}</div>
                     <div style={styles.previewSmall}>No: {doc.number}</div>
                     <div style={styles.previewSmall}>Date: {doc.date}</div>
@@ -1985,7 +2473,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <>
                 <div style={{ background: t.color, borderRadius: 10, padding: '20px 24px', marginBottom: 20 }}>
                   <div style={styles.previewHeader}>
-                    <div style={styles.previewBrandRow}>
+                    <div style={{ ...styles.previewBrandRow, flex: 1, minWidth: 0 }}>
                       {logoDark}
                       <div>
                         <div className="serif" style={{ ...styles.previewBrand, color: '#fff' }}>{businessInfo.name}</div>
@@ -1994,7 +2482,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ ...styles.previewSmall, color: 'rgba(255,255,255,0.8)' }}>{businessInfo.phone} · {businessInfo.email}{businessInfo.website ? ' · ' + businessInfo.website : ''}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                       <div className="serif" style={{ ...styles.previewDocType, color: '#fff' }}>{t.label}</div>
                       <div style={{ ...styles.previewSmall, color: 'rgba(255,255,255,0.8)' }}>No: {doc.number}</div>
                       <div style={{ ...styles.previewSmall, color: 'rgba(255,255,255,0.8)' }}>Date: {doc.date}</div>
@@ -2010,8 +2498,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <>
                 <div style={{ borderTop: '3px solid #1E2A4A', paddingTop: 16, marginBottom: 4 }}>
                   <div style={styles.previewHeader}>
-                    <div style={styles.previewBrandRow}>{logo}{brandInfo}</div>
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ ...styles.previewBrandRow, flex: 1, minWidth: 0 }}>{logo}{brandInfo}</div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                       <div className="serif" style={{ ...styles.previewDocType, color: '#1E2A4A' }}>{t.label}</div>
                       <div style={styles.previewSmall}>No: {doc.number}</div>
                       <div style={styles.previewSmall}>Date: {doc.date}</div>
@@ -2037,7 +2525,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ ...styles.previewSmall, color: '#A9B8D4' }}>{businessInfo.phone} · {businessInfo.email}{businessInfo.website ? ' · ' + businessInfo.website : ''}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                       <div style={{ background: t.color, borderRadius: 6, padding: '4px 14px', display: 'inline-block', marginBottom: 8 }}>
                         <div className="serif" style={{ ...styles.previewDocType, color: '#fff' }}>{t.label}</div>
                       </div>
@@ -2057,8 +2545,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <div style={{ width: 5, borderRadius: 4, background: t.color, marginRight: 18, flexShrink: 0, minHeight: 70 }} />
                   <div style={{ flex: 1 }}>
                     <div style={styles.previewHeader}>
-                      <div style={styles.previewBrandRow}>{logo}{brandInfo}</div>
-                      <div style={{ textAlign: 'right' }}>
+                      <div style={{ ...styles.previewBrandRow, flex: 1, minWidth: 0 }}>{logo}{brandInfo}</div>
+                      <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                         <div className="serif" style={{ ...styles.previewDocType, color: t.color }}>{t.label}</div>
                         <div style={styles.previewSmall}>No: {doc.number}</div>
                         <div style={styles.previewSmall}>Date: {doc.date}</div>
@@ -2085,7 +2573,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ ...styles.previewSmall, color: '#3A7A5A' }}>{businessInfo.phone} · {businessInfo.email}{businessInfo.website ? ' · ' + businessInfo.website : ''}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', paddingLeft: 16 }}>
                       <div className="serif" style={{ ...styles.previewDocType, color: '#1A7A3E' }}>{t.label}</div>
                       <div style={{ ...styles.previewSmall, color: '#3A7A5A' }}>No: {doc.number}</div>
                       <div style={{ ...styles.previewSmall, color: '#3A7A5A' }}>Date: {doc.date}</div>
@@ -2096,8 +2584,146 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               </>
             );
 
+            // ── Formal / Prestige ──
+            if (template === 'formal' || template === 'prestige') {
+              const isPrestige = template === 'prestige';
+              const bdr = '1px solid #000';
+              const taxRows = cc.splitTax
+                ? (totals.sameState ? [['CGST', totals.cgst], ['SGST', totals.sgst]] : [['IGST', totals.igst]])
+                : [[cc.taxLabel, totals.vat]];
+              return (
+                <div style={{ margin: '-40px -48px', border: bdr, fontSize: 12, fontFamily: 'Arial, sans-serif', color: '#222', lineHeight: 1.5 }}>
+                  {/* Header band */}
+                  <div style={{ background: isPrestige ? '#1E2A4A' : '#fff', color: isPrestige ? '#fff' : '#000', textAlign: 'center', padding: '8px 16px', fontWeight: 700, fontSize: 15, letterSpacing: 1, borderBottom: bdr }}>
+                    {doc.type === 'invoice' ? 'TAX INVOICE' : t.label.toUpperCase()}
+                  </div>
+                  {/* Seller + Logo */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 18px', borderBottom: bdr }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{businessInfo.name}</div>
+                      <div style={{ color: '#333' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>
+                      <div style={{ color: '#333' }}>{businessInfo.address}</div>
+                      {businessInfo.phone && <div style={{ color: '#333' }}>{businessInfo.phone}</div>}
+                      {businessInfo.email && <div style={{ color: '#1A56DB', textDecoration: 'underline' }}>{businessInfo.email}</div>}
+                      {businessInfo.website && <div style={{ color: '#1A56DB' }}>{businessInfo.website}</div>}
+                    </div>
+                    {businessInfo.logo && (
+                      <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 20 }}>
+                        <img src={businessInfo.logo} alt="logo" style={{ width: 84, height: 84, objectFit: 'contain', display: 'block' }} />
+                        <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, maxWidth: 100 }}>{businessInfo.name}</div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Buyer + Invoice details */}
+                  <div style={{ display: 'flex', borderBottom: bdr }}>
+                    <div style={{ flex: 1, padding: '10px 18px', borderRight: bdr }}>
+                      {[['Customer', displayParty?.name],['GSTIN', displayParty?.gstin || displayParty?.taxId],['Address', displayParty?.address],['Mob', displayParty?.phone],['Email', displayParty?.email]].map(([k,v]) => (
+                        <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 3 }}>
+                          <span style={{ fontWeight: 700, minWidth: 72 }}>{k}:</span>
+                          <span style={{ color: k === 'Email' && v ? '#1A56DB' : '#222' }}>{v || '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ width: 270, padding: '10px 18px' }}>
+                      {[[`${t.label} No`, doc.number],['Date', doc.date],['Due Date', doc.dueDate],['Place of Supply', doc.placeOfSupply]].filter(([,v])=>v).map(([k,v])=>(
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 5 }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{k}:</span>
+                          <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Items table */}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: isPrestige ? '#1E2A4A' : '#f0f0f0' }}>
+                        {['Sl No','HSN/SAC','Item Description','Tax %','Qty','Rate','Amount'].map((h,i)=>(
+                          <th key={h} style={{ padding:'7px 8px', fontWeight:700, color: isPrestige?'#fff':'#222', textAlign: h==='Item Description'?'left':['Qty','Rate','Amount'].includes(h)?'right':'center', borderBottom: bdr, borderRight: i<6?'1px solid #ccc':'none', whiteSpace:'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(doc.items||[]).map((it,i)=>{
+                        const amt = (Number(it.qty)||0)*(Number(it.rate)||0);
+                        return (
+                          <tr key={it.id||i} style={{ borderBottom:'1px solid #ddd', background: i%2===0?'#fff':'#fafafa' }}>
+                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{i+1}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
+                            <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500 }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.gst||0}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmt(amt)}</td>
+                          </tr>
+                        );
+                      })}
+                      {(doc.items||[]).length < 3 && [...Array(Math.max(0,3-(doc.items||[]).length))].map((_,i)=>(
+                        <tr key={'pad'+i} style={{ borderBottom:'1px solid #eee', height:26 }}>
+                          {[...Array(7)].map((_,j)=><td key={j} style={{ borderRight:j<6?'1px solid #eee':'none' }}>&nbsp;</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {/* Footer */}
+                  <div style={{ display:'flex', borderTop: bdr }}>
+                    <div style={{ flex:1, padding:'10px 18px', borderRight: bdr }}>
+                      <div style={{ color:'#555', fontStyle:'italic', marginBottom:8 }}>Thank you for your valuable business!</div>
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontWeight:700, textDecoration:'underline', marginBottom:3 }}>Amount in words:</div>
+                        <div style={{ fontStyle:'italic' }}>{numToWords(Math.round(totals.grandTotal))} Rupees Only.</div>
+                      </div>
+                      {doc.notes && <div style={{ marginBottom:6 }}><div style={{ fontWeight:700 }}>Notes:</div><div style={{ color:'#444' }}>{doc.notes}</div></div>}
+                      {(businessInfo.bankName||businessInfo.bankAccount) && (
+                        <div style={{ marginTop:6 }}>
+                          <div style={{ fontWeight:700 }}>Bank Details:</div>
+                          {businessInfo.bankName && <div>Bank: {businessInfo.bankName}</div>}
+                          {businessInfo.bankAccount && <div>A/C: {businessInfo.bankAccount}</div>}
+                          {businessInfo.ifsc && <div>IFSC: {businessInfo.ifsc}</div>}
+                          {businessInfo.upi && <div>UPI: {businessInfo.upi}</div>}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ width:270, display:'flex', flexDirection:'column' }}>
+                      <div>
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
+                          <span>Taxable</span><span style={{ fontWeight:600 }}>{fmt(totals.subtotal)}</span>
+                        </div>
+                        {taxRows.map(([label,val])=>(
+                          <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
+                            <span>{label}</span><span style={{ fontWeight:600 }}>{fmt(val||0)}</span>
+                          </div>
+                        ))}
+                        <div style={{ display:'flex', justifyContent:'space-between', padding:'7px 16px', borderTop:'2px solid #000', fontWeight:700, fontSize:13 }}>
+                          <span>Total (Round off)</span><span>{fmt(Math.round(totals.grandTotal))}</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign:'right', padding:'10px 18px', borderTop: bdr, marginTop:'auto' }}>
+                        <div style={{ fontWeight:600, marginBottom:32, fontSize:12 }}>{businessInfo.name}</div>
+                        <div style={{ borderTop:'1px solid #555', paddingTop:5, fontSize:11, color:'#555' }}>
+                          {businessInfo.signatory || 'Authorized Signatory'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Terms & Conditions — doc-level first, fall back to profile default */}
+                  {(doc.terms || businessInfo.terms) && (
+                    <div style={{ borderTop: bdr, padding:'8px 18px' }}>
+                      <div style={{ fontWeight:700, marginBottom:4 }}>Terms &amp; Conditions:</div>
+                      <div style={{ fontSize:11, color:'#555', lineHeight:1.7 }}>
+                        {(doc.terms || businessInfo.terms).split('\n').filter(Boolean).map((line,i)=>(
+                          <div key={i}>{i+1}. {line}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             return null;
           })()}
+
+          {(template !== 'formal' && template !== 'prestige') && (<>
 
           {doc.type === 'packing_list' ? (
             <>
@@ -2105,11 +2731,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12 }}>
                 <div style={styles.billTo}>
                   <div style={styles.billToLabel}>Invoice Address (Bill To)</div>
-                  {customer ? (
+                  {displayParty ? (
                     <>
-                      <div style={styles.billToName}>{customer.name}</div>
-                      <div style={styles.previewSmall}>{customer.address}</div>
-                      <div style={styles.previewSmall}>{customer.state}</div>
+                      <div style={styles.billToName}>{displayParty.name}</div>
+                      <div style={styles.previewSmall}>{displayParty.address}</div>
+                      <div style={styles.previewSmall}>{displayParty.state}</div>
                     </>
                   ) : <div style={styles.previewSmall}>No customer selected</div>}
                 </div>
@@ -2146,12 +2772,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           ) : (
             <div style={styles.billTo}>
               <div style={styles.billToLabel}>{isVendorDoc ? 'Vendor / billed from' : 'Billed to'}</div>
-              {customer ? (
+              {displayParty ? (
                 <>
-                  <div style={styles.billToName}>{customer.name}</div>
-                  <div style={styles.previewSmall}>{customer.address}</div>
-                  <div style={styles.previewSmall}>{cc.taxIdLabel}: {customer.gstin || '—'}</div>
-                  <div style={styles.previewSmall}>State: {customer.state}</div>
+                  <div style={styles.billToName}>{displayParty.name}</div>
+                  <div style={styles.previewSmall}>{displayParty.address}</div>
+                  {(displayParty.gstin || displayParty.taxId) && <div style={styles.previewSmall}>{cc.taxIdLabel}: {displayParty.gstin || displayParty.taxId}</div>}
+                  {displayParty.state && <div style={styles.previewSmall}>State: {displayParty.state}</div>}
                 </>
               ) : (
                 <div style={styles.previewSmall}>{isVendorDoc ? 'No vendor selected' : 'No customer selected'}</div>
@@ -2172,7 +2798,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <th style={styles.th}>Dimensions</th>
                 </>) : (<>
                   <th style={{ ...styles.th, textAlign: 'right' }}>Rate</th>
-                  <th style={{ ...styles.th, textAlign: 'right' }}>{cc.taxLabel} %</th>
+                  {cc.hasTax && <th style={{ ...styles.th, textAlign: 'right' }}>{cc.taxLabel} %</th>}
                   <th style={{ ...styles.th, textAlign: 'right' }}>Amount</th>
                 </>)}
                 <th className="no-print" style={styles.th}></th>
@@ -2190,7 +2816,19 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       </select>}
                       <input value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} style={{ ...styles.inlineInput, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="Item description" readOnly={!isEditable} />
                     </td>
-                    {doc.type !== 'packing_list' && <td style={styles.td}><input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 70, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
+                    {doc.type !== 'packing_list' && (
+                      <td style={styles.td}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
+                          {isEditable && cc.splitTax && (
+                            <button type="button" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>
+                              🔍
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                     <td style={styles.td}><input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
                     {doc.type === 'packing_list' ? (<>
                       <td style={styles.td}><input type="number" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
@@ -2199,7 +2837,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       <td style={styles.td}><input value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
                     </>) : (<>
                       <td style={styles.td}><input type="number" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      {cc.hasTax && <td style={styles.td}><input type="number" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
                     </>)}
                     {isEditable && <td className="no-print" style={styles.td}>
@@ -2245,7 +2883,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#555', borderBottom: '1px solid #F2EFE6' }}>
                 <span>Subtotal</span><span>{fmt(totals.subtotal)}</span>
               </div>
-              {cc.splitTax ? (
+              {cc.hasTax && (cc.splitTax ? (
                 totals.sameState ? (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#555', borderBottom: '1px solid #F2EFE6' }}>
@@ -2264,7 +2902,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#555', borderBottom: '1px solid #F2EFE6' }}>
                   <span>{cc.taxLabel}</span><span>{fmt(totals.vat)}</span>
                 </div>
-              )}
+              ))}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 6px', fontSize: 16, fontWeight: 700, color: '#1E2A4A', borderTop: '2px solid #1E2A4A', marginTop: 2 }}>
                 <span>Grand Total</span><span className="serif">{fmt(totals.grandTotal)}</span>
               </div>
@@ -2277,11 +2915,17 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
 
               {/* Notes / Terms */}
               <div>
-                {(doc.notes || businessInfo.terms) && (
+                {(doc.notes || doc.terms || businessInfo.terms) && (
                   <>
                     <div style={styles.billToLabel}>Notes &amp; Terms</div>
                     {doc.notes && <div style={{ fontSize: 12, color: '#555', lineHeight: 1.6, marginBottom: 4 }}>{doc.notes}</div>}
-                    {businessInfo.terms && <div style={{ fontSize: 11.5, color: '#888780', lineHeight: 1.6, fontStyle: 'italic' }}>{businessInfo.terms}</div>}
+                    {(doc.terms || businessInfo.terms) && (
+                      <div style={{ fontSize: 11.5, color: '#888780', lineHeight: 1.6, fontStyle: 'italic' }}>
+                        {(doc.terms || businessInfo.terms).split('\n').filter(Boolean).map((line, i) => (
+                          <div key={i}>{i + 1}. {line}</div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -2329,8 +2973,15 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               </div>
             </div>
           </div>
+          </>)}
         </div>
       </div>
+      {hsnSearchRow && (
+        <HsnSearchModal
+          onSelect={(code) => { updateItem(hsnSearchRow, 'hsn', code); setHsnSearchRow(null); }}
+          onClose={() => setHsnSearchRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2351,6 +3002,9 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
   const [editingOB, setEditingOB] = useState(false);
   const [obInput, setObInput] = useState('');
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'accounts';
+  const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india;
+  const fmt = makeFmt(businessInfo);
+  const sym = cc.currency;
 
   const entries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
 
@@ -2370,9 +3024,14 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
     const existing = entries.find(e => e.id === entry.id);
     let updated;
     if (existing) { updated = entries.map(e => e.id === entry.id ? entry : e); }
-    else { updated = [...entries, { ...entry, id: Date.now().toString() }]; }
+    else { updated = [...entries, { ...entry, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
     setPettyCash({ openingBalance: pettyCash.openingBalance ?? 0, entries: updated });
     setShowForm(false); setEditing(null);
+  }
+
+  function updateEntryStatus(id, patch) {
+    const updated = entries.map(e => e.id === id ? { ...e, ...patch } : e);
+    setPettyCash({ ...pettyCash, entries: updated });
   }
 
   function deleteEntry(id) {
@@ -2397,7 +3056,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ background: balance >= 0 ? '#EEF7F1' : '#FEF2F2', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, color: balance >= 0 ? '#1A7A3E' : '#B91C1C' }}>
-            Balance: ₹{balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            Balance: {fmt(balance)}
           </div>
           <button style={styles.secondaryBtn} onClick={() => setShowStatement(true)}>
             <Printer size={15} />Print / Export
@@ -2420,7 +3079,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
           </>
         ) : (
           <>
-            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>₹{(pettyCash.openingBalance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>{fmt(pettyCash.openingBalance ?? 0)}</span>
             {canEdit && <button style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }} onClick={() => { setObInput(pettyCash.openingBalance ?? 0); setEditingOB(true); }}>Edit</button>}
           </>
         )}
@@ -2430,14 +3089,14 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
         <table style={styles.table}>
           <thead>
             <tr>
-              {['Date', 'Voucher No', 'Category', 'Description', 'Paid To', 'Debit (₹)', 'Credit (₹)', 'Balance (₹)', ''].map(h => (
+              {['Date', 'Voucher No', 'Category', 'Description', 'Paid To', `Debit (${sym.trim()})`, `Credit (${sym.trim()})`, `Balance (${sym.trim()})`, 'Status', ''].map(h => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No entries yet. Add your first petty cash entry.</td></tr>
+              <tr><td colSpan={10} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No entries yet. Add your first petty cash entry.</td></tr>
             )}
             {rows.map(entry => (
               <tr key={entry.id}>
@@ -2446,14 +3105,18 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
                 <td style={styles.td}>{entry.category}</td>
                 <td style={styles.td}>{entry.description}</td>
                 <td style={styles.td}>{entry.paidTo}</td>
-                <td style={{ ...styles.td, color: '#B91C1C', fontWeight: 500 }}>{entry.debit ? '₹' + entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}</td>
-                <td style={{ ...styles.td, color: '#1A7A3E', fontWeight: 500 }}>{entry.credit ? '₹' + entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}</td>
-                <td style={{ ...styles.td, fontWeight: 600, color: entry.__balance >= 0 ? '#1E2A4A' : '#B91C1C' }}>₹{entry.__balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td style={{ ...styles.td, color: '#B91C1C', fontWeight: 500 }}>{entry.debit ? fmt(entry.debit) : '—'}</td>
+                <td style={{ ...styles.td, color: '#1A7A3E', fontWeight: 500 }}>{entry.credit ? fmt(entry.credit) : '—'}</td>
+                <td style={{ ...styles.td, fontWeight: 600, color: entry.__balance >= 0 ? '#1E2A4A' : '#B91C1C' }}>{fmt(entry.__balance)}</td>
+                <td style={styles.td}>
+                  <StatusBadge status={entry.status || 'draft'} />
+                  <ApprovalActions item={entry} onUpdate={(patch) => updateEntryStatus(entry.id, patch)} userRole={userRole} compact />
+                </td>
                 <td style={styles.td}>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button style={styles.iconBtn} onClick={() => setPrintVoucher(entry)} title="Print"><Printer size={14} /></button>
-                    {canEdit && <button style={styles.iconBtn} onClick={() => { setEditing(entry); setShowForm(true); }}>✏️</button>}
-                    {canEdit && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteEntry(entry.id)}><Trash2 size={14} /></button>}
+                    {canEdit && entry.status !== 'submitted' && <button style={styles.iconBtn} onClick={() => { setEditing(entry); setShowForm(true); }}>✏️</button>}
+                    {canEdit && entry.status !== 'submitted' && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteEntry(entry.id)}><Trash2 size={14} /></button>}
                   </div>
                 </td>
               </tr>
@@ -2533,7 +3196,7 @@ function PettyCashForm({ entry, onSave, onClose }) {
           <input value={form.paidTo} onChange={e => set('paidTo', e.target.value)} style={styles.input} placeholder="Name" />
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.label}>Amount (₹)</label>
+          <label style={styles.label}>Amount</label>
           <input type="number" value={form.type === 'debit' ? form.debit : form.credit}
             onChange={e => form.type === 'debit' ? set('debit', e.target.value) : set('credit', e.target.value)}
             style={styles.input} placeholder="0.00" />
@@ -2554,6 +3217,74 @@ function PettyCashForm({ entry, onSave, onClose }) {
         <button style={styles.primaryBtn} onClick={handleSave}>Save Entry</button>
       </div>
     </Modal>
+  );
+}
+
+function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
+  // Build running balance
+  let balance = parseFloat(openingBalance) || 0;
+  const ledger = (rows || []).map(e => {
+    const debit  = parseFloat(e.debit)  || 0;
+    const credit = parseFloat(e.credit) || 0;
+    balance = balance - debit + credit;
+    return { ...e, debit, credit, runningBalance: balance };
+  });
+  const fmtStmt = (n) => makeFmt(businessInfo)(Math.abs(n));
+
+  return (
+    <div>
+      <div className="no-print" onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 998 }} />
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
+        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+      </div>
+      <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+        {/* Header */}
+        <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
+            <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PETTY CASH STATEMENT</div>
+            <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>Printed: {new Date().toLocaleDateString('en-IN')}</div>
+          </div>
+        </div>
+        {/* Opening balance */}
+        <div style={{ fontSize: 13, marginBottom: 14, color: '#555' }}>
+          Opening Balance: <strong style={{ color: '#1E2A4A' }}>{fmtStmt(openingBalance)}</strong>
+        </div>
+        {/* Table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#F8F5EE' }}>
+              {['Date','Voucher No','Description','Category','Paid To','Debit','Credit','Balance'].map(h => (
+                <th key={h} style={{ padding: '7px 10px', textAlign: h === 'Date' || h === 'Voucher No' || h === 'Description' || h === 'Category' || h === 'Paid To' ? 'left' : 'right', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ledger.map((e, i) => (
+              <tr key={e.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF7' }}>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.date}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.voucherNo}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#1E2A4A' }}>{e.description}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.category}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{e.paidTo}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', color: e.debit ? '#B91C1C' : '#ccc' }}>{e.debit ? fmtStmt(e.debit) : '—'}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', color: e.credit ? '#1A7A3E' : '#ccc' }}>{e.credit ? fmtStmt(e.credit) : '—'}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid #F0EDE5', textAlign: 'right', fontWeight: 600, color: e.runningBalance >= 0 ? '#1E2A4A' : '#B91C1C' }}>{fmtStmt(e.runningBalance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {/* Closing balance */}
+        <div style={{ marginTop: 20, textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#1E2A4A', borderTop: '2px solid #1E2A4A', paddingTop: 10 }}>
+          Closing Balance: {fmtStmt(ledger.length ? ledger[ledger.length - 1].runningBalance : openingBalance)}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2582,7 +3313,7 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
               ['Description', entry.description],
               [entry.debit > 0 ? 'Paid To' : 'Received From', entry.paidTo],
               ['Payment Mode', entry.mode],
-              ['Amount', '₹' + (entry.debit || entry.credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })],
+              ['Amount', makeFmt(businessInfo)(entry.debit || entry.credit || 0)],
               ['Type', entry.debit > 0 ? 'Expense (Debit)' : 'Cash Received (Credit)'],
               ...(entry.remarks ? [['Remarks', entry.remarks]] : []),
             ].map(([label, val]) => (
@@ -2607,6 +3338,15 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
 }
 
 // ─── Vouchers ──────────────────────────────────────────────────
+
+const VOUCHER_ACCOUNT_HEADS = [
+  'Cash', 'Bank', 'Petty Cash',
+  'Accounts Payable', 'Accounts Receivable',
+  'Sales', 'Purchase', 'Expenses',
+  'Salaries & Wages', 'Rent', 'Utilities',
+  'Office Supplies', 'Travel & Transport',
+  'Professional Fees', 'Loan', 'Capital', 'Other',
+];
 
 function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, userRole }) {
   const [tab, setTab] = useState('payment');
@@ -2635,9 +3375,13 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
     const existing = list.find(x => x.id === v.id);
     let updated;
     if (existing) { updated = list.map(x => x.id === v.id ? v : x); }
-    else { updated = [...list, { ...v, id: Date.now().toString() }]; }
+    else { updated = [...list, { ...v, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
     setVouchers(updated);
     setShowForm(false); setEditing(null);
+  }
+
+  function updateVoucherStatus(id, patch) {
+    setVouchers(list.map(x => x.id === id ? { ...x, ...patch } : x));
   }
 
   function deleteVoucher(id) {
@@ -2646,6 +3390,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   }
 
   const totalAmount = filtered.reduce((sum, v) => sum + (parseFloat(v.amount) || 0), 0);
+  const fmt = makeFmt(businessInfo);
 
   const tabStyle = (t) => ({
     padding: '8px 20px', border: 'none', cursor: 'pointer', fontWeight: 500, fontSize: 13.5,
@@ -2702,7 +3447,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
 
       {filtered.length > 0 && (
         <div style={{ background: tab === 'payment' ? '#FEF2F2' : '#EEF7F1', borderRadius: 8, padding: '8px 14px', marginBottom: 12, fontSize: 13, fontWeight: 600, color: tab === 'payment' ? '#B91C1C' : '#1A7A3E', display: 'inline-block' }}>
-          Total {tab === 'payment' ? 'Payments' : 'Receipts'}{partyFilter ? ` · ${partyFilter}` : ''}: ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+          Total {tab === 'payment' ? 'Payments' : 'Receipts'}{partyFilter ? ` · ${partyFilter}` : ''}: {fmt(totalAmount)}
         </div>
       )}
 
@@ -2710,14 +3455,14 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
         <table style={styles.table}>
           <thead>
             <tr>
-              {['Date', 'Voucher No', 'Party', 'Account Head', 'Mode', 'Amount (₹)', 'Narration', ''].map(h => (
+              {['Date', 'Voucher No', 'Party', 'Account Head', 'Mode', 'Amount', 'Narration', 'Status', ''].map(h => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No {tab} vouchers yet.</td></tr>
+              <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No {tab} vouchers yet.</td></tr>
             )}
             {filtered.map(v => (
               <tr key={v.id}>
@@ -2726,13 +3471,17 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
                 <td style={styles.td}>{v.party}</td>
                 <td style={styles.td}>{v.accountHead}</td>
                 <td style={styles.td}><span style={{ background: '#F5F3EE', borderRadius: 4, padding: '2px 7px', fontSize: 11.5 }}>{v.mode}</span></td>
-                <td style={{ ...styles.td, fontWeight: 600, color: tab === 'payment' ? '#B91C1C' : '#1A7A3E' }}>₹{parseFloat(v.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <td style={{ ...styles.td, fontWeight: 600, color: tab === 'payment' ? '#B91C1C' : '#1A7A3E' }}>{fmt(parseFloat(v.amount || 0))}</td>
                 <td style={{ ...styles.td, color: '#888780', maxWidth: 180 }}>{v.narration}</td>
+                <td style={styles.td}>
+                  <StatusBadge status={v.status || 'draft'} />
+                  <ApprovalActions item={v} onUpdate={(patch) => updateVoucherStatus(v.id, patch)} userRole={userRole} compact />
+                </td>
                 <td style={styles.td}>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button style={styles.iconBtn} onClick={() => setPrintVoucher(v)} title="Print"><Printer size={14} /></button>
-                    {canEdit && <button style={styles.iconBtn} onClick={() => { setEditing(v); setShowForm(true); }}>✏️</button>}
-                    {canEdit && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteVoucher(v.id)}><Trash2 size={14} /></button>}
+                    {canEdit && v.status !== 'submitted' && <button style={styles.iconBtn} onClick={() => { setEditing(v); setShowForm(true); }}>✏️</button>}
+                    {canEdit && v.status !== 'submitted' && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteVoucher(v.id)}><Trash2 size={14} /></button>}
                   </div>
                 </td>
               </tr>
@@ -2807,7 +3556,7 @@ function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
           </select>
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.label}>Amount (₹)</label>
+          <label style={styles.label}>Amount</label>
           <input type="number" value={form.amount} onChange={e => set('amount', e.target.value)} style={styles.input} placeholder="0.00" />
         </div>
         <div style={styles.formGroup}>
@@ -3386,11 +4135,15 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
     return 'GRN-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
   }
 
+  function updateGRNStatus(id, patch) {
+    setGrns((grns || []).map(g => g.id === id ? { ...g, ...patch } : g));
+  }
+
   function saveGRN(grn) {
     const isNew = !(grns || []).find(g => g.id === grn.id);
     let updated;
     if (isNew) {
-      const newGrn = { ...grn, id: crypto.randomUUID(), createdAt: Date.now() };
+      const newGrn = { ...grn, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
       updated = [newGrn, ...(grns || [])];
       // Only create stock IN entries for QA-accepted lines
       if (setStockLedger) {
@@ -3436,9 +4189,9 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
 
       <div style={{ overflowX: 'auto' }}>
         <table style={styles.table}>
-          <thead><tr>{['GRN No', 'Date', 'PO Ref', 'Vendor', 'Items Received', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{['GRN No', 'Date', 'PO Ref', 'Vendor', 'Items Received', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {(!grns || grns.length === 0) && <tr><td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No GRNs yet. Create one when goods arrive against a PO.</td></tr>}
+            {(!grns || grns.length === 0) && <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No GRNs yet. Create one when goods arrive against a PO.</td></tr>}
             {(grns || []).map(g => {
               const po = poList.find(p => p.id === g.poId);
               const vendor = vendors.find(v => v.id === (po ? po.customerId : ''));
@@ -3464,9 +4217,13 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
                     </div>
                   </td>
                   <td style={styles.td}>
+                    <StatusBadge status={g.status || 'draft'} />
+                    <ApprovalActions item={g} onUpdate={(patch) => updateGRNStatus(g.id, patch)} userRole={userRole} compact />
+                  </td>
+                  <td style={styles.td}>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      {canEdit && <button style={styles.iconBtn} onClick={() => { setEditing(g); setShowForm(true); }}>✏️</button>}
-                      {canEdit && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteGRN(g.id)}><Trash2 size={14} /></button>}
+                      {canEdit && g.status !== 'submitted' && <button style={styles.iconBtn} onClick={() => { setEditing(g); setShowForm(true); }}>✏️</button>}
+                      {canEdit && g.status !== 'submitted' && <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteGRN(g.id)}><Trash2 size={14} /></button>}
                     </div>
                   </td>
                 </tr>
@@ -3648,7 +4405,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
                     <span style={{ ...styles.badge, background: DEPT_COLORS[i % DEPT_COLORS.length], color: '#333' }}>{e.department || '—'}</span>
                   </td>
                   <td style={styles.td}>{e.phone}</td>
-                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{currency(parseFloat(e.basicSalary)||0)}</td>
+                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{makeFmt(businessInfo)(parseFloat(e.basicSalary)||0)}</td>
                   <td style={styles.td}>
                     <span style={{ ...styles.badge, ...(e.status === 'active' ? { background: '#D1FAE5', color: '#065F46' } : { background: '#F3F2EF', color: '#6B7494' }) }}>{e.status || 'active'}</span>
                   </td>
@@ -3666,7 +4423,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
       )}
       {showModal && (
         <Modal title={active ? 'Edit Employee' : 'New Employee'} onClose={() => setShowModal(false)} wide>
-          <EmployeeForm employee={active} count={employees.length} onSave={saveEmployee} onClose={() => setShowModal(false)} />
+          <EmployeeForm employee={active} count={employees.length} businessInfo={businessInfo} onSave={saveEmployee} onClose={() => setShowModal(false)} />
         </Modal>
       )}
     </div>
@@ -3691,7 +4448,7 @@ function EmpField({ label, name, type = 'text', placeholder, form, errors, set, 
   );
 }
 
-function EmployeeForm({ employee, count, onSave, onClose }) {
+function EmployeeForm({ employee, count, businessInfo, onSave, onClose }) {
   const blank = {
     id: crypto.randomUUID(),
     empId: 'EMP-' + String(count + 1).padStart(4, '0'),
@@ -3716,6 +4473,7 @@ function EmployeeForm({ employee, count, onSave, onClose }) {
   const tds   = parseFloat(form.tds) || 0;
   const deductions = pf + esi + tds;
   const net   = gross - deductions;
+  const fmtEmp = makeFmt(businessInfo);
 
   function validate() {
     const e = {};
@@ -3761,12 +4519,12 @@ function EmployeeForm({ employee, count, onSave, onClose }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
         <EmpField label="PF % (of Basic)" name="pf" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
         <EmpField label="ESI % (of Gross)" name="esi" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="TDS Fixed (₹)" name="tds" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
+        <EmpField label="TDS Fixed" name="tds" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
       </div>
       <div style={{ background: '#1E2A4A', color: '#fff', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, fontSize: 13 }}>
-        <div>Gross: <strong>{currency(gross)}</strong></div>
-        <div>Deductions: <strong>{currency(deductions)}</strong></div>
-        <div>Net Pay: <strong style={{ color: '#7FBF96' }}>{currency(net)}</strong></div>
+        <div>Gross: <strong>{fmtEmp(gross)}</strong></div>
+        <div>Deductions: <strong>{fmtEmp(deductions)}</strong></div>
+        <div>Net Pay: <strong style={{ color: '#7FBF96' }}>{fmtEmp(net)}</strong></div>
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 6, marginBottom: 12 }}>Bank Details</div>
@@ -3791,14 +4549,33 @@ function EmployeeForm({ employee, count, onSave, onClose }) {
 function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole }) {
   const [showModal, setShowModal] = useState(false);
   const [printRun, setPrintRun] = useState(null);
-  const canEdit = userRole === 'admin';
+  const [printMode, setPrintMode] = useState(null); // 'summary' | 'individual'
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const fmt = makeFmt(businessInfo);
 
   function deleteRun(id) {
     if (!window.confirm('Delete this payroll run?')) return;
     setPayrollRuns(prev => prev.filter(r => r.id !== id));
   }
+  function updateStatus(id, status) {
+    setPayrollRuns(prev => prev.map(x => x.id === id ? { ...x, status } : x));
+  }
 
-  if (printRun) return <PaySlipPrint run={printRun} businessInfo={businessInfo} onClose={() => setPrintRun(null)} />;
+  const STATUS_BADGE = {
+    draft:    { bg: '#EEEDE6', color: '#5F5E5A', label: 'Preparing' },
+    submitted:{ bg: '#E6EEF9', color: '#2255A0', label: 'Forwarded' },
+    approved: { bg: '#EAF3DE', color: '#3B6D11', label: 'Approved' },
+    rejected: { bg: '#FBEAE7', color: '#B5453A', label: 'Rejected' },
+    paid:     { bg: '#D1FAE5', color: '#065F46', label: 'Paid' },
+  };
+
+  // Print views
+  if (printRun && printMode === 'summary') {
+    return <PaySlipPrint run={printRun} businessInfo={businessInfo} onClose={() => { setPrintRun(null); setPrintMode(null); }} />;
+  }
+  if (printRun && printMode === 'individual') {
+    return <IndividualPaySlips run={printRun} businessInfo={businessInfo} onClose={() => { setPrintRun(null); setPrintMode(null); }} />;
+  }
 
   const activeEmp = employees.filter(e => e.status === 'active' || !e.status);
 
@@ -3809,7 +4586,9 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
           <h2 className="serif" style={styles.h1}>Payroll</h2>
           <div style={styles.muted}>{payrollRuns.length} payroll run{payrollRuns.length !== 1 ? 's' : ''}</div>
         </div>
-        {canEdit && <button style={styles.primaryBtn} onClick={() => setShowModal(true)}><Plus size={15}/> Process Payroll</button>}
+        {(userRole === 'admin' || userRole === 'accounts') && (
+          <button style={styles.primaryBtn} onClick={() => setShowModal(true)}><Plus size={15}/> Process Payroll</button>
+        )}
       </div>
 
       {payrollRuns.length === 0 ? (
@@ -3821,32 +4600,56 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
               <tr>{['Period','Employees','Gross','Deductions','Net Payable','Status',''].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {[...payrollRuns].sort((a,b)=>a.period<b.period?1:-1).map(r=>(
-                <tr key={r.id}>
-                  <td style={{ ...styles.td, fontWeight: 600 }}>{MONTHS.find(m=>m[0]===r.month)?.[1]} {r.year}</td>
-                  <td style={styles.td}>{r.lines.length}</td>
-                  <td style={{ ...styles.td, textAlign: 'right' }}>{currency(r.lines.reduce((s,l)=>s+(l.gross||0),0))}</td>
-                  <td style={{ ...styles.td, textAlign: 'right', color: '#B5453A' }}>{currency(r.lines.reduce((s,l)=>s+(l.totalDeductions||l.deductions||0),0))}</td>
-                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: '#065F46' }}>{currency(r.lines.reduce((s,l)=>s+(l.net||0),0))}</td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, ...(r.status === 'paid' ? { background: '#D1FAE5', color: '#065F46' } : { background: '#FFF3CD', color: '#8B6914' }) }}>{r.status}</span>
-                  </td>
-                  <td style={styles.td}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button style={styles.iconBtn} title="Print Pay Slips" onClick={() => setPrintRun(r)}><Printer size={14}/></button>
-                      {canEdit && r.status === 'draft' && (
-                        <button style={{ ...styles.iconBtn, color: '#065F46' }} title="Mark Paid"
-                          onClick={() => setPayrollRuns(prev => prev.map(x => x.id === r.id ? { ...x, status: 'paid' } : x))}>
-                          <CheckCircle size={14}/>
-                        </button>
-                      )}
-                      {canEdit && r.status === 'draft' && (
-                        <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {[...payrollRuns].sort((a,b)=>a.period<b.period?1:-1).map(r => {
+                const sb = STATUS_BADGE[r.status] || STATUS_BADGE.draft;
+                return (
+                  <tr key={r.id}>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{MONTHS.find(m=>m[0]===r.month)?.[1]} {r.year}</td>
+                    <td style={styles.td}>{(r.lines||[]).length}</td>
+                    <td style={{ ...styles.td, textAlign: 'right' }}>{fmt((r.lines||[]).reduce((s,l)=>s+(l.gross||0),0))}</td>
+                    <td style={{ ...styles.td, textAlign: 'right', color: '#B5453A' }}>{fmt((r.lines||[]).reduce((s,l)=>s+(l.totalDeductions||0),0))}</td>
+                    <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: '#065F46' }}>{fmt((r.lines||[]).reduce((s,l)=>s+(l.net||0),0))}</td>
+                    <td style={styles.td}>
+                      <span style={{ ...styles.badge, background: sb.bg, color: sb.color }}>{sb.label}</span>
+                    </td>
+                    <td style={styles.td}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* Print buttons */}
+                        <button style={styles.iconBtn} title="Payroll Summary Sheet" onClick={() => { setPrintRun(r); setPrintMode('summary'); }}><Printer size={14}/></button>
+                        <button style={styles.iconBtn} title="Individual Pay Slips" onClick={() => { setPrintRun(r); setPrintMode('individual'); }}><Users size={14}/></button>
+                        {/* Approval flow: Preparing → Forward → Approve → Paid */}
+                        {r.status === 'draft' && (
+                          <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '4px 10px', color: '#2255A0', borderColor: '#2255A0', background: '#EEF1F8' }}
+                            onClick={() => updateStatus(r.id, 'submitted')}>
+                            Forward →
+                          </button>
+                        )}
+                        {r.status === 'submitted' && canEdit && (
+                          <>
+                            <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '4px 10px', color: '#B5453A', borderColor: '#B5453A', background: '#FBEAE7' }}
+                              onClick={() => updateStatus(r.id, 'draft')}>
+                              Reject
+                            </button>
+                            <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '4px 10px', color: '#3B6D11', borderColor: '#3B6D11', background: '#EAF3DE' }}
+                              onClick={() => updateStatus(r.id, 'approved')}>
+                              ✓ Approve
+                            </button>
+                          </>
+                        )}
+                        {r.status === 'approved' && canEdit && (
+                          <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '4px 10px', color: '#065F46', borderColor: '#065F46', background: '#D1FAE5' }}
+                            onClick={() => updateStatus(r.id, 'paid')}>
+                            ✓ Mark Paid
+                          </button>
+                        )}
+                        {r.status !== 'paid' && r.status !== 'submitted' && (
+                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -3855,6 +4658,7 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
         <PayrollModal
           employees={activeEmp}
           payrollRuns={payrollRuns}
+          businessInfo={businessInfo}
           onSave={(run) => { setPayrollRuns(prev => [...prev, run]); setShowModal(false); }}
           onClose={() => setShowModal(false)}
         />
@@ -3863,11 +4667,12 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
   );
 }
 
-function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
+function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose }) {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
   const [year, setYear]   = useState(String(now.getFullYear()));
   const [error, setError] = useState('');
+  const fmt = makeFmt(businessInfo);
 
   const initLines = () => employees.map(e => {
     const basic = parseFloat(e.basicSalary) || 0;
@@ -3886,6 +4691,7 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
       workingDays: 26, paidDays: 26,
       pf: parseFloat(pf.toFixed(2)), esi: parseFloat(esi.toFixed(2)), tds,
       lopDays: 0, lopAmt: 0,
+      advance: 0,
       otherDeductAmt: 0, otherDeductNote: '',
       totalDeductions: parseFloat(totalDeductions.toFixed(2)),
       net: parseFloat((gross - totalDeductions).toFixed(2)),
@@ -3897,7 +4703,7 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
   function recalcLine(line) {
     const dailyRate = line.gross / (line.workingDays || 26);
     const lopAmt    = parseFloat((dailyRate * (line.lopDays || 0)).toFixed(2));
-    const totalDeductions = parseFloat((line.pf + line.esi + line.tds + lopAmt + (line.otherDeductAmt || 0)).toFixed(2));
+    const totalDeductions = parseFloat((line.pf + line.esi + line.tds + lopAmt + (line.advance || 0) + (line.otherDeductAmt || 0)).toFixed(2));
     const net = Math.max(0, parseFloat((line.gross - totalDeductions).toFixed(2)));
     return { ...line, lopAmt, totalDeductions, net };
   }
@@ -3950,9 +4756,9 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
               </div>
             )}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 20, fontSize: 13 }}>
-              <span>Gross: <strong>{currency(totalGross)}</strong></span>
-              <span style={{ color: '#B5453A' }}>Deductions: <strong>{currency(totalDed)}</strong></span>
-              <span style={{ color: '#065F46', fontWeight: 700 }}>Net: <strong>{currency(totalNet)}</strong></span>
+              <span>Gross: <strong>{fmt(totalGross)}</strong></span>
+              <span style={{ color: '#B5453A' }}>Deductions: <strong>{fmt(totalDed)}</strong></span>
+              <span style={{ color: '#065F46', fontWeight: 700 }}>Net: <strong>{fmt(totalNet)}</strong></span>
             </div>
           </div>
 
@@ -3969,7 +4775,7 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
               <table style={{ ...styles.table, fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: '#F7F4EE' }}>
-                    {['Employee','Gross (₹)','Working Days','Paid Days','PF (₹)','ESI (₹)','TDS (₹)','LOP Days','LOP (₹)','Other Deduct','Note','Net Pay (₹)'].map(h=>(
+                    {['Employee','Gross','Working Days','Paid Days','PF','ESI','TDS','LOP Days','LOP','Advance','Other Deduct','Note','Net Pay'].map(h=>(
                       <th key={h} style={{ ...styles.th, whiteSpace: 'nowrap', padding: '8px 8px' }}>{h}</th>
                     ))}
                   </tr>
@@ -3981,7 +4787,7 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
                         <div style={{ fontWeight: 600 }}>{l.name}</div>
                         <div style={{ color: '#888', fontSize: 11 }}>{l.empId} · {l.designation}</div>
                       </td>
-                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{currency(l.gross)}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{fmt(l.gross)}</td>
                       <td style={{ ...styles.td, textAlign: 'center' }}>{l.workingDays}</td>
                       <td style={{ ...styles.td, textAlign: 'center' }}>
                         <input type="number" min={0} max={l.workingDays}
@@ -3989,9 +4795,9 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
                           value={l.paidDays}
                           onChange={e => updateLine(i, { paidDays: parseFloat(e.target.value)||0 })} />
                       </td>
-                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{currency(l.pf)}</td>
-                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{currency(l.esi)}</td>
-                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{currency(l.tds)}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{fmt(l.pf)}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{fmt(l.esi)}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', color: '#666' }}>{fmt(l.tds)}</td>
                       {/* LOP Days */}
                       <td style={{ ...styles.td, textAlign: 'center' }}>
                         <input type="number" min={0} max={l.workingDays}
@@ -4001,7 +4807,15 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
                       </td>
                       {/* LOP amount — auto-calculated */}
                       <td style={{ ...styles.td, textAlign: 'right', color: l.lopAmt > 0 ? '#B5453A' : '#ccc' }}>
-                        {l.lopAmt > 0 ? `-${currency(l.lopAmt)}` : '—'}
+                        {l.lopAmt > 0 ? `-${fmt(l.lopAmt)}` : '—'}
+                      </td>
+                      {/* Advance deduction */}
+                      <td style={{ ...styles.td, textAlign: 'right' }}>
+                        <input type="number" min={0}
+                          style={{ ...styles.input, width: 70, margin: 0, textAlign: 'right', padding: '4px 6px', borderColor: l.advance > 0 ? '#C9A24B' : undefined }}
+                          value={l.advance || ''}
+                          placeholder="0"
+                          onChange={e => updateLine(i, { advance: parseFloat(e.target.value)||0 })} />
                       </td>
                       {/* Other deduction amount */}
                       <td style={{ ...styles.td, textAlign: 'right' }}>
@@ -4020,7 +4834,7 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
                           onChange={e => updateLine(i, { otherDeductNote: e.target.value })} />
                       </td>
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: '#065F46', whiteSpace: 'nowrap' }}>
-                        {currency(l.net)}
+                        {fmt(l.net)}
                       </td>
                     </tr>
                   ))}
@@ -4042,55 +4856,159 @@ function PayrollModal({ employees, payrollRuns, onSave, onClose }) {
 }
 
 // ─── Pay Slip Print ───────────────────────────────────────────────────────────
+// Summary payroll sheet — all employees in one table
 function PaySlipPrint({ run, businessInfo, onClose }) {
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
+  const lines = run?.lines || [];
+  const period = `${MONTHS.find(m=>m[0]===run?.month)?.[1] || run?.month} ${run?.year}`;
   return (
-    <div style={{ padding: 32, fontFamily: 'Inter, sans-serif', maxWidth: 600, margin: '0 auto' }} className="print-area">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 20 }}>{businessInfo.name}</div>
-          <div style={{ fontSize: 12, color: '#888' }}>{businessInfo.address}</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>Pay Slip</div>
-          <div style={{ fontSize: 12, color: '#888' }}>{run?.month} {run?.year}</div>
-        </div>
+    <div>
+      <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
+        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print</button>
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-        <thead>
-          <tr style={{ background: '#1E2A4A', color: '#fff' }}>
-            <th style={{ padding: '8px 12px', textAlign: 'left' }}>Employee</th>
-            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Basic</th>
-            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Allowances</th>
-            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Deductions</th>
-            <th style={{ padding: '8px 12px', textAlign: 'right' }}>Net Pay</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(run?.entries || []).map((e, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid #EAE6DB' }}>
-              <td style={{ padding: '8px 12px' }}>{e.name}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.basic)}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.allowances)}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(e.deductions)}</td>
-              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(e.net)}</td>
+      <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, borderBottom: '2px solid #1E2A4A', paddingBottom: 12 }}>
+          <div>
+            <div className="serif" style={{ fontWeight: 700, fontSize: 20, color: '#1E2A4A' }}>{businessInfo.name}</div>
+            <div style={{ fontSize: 11, color: '#888' }}>{businessInfo.address}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#C9A24B' }}>PAYROLL SUMMARY</div>
+            <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>{period}</div>
+          </div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#1E2A4A', color: '#fff' }}>
+              {['Emp ID','Name','Designation','Basic','HRA','DA','Other Allow.','Gross','PF','ESI','TDS','LOP','Advance','Other Ded.','Total Ded.','Net Pay'].map(h => (
+                <th key={h} style={{ padding: '7px 8px', textAlign: h==='Name'||h==='Designation'||h==='Emp ID' ? 'left' : 'right', fontWeight: 600, fontSize: 11 }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr style={{ fontWeight: 700, borderTop: '2px solid #1E2A4A' }}>
-            <td style={{ padding: '8px 12px' }}>Total</td>
-            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.basic||0),0))}</td>
-            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.allowances||0),0))}</td>
-            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((run?.entries||[]).reduce((s,e)=>s+(e.deductions||0),0))}</td>
-            <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(run?.totalNet||0)}</td>
-          </tr>
-        </tfoot>
-      </table>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }} className="no-print">
-        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}><Printer size={14} /> Print</button>
-        <button onClick={onClose} style={{ padding: '8px 20px', background: '#eee', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Close</button>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #EAE6DB', background: i%2===0?'#fff':'#FAFAF7' }}>
+                <td style={{ padding: '6px 8px' }}>{l.empId}</td>
+                <td style={{ padding: '6px 8px', fontWeight: 500 }}>{l.name}</td>
+                <td style={{ padding: '6px 8px', color: '#555' }}>{l.designation}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmt(l.basic)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmt(l.hra||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmt(l.da||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmt(l.other||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>{fmt(l.gross)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.pf||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.esi||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.tds||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.lopAmt||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.advance||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A' }}>{fmt(l.otherDeductAmt||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: '#B5453A', fontWeight: 600 }}>{fmt(l.totalDeductions||0)}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: '#065F46' }}>{fmt(l.net||0)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ fontWeight: 700, borderTop: '2px solid #1E2A4A', background: '#F8F5EE' }}>
+              <td colSpan={3} style={{ padding: '7px 8px' }}>TOTAL ({lines.length} employees)</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.basic||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.hra||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.da||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.other||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.gross||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.pf||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.esi||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.tds||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.lopAmt||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.advance||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.otherDeductAmt||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(lines.reduce((s,l)=>s+(l.totalDeductions||0),0))}</td>
+              <td style={{ padding: '7px 8px', textAlign: 'right', color: '#065F46' }}>{fmt(lines.reduce((s,l)=>s+(l.net||0),0))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Individual payslips — one per employee, page-break between each
+function IndividualPaySlips({ run, businessInfo, onClose }) {
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
+  const fmt = (n) => currency(n, cc.currency);
+  const lines = run?.lines || [];
+  const period = `${MONTHS.find(m=>m[0]===run?.month)?.[1] || run?.month} ${run?.year}`;
+
+  return (
+    <div>
+      <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
+        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print All ({lines.length})</button>
+      </div>
+      <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
+        {lines.map((l, i) => (
+          <div key={i} style={{ padding: '36px 48px', pageBreakAfter: i < lines.length - 1 ? 'always' : 'auto', borderBottom: i < lines.length - 1 ? '3px dashed #EAE6DB' : 'none' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, borderBottom: '2px solid #1E2A4A', paddingBottom: 10 }}>
+              <div>
+                <div className="serif" style={{ fontWeight: 700, fontSize: 18, color: '#1E2A4A' }}>{businessInfo.name}</div>
+                <div style={{ fontSize: 11, color: '#888' }}>{businessInfo.address}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#1E2A4A', letterSpacing: 2, textTransform: 'uppercase' }}>PAY SLIP</div>
+                <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{period}</div>
+              </div>
+            </div>
+            {/* Employee info */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 24px', marginBottom: 16, fontSize: 12 }}>
+              {[['Employee Name', l.name], ['Employee ID', l.empId], ['Designation', l.designation], ['Department', l.department||'—'],
+                ['Working Days', l.workingDays||26], ['Paid Days', (l.workingDays||26)-(l.lopDays||0)], ['LOP Days', l.lopDays||0], ['Bank', l.bankName ? `${l.bankName} · ${l.bankAccount||''}` : '—']
+              ].map(([k,v]) => (
+                <div key={k} style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ color: '#888', minWidth: 110 }}>{k}:</span>
+                  <span style={{ fontWeight: 500, color: '#1E2A4A' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+            {/* Earnings vs Deductions */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', paddingBottom: 4, marginBottom: 6 }}>EARNINGS</div>
+                {[['Basic Salary', l.basic], ['HRA', l.hra||0], ['DA', l.da||0], ['Other Allowances', l.other||0]].map(([k,v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', borderBottom: '1px solid #F5F3EE' }}>
+                    <span style={{ color: '#555' }}>{k}</span><span>{fmt(v)}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginTop: 6, color: '#1E2A4A' }}>
+                  <span>Gross</span><span>{fmt(l.gross||0)}</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: '#B5453A', borderBottom: '1px solid #EAE6DB', paddingBottom: 4, marginBottom: 6 }}>DEDUCTIONS</div>
+                {[['PF (Employee)', l.pf||0], ['ESI', l.esi||0], ['TDS', l.tds||0], ['LOP', l.lopAmt||0], ['Advance', l.advance||0], [l.otherDeductNote||'Other Deductions', l.otherDeductAmt||0]].map(([k,v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', borderBottom: '1px solid #F5F3EE' }}>
+                    <span style={{ color: '#555' }}>{k}</span><span style={{ color: v > 0 ? '#B5453A' : '#aaa' }}>{fmt(v)}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginTop: 6, color: '#B5453A' }}>
+                  <span>Total Deductions</span><span>{fmt(l.totalDeductions||0)}</span>
+                </div>
+              </div>
+            </div>
+            {/* Net pay */}
+            <div style={{ background: '#1E2A4A', color: '#fff', borderRadius: 8, padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+              <span style={{ fontWeight: 600 }}>NET PAY</span>
+              <span style={{ fontSize: 22, fontWeight: 700, color: '#C9A24B' }}>{fmt(l.net||0)}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 32, fontSize: 11, color: '#888' }}>
+              <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #555', paddingTop: 4, marginTop: 24 }}>Employee Signature</div></div>
+              <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #555', paddingTop: 4, marginTop: 24 }}>Authorised Signatory</div></div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -4128,6 +5046,8 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
       scheduledDate: '',
       completedDate: '',
       status: 'draft',
+      approvalStatus: 'draft',
+      approvalNote: '',
       notes: '',
     };
   }
@@ -4139,6 +5059,15 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
       return [...prev, order];
     });
     setView('list');
+  }
+
+  function updateOrderApproval(id, patch) {
+    // patch: { status, rejectionNote } → maps to approvalStatus, approvalNote
+    setServiceOrders(prev => prev.map(o => o.id === id ? {
+      ...o,
+      approvalStatus: patch.status,
+      approvalNote: patch.rejectionNote ?? o.approvalNote,
+    } : o));
   }
 
   function deleteOrder(id) {
@@ -4166,7 +5095,7 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
           <table style={styles.table}>
             <thead>
               <tr>
-                {['Order No','Date','Customer','Technician','Scheduled','Status','Amount','Actions'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                {['Order No','Date','Customer','Technician','Scheduled','Status','Amount','Approval','Actions'].map(h => <th key={h} style={styles.th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -4185,10 +5114,19 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
                     </td>
                     <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{fmt(total)}</td>
                     <td style={styles.td}>
+                      <StatusBadge status={o.approvalStatus || 'draft'} />
+                      <ApprovalActions
+                        item={{ status: o.approvalStatus || 'draft', rejectionNote: o.approvalNote || '' }}
+                        onUpdate={(patch) => updateOrderApproval(o.id, patch)}
+                        userRole={userRole}
+                        compact
+                      />
+                    </td>
+                    <td style={styles.td}>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button style={styles.iconBtn} title="Print" onClick={() => setPrintOrder(o)}><Printer size={14} /></button>
-                        {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => { setActive(o); setView('form'); }}><Pencil size={14} /></button>}
-                        {canEdit && <button style={{ ...styles.iconBtn, color: '#B5453A' }} title="Delete" onClick={() => deleteOrder(o.id)}><Trash2 size={14} /></button>}
+                        {canEdit && o.approvalStatus !== 'submitted' && <button style={styles.iconBtn} title="Edit" onClick={() => { setActive(o); setView('form'); }}><Pencil size={14} /></button>}
+                        {canEdit && o.approvalStatus !== 'submitted' && <button style={{ ...styles.iconBtn, color: '#B5453A' }} title="Delete" onClick={() => deleteOrder(o.id)}><Trash2 size={14} /></button>}
                       </div>
                     </td>
                   </tr>
@@ -5561,9 +6499,10 @@ function DrawingUploader({ files = [], onChange, ownerUid, folder }) {
   );
 }
 
-function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid }) {
+function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, businessInfo }) {
   const [editing, setEditing] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory';
+  const fmt = makeFmt(businessInfo);
 
   function upsert(m) {
     if (m.id) {
@@ -5587,7 +6526,7 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid })
           <div key={m.id} style={styles.recordRow}>
             <div style={{ flex: 1 }}>
               <div style={styles.docRowTitle}>{m.name}</div>
-              <div style={styles.docRowSub}>Unit: {m.unit || '—'} · Rate: {currency(m.rate || 0)} · Min stock: {m.minStock || 0}</div>
+              <div style={styles.docRowSub}>Unit: {m.unit || '—'} · Rate: {fmt(m.rate || 0)} · Min stock: {m.minStock || 0}</div>
             </div>
             <div style={{ textAlign: 'right', minWidth: 80 }}>
               <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: (m.stock <= m.minStock) ? '#B5453A' : '#1E2A4A' }}>{m.stock}</div>
@@ -5812,12 +6751,34 @@ const PO_STATUS = {
 
 function ProductionOrdersList({ productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [] }) {
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
   const canCreate = userRole === 'admin' || userRole === 'manager' || userRole === 'sales' || userRole === 'purchase';
   const canApprove = userRole === 'admin';
 
   function createOrder(order) {
-    setProductionOrders((p) => [{ ...order, id: crypto.randomUUID(), createdAt: Date.now() }, ...p]);
+    setProductionOrders((p) => [{ ...order, id: crypto.randomUUID(), createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '' }, ...p]);
     setCreating(false);
+  }
+
+  function saveOrder(order) {
+    setProductionOrders(prev => {
+      const idx = prev.findIndex(p => p.id === order.id);
+      if (idx >= 0) { const a = [...prev]; a[idx] = order; return a; }
+      return [{ ...order, id: crypto.randomUUID(), createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '' }, ...prev];
+    });
+  }
+
+  function deleteOrder(id) {
+    if (!window.confirm('Delete this production order?')) return;
+    setProductionOrders(prev => prev.filter(p => p.id !== id));
+  }
+
+  function updateApproval(id, patch) {
+    setProductionOrders(prev => prev.map(p => p.id === id ? {
+      ...p,
+      approvalStatus: patch.status,
+      approvalNote: patch.rejectionNote ?? p.approvalNote,
+    } : p));
   }
 
   function updateStatus(id, status) {
@@ -5907,9 +6868,18 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{o.quantity} units · {o.startDate || ''}</div>
               </div>
               <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace('_',' ')}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                <StatusBadge status={o.approvalStatus || 'draft'} />
+                <ApprovalActions
+                  item={{ status: o.approvalStatus || 'draft', rejectionNote: o.approvalNote || '' }}
+                  onUpdate={(patch) => updateApproval(o.id, patch)}
+                  userRole={userRole}
+                  compact
+                />
+              </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>
-                <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>
+                {o.approvalStatus !== 'submitted' && <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>}
+                {o.approvalStatus !== 'submitted' && <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>}
               </div>
             </div>
           );
@@ -5920,6 +6890,87 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           <ProductionOrderForm order={editing} boms={boms} items={items} onSave={(o) => { saveOrder(o); setCreating(false); setEditing(null); }} onClose={() => { setCreating(false); setEditing(null); }} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
+  const [form, setForm] = useState({
+    id: order?.id || '',
+    number: order?.number || '',
+    bomId: order?.bomId || '',
+    quantity: order?.quantity || 1,
+    startDate: order?.startDate || new Date().toISOString().split('T')[0],
+    targetDate: order?.targetDate || '',
+    status: order?.status || 'planned',
+    notes: order?.notes || '',
+  });
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  function handleSave() {
+    if (!form.bomId) return alert('Please select a BOM');
+    if (!form.number) return alert('Please enter an order number');
+    onSave({ ...form, quantity: parseFloat(form.quantity) || 1, updatedAt: new Date().toISOString() });
+  }
+
+  const selectedBom = boms.find(b => b.id === form.bomId);
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Order Number *</label>
+        <input value={form.number} onChange={e => set('number', e.target.value)} style={styles.input} placeholder="PO-001" />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>BOM / Product *</label>
+        <select value={form.bomId} onChange={e => set('bomId', e.target.value)} style={styles.input}>
+          <option value="">— Select BOM —</option>
+          {boms.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Quantity</label>
+        <input type="number" min="1" value={form.quantity} onChange={e => set('quantity', e.target.value)} style={styles.input} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Status</label>
+        <select value={form.status} onChange={e => set('status', e.target.value)} style={styles.input}>
+          {['planned','in_progress','qc_pending','completed','failed'].map(s => (
+            <option key={s} value={s}>{s.replace('_', ' ')}</option>
+          ))}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Start Date</label>
+        <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} style={styles.input} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Target Date</label>
+        <input type="date" value={form.targetDate} onChange={e => set('targetDate', e.target.value)} style={styles.input} />
+      </div>
+      <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+        <label style={styles.label}>Notes</label>
+        <textarea value={form.notes} onChange={e => set('notes', e.target.value)} style={{ ...styles.input, minHeight: 70 }} placeholder="Optional notes..." />
+      </div>
+      {selectedBom && (
+        <div style={{ gridColumn: '1 / -1', background: '#F8F5EE', borderRadius: 8, padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 6 }}>BOM Components ({selectedBom.components?.length || 0} items)</div>
+          {(selectedBom.components || []).map((c, i) => {
+            const item = items.find(it => it.id === c.itemId);
+            return (
+              <div key={i} style={{ fontSize: 12, color: '#555', display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid #EAE6DB' }}>
+                <span>{item?.name || c.itemId}</span>
+                <span style={{ color: '#888' }}>{(c.qty * form.quantity).toFixed(2)} {c.unit || item?.unit || ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={handleSave}>Save Order</button>
+      </div>
     </div>
   );
 }
@@ -6180,440 +7231,1585 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
   );
 }
 
-// ─── Bin Card ────────────────────────────────────────────────────────────────
+// ─── Terms Library ────────────────────────────────────────────────────────────
+const CLAUSE_CATEGORIES = ['Payment', 'Delivery', 'Warranty', 'Liability', 'Force Majeure', 'Confidentiality', 'Termination', 'Dispute Resolution', 'Other'];
 
-// ─── App ──────────────────────────────────────────────
-
-export default function InvoiceApp() {
-  // ── Auth & role ─────────────────────────────────────────────────────────
-  const [user, setUser] = useState(undefined);
-  const [userRole, setUserRole] = useState('admin');
-  const [ownerUid, setOwnerUid] = useState(null);
-  const [membershipChecked, setMembershipChecked] = useState(false);
-
-  // ── Business data ────────────────────────────────────────────────────────
-  const [businessInfo, setBusinessInfo] = useState({
-    name: 'Your business name',
-    address: '123 Business Street, City, State - 600001',
-    gstin: '33AAAAA0000A1Z5',
-    state: 'Tamil Nadu',
-    phone: '+91 00000 00000',
-    email: 'you@business.com',
-    website: '',
-    logo: '',
-    template: 'classic',
-    companyType: 'trading',
-    bankName: '', bankAccount: '', ifsc: '', upi: '',
-    terms: 'Payment due within 30 days. Thank you for your business.',
-    signatory: '',
-    country: 'india',
-  });
-  const [customers, setCustomers] = useState([]);
-  const [vendors, setVendors] = useState([]);
-  const [items, setItems] = useState([]);
-  const [documents, setDocuments] = useState([]);
-  const [counters, setCounters] = useState({});
-  const [boms, setBoms] = useState([]);
-  const [parts, setParts] = useState([]);
-  const [engDocs, setEngDocs] = useState([]);
-  const [rawMaterials, setRawMaterials] = useState([]);
-  const [productionOrders, setProductionOrders] = useState([]);
-  const [pettyCash, setPettyCash] = useState({ openingBalance: 0, entries: [] });
-  const [vouchers, setVouchers] = useState([]);
-  const [stockLedger, setStockLedger] = useState([]);
-  const [grns, setGrns] = useState([]);
-  const [serviceOrders, setServiceOrders] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [payrollRuns, setPayrollRuns] = useState([]);
-  const [enquiries, setEnquiries] = useState([]);
-
-  // ── UI state ─────────────────────────────────────────────────────────────
-  const [loaded, setLoaded] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const [retryCount, setRetryCount] = useState(0);
-  // loadError shown in error screen for debugging — remove after issue is resolved
-  const [syncStatus, setSyncStatus] = useState('idle');
-  const [view, setView] = useState('dashboard');
-  const [activeDoc, setActiveDoc] = useState(null);
-  const [editingCustomer, setEditingCustomer] = useState(null);
-  const [editingVendor, setEditingVendor] = useState(null);
-  const [editingItem, setEditingItem] = useState(null);
+function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
+  const [tab, setTab] = useState('clauses'); // 'clauses' | 'templates'
+  const [clauseModal, setClauseModal] = useState(null); // null | clause obj
+  const [tmplModal, setTmplModal] = useState(null);     // null | template obj
+  const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
 
-  // ── Auth watch ───────────────────────────────────────────────────────────
+  const clauses   = termsLibrary.clauses   || [];
+  const templates = termsLibrary.templates || [];
+
+  function saveClauses(next)   { setTermsLibrary(prev => ({ ...prev, clauses: next })); }
+  function saveTemplates(next) { setTermsLibrary(prev => ({ ...prev, templates: next })); }
+
+  // ── Clause CRUD ──
+  function handleSaveClause(form) {
+    const saved = { ...form, id: form.id || crypto.randomUUID() };
+    saveClauses(prev => form.id ? prev.map(c => c.id === form.id ? saved : c) : [...prev, saved]);
+    setClauseModal(null);
+  }
+  function deleteClause(id) {
+    if (!window.confirm('Delete this clause?')) return;
+    saveClauses(prev => prev.filter(c => c.id !== id));
+  }
+
+  // ── Template CRUD ──
+  function handleSaveTemplate(form) {
+    const saved = { ...form, id: form.id || crypto.randomUUID() };
+    saveTemplates(prev => form.id ? prev.map(t => t.id === form.id ? saved : t) : [...prev, saved]);
+    setTmplModal(null);
+  }
+  function deleteTemplate(id) {
+    if (!window.confirm('Delete this template?')) return;
+    saveTemplates(prev => prev.filter(t => t.id !== id));
+  }
+
+  const filteredClauses = clauses.filter(c => {
+    const matchCat = filterCat === 'All' || c.category === filterCat;
+    const matchSearch = `${c.title} ${c.text}`.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  const canEdit = userRole === 'admin';
+
+  const cardStyle = { background: '#fff', borderRadius: 10, border: '1px solid #EAE6DB', padding: '14px 18px', marginBottom: 10 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 900 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Terms Library</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>Reusable clauses and full terms templates for contracts & documents</p>
+        </div>
+        {canEdit && (
+          <button
+            onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '' }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
+            style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>
+            + {tab === 'clauses' ? 'New Clause' : 'New Template'}
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #EAE6DB', marginBottom: 20 }}>
+        {[['clauses', `Clauses (${clauses.length})`], ['templates', `Templates (${templates.length})`]].map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{ padding: '10px 22px', border: 'none', background: 'none', fontWeight: 700, fontSize: 14, color: tab === key ? '#1E2A4A' : '#888', borderBottom: tab === key ? '2px solid #1E2A4A' : '2px solid transparent', marginBottom: -2, cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'clauses' && (
+        <>
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clauses…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '7px 12px', fontSize: 13, width: 220 }} />
+            {['All', ...CLAUSE_CATEGORIES].map(cat => (
+              <button key={cat} onClick={() => setFilterCat(cat)} style={{ padding: '5px 13px', borderRadius: 16, border: `1.5px solid ${filterCat === cat ? '#1E2A4A' : '#DDD8CE'}`, background: filterCat === cat ? '#1E2A4A' : '#fff', color: filterCat === cat ? '#fff' : '#555', fontSize: 12, fontWeight: 600 }}>
+                {cat}
+              </button>
+            ))}
+          </div>
+          {filteredClauses.length === 0 && <div style={{ color: '#999', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>No clauses yet. Add your first reusable clause above.</div>}
+          {filteredClauses.map(c => (
+            <div key={c.id} style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{c.title}</span>
+                    <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#666' }}>{c.category}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                </div>
+                {canEdit && (
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
+                    <button onClick={() => setClauseModal(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>
+                    <button onClick={() => deleteClause(c.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}>Delete</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {tab === 'templates' && (
+        <>
+          {templates.length === 0 && <div style={{ color: '#999', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>No templates yet. Create a full-terms template from your clause library.</div>}
+          {templates.map(t => {
+            const linked = (t.clauseIds || []).map(id => clauses.find(c => c.id === id)).filter(Boolean);
+            return (
+              <div key={t.id} style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 4 }}>{t.name}</div>
+                    {t.description && <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{t.description}</div>}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {linked.map(c => (
+                        <span key={c.id} style={{ background: '#F0EDE6', borderRadius: 10, padding: '3px 10px', fontSize: 11, color: '#555' }}>{c.category}: {c.title}</span>
+                      ))}
+                      {t.customText && <span style={{ background: '#F0EDE6', borderRadius: 10, padding: '3px 10px', fontSize: 11, color: '#555' }}>+ Custom text</span>}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
+                      <button onClick={() => setTmplModal(t)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>
+                      <button onClick={() => deleteTemplate(t.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}>Delete</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Clause Modal */}
+      {clauseModal && (
+        <ClauseModal clause={clauseModal} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+      )}
+      {/* Template Modal */}
+      {tmplModal && (
+        <TemplateModal template={tmplModal} clauses={clauses} onSave={handleSaveTemplate} onClose={() => setTmplModal(null)} />
+      )}
+    </div>
+  );
+}
+
+function ClauseModal({ clause, onSave, onClose }) {
+  const [form, setForm] = useState({ title: '', category: 'Payment', text: '', ...clause });
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 540, maxHeight: '80vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{clause.id ? 'Edit Clause' : 'New Clause'}</h3>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Title</label>
+        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
+        <select value={form.category} onChange={e => set('category', e.target.value)} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }}>
+          {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Text</label>
+        <textarea value={form.text} onChange={e => set('text', e.target.value)} placeholder="Write the full clause text here…" rows={6} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
+          <button onClick={() => { if (!form.title || !form.text) return alert('Title and text are required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateModal({ template, clauses, onSave, onClose }) {
+  const [form, setForm] = useState({ name: '', description: '', clauseIds: [], customText: '', ...template });
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  function toggleClause(id) {
+    set('clauseIds', form.clauseIds.includes(id) ? form.clauseIds.filter(x => x !== id) : [...form.clauseIds, id]);
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 580, maxHeight: '85vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{template.id ? 'Edit Template' : 'New Template'}</h3>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Template Name</label>
+        <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Standard Supply Contract Terms" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Description (optional)</label>
+        <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Short description" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666', display: 'block', marginBottom: 8 }}>Select Clauses to include</label>
+        {clauses.length === 0 && <div style={{ color: '#999', fontSize: 12, marginBottom: 14 }}>No clauses yet — add clauses in the Clauses tab first.</div>}
+        <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+          {CLAUSE_CATEGORIES.map(cat => {
+            const catClauses = clauses.filter(c => c.category === cat);
+            if (!catClauses.length) return null;
+            return (
+              <div key={cat} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 4 }}>{cat.toUpperCase()}</div>
+                {catClauses.map(c => (
+                  <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6, cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" checked={form.clauseIds.includes(c.id)} onChange={() => toggleClause(c.id)} style={{ marginTop: 2 }} />
+                    <span><strong>{c.title}</strong> — <span style={{ color: '#888' }}>{c.text.slice(0, 80)}{c.text.length > 80 ? '…' : ''}</span></span>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Additional Custom Text (appended after clauses)</label>
+        <textarea value={form.customText} onChange={e => set('customText', e.target.value)} placeholder="Any additional terms not covered by individual clauses…" rows={4} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
+          <button onClick={() => { if (!form.name) return alert('Template name required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Template</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Contracts ────────────────────────────────────────────────────────────────
+const CONTRACT_STATUSES = ['Draft', 'Sent', 'Under Review', 'Signed', 'Active', 'Completed', 'Terminated'];
+const CONTRACT_STATUS_COLOR = { Draft: '#888', Sent: '#2563EB', 'Under Review': '#D97706', Signed: '#7C3AED', Active: '#059669', Completed: '#1E2A4A', Terminated: '#B5453A' };
+const SCOPE_SECTIONS = [
+  { key: 'supply',          label: 'Supply' },
+  { key: 'installation',    label: 'Installation' },
+  { key: 'testing',         label: 'Testing' },
+  { key: 'commissioning',   label: 'Commissioning' },
+];
+
+function blankContract() {
+  return {
+    id: crypto.randomUUID(),
+    number: '',
+    date: new Date().toISOString().slice(0, 10),
+    title: '',
+    customerId: '',
+    customerSnapshot: null,
+    contractValue: 0,
+    scope: { supply: { enabled: true, description: '', value: 0, timeline: '' }, installation: { enabled: false, description: '', value: 0, timeline: '' }, testing: { enabled: false, description: '', value: 0, timeline: '' }, commissioning: { enabled: false, description: '', value: 0, timeline: '' } },
+    paymentMilestones: [],
+    termsTemplateId: '',
+    customTerms: '',
+    status: 'Draft',
+    signatoryOurName: '', signatoryOurDesignation: '',
+    signatoryClientName: '', signatoryClientDesignation: '',
+    notes: '',
+  };
+}
+
+function ContractList({ contracts, setContracts, customers, termsLibrary, businessInfo, userRole }) {
+  const [editing, setEditing] = useState(null); // null | contract obj | 'new'
+  const [printing, setPrinting] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+
+  function nextConNum() {
+    if (!contracts.length) return 'CON-001';
+    const nums = contracts.map(c => parseInt((c.number || '').replace(/\D/g, '')) || 0);
+    return 'CON-' + String(Math.max(...nums) + 1).padStart(3, '0');
+  }
+
+  function handleSave(form) {
+    if (!form.number) form.number = nextConNum();
+    setContracts(prev => form._isNew ? [...prev, { ...form, _isNew: undefined }] : prev.map(c => c.id === form.id ? form : c));
+    setEditing(null);
+  }
+
+  function handleDelete(id) {
+    if (!window.confirm('Delete this contract?')) return;
+    setContracts(prev => prev.filter(c => c.id !== id));
+  }
+
+  const filtered = contracts.filter(c => {
+    const cust = customers.find(x => x.id === c.customerId);
+    const text = `${c.number} ${c.title} ${cust?.name || ''}`.toLowerCase();
+    return text.includes(search.toLowerCase()) && (filterStatus === 'All' || c.status === filterStatus);
+  });
+
+  const counts = {};
+  CONTRACT_STATUSES.forEach(s => { counts[s] = contracts.filter(c => c.status === s).length; });
+
+  const fmt = makeFmt(businessInfo);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  if (editing) return (
+    <ContractEditor
+      contract={editing === 'new' ? { ...blankContract(), number: nextConNum(), _isNew: true } : editing}
+      customers={customers}
+      termsLibrary={termsLibrary}
+      businessInfo={businessInfo}
+      userRole={userRole}
+      onSave={handleSave}
+      onBack={() => setEditing(null)}
+    />
+  );
+
+  if (printing) return (
+    <ContractPrint contract={printing} businessInfo={businessInfo} termsLibrary={termsLibrary} onBack={() => setPrinting(null)} />
+  );
+
+  return (
+    <div style={{ padding: 28 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Contracts</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>{contracts.length} contract{contracts.length !== 1 ? 's' : ''} — supply, installation, testing & commissioning</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => setEditing('new')} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>+ New Contract</button>
+        )}
+      </div>
+
+      {/* Status filter chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {['All', ...CONTRACT_STATUSES].map(s => (
+          <button key={s} onClick={() => setFilterStatus(s)}
+            style={{ padding: '5px 14px', borderRadius: 16, border: `1.5px solid ${s === 'All' ? '#1E2A4A' : (CONTRACT_STATUS_COLOR[s] || '#1E2A4A')}`, background: filterStatus === s ? (s === 'All' ? '#1E2A4A' : CONTRACT_STATUS_COLOR[s]) : '#fff', color: filterStatus === s ? '#fff' : '#555', fontWeight: 600, fontSize: 12 }}>
+            {s} ({s === 'All' ? contracts.length : counts[s] || 0})
+          </button>
+        ))}
+      </div>
+
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by number, title, customer…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 14px', fontSize: 13, width: 300, marginBottom: 18 }} />
+
+      {filtered.length === 0 && <div style={{ color: '#999', textAlign: 'center', padding: '60px 0', fontSize: 14 }}>No contracts found.</div>}
+
+      {filtered.map(c => {
+        const cust = customers.find(x => x.id === c.customerId);
+        const scopeLabels = SCOPE_SECTIONS.filter(s => c.scope?.[s.key]?.enabled).map(s => s.label).join(' · ');
+        return (
+          <div key={c.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 20px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{c.number}</span>
+                <span style={{ background: CONTRACT_STATUS_COLOR[c.status] || '#888', color: '#fff', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                {scopeLabels && <span style={{ fontSize: 11, color: '#888', background: '#F0EDE6', borderRadius: 8, padding: '2px 8px' }}>{scopeLabels}</span>}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 2 }}>{c.title}</div>
+              <div style={{ fontSize: 12, color: '#888' }}>{cust?.name || '—'} &nbsp;·&nbsp; {c.date} &nbsp;·&nbsp; {fmt(c.contractValue || 0)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setPrinting(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}><Printer size={13} style={{ marginRight: 4 }} />Print</button>
+              {canEdit && <button onClick={() => setEditing(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>}
+              {canEdit && <button onClick={() => handleDelete(c.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '6px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}><Trash2 size={13} /></button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ContractEditor({ contract, customers, termsLibrary, businessInfo, userRole, onSave, onBack }) {
+  const [form, setForm] = useState(contract);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setScope = (section, field, val) => setForm(p => ({ ...p, scope: { ...p.scope, [section]: { ...p.scope[section], [field]: val } } }));
+
+  const [milestoneInput, setMilestoneInput] = useState({ milestone: '', percentage: '', dueDate: '' });
+
+  const clauses   = termsLibrary.clauses   || [];
+  const templates = termsLibrary.templates || [];
+  const fmt = makeFmt(businessInfo);
+
+  // Build resolved terms text from template + clauses
+  function buildTermsPreview() {
+    if (form.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === form.termsTemplateId);
+      if (tmpl) {
+        const clauseTexts = (tmpl.clauseIds || []).map(id => {
+          const c = clauses.find(x => x.id === id);
+          return c ? `${c.title}\n${c.text}` : '';
+        }).filter(Boolean);
+        return [...clauseTexts, tmpl.customText].filter(Boolean).join('\n\n');
+      }
+    }
+    return form.customTerms || '';
+  }
+
+  function addMilestone() {
+    if (!milestoneInput.milestone) return;
+    set('paymentMilestones', [...(form.paymentMilestones || []), { ...milestoneInput, id: crypto.randomUUID() }]);
+    setMilestoneInput({ milestone: '', percentage: '', dueDate: '' });
+  }
+  function removeMilestone(id) { set('paymentMilestones', form.paymentMilestones.filter(m => m.id !== id)); }
+
+  const totalScopeValue = SCOPE_SECTIONS.filter(s => form.scope[s.key]?.enabled).reduce((sum, s) => sum + (parseFloat(form.scope[s.key]?.value) || 0), 0);
+
+  const inputStyle = { width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', marginTop: 4 };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: '#555' };
+  const sectionHead = { fontSize: 13, fontWeight: 700, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', paddingBottom: 8, marginBottom: 14, marginTop: 24 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 780 }}>
+      <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>← Back to Contracts</button>
+      <h2 style={{ margin: '0 0 24px', fontSize: 20, fontWeight: 700 }}>{contract._isNew ? 'New Contract' : `Edit Contract — ${form.number}`}</h2>
+
+      <div style={sectionHead}>Contract Details</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Contract No.</label><input value={form.number} onChange={e => set('number', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Date</label><input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inputStyle} /></div>
+      </div>
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Contract Title</label><input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Supply & Installation of Solar Panels" style={inputStyle} /></div>
+      <div style={{ marginTop: 14 }}>
+        <label style={labelStyle}>Customer / Client</label>
+        <select value={form.customerId} onChange={e => { const c = customers.find(x => x.id === e.target.value); set('customerId', e.target.value); set('customerSnapshot', c || null); }} style={inputStyle}>
+          <option value="">— Select customer —</option>
+          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)} style={inputStyle}>
+            {CONTRACT_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div><label style={labelStyle}>Total Contract Value</label>
+          <input type="number" value={form.contractValue} onChange={e => set('contractValue', parseFloat(e.target.value) || 0)} style={inputStyle} />
+        </div>
+      </div>
+
+      <div style={sectionHead}>Scope of Work</div>
+      {SCOPE_SECTIONS.map(({ key, label }) => (
+        <div key={key} style={{ background: form.scope[key]?.enabled ? '#FAFAF8' : '#F7F6F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '12px 16px', marginBottom: 10 }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', marginBottom: form.scope[key]?.enabled ? 12 : 0 }}>
+            <input type="checkbox" checked={!!form.scope[key]?.enabled} onChange={e => setScope(key, 'enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</span>
+          </label>
+          {form.scope[key]?.enabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 160px', gap: 10 }}>
+              <div><label style={labelStyle}>Scope Description</label><input value={form.scope[key]?.description || ''} onChange={e => setScope(key, 'description', e.target.value)} placeholder={`Describe ${label.toLowerCase()} scope`} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Value</label><input type="number" value={form.scope[key]?.value || 0} onChange={e => setScope(key, 'value', parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Timeline</label><input value={form.scope[key]?.timeline || ''} onChange={e => setScope(key, 'timeline', e.target.value)} placeholder="e.g. 45 days" style={inputStyle} /></div>
+            </div>
+          )}
+        </div>
+      ))}
+      {totalScopeValue > 0 && <div style={{ textAlign: 'right', fontSize: 13, color: '#888', marginBottom: 4 }}>Total scope: <strong style={{ color: '#1E2A4A' }}>{makeFmt(businessInfo)(totalScopeValue)}</strong></div>}
+
+      <div style={sectionHead}>Payment Milestones</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 140px 36px', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
+        <div><label style={labelStyle}>Milestone</label><input value={milestoneInput.milestone} onChange={e => setMilestoneInput(p => ({ ...p, milestone: e.target.value }))} placeholder="e.g. On delivery" style={inputStyle} /></div>
+        <div><label style={labelStyle}>%</label><input type="number" value={milestoneInput.percentage} onChange={e => setMilestoneInput(p => ({ ...p, percentage: e.target.value }))} placeholder="30" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Due Date</label><input type="date" value={milestoneInput.dueDate} onChange={e => setMilestoneInput(p => ({ ...p, dueDate: e.target.value }))} style={inputStyle} /></div>
+        <button onClick={addMilestone} style={{ border: 'none', background: '#1E2A4A', color: '#fff', borderRadius: 6, padding: '9px 10px', cursor: 'pointer', fontSize: 16 }}>+</button>
+      </div>
+      {(form.paymentMilestones || []).map(m => (
+        <div key={m.id} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FAFAF8', border: '1px solid #EAE6DB', borderRadius: 6, padding: '8px 12px', marginBottom: 6, fontSize: 13 }}>
+          <span style={{ flex: 2 }}>{m.milestone}</span>
+          <span style={{ width: 60, color: '#888' }}>{m.percentage}%</span>
+          <span style={{ width: 120, color: '#888' }}>{m.dueDate || '—'}</span>
+          <button onClick={() => removeMilestone(m.id)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#B5453A' }}><Trash2 size={13} /></button>
+        </div>
+      ))}
+
+      <div style={sectionHead}>Terms & Conditions</div>
+      {templates.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Apply from Terms Library</label>
+          <select value={form.termsTemplateId || ''} onChange={e => { set('termsTemplateId', e.target.value); if (e.target.value) set('customTerms', ''); }} style={inputStyle}>
+            <option value="">— None / use custom text below —</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+      {!form.termsTemplateId && <div><label style={labelStyle}>Custom Terms</label><textarea value={form.customTerms || ''} onChange={e => set('customTerms', e.target.value)} rows={6} style={{ ...inputStyle, resize: 'vertical' }} /></div>}
+      {form.termsTemplateId && (
+        <div style={{ background: '#F7F6F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: 14, fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', lineHeight: 1.8, maxHeight: 200, overflowY: 'auto' }}>{buildTermsPreview()}</div>
+      )}
+
+      <div style={sectionHead}>Signatories</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#555', marginBottom: 8 }}>Our Signatory</div>
+          <label style={labelStyle}>Name</label><input value={form.signatoryOurName || ''} onChange={e => set('signatoryOurName', e.target.value)} style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 10, display: 'block' }}>Designation</label><input value={form.signatoryOurDesignation || ''} onChange={e => set('signatoryOurDesignation', e.target.value)} style={inputStyle} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#555', marginBottom: 8 }}>Client Signatory</div>
+          <label style={labelStyle}>Name</label><input value={form.signatoryClientName || ''} onChange={e => set('signatoryClientName', e.target.value)} style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 10, display: 'block' }}>Designation</label><input value={form.signatoryClientDesignation || ''} onChange={e => set('signatoryClientDesignation', e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ marginTop: 20 }}><label style={labelStyle}>Internal Notes</label><textarea value={form.notes || ''} onChange={e => set('notes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></div>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
+        <button onClick={onBack} style={{ padding: '10px 24px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 14 }}>Cancel</button>
+        <button onClick={() => { if (!form.title) return alert('Contract title required'); onSave(form); }} style={{ padding: '10px 24px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700 }}>Save Contract</button>
+      </div>
+    </div>
+  );
+}
+
+function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) {
+  const clauses   = termsLibrary?.clauses   || [];
+  const templates = termsLibrary?.templates || [];
+  const fmt = makeFmt(bi);
+
+  function getTermsText() {
+    if (c.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === c.termsTemplateId);
+      if (tmpl) {
+        const items = (tmpl.clauseIds || []).map(id => { const cl = clauses.find(x => x.id === id); return cl ? { title: cl.title, text: cl.text } : null; }).filter(Boolean);
+        return { items, extra: tmpl.customText };
+      }
+    }
+    if (c.customTerms) return { items: c.customTerms.split('\n').filter(Boolean).map(t => ({ title: null, text: t })), extra: '' };
+    return { items: [], extra: '' };
+  }
+
+  const terms = getTermsText();
+  const enabledScopes = SCOPE_SECTIONS.filter(s => c.scope?.[s.key]?.enabled);
+
+  return (
+    <div>
+      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12 }}>
+        <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print / PDF</button>
+      </div>
+      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
+          {bi.companyName && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.companyName}</div>}
+          {bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>CONTRACT AGREEMENT</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}</div>
+        </div>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: '#1E2A4A', textTransform: 'uppercase' }}>Parties</div>
+          <p>This Contract Agreement is entered into between <strong>{bi.companyName || 'the Company'}</strong> (the "Contractor") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "Client").</p>
+        </div>
+        <div style={{ background: '#F7F6F3', border: '1px solid #DDD8CE', borderRadius: 6, padding: '14px 20px', marginBottom: 28, fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>Subject: {c.title}</div>
+        {enabledScopes.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Scope of Work</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Section</th><th style={{ padding: '8px 12px', textAlign: 'left' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Value</th><th style={{ padding: '8px 12px', textAlign: 'center' }}>Timeline</th></tr></thead>
+              <tbody>
+                {enabledScopes.map(({ key, label }, i) => (
+                  <tr key={key} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
+                    <td style={{ padding: '8px 12px', fontWeight: 600 }}>{label}</td>
+                    <td style={{ padding: '8px 12px' }}>{c.scope[key]?.description || '—'}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.scope[key]?.value || 0)}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>{c.scope[key]?.timeline || '—'}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#F0EDE6', fontWeight: 700 }}>
+                  <td colSpan={2} style={{ padding: '8px 12px' }}>Total Contract Value</td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.contractValue || 0)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {(c.paymentMilestones || []).length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Payment Schedule</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Milestone</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>%</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Amount</th><th style={{ padding: '8px 12px', textAlign: 'center' }}>Due Date</th></tr></thead>
+              <tbody>
+                {c.paymentMilestones.map((m, i) => (
+                  <tr key={m.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
+                    <td style={{ padding: '8px 12px' }}>{m.milestone}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{m.percentage}%</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((parseFloat(m.percentage) / 100) * (c.contractValue || 0))}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>{m.dueDate || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {terms.items.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
+            {terms.items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                <div style={{ marginLeft: item.title ? 16 : 0 }}>{item.title ? '' : `${i + 1}. `}{item.text}</div>
+              </div>
+            ))}
+            {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
+          </div>
+        )}
+        <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
+          {[{ label: 'For ' + (bi.companyName || 'the Contractor'), name: c.signatoryOurName, desig: c.signatoryOurDesignation }, { label: 'For ' + (c.customerSnapshot?.name || 'the Client'), name: c.signatoryClientName, desig: c.signatoryClientDesignation }].map((sig, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{sig.label}</div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>
+                <div style={{ fontWeight: 700 }}>{sig.name || 'Authorised Signatory'}</div>
+                {sig.desig && <div style={{ fontSize: 12, color: '#888' }}>{sig.desig}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Channel Partners ──────────────────────────────────────────────────────────
+const PARTNER_TYPES = ['Dealer', 'Distributor', 'Agent', 'Reseller', 'System Integrator'];
+const PARTNER_STATUSES = ['Onboarding', 'Active', 'Inactive', 'Terminated'];
+const PARTNER_STATUS_COLOR = { Onboarding: '#D97706', Active: '#059669', Inactive: '#888', Terminated: '#B5453A' };
+
+function blankPartner() {
+  return {
+    id: crypto.randomUUID(), number: '', name: '', type: 'Dealer', territory: '',
+    contactPerson: '', contactPhone: '', contactEmail: '',
+    address: '', taxId: '', commissions: [],
+    agreementDate: new Date().toISOString().slice(0, 10), agreementExpiry: '',
+    status: 'Active', termsTemplateId: '', agreementTerms: '', notes: '',
+  };
+}
+
+function ChannelPartnerList({ channelPartners, setChannelPartners, documents, termsLibrary, businessInfo, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  function nextCPNum() {
+    if (!channelPartners.length) return 'CP-001';
+    const nums = channelPartners.map(p => parseInt((p.number || '').replace(/\D/g, '')) || 0);
+    return 'CP-' + String(Math.max(...nums) + 1).padStart(3, '0');
+  }
+
+  function handleSave(form) {
+    if (!form.number) form.number = nextCPNum();
+    setChannelPartners(prev => form._isNew ? [...prev, { ...form, _isNew: undefined }] : prev.map(p => p.id === form.id ? form : p));
+    setEditing(null);
+  }
+
+  function handleDelete(id) {
+    if (!window.confirm('Delete this channel partner?')) return;
+    setChannelPartners(prev => prev.filter(p => p.id !== id));
+  }
+
+  const filtered = channelPartners.filter(p => {
+    const text = `${p.number} ${p.name} ${p.territory} ${p.contactPerson}`.toLowerCase();
+    return text.includes(search.toLowerCase()) && (filterStatus === 'All' || p.status === filterStatus);
+  });
+
+  if (editing) return <ChannelPartnerForm partner={editing === 'new' ? { ...blankPartner(), number: nextCPNum(), _isNew: true } : editing} termsLibrary={termsLibrary} businessInfo={businessInfo} documents={documents} onSave={handleSave} onBack={() => setEditing(null)} />;
+  if (viewing) return <PartnerAgreement partner={viewing} termsLibrary={termsLibrary} businessInfo={businessInfo} documents={documents} onBack={() => setViewing(null)} />;
+
+  return (
+    <div style={{ padding: 28 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Channel Partners</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>{channelPartners.length} partner{channelPartners.length !== 1 ? 's' : ''} — dealers, distributors, agents</p>
+        </div>
+        {canEdit && <button onClick={() => setEditing('new')} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>+ Add Partner</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {['All', ...PARTNER_STATUSES].map(s => (
+          <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: '5px 14px', borderRadius: 16, border: `1.5px solid ${s === 'All' ? '#1E2A4A' : (PARTNER_STATUS_COLOR[s] || '#1E2A4A')}`, background: filterStatus === s ? (s === 'All' ? '#1E2A4A' : PARTNER_STATUS_COLOR[s]) : '#fff', color: filterStatus === s ? '#fff' : '#555', fontWeight: 600, fontSize: 12 }}>
+            {s} ({s === 'All' ? channelPartners.length : channelPartners.filter(p => p.status === s).length})
+          </button>
+        ))}
+      </div>
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, number, territory…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 14px', fontSize: 13, width: 300, marginBottom: 18 }} />
+      {filtered.length === 0 && <div style={{ color: '#999', textAlign: 'center', padding: '60px 0', fontSize: 14 }}>No channel partners found.</div>}
+      {filtered.map(p => {
+        const linkedDocs = documents.filter(d => d.channelPartnerId === p.id);
+        return (
+          <div key={p.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 20px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{p.name}</span>
+                <span style={{ fontSize: 11, background: '#F0EDE6', color: '#555', borderRadius: 8, padding: '2px 8px', fontWeight: 600 }}>{p.type}</span>
+                <span style={{ background: PARTNER_STATUS_COLOR[p.status] || '#888', color: '#fff', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{p.status}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#888' }}>
+                {p.number} · {p.territory || '—'} · {p.contactPerson || '—'}
+                {linkedDocs.length > 0 && <span style={{ marginLeft: 10, color: '#2563EB' }}>{linkedDocs.length} linked doc{linkedDocs.length !== 1 ? 's' : ''}</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setViewing(p)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Agreement</button>
+              {canEdit && <button onClick={() => setEditing(p)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>}
+              {canEdit && <button onClick={() => handleDelete(p.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '6px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}><Trash2 size={13} /></button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChannelPartnerForm({ partner, termsLibrary, businessInfo, documents, onSave, onBack }) {
+  const [form, setForm] = useState(partner);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [commInput, setCommInput] = useState({ category: '', percentage: '' });
+  const templates = termsLibrary?.templates || [];
+
+  function addComm() {
+    if (!commInput.category) return;
+    set('commissions', [...(form.commissions || []), { ...commInput, id: crypto.randomUUID() }]);
+    setCommInput({ category: '', percentage: '' });
+  }
+
+  const inputStyle = { width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', marginTop: 4 };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: '#555' };
+  const sectionHead = { fontSize: 13, fontWeight: 700, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', paddingBottom: 8, marginBottom: 14, marginTop: 24 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 760 }}>
+      <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>← Back to Partners</button>
+      <h2 style={{ margin: '0 0 24px', fontSize: 20, fontWeight: 700 }}>{partner._isNew ? 'Add Channel Partner' : `Edit — ${form.name}`}</h2>
+
+      <div style={sectionHead}>Partner Details</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Partner No.</label><input value={form.number} onChange={e => set('number', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Type</label><select value={form.type} onChange={e => set('type', e.target.value)} style={inputStyle}>{PARTNER_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+      </div>
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Company / Partner Name</label><input value={form.name} onChange={e => set('name', e.target.value)} style={inputStyle} /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>Territory / Region</label><input value={form.territory} onChange={e => set('territory', e.target.value)} placeholder="e.g. South India" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Status</label><select value={form.status} onChange={e => set('status', e.target.value)} style={inputStyle}>{PARTNER_STATUSES.map(s => <option key={s}>{s}</option>)}</select></div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>GST / Tax ID</label><input value={form.taxId || ''} onChange={e => set('taxId', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Address</label><input value={form.address || ''} onChange={e => set('address', e.target.value)} style={inputStyle} /></div>
+      </div>
+
+      <div style={sectionHead}>Contact</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Contact Person</label><input value={form.contactPerson || ''} onChange={e => set('contactPerson', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Phone</label><input value={form.contactPhone || ''} onChange={e => set('contactPhone', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Email</label><input type="email" value={form.contactEmail || ''} onChange={e => set('contactEmail', e.target.value)} style={inputStyle} /></div>
+      </div>
+
+      <div style={sectionHead}>Commission Structure</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 36px', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
+        <div><label style={labelStyle}>Product / Category</label><input value={commInput.category} onChange={e => setCommInput(p => ({ ...p, category: e.target.value }))} placeholder="e.g. All Products" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Commission %</label><input type="number" value={commInput.percentage} onChange={e => setCommInput(p => ({ ...p, percentage: e.target.value }))} placeholder="10" style={inputStyle} /></div>
+        <button onClick={addComm} style={{ border: 'none', background: '#1E2A4A', color: '#fff', borderRadius: 6, padding: '9px 10px', cursor: 'pointer', fontSize: 16 }}>+</button>
+      </div>
+      {(form.commissions || []).map(cm => (
+        <div key={cm.id} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FAFAF8', border: '1px solid #EAE6DB', borderRadius: 6, padding: '8px 12px', marginBottom: 6, fontSize: 13 }}>
+          <span style={{ flex: 2 }}>{cm.category}</span>
+          <span style={{ width: 80 }}>{cm.percentage}%</span>
+          <button onClick={() => set('commissions', form.commissions.filter(c => c.id !== cm.id))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#B5453A' }}><Trash2 size={13} /></button>
+        </div>
+      ))}
+
+      <div style={sectionHead}>Agreement</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Agreement Date</label><input type="date" value={form.agreementDate || ''} onChange={e => set('agreementDate', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Expiry Date</label><input type="date" value={form.agreementExpiry || ''} onChange={e => set('agreementExpiry', e.target.value)} style={inputStyle} /></div>
+      </div>
+      {templates.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <label style={labelStyle}>Terms Template</label>
+          <select value={form.termsTemplateId || ''} onChange={e => { set('termsTemplateId', e.target.value); if (e.target.value) set('agreementTerms', ''); }} style={inputStyle}>
+            <option value="">— None / use custom text —</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+      {!form.termsTemplateId && <div style={{ marginTop: 14 }}><label style={labelStyle}>Custom Agreement Terms</label><textarea value={form.agreementTerms || ''} onChange={e => set('agreementTerms', e.target.value)} rows={5} placeholder="One term per line…" style={{ ...inputStyle, resize: 'vertical' }} /></div>}
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Internal Notes</label><textarea value={form.notes || ''} onChange={e => set('notes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></div>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
+        <button onClick={onBack} style={{ padding: '10px 24px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 14 }}>Cancel</button>
+        <button onClick={() => { if (!form.name) return alert('Partner name required'); onSave(form); }} style={{ padding: '10px 24px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700 }}>Save Partner</button>
+      </div>
+    </div>
+  );
+}
+
+function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, documents, onBack }) {
+  const clauses   = termsLibrary?.clauses   || [];
+  const templates = termsLibrary?.templates || [];
+  const linkedDocs = documents.filter(d => d.channelPartnerId === p.id);
+
+  function getTermsItems() {
+    if (p.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === p.termsTemplateId);
+      if (tmpl) {
+        const items = (tmpl.clauseIds || []).map(id => { const c = clauses.find(x => x.id === id); return c ? { title: c.title, text: c.text } : null; }).filter(Boolean);
+        return { items, extra: tmpl.customText };
+      }
+    }
+    if (p.agreementTerms) return { items: p.agreementTerms.split('\n').filter(Boolean).map(t => ({ title: null, text: t })), extra: '' };
+    return { items: [], extra: '' };
+  }
+  const terms = getTermsItems();
+
+  return (
+    <div>
+      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
+        {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
+      </div>
+      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
+          {bi.companyName && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.companyName}</div>}
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>Dealership / Channel Partner Agreement</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>{p.number} | {p.agreementDate}</div>
+        </div>
+        <p style={{ marginBottom: 24 }}>This Agreement is made between <strong>{bi.companyName || 'the Company'}</strong> and <strong>{p.name}</strong> ({p.type}), referred to as "the Partner".</p>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 8, textTransform: 'uppercase' }}>Partner Details</div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            {[['Type', p.type], ['Territory', p.territory || '—'], ['Contact', p.contactPerson || '—'], ['Phone', p.contactPhone || '—'], ['Email', p.contactEmail || '—'], ['GST / Tax ID', p.taxId || '—'], ['Agreement Date', p.agreementDate], ['Expiry', p.agreementExpiry || 'Open-ended']].map(([k, v]) => (
+              <tr key={k} style={{ borderBottom: '1px solid #EAE6DB' }}>
+                <td style={{ padding: '6px 12px', fontWeight: 600, width: '35%', color: '#555' }}>{k}</td>
+                <td style={{ padding: '6px 12px' }}>{v}</td>
+              </tr>
+            ))}
+          </table>
+        </div>
+        {(p.commissions || []).length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 8, textTransform: 'uppercase' }}>Commission Structure</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '7px 12px', textAlign: 'left' }}>Product / Category</th><th style={{ padding: '7px 12px', textAlign: 'right' }}>Commission %</th></tr></thead>
+              <tbody>{p.commissions.map((cm, i) => <tr key={cm.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}><td style={{ padding: '7px 12px' }}>{cm.category}</td><td style={{ padding: '7px 12px', textAlign: 'right' }}>{cm.percentage}%</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {terms.items.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 12, textTransform: 'uppercase' }}>Terms & Conditions</div>
+            {terms.items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                <div style={{ marginLeft: item.title ? 16 : 0 }}>{!item.title && `${i + 1}. `}{item.text}</div>
+              </div>
+            ))}
+            {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
+          </div>
+        )}
+        <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
+          {['For ' + (bi.companyName || 'the Company'), 'For ' + p.name].map((label, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{label}</div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8, color: '#888', fontSize: 12 }}>Authorised Signatory | Date: ___________</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Root App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [view,             setView]           = useState('dashboard');
+  const [activeDoc,        setActiveDoc]       = useState(null);
+  const [user,             setUser]            = useState(null);
+  const [ownerUid,         setOwnerUid]        = useState(null);
+  const [authReady,        setAuthReady]       = useState(false);
+  const [userRole,         setUserRole]        = useState('admin');
+  const [syncStatus,       setSyncStatus]      = useState('synced');
+  const [editingCustomer,  setEditingCustomer] = useState(null);
+  const [editingVendor,    setEditingVendor]   = useState(null);
+  const [editingItem,      setEditingItem]     = useState(null);
+  const [docSearch,        setDocSearch]       = useState('');
+
+  // ── Data state ──────────────────────────────────────────────────────────────
+  const [businessInfo,     _setBi]     = useState({});
+  const [documents,        _setDocs]   = useState([]);
+  const [customers,        _setCusts]  = useState([]);
+  const [vendors,          _setVends]  = useState([]);
+  const [items,            _setItems]  = useState([]);
+  const [employees,        _setEmps]   = useState([]);
+  const [payrollRuns,      _setPR]     = useState([]);
+  const [pettyCash,        _setPC]     = useState({ openingBalance: 0, entries: [] });
+  const [vouchers,         _setVouch]  = useState([]);
+  const [grns,             _setGrns]   = useState([]);
+  const [serviceOrders,    _setSO]     = useState([]);
+  const [productionOrders, _setPO]     = useState([]);
+  const [rawMaterials,     _setRM]     = useState([]);
+  const [boms,             _setBoms]   = useState([]);
+  const [stockLedger,      _setSL]     = useState([]);
+  const [parts,            _setParts]  = useState([]);
+  const [engDocs,          _setEngD]   = useState([]);
+  const [enquiries,        _setEnq]    = useState([]);
+  const [contracts,        _setCon]    = useState([]);
+  const [channelPartners,  _setCP]     = useState([]);
+  const [termsLibrary,     _setTL]     = useState({ clauses: [], templates: [] });
+
+  // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const unsub = watchAuth(async (u) => {
-      setUser(u);
-      if (!u) {
-        setLoaded(false);
-        setMembershipChecked(false);
-        setOwnerUid(null);
-        setUserRole('admin');
-        return;
-      }
-      try {
-        const membership = await getMembership(u.uid);
-        if (membership) {
-          setUserRole(membership.role);
-          setOwnerUid(membership.ownerUid);
-        } else {
+    return watchAuth(async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        setAuthReady(true);
+        if (!firebaseUser.emailVerified) return;
+        try {
+          const membership = await getMembership(firebaseUser.uid);
+          if (membership) {
+            setOwnerUid(membership.ownerUid);
+            setUserRole(membership.role);
+          } else {
+            setOwnerUid(firebaseUser.uid);
+            setUserRole('admin');
+          }
+        } catch {
+          setOwnerUid(firebaseUser.uid);
           setUserRole('admin');
-          setOwnerUid(u.uid);
         }
-      } catch {
-        setUserRole('admin');
-        setOwnerUid(u.uid);
+      } else {
+        setUser(null);
+        setOwnerUid(null);
+        setAuthReady(true);
       }
-      setMembershipChecked(true);
     });
-    return () => unsub();
   }, []);
 
-  // ── Load + subscribe ─────────────────────────────────────────────────────
+  // ── Firestore subscription ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!ownerUid || !membershipChecked) return;
-    setLoaded(false);
-    setLoadFailed(false);
-    setSyncStatus('syncing');
-
-    function applyData(data) {
-      if (!data) return;
-      if (data.businessInfo)     setBusinessInfo((b) => ({ ...b, ...data.businessInfo }));
-      if (data.customers)        setCustomers(data.customers);
-      if (data.vendors)          setVendors(data.vendors);
-      if (data.items)            setItems(data.items);
-      if (data.documents)        setDocuments(data.documents);
-      if (data.counters)         setCounters(data.counters);
-      if (data.boms)             setBoms(data.boms);
-      if (data.rawMaterials)     setRawMaterials(data.rawMaterials);
-      if (data.productionOrders) setProductionOrders(data.productionOrders);
-      if (data.parts)            setParts(data.parts);
-      if (data.engDocs)          setEngDocs(data.engDocs);
-      if (data.pettyCash)        setPettyCash(data.pettyCash);
-      if (data.vouchers)         setVouchers(data.vouchers);
-      if (data.stockLedger)      setStockLedger(data.stockLedger);
-      if (data.grns)             setGrns(data.grns);
-      if (data.serviceOrders)    setServiceOrders(data.serviceOrders);
-      if (data.employees)        setEmployees(data.employees);
-      if (data.payrollRuns)      setPayrollRuns(data.payrollRuns);
-      if (data.enquiries)        setEnquiries(data.enquiries);
-    }
-
-    (async () => {
-      try {
-        const data = await loadCompanyData(ownerUid);
-        applyData(data);
-        setSyncStatus('synced');
-        setLoadFailed(false);
-        setLoaded(true);
-      } catch (e) {
-        console.error('Firestore load failed:', e);
-        const isOffline = e?.code === 'unavailable' || (e?.message || '').toLowerCase().includes('offline');
-        if (isOffline) {
-          // Network issue — auto-retry every 4 seconds
-          setTimeout(() => setRetryCount(c => c + 1), 4000);
-        } else {
-          setSyncStatus('error');
-          setLoadFailed(true);
-        }
-      }
-    })();
-
+    if (!ownerUid) return;
     const unsub = subscribeCompanyData(ownerUid, (data) => {
-      applyData(data);
       setSyncStatus('synced');
-      setLoaded(true);
+      _setBi(data.businessInfo || {});
+      _setDocs(data.documents || []);
+      _setCusts(data.customers || []);
+      _setVends(data.vendors || []);
+      _setItems(data.items || []);
+      _setEmps(data.employees || []);
+      _setPR(data.payrollRuns || []);
+      _setPC(data.pettyCash || { openingBalance: 0, entries: [] });
+      _setVouch(data.vouchers || []);
+      _setGrns(data.grns || []);
+      _setSO(data.serviceOrders || []);
+      _setPO(data.productionOrders || []);
+      _setRM(data.rawMaterials || []);
+      _setBoms(data.boms || []);
+      _setSL(data.stockLedger || []);
+      _setParts(data.parts || []);
+      _setEngD(data.engDocs || []);
+      _setEnq(data.enquiries || []);
+      _setCon(data.contracts || []);
+      _setCP(data.channelPartners || []);
+      _setTL(data.termsLibrary || { clauses: [], templates: [] });
     });
+    return unsub;
+  }, [ownerUid]);
 
-    return () => unsub();
-  }, [ownerUid, membershipChecked, retryCount]);
+  // ── Persist helper ───────────────────────────────────────────────────────────
+  function persist(patch) {
+    if (!ownerUid) return;
+    setSyncStatus('syncing');
+    saveCompanyData(ownerUid, patch)
+      .then(() => setSyncStatus('synced'))
+      .catch(() => setSyncStatus('error'));
+  }
 
-  // ── Persist (debounced) ──────────────────────────────────────────────────
-  const allData = { businessInfo, customers, vendors, items, documents, counters, boms, rawMaterials, productionOrders, parts, engDocs, pettyCash, vouchers, stockLedger, grns, serviceOrders, employees, payrollRuns, enquiries };
-
-  useEffect(() => {
-    if (!loaded || !ownerUid || loadFailed) return;
-    const t = setTimeout(() => {
-      setSyncStatus('syncing');
-      saveCompanyData(ownerUid, allData)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [businessInfo, customers, vendors, items, documents, counters, boms, rawMaterials, productionOrders, parts, engDocs, pettyCash, vouchers, stockLedger, grns, serviceOrders, employees, payrollRuns, enquiries, loaded, ownerUid]);
-
-  useEffect(() => {
-    // Use sendBeacon so the save fires even as the page unloads.
-    // Firestore doesn't support sendBeacon, so we keep a ref to the latest allData
-    // and do a synchronous-style save in beforeunload.
-    const flush = (e) => {
-      if (!loaded || !ownerUid) return;
-      saveCompanyData(ownerUid, allData).catch(() => {});
+  // ── Wrapped setters ──────────────────────────────────────────────────────────
+  function mkSet(rawSet, key) {
+    return (v) => {
+      if (typeof v === 'function') {
+        rawSet((prev) => {
+          const next = v(prev);
+          persist({ [key]: next });
+          return next;
+        });
+      } else {
+        rawSet(v);
+        persist({ [key]: v });
+      }
     };
-    window.addEventListener('beforeunload', flush);
-    return () => window.removeEventListener('beforeunload', flush);
-  }, [businessInfo, customers, vendors, items, documents, counters, boms, rawMaterials, productionOrders, parts, engDocs, pettyCash, vouchers, stockLedger, grns, serviceOrders, employees, payrollRuns, enquiries, loaded, ownerUid]);
-
-  // ── Derived state ────────────────────────────────────────────────────────
-  const filteredDocs = useMemo(() => {
-    return documents.filter((d) => {
-      if (!DOC_TYPES[d.type]) return false;
-      const partyList = DOC_TYPES[d.type].party === 'vendor' ? vendors : customers;
-      const party = partyList.find((c) => c.id === d.customerId);
-      const text = `${d.number} ${party ? party.name : ''} ${DOC_TYPES[d.type].label}`.toLowerCase();
-      return text.includes(search.toLowerCase());
-    });
-  }, [documents, customers, vendors, search]);
-
-  const stats = useMemo(() => {
-    const invoices = documents.filter((d) => d.type === 'invoice');
-    const totalRevenue = invoices.reduce((sum, d) => sum + computeTotals(d, businessInfo.state, businessInfo.country).grandTotal, 0);
-    const outstanding = invoices.filter((d) => d.status !== 'paid').reduce((sum, d) => sum + computeTotals(d, businessInfo.state, businessInfo.country).grandTotal, 0);
-    const purchaseBills = documents.filter((d) => d.type === 'purchasebill');
-    const totalPurchases = purchaseBills.reduce((sum, d) => sum + computeTotals(d, businessInfo.state, businessInfo.country).grandTotal, 0);
-    const payable = purchaseBills.filter((d) => d.status !== 'paid').reduce((sum, d) => sum + computeTotals(d, businessInfo.state, businessInfo.country).grandTotal, 0);
-    const counts = {};
-    Object.keys(DOC_TYPES).forEach((t) => (counts[t] = documents.filter((d) => d.type === t).length));
-    const vList = Array.isArray(vouchers) ? vouchers : [];
-    const totalReceived = vList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
-    const totalPaid = vList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
-    const pcEntries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
-    const pcBalance = pcEntries.reduce((bal, e) => bal + (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0), parseFloat(pettyCash.openingBalance) || 0);
-    const poCount = Array.isArray(productionOrders) ? productionOrders.length : 0;
-    const poOpen = Array.isArray(productionOrders) ? productionOrders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').length : 0;
-    const rmCount = Array.isArray(rawMaterials) ? rawMaterials.length : 0;
-    const itemCount = Array.isArray(items) ? items.length : 0;
-    const stockMap = {};
-    (items || []).forEach(it => { stockMap[it.id] = parseFloat(it.openingStock) || 0; });
-    (Array.isArray(stockLedger) ? stockLedger : []).forEach(e => {
-      if (!stockMap[e.itemId]) stockMap[e.itemId] = 0;
-      stockMap[e.itemId] += (e.type === 'in' ? 1 : -1) * (parseFloat(e.qty) || 0);
-    });
-    const lowStockCount = (items || []).filter(it => it.minStock && stockMap[it.id] !== undefined && stockMap[it.id] <= parseFloat(it.minStock)).length;
-    return { totalRevenue, outstanding, totalPurchases, payable, counts, totalDocs: documents.length, totalReceived, totalPaid, pcBalance, poCount, poOpen, rmCount, itemCount, lowStockCount };
-  }, [documents, vouchers, pettyCash, productionOrders, rawMaterials, items, stockLedger, businessInfo.state, businessInfo.country]);
-
-  // ── Actions ──────────────────────────────────────────────────────────────
-  async function handleLogout() {
-    await logOut();
-    setCustomers([]); setVendors([]); setItems([]); setDocuments([]); setCounters({});
-    setBoms([]); setRawMaterials([]); setProductionOrders([]); setParts([]); setEngDocs([]);
-    setStockLedger([]); setGrns([]); setPettyCash({ openingBalance: 0, entries: [] }); setVouchers([]);
-    setServiceOrders([]); setEmployees([]); setPayrollRuns([]); setEnquiries([]);
-    setUserRole('admin'); setOwnerUid(null); setMembershipChecked(false);
-    setView('dashboard');
-    setBusinessInfo({ name: 'Your business name', address: '123 Business Street, City, State - 600001', gstin: '33AAAAA0000A1Z5', state: 'Tamil Nadu', phone: '+91 00000 00000', email: 'you@business.com', website: '', logo: '', template: 'classic', companyType: 'trading', bankName: '', bankAccount: '', ifsc: '', upi: '', terms: 'Payment due within 30 days. Thank you for your business.', signatory: '', country: 'india' });
   }
 
-  function nextNumber(type) {
-    const prefix = DOC_TYPES[type].prefix;
-    const year = new Date().getFullYear();
-    const key = `${prefix}-${year}`;
-    const current = counters[key] || 0;
-    const next = current + 1;
-    return { display: `${prefix}-${year}-${String(next).padStart(4, '0')}`, key, next };
+  const setBusinessInfo     = mkSet(_setBi,    'businessInfo');
+  const setDocuments        = mkSet(_setDocs,  'documents');
+  const setCustomers        = mkSet(_setCusts, 'customers');
+  const setVendors          = mkSet(_setVends, 'vendors');
+  const setItems            = mkSet(_setItems, 'items');
+  const setEmployees        = mkSet(_setEmps,  'employees');
+  const setPayrollRuns      = mkSet(_setPR,    'payrollRuns');
+  const setPettyCash        = mkSet(_setPC,    'pettyCash');
+  const setVouchers         = mkSet(_setVouch, 'vouchers');
+  const setGrns             = mkSet(_setGrns,  'grns');
+  const setServiceOrders    = mkSet(_setSO,    'serviceOrders');
+  const setProductionOrders = mkSet(_setPO,    'productionOrders');
+  const setRawMaterials     = mkSet(_setRM,    'rawMaterials');
+  const setBoms             = mkSet(_setBoms,  'boms');
+  const setStockLedger      = mkSet(_setSL,    'stockLedger');
+  const setParts            = mkSet(_setParts, 'parts');
+  const setEngDocs          = mkSet(_setEngD,  'engDocs');
+  const setEnquiries        = mkSet(_setEnq,   'enquiries');
+  const setContracts        = mkSet(_setCon,   'contracts');
+  const setChannelPartners  = mkSet(_setCP,    'channelPartners');
+  const setTermsLibrary     = mkSet(_setTL,    'termsLibrary');
+
+  // ── Document number helpers ──────────────────────────────────────────────────
+  function getFY(dateStr) {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const fyStart = m >= 4 ? y : y - 1;
+    return `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
   }
 
+  function nextDocNumber(type, dateStr) {
+    const fy = getFY(dateStr);
+    const prefix = DOC_TYPES[type]?.prefix || type.toUpperCase();
+    const same = documents.filter((d) => d.type === type && getFY(d.date) === fy);
+    return `${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`;
+  }
+
+  // ── Doc helpers ──────────────────────────────────────────────────────────────
   function startNewDoc(type) {
-    const doc = blankDoc(type);
-    const { display } = nextNumber(type);
-    doc.number = display;
-    doc.placeOfSupply = businessInfo.state;
-    setActiveDoc(doc);
-    setView('editor');
-  }
-
-  function convertEnquiry(enq) {
-    const doc = blankDoc('quotation');
-    const { display } = nextNumber('quotation');
-    doc.number = display;
-    doc.customerId = enq.customerId || '';
-    doc.placeOfSupply = businessInfo.state;
-    if (!enq.customerId && enq.customerName) doc.customerSnapshot = { name: enq.customerName };
-    doc.notes = [enq.interest, enq.notes].filter(Boolean).join('\n');
-    doc.linkedEnquiry = { enqId: enq.id, enqNumber: enq.number };
-    setEnquiries(prev => prev.map(e => e.id === enq.id ? { ...e, status: 'Quoted' } : e));
-    setActiveDoc(doc);
-    setView('editor');
-  }
-
-  function convertDoc(sourceDoc, targetType) {
-    const doc = blankDoc(targetType);
-    const { display } = nextNumber(targetType);
-    doc.number = display;
-    doc.customerId = sourceDoc.customerId;
-    doc.customerSnapshot = sourceDoc.customerSnapshot;
-    doc.placeOfSupply = sourceDoc.placeOfSupply;
-    doc.notes = sourceDoc.notes;
-    doc.items = sourceDoc.items.map((it) => ({ ...it, id: crypto.randomUUID() }));
-    doc.linkedFrom = { docId: sourceDoc.id, docNumber: sourceDoc.number, docType: sourceDoc.type };
-    setActiveDoc(doc);
-    setView('editor');
+    const today = new Date().toISOString().slice(0, 10);
+    setActiveDoc({
+      ...blankDoc(type, businessInfo),
+      number: nextDocNumber(type, today),
+    });
+    setView('doceditor');
   }
 
   function openDoc(doc) {
-    setActiveDoc(JSON.parse(JSON.stringify(doc)));
-    setView('editor');
+    setActiveDoc(doc);
+    setView('doceditor');
   }
 
-  function saveDoc(status, rejectionNote = '') {
-    const now = Date.now();
-    const stamps = {};
-    if (status === 'submitted') stamps.submittedAt = now;
-    if (status === 'verified')  stamps.verifiedAt  = now;
-    if (status === 'approved')  stamps.approvedAt  = now;
-    if (status === 'rejected')  { stamps.rejectedAt = now; stamps.rejectionNote = rejectionNote; }
-    if (status === 'rejected' || status === 'draft') {
-      stamps.submittedAt = null; stamps.verifiedAt = null; stamps.approvedAt = null;
+  function convertDoc(srcDoc, newType) {
+    const today = new Date().toISOString().slice(0, 10);
+    setActiveDoc({
+      ...blankDoc(newType, businessInfo),
+      number: nextDocNumber(newType, today),
+      customerId: srcDoc.customerId,
+      customerSnapshot: srcDoc.customerSnapshot,
+      items: (srcDoc.items || []).map((it) => ({ ...it, id: crypto.randomUUID() })),
+      notes: srcDoc.notes || '',
+      terms: srcDoc.terms || '',
+      discount: srcDoc.discount || 0,
+      placeOfSupply: srcDoc.placeOfSupply || '',
+      linkedFrom: { id: srcDoc.id, docType: srcDoc.type, docNumber: srcDoc.number },
+    });
+    setView('doceditor');
+  }
+
+  function handleSaveDoc(status, rejectionNote) {
+    const saved = {
+      ...activeDoc,
+      status: status || activeDoc.status || 'draft',
+      ...(rejectionNote !== undefined ? { rejectionNote, rejectedAt: Date.now() } : {}),
+      ...(status === 'approved' ? { approvedAt: Date.now() } : {}),
+      ...(status === 'submitted' ? { submittedAt: Date.now() } : {}),
+    };
+    const isNew = !documents.find((d) => d.id === saved.id);
+    setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
+    // Auto-update stock ledger on first save of outgoing docs
+    if (isNew && ['invoice', 'delivery'].includes(saved.type)) {
+      const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
+        id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
+        qty: -(it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+      }));
+      if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
-    const doc = { ...activeDoc, status: status || activeDoc.status, ...stamps };
-    const exists = documents.find((d) => d.id === doc.id);
-    if (!exists) {
-      const { key, next } = nextNumber(doc.type);
-      setCounters((c) => ({ ...c, [key]: next }));
-      setDocuments((docs) => [doc, ...docs]);
-    } else {
-      setDocuments((docs) => docs.map((d) => (d.id === doc.id ? doc : d)));
+    if (isNew && saved.type === 'purchasebill') {
+      const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
+        id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
+        qty: (it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+      }));
+      if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
-    // Stock ledger auto-entries
-    const isNowApproved = status === 'approved';
-    const stockDocTypes = ['purchasebill', 'invoice', 'delivery'];
-    if (stockDocTypes.includes(doc.type)) {
-      setStockLedger(prev => {
-        const without = prev.filter(e => e.sourceId !== doc.id);
-        if (!isNowApproved) return without;
-        const direction = doc.type === 'purchasebill' ? 'in' : 'out';
-        const newEntries = doc.items
-          .filter(it => it.itemId && (parseFloat(it.qty) || 0) > 0)
-          .map(it => ({ id: crypto.randomUUID(), date: doc.date, itemId: it.itemId, itemName: it.name, type: direction, qty: parseFloat(it.qty) || 0, rate: parseFloat(it.rate) || 0, sourceType: doc.type, sourceId: doc.id, sourceNumber: doc.number, createdAt: Date.now() }));
-        return [...without, ...newEntries];
-      });
-    }
-    setView('documents');
     setActiveDoc(null);
+    setView('documents');
   }
 
-  function deleteDoc(id) { setDocuments((docs) => docs.filter((d) => d.id !== id)); }
-
-  function upsertCustomer(c) {
-    if (c.id) { setCustomers((cs) => cs.map((x) => (x.id === c.id ? c : x))); }
-    else { setCustomers((cs) => [...cs, { ...c, id: crypto.randomUUID() }]); }
-    setEditingCustomer(null);
+  function deleteDoc(id) {
+    if (!window.confirm('Delete this document?')) return;
+    setDocuments((prev) => prev.filter((d) => d.id !== id));
   }
 
-  function upsertVendor(v) {
-    if (v.id) { setVendors((vs) => vs.map((x) => (x.id === v.id ? v : x))); }
-    else { setVendors((vs) => [...vs, { ...v, id: crypto.randomUUID() }]); }
-    setEditingVendor(null);
+  async function handleLogout() { await logOut(); }
+
+  const companyType = (businessInfo && businessInfo.companyType) || 'trading';
+  const country     = (businessInfo && businessInfo.country)     || 'india';
+  const showTrade   = companyType === 'trading' || companyType === 'both' || companyType === 'manufacturing';
+  const showProduction = companyType === 'manufacturing' || companyType === 'both';
+  const showService    = companyType === 'service'       || companyType === 'both';
+
+  const stats = useMemo(() => {
+    const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.india;
+    const totalRevenue   = documents.filter(d => d.type === 'invoice').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = documents.filter(d => d.type === 'purchasebill').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const outstanding    = documents.filter(d => d.type === 'invoice' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const payable        = documents.filter(d => d.type === 'purchasebill' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid };
+  }, [documents, vouchers, businessInfo, country]);
+
+  // ── Auth gates ───────────────────────────────────────────────────────────────
+  if (!authReady) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
+  );
+  if (!user) return <AuthScreen />;
+  if (user && !user.emailVerified) return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
+
+  // ── Content router ───────────────────────────────────────────────────────────
+  function renderContent() {
+    if (view === 'doceditor' && activeDoc) {
+      return (
+        <DocEditor
+          doc={activeDoc}
+          setDoc={setActiveDoc}
+          customers={customers}
+          vendors={vendors}
+          items={items}
+          businessInfo={businessInfo}
+          userRole={userRole}
+          onSave={handleSaveDoc}
+          onCancel={() => { setActiveDoc(null); setView('documents'); }}
+          onAddCustomer={(c) => setEditingCustomer(c || { name: '' })}
+          onAddVendor={(v) => setEditingVendor(v || { name: '' })}
+          onConvert={convertDoc}
+          onOpenDoc={openDoc}
+          documents={documents}
+        />
+      );
+    }
+    switch (view) {
+      case 'dashboard':
+        return (
+          <Dashboard
+            stats={stats}
+            documents={documents}
+            customers={customers}
+            vendors={vendors}
+            businessInfo={businessInfo}
+            startNewDoc={startNewDoc}
+            openDoc={openDoc}
+            setView={setView}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
+            productionOrders={productionOrders}
+            rawMaterials={rawMaterials}
+            items={items}
+            companyType={companyType}
+          />
+        );
+      case 'documents':
+        return (
+          <DocumentsList
+            docs={documents}
+            customers={customers}
+            vendors={vendors}
+            search={docSearch}
+            setSearch={setDocSearch}
+            openDoc={openDoc}
+            deleteDoc={deleteDoc}
+            startNewDoc={startNewDoc}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'customers':
+        return (
+          <CustomersList
+            customers={customers}
+            setEditing={setEditingCustomer}
+            setCustomers={setCustomers}
+            documents={documents}
+          />
+        );
+      case 'vendors':
+        return (
+          <VendorsList
+            vendors={vendors}
+            setEditing={setEditingVendor}
+            setVendors={setVendors}
+            documents={documents}
+          />
+        );
+      case 'items':
+        return (
+          <ItemsList
+            items={items}
+            setEditing={setEditingItem}
+            setItems={setItems}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'staff':
+        return <StaffPage ownerUid={ownerUid} employees={employees} />;
+      case 'settings':
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} />;
+      case 'pettycash':
+        return (
+          <PettyCashList
+            pettyCash={pettyCash}
+            setPettyCash={setPettyCash}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'vouchers':
+        return (
+          <VoucherList
+            vouchers={vouchers}
+            setVouchers={setVouchers}
+            customers={customers}
+            vendors={vendors}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'grn':
+        return (
+          <GRNList
+            grns={grns}
+            setGrns={setGrns}
+            documents={documents}
+            vendors={vendors}
+            items={items}
+            setStockLedger={setStockLedger}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'stock':
+        return (
+          <StockView
+            items={items}
+            stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'stockledger':
+        return (
+          <StockLedgerView
+            items={items}
+            stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'bincard':
+        return <BinCard items={items} stockLedger={stockLedger} businessInfo={businessInfo} />;
+      case 'employees':
+        return (
+          <EmployeesView
+            employees={employees}
+            setEmployees={setEmployees}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'payroll':
+        return (
+          <PayrollView
+            employees={employees}
+            payrollRuns={payrollRuns}
+            setPayrollRuns={setPayrollRuns}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'serviceorders':
+        return (
+          <ServiceOrdersView
+            serviceOrders={serviceOrders}
+            setServiceOrders={setServiceOrders}
+            customers={customers}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'rawmaterials':
+        return (
+          <RawMaterialsList
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'bom':
+        return (
+          <BOMList
+            boms={boms}
+            setBoms={setBoms}
+            rawMaterials={rawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            parts={parts}
+          />
+        );
+      case 'productionorders':
+        return (
+          <ProductionOrdersList
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            boms={boms}
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            setStockLedger={setStockLedger}
+            items={items}
+          />
+        );
+      case 'qualitycheck':
+        return (
+          <QualityCheckList
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            userRole={userRole}
+            boms={boms}
+            parts={parts}
+          />
+        );
+      case 'partsmaster':
+        return (
+          <PartsMasterList
+            parts={parts}
+            setParts={setParts}
+            vendors={vendors}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'engdocs':
+        return (
+          <EngineeringDocsList
+            engDocs={engDocs}
+            setEngDocs={setEngDocs}
+            parts={parts}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'enquiries':
+        return (
+          <EnquiryList
+            enquiries={enquiries}
+            setEnquiries={setEnquiries}
+            customers={customers}
+            userRole={userRole}
+            onConvertToQuotation={(enq) => {
+              const cust = customers.find((c) => c.id === enq.customerId);
+              const today = new Date().toISOString().slice(0, 10);
+              setActiveDoc({
+                ...blankDoc('quotation', businessInfo),
+                number: nextDocNumber('quotation', today),
+                customerId: enq.customerId || '',
+                customerSnapshot: cust || null,
+                notes: enq.interest || '',
+                linkedFrom: { id: enq.id, docType: 'enquiry', docNumber: enq.number },
+              });
+              setView('doceditor');
+            }}
+          />
+        );
+      case 'contracts':
+        return (
+          <ContractList
+            contracts={contracts}
+            setContracts={setContracts}
+            customers={customers}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'channelpartners':
+        return (
+          <ChannelPartnerList
+            channelPartners={channelPartners}
+            setChannelPartners={setChannelPartners}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'termslibrary':
+        return (
+          <TermsLibraryView
+            termsLibrary={termsLibrary}
+            setTermsLibrary={setTermsLibrary}
+            userRole={userRole}
+          />
+        );
+      case 'gstr1':
+        return <GSTR1Report documents={documents} customers={customers} businessInfo={businessInfo} />;
+      case 'vatreport':
+        return <VATReport documents={documents} customers={customers} businessInfo={businessInfo} />;
+      case 'taxreport':
+        return <TaxReport documents={documents} customers={customers} businessInfo={businessInfo} />;
+      default:
+        return <div style={{ padding: 40, color: '#888780', fontSize: 14 }}>Section coming soon.</div>;
+    }
   }
 
-  function upsertItem(it) {
-    if (it.id) { setItems((is) => is.map((x) => (x.id === it.id ? it : x))); }
-    else { setItems((is) => [...is, { ...it, id: crypto.randomUUID() }]); }
-    setEditingItem(null);
-  }
-
-  // ── Auth guards ──────────────────────────────────────────────────────────
-  if (user === undefined || (user && !membershipChecked)) {
-    return <div style={{ ...styles.app, alignItems: 'center', justifyContent: 'center' }}><div className="serif" style={{ fontSize: 20, color: '#1E2A4A' }}>Loading…</div></div>;
-  }
-  if (user === null) return <AuthScreen />;
-  if (!user.emailVerified && userRole === 'admin') return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
-
-  if (!loaded) {
-    if (loadFailed) return (
-      <div style={{ ...styles.app, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-        <div className="serif" style={{ fontSize: 20, color: '#B5453A' }}>Could not connect to cloud</div>
-        <div style={{ color: '#888780', fontSize: 13, textAlign: 'center', maxWidth: 320 }}>Check your internet connection and try again.</div>
-        {loadError && <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#B5453A', background: '#FFF0EE', padding: '6px 12px', borderRadius: 6, maxWidth: 400, wordBreak: 'break-all' }}>{loadError}</div>}
-        <button style={styles.primaryBtn} onClick={() => setRetryCount(c => c + 1)}>Retry</button>
-      </div>
-    );
-    return (
-      <div style={{ ...styles.app, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
-        <div className="serif" style={{ fontSize: 20, color: '#1E2A4A' }}>Loading your workspace…</div>
-        <div style={{ color: '#888780', fontSize: 13 }}>{retryCount > 0 ? `Slow network — retrying… (attempt ${retryCount + 1})` : 'Syncing data from the cloud'}</div>
-      </div>
-    );
-  }
-
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={styles.app}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#FAF8F4' }}>
       <style>{`
-        * { box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
         .serif { font-family: 'Lora', Georgia, serif; }
         button { cursor: pointer; font-family: inherit; }
-        input, select, textarea { font-family: inherit; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-thumb { background: #d6d0c4; border-radius: 3px; }
+        input, textarea, select { font-family: inherit; }
         @media print {
-          @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          body * { visibility: hidden !important; }
+          .no-print { display: none !important; }
+          body > * { visibility: hidden !important; }
           .print-area, .print-area * { visibility: visible !important; }
-          body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
-          .print-area { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; }
-          .print-area table { page-break-inside: auto; }
-          .print-area tr { page-break-inside: avoid; }
+          .print-area {
+            position: absolute !important;
+            top: 0 !important; left: 0 !important;
+            right: auto !important; bottom: auto !important;
+            width: 100% !important; height: auto !important;
+            overflow: visible !important;
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            z-index: 9999 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .draft-watermark {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color: rgba(185, 28, 28, 0.13) !important;
+          }
         }
+        @page { size: A4; margin: 10mm 12mm; }
       `}</style>
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" />
 
       <Sidebar
-        view={view} setView={setView} setActiveDoc={setActiveDoc}
-        startNewDoc={startNewDoc} syncStatus={syncStatus} user={user}
-        onLogout={handleLogout} userRole={userRole}
-        companyType={businessInfo.companyType} country={businessInfo.country || 'india'}
+        view={view}
+        setView={setView}
+        setActiveDoc={setActiveDoc}
+        startNewDoc={startNewDoc}
+        syncStatus={syncStatus}
+        user={user}
+        onLogout={handleLogout}
+        userRole={userRole}
+        companyType={companyType}
+        country={country}
       />
 
-      <div style={styles.main}>
-        {view === 'dashboard' && <Dashboard stats={stats} documents={documents} customers={customers} vendors={vendors} businessInfo={businessInfo} startNewDoc={startNewDoc} openDoc={openDoc} setView={setView} vouchers={vouchers} pettyCash={pettyCash} productionOrders={productionOrders} rawMaterials={rawMaterials} items={items} companyType={businessInfo.companyType} />}
-        {view === 'documents' && <DocumentsList docs={filteredDocs} customers={customers} vendors={vendors} search={search} setSearch={setSearch} openDoc={openDoc} deleteDoc={deleteDoc} startNewDoc={startNewDoc} />}
-        {view === 'editor' && activeDoc && (
-          <DocEditor
-            doc={activeDoc} setDoc={setActiveDoc}
-            customers={customers} vendors={vendors} items={items}
-            businessInfo={businessInfo} userRole={userRole}
-            onSave={saveDoc}
-            onCancel={() => { setActiveDoc(null); setView('documents'); }}
-            onAddCustomer={() => setEditingCustomer({ name: '', gstin: '', address: '', state: businessInfo.state, phone: '', email: '' })}
-            onAddVendor={() => setEditingVendor({ name: '', gstin: '', address: '', state: businessInfo.state, phone: '', email: '' })}
-            onConvert={convertDoc}
-            documents={documents}
-            onOpenDoc={(docId) => { const d = documents.find(x => x.id === docId); if (d) setActiveDoc(JSON.parse(JSON.stringify(d))); }}
-          />
-        )}
-        {view === 'customers'       && <CustomersList customers={customers} setEditing={setEditingCustomer} setCustomers={setCustomers} documents={documents} />}
-        {view === 'vendors'         && <VendorsList vendors={vendors} setEditing={setEditingVendor} setVendors={setVendors} documents={documents} />}
-        {view === 'items'           && <ItemsList items={items} setEditing={setEditingItem} setItems={setItems} />}
-        {view === 'stock'           && <StockView items={items} stockLedger={stockLedger} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} />}
-        {view === 'stockledger'     && <StockLedgerView items={items} stockLedger={stockLedger} setStockLedger={setStockLedger} businessInfo={businessInfo} />}
-        {view === 'bincard'         && <BinCard items={items} stockLedger={stockLedger} businessInfo={businessInfo} />}
-        {view === 'employees'       && <EmployeesView employees={employees} setEmployees={setEmployees} userRole={userRole} businessInfo={businessInfo} />}
-        {view === 'payroll'         && <PayrollView employees={employees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} businessInfo={businessInfo} userRole={userRole} />}
-        {view === 'serviceorders'   && <ServiceOrdersView serviceOrders={serviceOrders} setServiceOrders={setServiceOrders} customers={customers} businessInfo={businessInfo} userRole={userRole} />}
-        {view === 'vatreport'       && <VATReport documents={documents} customers={customers} businessInfo={businessInfo} />}
-        {view === 'taxreport'       && <TaxReport documents={documents} customers={customers} businessInfo={businessInfo} />}
-        {view === 'gstr1'           && <GSTR1Report documents={documents} customers={customers} businessInfo={businessInfo} />}
-        {view === 'grn'             && <GRNList grns={grns} setGrns={setGrns} documents={documents} vendors={vendors} items={items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} />}
-        {view === 'enquiries'       && <EnquiryList enquiries={enquiries} setEnquiries={setEnquiries} customers={customers} userRole={userRole} onConvertToQuotation={convertEnquiry} />}
-        {view === 'pettycash'       && <PettyCashList pettyCash={pettyCash} setPettyCash={setPettyCash} businessInfo={businessInfo} userRole={userRole} />}
-        {view === 'vouchers'        && <VoucherList vouchers={vouchers} setVouchers={setVouchers} businessInfo={businessInfo} customers={customers} vendors={vendors} userRole={userRole} />}
-        {view === 'rawmaterials'    && <RawMaterialsList rawMaterials={rawMaterials} setRawMaterials={setRawMaterials} userRole={userRole} ownerUid={ownerUid} />}
-        {view === 'bom'             && <BOMList boms={boms} setBoms={setBoms} rawMaterials={rawMaterials} userRole={userRole} ownerUid={ownerUid} parts={parts} />}
-        {view === 'productionorders'&& <ProductionOrdersList productionOrders={productionOrders} setProductionOrders={setProductionOrders} boms={boms} rawMaterials={rawMaterials} setRawMaterials={setRawMaterials} userRole={userRole} ownerUid={ownerUid} setStockLedger={setStockLedger} items={items} />}
-        {view === 'qualitycheck'    && <QualityCheckList productionOrders={productionOrders} setProductionOrders={setProductionOrders} userRole={userRole} boms={boms} parts={parts} />}
-        {view === 'partsmaster'     && <PartsMasterList parts={parts} setParts={setParts} vendors={vendors} ownerUid={ownerUid} userRole={userRole} />}
-        {view === 'engdocs'         && <EngineeringDocsList engDocs={engDocs} setEngDocs={setEngDocs} parts={parts} ownerUid={ownerUid} userRole={userRole} />}
-        {view === 'settings'        && userRole === 'admin' && <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} />}
-        {view === 'staff'           && userRole === 'admin' && <StaffPage ownerUid={ownerUid} />}
-      </div>
+      <main style={styles.main}>
+        {renderContent()}
+      </main>
 
-      {editingCustomer && <CustomerModal customer={editingCustomer} onSave={(c) => { upsertCustomer(c); if (view === 'editor' && activeDoc) setActiveDoc((d) => ({ ...d, customerId: c.id || customers[customers.length - 1]?.id })); }} onClose={() => setEditingCustomer(null)} />}
-      {editingVendor   && <VendorModal vendor={editingVendor} onSave={(v) => { upsertVendor(v); if (view === 'editor' && activeDoc) setActiveDoc((d) => ({ ...d, customerId: v.id || vendors[vendors.length - 1]?.id })); }} onClose={() => setEditingVendor(null)} />}
-      {editingItem     && <ItemModal item={editingItem} onSave={upsertItem} onClose={() => setEditingItem(null)} />}
+      {editingCustomer && (
+        <CustomerModal
+          customer={editingCustomer}
+          businessInfo={businessInfo}
+          onSave={(c) => {
+            const saved = { ...c, id: c.id || crypto.randomUUID() };
+            const isNew = !c.id;
+            setCustomers((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            if (isNew && view === 'doceditor' && activeDoc) {
+              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
+            }
+            setEditingCustomer(null);
+          }}
+          onClose={() => setEditingCustomer(null)}
+        />
+      )}
+
+      {editingVendor && (
+        <VendorModal
+          vendor={editingVendor}
+          businessInfo={businessInfo}
+          onSave={(v) => {
+            const saved = { ...v, id: v.id || crypto.randomUUID() };
+            const isNew = !v.id;
+            setVendors((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            if (isNew && view === 'doceditor' && activeDoc) {
+              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
+            }
+            setEditingVendor(null);
+          }}
+          onClose={() => setEditingVendor(null)}
+        />
+      )}
+
+      {editingItem && (
+        <ItemModal
+          item={editingItem}
+          businessInfo={businessInfo}
+          onSave={(it) => {
+            const saved = { ...it, id: it.id || crypto.randomUUID() };
+            const isNew = !it.id;
+            setItems((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
+    </div>
+  );
+}
+ }
+          .draft-watermark {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color: rgba(185, 28, 28, 0.13) !important;
+          }
+        }
+        @page { margin: 12mm; }
+      `}</style>
+
+      <Sidebar
+        view={view}
+        setView={setView}
+        setActiveDoc={setActiveDoc}
+        startNewDoc={startNewDoc}
+        syncStatus={syncStatus}
+        user={user}
+        onLogout={handleLogout}
+        userRole={userRole}
+        companyType={companyType}
+        country={country}
+      />
+
+      <main style={styles.main}>
+        {renderContent()}
+      </main>
+
+      {/* Customer modal */}
+      {editingCustomer && (
+        <CustomerModal
+          customer={editingCustomer}
+          businessInfo={businessInfo}
+          onSave={(c) => {
+            const saved = { ...c, id: c.id || crypto.randomUUID() };
+            const isNew = !c.id;
+            setCustomers((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            if (isNew && view === 'doceditor' && activeDoc) {
+              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
+            }
+            setEditingCustomer(null);
+          }}
+          onClose={() => setEditingCustomer(null)}
+        />
+      )}
+
+      {/* Vendor modal */}
+      {editingVendor && (
+        <VendorModal
+          vendor={editingVendor}
+          businessInfo={businessInfo}
+          onSave={(v) => {
+            const saved = { ...v, id: v.id || crypto.randomUUID() };
+            const isNew = !v.id;
+            setVendors((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            if (isNew && view === 'doceditor' && activeDoc) {
+              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
+            }
+            setEditingVendor(null);
+          }}
+          onClose={() => setEditingVendor(null)}
+        />
+      )}
+
+      {/* Item modal */}
+      {editingItem && (
+        <ItemModal
+          item={editingItem}
+          businessInfo={businessInfo}
+          onSave={(it) => {
+            const saved = { ...it, id: it.id || crypto.randomUUID() };
+            const isNew = !it.id;
+            setItems((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
     </div>
   );
 }
