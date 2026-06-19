@@ -619,7 +619,7 @@ function VendorsList({ vendors, setEditing, setVendors, documents }) {
       <div style={{ ...styles.list, marginTop: 16 }}>
         {vendors.length === 0 && <div style={styles.emptyBox}>No vendors yet. Add suppliers to speed up purchase orders and bills.</div>}
         {vendors.map((v) => {
-          const count = documents.filter((d) => d.customerId === v.id && DOC_TYPES[d.type].party === 'vendor').length;
+          const count = documents.filter((d) => d.customerId === v.id && DOC_TYPES[d.type]?.party === 'vendor').length;
           return (
             <div key={v.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
@@ -8324,7 +8324,8 @@ export default function App() {
     const voucherList    = Array.isArray(vouchers) ? vouchers : [];
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
-    return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid };
+    const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
+    return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid, counts };
   }, [documents, vouchers, businessInfo, country]);
 
   // ── Auth gates ───────────────────────────────────────────────────────────────
