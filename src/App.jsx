@@ -8724,7 +8724,7 @@ export default function App() {
             const isNew = !c.id;
             setCustomers((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
             if (isNew && view === 'doceditor' && activeDoc) {
-              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: save              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
+              setActiveDoc((d) => ({ ...d, customerId: saved.id, customerSnapshot: saved }));
             }
             setEditingCustomer(null);
           }}
@@ -8750,7 +8750,7 @@ export default function App() {
       )}
 
       {editingItem && (
-            <ItemModal
+        <ItemModal
           item={editingItem}
           businessInfo={businessInfo}
           onSave={(it) => {
