@@ -1685,8 +1685,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
       {/* Sales */}
       <Section sectionKey="sales" label="Sales">
-        <NavBtn id="customers"  label="Customers"    icon={Users} />
-        <NavBtn id="enquiries"  label="Enquiries"    icon={FileSignature} />
+        <NavBtn id="customers"       label="Customers"         icon={Users} />
+        <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
+        <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
         <CreateBtn docKey="quotation" />
       </Section>
 
@@ -1759,7 +1760,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {/* Admin */}
       {userRole === 'admin' && (
         <Section sectionKey="admin" label="Admin">
-          <NavBtn id="staff" label="Staff" icon={Shield} />
+          <NavBtn id="staff"         label="Staff"          icon={Shield} />
+          <NavBtn id="contracts"     label="Contracts"      icon={FileSignature} />
+          <NavBtn id="termslibrary"  label="Terms Library"  icon={BookOpen} />
         </Section>
       )}
 
@@ -7227,6 +7230,887 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
   );
 }
 
+// ─── Terms Library ────────────────────────────────────────────────────────────
+const CLAUSE_CATEGORIES = ['Payment', 'Delivery', 'Warranty', 'Liability', 'Force Majeure', 'Confidentiality', 'Termination', 'Dispute Resolution', 'Other'];
+
+function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
+  const [tab, setTab] = useState('clauses'); // 'clauses' | 'templates'
+  const [clauseModal, setClauseModal] = useState(null); // null | clause obj
+  const [tmplModal, setTmplModal] = useState(null);     // null | template obj
+  const [filterCat, setFilterCat] = useState('All');
+  const [search, setSearch] = useState('');
+
+  const clauses   = termsLibrary.clauses   || [];
+  const templates = termsLibrary.templates || [];
+
+  function saveClauses(next)   { setTermsLibrary(prev => ({ ...prev, clauses: next })); }
+  function saveTemplates(next) { setTermsLibrary(prev => ({ ...prev, templates: next })); }
+
+  // ── Clause CRUD ──
+  function handleSaveClause(form) {
+    const saved = { ...form, id: form.id || crypto.randomUUID() };
+    saveClauses(prev => form.id ? prev.map(c => c.id === form.id ? saved : c) : [...prev, saved]);
+    setClauseModal(null);
+  }
+  function deleteClause(id) {
+    if (!window.confirm('Delete this clause?')) return;
+    saveClauses(prev => prev.filter(c => c.id !== id));
+  }
+
+  // ── Template CRUD ──
+  function handleSaveTemplate(form) {
+    const saved = { ...form, id: form.id || crypto.randomUUID() };
+    saveTemplates(prev => form.id ? prev.map(t => t.id === form.id ? saved : t) : [...prev, saved]);
+    setTmplModal(null);
+  }
+  function deleteTemplate(id) {
+    if (!window.confirm('Delete this template?')) return;
+    saveTemplates(prev => prev.filter(t => t.id !== id));
+  }
+
+  const filteredClauses = clauses.filter(c => {
+    const matchCat = filterCat === 'All' || c.category === filterCat;
+    const matchSearch = `${c.title} ${c.text}`.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  const canEdit = userRole === 'admin';
+
+  const cardStyle = { background: '#fff', borderRadius: 10, border: '1px solid #EAE6DB', padding: '14px 18px', marginBottom: 10 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 900 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Terms Library</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>Reusable clauses and full terms templates for contracts & documents</p>
+        </div>
+        {canEdit && (
+          <button
+            onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '' }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
+            style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>
+            + {tab === 'clauses' ? 'New Clause' : 'New Template'}
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #EAE6DB', marginBottom: 20 }}>
+        {[['clauses', `Clauses (${clauses.length})`], ['templates', `Templates (${templates.length})`]].map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{ padding: '10px 22px', border: 'none', background: 'none', fontWeight: 700, fontSize: 14, color: tab === key ? '#1E2A4A' : '#888', borderBottom: tab === key ? '2px solid #1E2A4A' : '2px solid transparent', marginBottom: -2, cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'clauses' && (
+        <>
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clauses…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '7px 12px', fontSize: 13, width: 220 }} />
+            {['All', ...CLAUSE_CATEGORIES].map(cat => (
+              <button key={cat} onClick={() => setFilterCat(cat)} style={{ padding: '5px 13px', borderRadius: 16, border: `1.5px solid ${filterCat === cat ? '#1E2A4A' : '#DDD8CE'}`, background: filterCat === cat ? '#1E2A4A' : '#fff', color: filterCat === cat ? '#fff' : '#555', fontSize: 12, fontWeight: 600 }}>
+                {cat}
+              </button>
+            ))}
+          </div>
+          {filteredClauses.length === 0 && <div style={{ color: '#999', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>No clauses yet. Add your first reusable clause above.</div>}
+          {filteredClauses.map(c => (
+            <div key={c.id} style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{c.title}</span>
+                    <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#666' }}>{c.category}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                </div>
+                {canEdit && (
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
+                    <button onClick={() => setClauseModal(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>
+                    <button onClick={() => deleteClause(c.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}>Delete</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {tab === 'templates' && (
+        <>
+          {templates.length === 0 && <div style={{ color: '#999', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>No templates yet. Create a full-terms template from your clause library.</div>}
+          {templates.map(t => {
+            const linked = (t.clauseIds || []).map(id => clauses.find(c => c.id === id)).filter(Boolean);
+            return (
+              <div key={t.id} style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 4 }}>{t.name}</div>
+                    {t.description && <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>{t.description}</div>}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {linked.map(c => (
+                        <span key={c.id} style={{ background: '#F0EDE6', borderRadius: 10, padding: '3px 10px', fontSize: 11, color: '#555' }}>{c.category}: {c.title}</span>
+                      ))}
+                      {t.customText && <span style={{ background: '#F0EDE6', borderRadius: 10, padding: '3px 10px', fontSize: 11, color: '#555' }}>+ Custom text</span>}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
+                      <button onClick={() => setTmplModal(t)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>
+                      <button onClick={() => deleteTemplate(t.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}>Delete</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Clause Modal */}
+      {clauseModal && (
+        <ClauseModal clause={clauseModal} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+      )}
+      {/* Template Modal */}
+      {tmplModal && (
+        <TemplateModal template={tmplModal} clauses={clauses} onSave={handleSaveTemplate} onClose={() => setTmplModal(null)} />
+      )}
+    </div>
+  );
+}
+
+function ClauseModal({ clause, onSave, onClose }) {
+  const [form, setForm] = useState({ title: '', category: 'Payment', text: '', ...clause });
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 540, maxHeight: '80vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{clause.id ? 'Edit Clause' : 'New Clause'}</h3>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Title</label>
+        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
+        <select value={form.category} onChange={e => set('category', e.target.value)} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }}>
+          {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Text</label>
+        <textarea value={form.text} onChange={e => set('text', e.target.value)} placeholder="Write the full clause text here…" rows={6} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
+          <button onClick={() => { if (!form.title || !form.text) return alert('Title and text are required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateModal({ template, clauses, onSave, onClose }) {
+  const [form, setForm] = useState({ name: '', description: '', clauseIds: [], customText: '', ...template });
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  function toggleClause(id) {
+    set('clauseIds', form.clauseIds.includes(id) ? form.clauseIds.filter(x => x !== id) : [...form.clauseIds, id]);
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 580, maxHeight: '85vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{template.id ? 'Edit Template' : 'New Template'}</h3>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Template Name</label>
+        <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Standard Supply Contract Terms" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Description (optional)</label>
+        <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Short description" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666', display: 'block', marginBottom: 8 }}>Select Clauses to include</label>
+        {clauses.length === 0 && <div style={{ color: '#999', fontSize: 12, marginBottom: 14 }}>No clauses yet — add clauses in the Clauses tab first.</div>}
+        <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+          {CLAUSE_CATEGORIES.map(cat => {
+            const catClauses = clauses.filter(c => c.category === cat);
+            if (!catClauses.length) return null;
+            return (
+              <div key={cat} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 4 }}>{cat.toUpperCase()}</div>
+                {catClauses.map(c => (
+                  <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6, cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" checked={form.clauseIds.includes(c.id)} onChange={() => toggleClause(c.id)} style={{ marginTop: 2 }} />
+                    <span><strong>{c.title}</strong> — <span style={{ color: '#888' }}>{c.text.slice(0, 80)}{c.text.length > 80 ? '…' : ''}</span></span>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Additional Custom Text (appended after clauses)</label>
+        <textarea value={form.customText} onChange={e => set('customText', e.target.value)} placeholder="Any additional terms not covered by individual clauses…" rows={4} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
+          <button onClick={() => { if (!form.name) return alert('Template name required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Template</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Contracts ────────────────────────────────────────────────────────────────
+const CONTRACT_STATUSES = ['Draft', 'Sent', 'Under Review', 'Signed', 'Active', 'Completed', 'Terminated'];
+const CONTRACT_STATUS_COLOR = { Draft: '#888', Sent: '#2563EB', 'Under Review': '#D97706', Signed: '#7C3AED', Active: '#059669', Completed: '#1E2A4A', Terminated: '#B5453A' };
+const SCOPE_SECTIONS = [
+  { key: 'supply',          label: 'Supply' },
+  { key: 'installation',    label: 'Installation' },
+  { key: 'testing',         label: 'Testing' },
+  { key: 'commissioning',   label: 'Commissioning' },
+];
+
+function blankContract() {
+  return {
+    id: crypto.randomUUID(),
+    number: '',
+    date: new Date().toISOString().slice(0, 10),
+    title: '',
+    customerId: '',
+    customerSnapshot: null,
+    contractValue: 0,
+    scope: { supply: { enabled: true, description: '', value: 0, timeline: '' }, installation: { enabled: false, description: '', value: 0, timeline: '' }, testing: { enabled: false, description: '', value: 0, timeline: '' }, commissioning: { enabled: false, description: '', value: 0, timeline: '' } },
+    paymentMilestones: [],
+    termsTemplateId: '',
+    customTerms: '',
+    status: 'Draft',
+    signatoryOurName: '', signatoryOurDesignation: '',
+    signatoryClientName: '', signatoryClientDesignation: '',
+    notes: '',
+  };
+}
+
+function ContractList({ contracts, setContracts, customers, termsLibrary, businessInfo, userRole }) {
+  const [editing, setEditing] = useState(null); // null | contract obj | 'new'
+  const [printing, setPrinting] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+
+  function nextConNum() {
+    if (!contracts.length) return 'CON-001';
+    const nums = contracts.map(c => parseInt((c.number || '').replace(/\D/g, '')) || 0);
+    return 'CON-' + String(Math.max(...nums) + 1).padStart(3, '0');
+  }
+
+  function handleSave(form) {
+    if (!form.number) form.number = nextConNum();
+    setContracts(prev => form._isNew ? [...prev, { ...form, _isNew: undefined }] : prev.map(c => c.id === form.id ? form : c));
+    setEditing(null);
+  }
+
+  function handleDelete(id) {
+    if (!window.confirm('Delete this contract?')) return;
+    setContracts(prev => prev.filter(c => c.id !== id));
+  }
+
+  const filtered = contracts.filter(c => {
+    const cust = customers.find(x => x.id === c.customerId);
+    const text = `${c.number} ${c.title} ${cust?.name || ''}`.toLowerCase();
+    return text.includes(search.toLowerCase()) && (filterStatus === 'All' || c.status === filterStatus);
+  });
+
+  const counts = {};
+  CONTRACT_STATUSES.forEach(s => { counts[s] = contracts.filter(c => c.status === s).length; });
+
+  const fmt = makeFmt(businessInfo);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  if (editing) return (
+    <ContractEditor
+      contract={editing === 'new' ? { ...blankContract(), number: nextConNum(), _isNew: true } : editing}
+      customers={customers}
+      termsLibrary={termsLibrary}
+      businessInfo={businessInfo}
+      userRole={userRole}
+      onSave={handleSave}
+      onBack={() => setEditing(null)}
+    />
+  );
+
+  if (printing) return (
+    <ContractPrint contract={printing} businessInfo={businessInfo} termsLibrary={termsLibrary} onBack={() => setPrinting(null)} />
+  );
+
+  return (
+    <div style={{ padding: 28 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Contracts</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>{contracts.length} contract{contracts.length !== 1 ? 's' : ''} — supply, installation, testing & commissioning</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => setEditing('new')} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>+ New Contract</button>
+        )}
+      </div>
+
+      {/* Status filter chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {['All', ...CONTRACT_STATUSES].map(s => (
+          <button key={s} onClick={() => setFilterStatus(s)}
+            style={{ padding: '5px 14px', borderRadius: 16, border: `1.5px solid ${s === 'All' ? '#1E2A4A' : (CONTRACT_STATUS_COLOR[s] || '#1E2A4A')}`, background: filterStatus === s ? (s === 'All' ? '#1E2A4A' : CONTRACT_STATUS_COLOR[s]) : '#fff', color: filterStatus === s ? '#fff' : '#555', fontWeight: 600, fontSize: 12 }}>
+            {s} ({s === 'All' ? contracts.length : counts[s] || 0})
+          </button>
+        ))}
+      </div>
+
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by number, title, customer…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 14px', fontSize: 13, width: 300, marginBottom: 18 }} />
+
+      {filtered.length === 0 && <div style={{ color: '#999', textAlign: 'center', padding: '60px 0', fontSize: 14 }}>No contracts found.</div>}
+
+      {filtered.map(c => {
+        const cust = customers.find(x => x.id === c.customerId);
+        const scopeLabels = SCOPE_SECTIONS.filter(s => c.scope?.[s.key]?.enabled).map(s => s.label).join(' · ');
+        return (
+          <div key={c.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 20px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{c.number}</span>
+                <span style={{ background: CONTRACT_STATUS_COLOR[c.status] || '#888', color: '#fff', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                {scopeLabels && <span style={{ fontSize: 11, color: '#888', background: '#F0EDE6', borderRadius: 8, padding: '2px 8px' }}>{scopeLabels}</span>}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 2 }}>{c.title}</div>
+              <div style={{ fontSize: 12, color: '#888' }}>{cust?.name || '—'} &nbsp;·&nbsp; {c.date} &nbsp;·&nbsp; {fmt(c.contractValue || 0)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setPrinting(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}><Printer size={13} style={{ marginRight: 4 }} />Print</button>
+              {canEdit && <button onClick={() => setEditing(c)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>}
+              {canEdit && <button onClick={() => handleDelete(c.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '6px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}><Trash2 size={13} /></button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ContractEditor({ contract, customers, termsLibrary, businessInfo, userRole, onSave, onBack }) {
+  const [form, setForm] = useState(contract);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setScope = (section, field, val) => setForm(p => ({ ...p, scope: { ...p.scope, [section]: { ...p.scope[section], [field]: val } } }));
+
+  const [milestoneInput, setMilestoneInput] = useState({ milestone: '', percentage: '', dueDate: '' });
+
+  const clauses   = termsLibrary.clauses   || [];
+  const templates = termsLibrary.templates || [];
+  const fmt = makeFmt(businessInfo);
+
+  // Build resolved terms text from template + clauses
+  function buildTermsPreview() {
+    if (form.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === form.termsTemplateId);
+      if (tmpl) {
+        const clauseTexts = (tmpl.clauseIds || []).map(id => {
+          const c = clauses.find(x => x.id === id);
+          return c ? `${c.title}\n${c.text}` : '';
+        }).filter(Boolean);
+        return [...clauseTexts, tmpl.customText].filter(Boolean).join('\n\n');
+      }
+    }
+    return form.customTerms || '';
+  }
+
+  function addMilestone() {
+    if (!milestoneInput.milestone) return;
+    set('paymentMilestones', [...(form.paymentMilestones || []), { ...milestoneInput, id: crypto.randomUUID() }]);
+    setMilestoneInput({ milestone: '', percentage: '', dueDate: '' });
+  }
+  function removeMilestone(id) { set('paymentMilestones', form.paymentMilestones.filter(m => m.id !== id)); }
+
+  const totalScopeValue = SCOPE_SECTIONS.filter(s => form.scope[s.key]?.enabled).reduce((sum, s) => sum + (parseFloat(form.scope[s.key]?.value) || 0), 0);
+
+  const inputStyle = { width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', font
+  const inputStyle = { width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', marginTop: 4 };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: '#555' };
+  const sectionHead = { fontSize: 13, fontWeight: 700, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', paddingBottom: 8, marginBottom: 14, marginTop: 24 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 780 }}>
+      <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>← Back to Contracts</button>
+      <h2 style={{ margin: '0 0 24px', fontSize: 20, fontWeight: 700 }}>{contract._isNew ? 'New Contract' : `Edit Contract — ${form.number}`}</h2>
+
+      <div style={sectionHead}>Contract Details</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Contract No.</label><input value={form.number} onChange={e => set('number', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Date</label><input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inputStyle} /></div>
+      </div>
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Contract Title</label><input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Supply & Installation of Solar Panels" style={inputStyle} /></div>
+      <div style={{ marginTop: 14 }}>
+        <label style={labelStyle}>Customer / Client</label>
+        <select value={form.customerId} onChange={e => { const c = customers.find(x => x.id === e.target.value); set('customerId', e.target.value); set('customerSnapshot', c || null); }} style={inputStyle}>
+          <option value="">— Select customer —</option>
+          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)} style={inputStyle}>
+            {CONTRACT_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div><label style={labelStyle}>Total Contract Value</label>
+          <input type="number" value={form.contractValue} onChange={e => set('contractValue', parseFloat(e.target.value) || 0)} style={inputStyle} />
+        </div>
+      </div>
+
+      <div style={sectionHead}>Scope of Work</div>
+      {SCOPE_SECTIONS.map(({ key, label }) => (
+        <div key={key} style={{ background: form.scope[key]?.enabled ? '#FAFAF8' : '#F7F6F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '12px 16px', marginBottom: 10 }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', marginBottom: form.scope[key]?.enabled ? 12 : 0 }}>
+            <input type="checkbox" checked={!!form.scope[key]?.enabled} onChange={e => setScope(key, 'enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</span>
+          </label>
+          {form.scope[key]?.enabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 160px', gap: 10 }}>
+              <div><label style={labelStyle}>Scope Description</label><input value={form.scope[key]?.description || ''} onChange={e => setScope(key, 'description', e.target.value)} placeholder={`Describe ${label.toLowerCase()} scope`} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Value</label><input type="number" value={form.scope[key]?.value || 0} onChange={e => setScope(key, 'value', parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Timeline</label><input value={form.scope[key]?.timeline || ''} onChange={e => setScope(key, 'timeline', e.target.value)} placeholder="e.g. 45 days" style={inputStyle} /></div>
+            </div>
+          )}
+        </div>
+      ))}
+      {totalScopeValue > 0 && <div style={{ textAlign: 'right', fontSize: 13, color: '#888', marginBottom: 4 }}>Total scope: <strong style={{ color: '#1E2A4A' }}>{makeFmt(businessInfo)(totalScopeValue)}</strong></div>}
+
+      <div style={sectionHead}>Payment Milestones</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 140px 36px', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
+        <div><label style={labelStyle}>Milestone</label><input value={milestoneInput.milestone} onChange={e => setMilestoneInput(p => ({ ...p, milestone: e.target.value }))} placeholder="e.g. On delivery" style={inputStyle} /></div>
+        <div><label style={labelStyle}>%</label><input type="number" value={milestoneInput.percentage} onChange={e => setMilestoneInput(p => ({ ...p, percentage: e.target.value }))} placeholder="30" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Due Date</label><input type="date" value={milestoneInput.dueDate} onChange={e => setMilestoneInput(p => ({ ...p, dueDate: e.target.value }))} style={inputStyle} /></div>
+        <button onClick={addMilestone} style={{ border: 'none', background: '#1E2A4A', color: '#fff', borderRadius: 6, padding: '9px 10px', cursor: 'pointer', fontSize: 16 }}>+</button>
+      </div>
+      {(form.paymentMilestones || []).map(m => (
+        <div key={m.id} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FAFAF8', border: '1px solid #EAE6DB', borderRadius: 6, padding: '8px 12px', marginBottom: 6, fontSize: 13 }}>
+          <span style={{ flex: 2 }}>{m.milestone}</span>
+          <span style={{ width: 60, color: '#888' }}>{m.percentage}%</span>
+          <span style={{ width: 120, color: '#888' }}>{m.dueDate || '—'}</span>
+          <button onClick={() => removeMilestone(m.id)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#B5453A' }}><Trash2 size={13} /></button>
+        </div>
+      ))}
+
+      <div style={sectionHead}>Terms & Conditions</div>
+      {templates.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Apply from Terms Library</label>
+          <select value={form.termsTemplateId || ''} onChange={e => { set('termsTemplateId', e.target.value); if (e.target.value) set('customTerms', ''); }} style={inputStyle}>
+            <option value="">— None / use custom text below —</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+      {!form.termsTemplateId && <div><label style={labelStyle}>Custom Terms</label><textarea value={form.customTerms || ''} onChange={e => set('customTerms', e.target.value)} rows={6} style={{ ...inputStyle, resize: 'vertical' }} /></div>}
+      {form.termsTemplateId && (
+        <div style={{ background: '#F7F6F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: 14, fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', lineHeight: 1.8, maxHeight: 200, overflowY: 'auto' }}>{buildTermsPreview()}</div>
+      )}
+
+      <div style={sectionHead}>Signatories</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#555', marginBottom: 8 }}>Our Signatory</div>
+          <label style={labelStyle}>Name</label><input value={form.signatoryOurName || ''} onChange={e => set('signatoryOurName', e.target.value)} style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 10, display: 'block' }}>Designation</label><input value={form.signatoryOurDesignation || ''} onChange={e => set('signatoryOurDesignation', e.target.value)} style={inputStyle} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#555', marginBottom: 8 }}>Client Signatory</div>
+          <label style={labelStyle}>Name</label><input value={form.signatoryClientName || ''} onChange={e => set('signatoryClientName', e.target.value)} style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 10, display: 'block' }}>Designation</label><input value={form.signatoryClientDesignation || ''} onChange={e => set('signatoryClientDesignation', e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ marginTop: 20 }}><label style={labelStyle}>Internal Notes</label><textarea value={form.notes || ''} onChange={e => set('notes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></div>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
+        <button onClick={onBack} style={{ padding: '10px 24px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 14 }}>Cancel</button>
+        <button onClick={() => { if (!form.title) return alert('Contract title required'); onSave(form); }} style={{ padding: '10px 24px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700 }}>Save Contract</button>
+      </div>
+    </div>
+  );
+}
+
+function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) {
+  const clauses   = termsLibrary?.clauses   || [];
+  const templates = termsLibrary?.templates || [];
+  const fmt = makeFmt(bi);
+
+  function getTermsText() {
+    if (c.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === c.termsTemplateId);
+      if (tmpl) {
+        const items = (tmpl.clauseIds || []).map(id => { const cl = clauses.find(x => x.id === id); return cl ? { title: cl.title, text: cl.text } : null; }).filter(Boolean);
+        return { items, extra: tmpl.customText };
+      }
+    }
+    if (c.customTerms) return { items: c.customTerms.split('\n').filter(Boolean).map(t => ({ title: null, text: t })), extra: '' };
+    return { items: [], extra: '' };
+  }
+
+  const terms = getTermsText();
+  const enabledScopes = SCOPE_SECTIONS.filter(s => c.scope?.[s.key]?.enabled);
+
+  return (
+    <div>
+      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12 }}>
+        <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print / PDF</button>
+      </div>
+      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
+          {bi.companyName && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.companyName}</div>}
+          {bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>CONTRACT AGREEMENT</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}</div>
+        </div>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: '#1E2A4A', textTransform: 'uppercase' }}>Parties</div>
+          <p>This Contract Agreement is entered into between <strong>{bi.companyName || 'the Company'}</strong> (the "Contractor") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "Client").</p>
+        </div>
+        <div style={{ background: '#F7F6F3', border: '1px solid #DDD8CE', borderRadius: 6, padding: '14px 20px', marginBottom: 28, fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>Subject: {c.title}</div>
+        {enabledScopes.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Scope of Work</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Section</th><th style={{ padding: '8px 12px', textAlign: 'left' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Value</th><th style={{ padding: '8px 12px', textAlign: 'center' }}>Timeline</th></tr></thead>
+              <tbody>
+                {enabledScopes.map(({ key, label }, i) => (
+                  <tr key={key} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
+                    <td style={{ padding: '8px 12px', fontWeight: 600 }}>{label}</td>
+                    <td style={{ padding: '8px 12px' }}>{c.scope[key]?.description || '—'}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.scope[key]?.value || 0)}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>{c.scope[key]?.timeline || '—'}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#F0EDE6', fontWeight: 700 }}>
+                  <td colSpan={2} style={{ padding: '8px 12px' }}>Total Contract Value</td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.contractValue || 0)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {(c.paymentMilestones || []).length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Payment Schedule</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Milestone</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>%</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Amount</th><th style={{ padding: '8px 12px', textAlign: 'center' }}>Due Date</th></tr></thead>
+              <tbody>
+                {c.paymentMilestones.map((m, i) => (
+                  <tr key={m.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
+                    <td style={{ padding: '8px 12px' }}>{m.milestone}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{m.percentage}%</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt((parseFloat(m.percentage) / 100) * (c.contractValue || 0))}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>{m.dueDate || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {terms.items.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
+            {terms.items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                <div style={{ marginLeft: item.title ? 16 : 0 }}>{item.title ? '' : `${i + 1}. `}{item.text}</div>
+              </div>
+            ))}
+            {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
+          </div>
+        )}
+        <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
+          {[{ label: 'For ' + (bi.companyName || 'the Contractor'), name: c.signatoryOurName, desig: c.signatoryOurDesignation }, { label: 'For ' + (c.customerSnapshot?.name || 'the Client'), name: c.signatoryClientName, desig: c.signatoryClientDesignation }].map((sig, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{sig.label}</div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>
+                <div style={{ fontWeight: 700 }}>{sig.name || 'Authorised Signatory'}</div>
+                {sig.desig && <div style={{ fontSize: 12, color: '#888' }}>{sig.desig}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Channel Partners ──────────────────────────────────────────────────────────
+const PARTNER_TYPES = ['Dealer', 'Distributor', 'Agent', 'Reseller', 'System Integrator'];
+const PARTNER_STATUSES = ['Onboarding', 'Active', 'Inactive', 'Terminated'];
+const PARTNER_STATUS_COLOR = { Onboarding: '#D97706', Active: '#059669', Inactive: '#888', Terminated: '#B5453A' };
+
+function blankPartner() {
+  return {
+    id: crypto.randomUUID(), number: '', name: '', type: 'Dealer', territory: '',
+    contactPerson: '', contactPhone: '', contactEmail: '',
+    address: '', taxId: '', commissions: [],
+    agreementDate: new Date().toISOString().slice(0, 10), agreementExpiry: '',
+    status: 'Active', termsTemplateId: '', agreementTerms: '', notes: '',
+  };
+}
+
+function ChannelPartnerList({ channelPartners, setChannelPartners, documents, termsLibrary, businessInfo, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  function nextCPNum() {
+    if (!channelPartners.length) return 'CP-001';
+    const nums = channelPartners.map(p => parseInt((p.number || '').replace(/\D/g, '')) || 0);
+    return 'CP-' + String(Math.max(...nums) + 1).padStart(3, '0');
+  }
+
+  function handleSave(form) {
+    if (!form.number) form.number = nextCPNum();
+    setChannelPartners(prev => form._isNew ? [...prev, { ...form, _isNew: undefined }] : prev.map(p => p.id === form.id ? form : p));
+    setEditing(null);
+  }
+
+  function handleDelete(id) {
+    if (!window.confirm('Delete this channel partner?')) return;
+    setChannelPartners(prev => prev.filter(p => p.id !== id));
+  }
+
+  const filtered = channelPartners.filter(p => {
+    const text = `${p.number} ${p.name} ${p.territory} ${p.contactPerson}`.toLowerCase();
+    return text.includes(search.toLowerCase()) && (filterStatus === 'All' || p.status === filterStatus);
+  });
+
+  if (editing) return <ChannelPartnerForm partner={editing === 'new' ? { ...blankPartner(), number: nextCPNum(), _isNew: true } : editing} termsLibrary={termsLibrary} businessInfo={businessInfo} documents={documents} onSave={handleSave} onBack={() => setEditing(null)} />;
+  if (viewing) return <PartnerAgreement partner={viewing} termsLibrary={termsLibrary} businessInfo={businessInfo} documents={documents} onBack={() => setViewing(null)} />;
+
+  return (
+    <div style={{ padding: 28 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Channel Partners</h2>
+          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 13 }}>{channelPartners.length} partner{channelPartners.length !== 1 ? 's' : ''} — dealers, distributors, agents</p>
+        </div>
+        {canEdit && <button onClick={() => setEditing('new')} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>+ Add Partner</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+        {['All', ...PARTNER_STATUSES].map(s => (
+          <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: '5px 14px', borderRadius: 16, border: `1.5px solid ${s === 'All' ? '#1E2A4A' : (PARTNER_STATUS_COLOR[s] || '#1E2A4A')}`, background: filterStatus === s ? (s === 'All' ? '#1E2A4A' : PARTNER_STATUS_COLOR[s]) : '#fff', color: filterStatus === s ? '#fff' : '#555', fontWeight: 600, fontSize: 12 }}>
+            {s} ({s === 'All' ? channelPartners.length : channelPartners.filter(p => p.status === s).length})
+          </button>
+        ))}
+      </div>
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, number, territory…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 14px', fontSize: 13, width: 300, marginBottom: 18 }} />
+      {filtered.length === 0 && <div style={{ color: '#999', textAlign: 'center', padding: '60px 0', fontSize: 14 }}>No channel partners found.</div>}
+      {filtered.map(p => {
+        const linkedDocs = documents.filter(d => d.channelPartnerId === p.id);
+        return (
+          <div key={p.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 20px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{p.name}</span>
+                <span style={{ fontSize: 11, background: '#F0EDE6', color: '#555', borderRadius: 8, padding: '2px 8px', fontWeight: 600 }}>{p.type}</span>
+                <span style={{ background: PARTNER_STATUS_COLOR[p.status] || '#888', color: '#fff', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>{p.status}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#888' }}>
+                {p.number} · {p.territory || '—'} · {p.contactPerson || '—'}
+                {linkedDocs.length > 0 && <span style={{ marginLeft: 10, color: '#2563EB' }}>{linkedDocs.length} linked doc{linkedDocs.length !== 1 ? 's' : ''}</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setViewing(p)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Agreement</button>
+              {canEdit && <button onClick={() => setEditing(p)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Edit</button>}
+              {canEdit && <button onClick={() => handleDelete(p.id)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '6px 10px', background: '#fff', fontSize: 12, color: '#B5453A', cursor: 'pointer' }}><Trash2 size={13} /></button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChannelPartnerForm({ partner, termsLibrary, businessInfo, documents, onSave, onBack }) {
+  const [form, setForm] = useState(partner);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [commInput, setCommInput] = useState({ category: '', percentage: '' });
+  const templates = termsLibrary?.templates || [];
+
+  function addComm() {
+    if (!commInput.category) return;
+    set('commissions', [...(form.commissions || []), { ...commInput, id: crypto.randomUUID() }]);
+    setCommInput({ category: '', percentage: '' });
+  }
+
+  const inputStyle = { width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', marginTop: 4 };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: '#555' };
+  const sectionHead = { fontSize: 13, fontWeight: 700, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', paddingBottom: 8, marginBottom: 14, marginTop: 24 };
+
+  return (
+    <div style={{ padding: 28, maxWidth: 760 }}>
+      <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>← Back to Partners</button>
+      <h2 style={{ margin: '0 0 24px', fontSize: 20, fontWeight: 700 }}>{partner._isNew ? 'Add Channel Partner' : `Edit — ${form.name}`}</h2>
+
+      <div style={sectionHead}>Partner Details</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Partner No.</label><input value={form.number} onChange={e => set('number', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Type</label><select value={form.type} onChange={e => set('type', e.target.value)} style={inputStyle}>{PARTNER_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+      </div>
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Company / Partner Name</label><input value={form.name} onChange={e => set('name', e.target.value)} style={inputStyle} /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>Territory / Region</label><input value={form.territory} onChange={e => set('territory', e.target.value)} placeholder="e.g. South India" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Status</label><select value={form.status} onChange={e => set('status', e.target.value)} style={inputStyle}>{PARTNER_STATUSES.map(s => <option key={s}>{s}</option>)}</select></div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
+        <div><label style={labelStyle}>GST / Tax ID</label><input value={form.taxId || ''} onChange={e => set('taxId', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Address</label><input value={form.address || ''} onChange={e => set('address', e.target.value)} style={inputStyle} /></div>
+      </div>
+
+      <div style={sectionHead}>Contact</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Contact Person</label><input value={form.contactPerson || ''} onChange={e => set('contactPerson', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Phone</label><input value={form.contactPhone || ''} onChange={e => set('contactPhone', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Email</label><input type="email" value={form.contactEmail || ''} onChange={e => set('contactEmail', e.target.value)} style={inputStyle} /></div>
+      </div>
+
+      <div style={sectionHead}>Commission Structure</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 36px', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
+        <div><label style={labelStyle}>Product / Category</label><input value={commInput.category} onChange={e => setCommInput(p => ({ ...p, category: e.target.value }))} placeholder="e.g. All Products" style={inputStyle} /></div>
+        <div><label style={labelStyle}>Commission %</label><input type="number" value={commInput.percentage} onChange={e => setCommInput(p => ({ ...p, percentage: e.target.value }))} placeholder="10" style={inputStyle} /></div>
+        <button onClick={addComm} style={{ border: 'none', background: '#1E2A4A', color: '#fff', borderRadius: 6, padding: '9px 10px', cursor: 'pointer', fontSize: 16 }}>+</button>
+      </div>
+      {(form.commissions || []).map(cm => (
+        <div key={cm.id} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FAFAF8', border: '1px solid #EAE6DB', borderRadius: 6, padding: '8px 12px', marginBottom: 6, fontSize: 13 }}>
+          <span style={{ flex: 2 }}>{cm.category}</span>
+          <span style={{ width: 80 }}>{cm.percentage}%</span>
+          <button onClick={() => set('commissions', form.commissions.filter(c => c.id !== cm.id))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#B5453A' }}><Trash2 size={13} /></button>
+        </div>
+      ))}
+
+      <div style={sectionHead}>Agreement</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div><label style={labelStyle}>Agreement Date</label><input type="date" value={form.agreementDate || ''} onChange={e => set('agreementDate', e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Expiry Date</label><input type="date" value={form.agreementExpiry || ''} onChange={e => set('agreementExpiry', e.target.value)} style={inputStyle} /></div>
+      </div>
+      {templates.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <label style={labelStyle}>Terms Template</label>
+          <select value={form.termsTemplateId || ''} onChange={e => { set('termsTemplateId', e.target.value); if (e.target.value) set('agreementTerms', ''); }} style={inputStyle}>
+            <option value="">— None / use custom text —</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+      {!form.termsTemplateId && <div style={{ marginTop: 14 }}><label style={labelStyle}>Custom Agreement Terms</label><textarea value={form.agreementTerms || ''} onChange={e => set('agreementTerms', e.target.value)} rows={5} placeholder="One term per line…" style={{ ...inputStyle, resize: 'vertical' }} /></div>}
+      <div style={{ marginTop: 14 }}><label style={labelStyle}>Internal Notes</label><textarea value={form.notes || ''} onChange={e => set('notes', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></div>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 28 }}>
+        <button onClick={onBack} style={{ padding: '10px 24px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 14 }}>Cancel</button>
+        <button onClick={() => { if (!form.name) return alert('Partner name required'); onSave(form); }} style={{ padding: '10px 24px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700 }}>Save Partner</button>
+      </div>
+    </div>
+  );
+}
+
+function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, documents, onBack }) {
+  const clauses   = termsLibrary?.clauses   || [];
+  const templates = termsLibrary?.templates || [];
+  const linkedDocs = documents.filter(d => d.channelPartnerId === p.id);
+
+  function getTermsItems() {
+    if (p.termsTemplateId) {
+      const tmpl = templates.find(t => t.id === p.termsTemplateId);
+      if (tmpl) {
+        const items = (tmpl.clauseIds || []).map(id => { const c = clauses.find(x => x.id === id); return c ? { title: c.title, text: c.text } : null; }).filter(Boolean);
+        return { items, extra: tmpl.customText };
+      }
+    }
+    if (p.agreementTerms) return { items: p.agreementTerms.split('\n').filter(Boolean).map(t => ({ title: null, text: t })), extra: '' };
+    return { items: [], extra: '' };
+  }
+  const terms = getTermsItems();
+
+  return (
+    <div>
+      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
+        {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
+      </div>
+      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
+          {bi.companyName && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.companyName}</div>}
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>Dealership / Channel Partner Agreement</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>{p.number} | {p.agreementDate}</div>
+        </div>
+        <p style={{ marginBottom: 24 }}>This Agreement is made between <strong>{bi.companyName || 'the Company'}</strong> and <strong>{p.name}</strong> ({p.type}), referred to as "the Partner".</p>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 8, textTransform: 'uppercase' }}>Partner Details</div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            {[['Type', p.type], ['Territory', p.territory || '—'], ['Contact', p.contactPerson || '—'], ['Phone', p.contactPhone || '—'], ['Email', p.contactEmail || '—'], ['GST / Tax ID', p.taxId || '—'], ['Agreement Date', p.agreementDate], ['Expiry', p.agreementExpiry || 'Open-ended']].map(([k, v]) => (
+              <tr key={k} style={{ borderBottom: '1px solid #EAE6DB' }}>
+                <td style={{ padding: '6px 12px', fontWeight: 600, width: '35%', color: '#555' }}>{k}</td>
+                <td style={{ padding: '6px 12px' }}>{v}</td>
+              </tr>
+            ))}
+          </table>
+        </div>
+        {(p.commissions || []).length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 8, textTransform: 'uppercase' }}>Commission Structure</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '7px 12px', textAlign: 'left' }}>Product / Category</th><th style={{ padding: '7px 12px', textAlign: 'right' }}>Commission %</th></tr></thead>
+              <tbody>{p.commissions.map((cm, i) => <tr key={cm.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}><td style={{ padding: '7px 12px' }}>{cm.category}</td><td style={{ padding: '7px 12px', textAlign: 'right' }}>{cm.percentage}%</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {terms.items.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 12, textTransform: 'uppercase' }}>Terms & Conditions</div>
+            {terms.items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                <div style={{ marginLeft: item.title ? 16 : 0 }}>{!item.title && `${i + 1}. `}{item.text}</div>
+              </div>
+            ))}
+            {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
+          </div>
+        )}
+        <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
+          {['For ' + (bi.companyName || 'the Company'), 'For ' + p.name].map((label, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{label}</div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8, color: '#888', fontSize: 12 }}>Authorised Signatory | Date: ___________</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ing: '7px 12px' }}>{cm.category}</td><td style={{ padding: '7px 12px', textAlign: 'right' }}>{cm.percentage}%</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+
+        {terms.items.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 12, textTransform: 'uppercase' }}>Terms & Conditions</div>
+            {terms.items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                <div style={{ marginLeft: item.title ? 16 : 0 }}>{i + 1}. {item.text}</div>
+              </div>
+            ))}
+            {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
+          </div>
+        )}
+
+        <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
+          {[{ label: 'For ' + (bi.companyName || 'the Company') }, { label: 'For ' + p.name }].map((sig, i) => (
+            <div key={i}>
+              <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{sig.label}</div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8, color: '#888', fontSize: 12 }}>Authorised Signatory &nbsp;|&nbsp; Date: ___________</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -7265,6 +8149,9 @@ export default function App() {
   const [parts,             _setParts] = useState([]);
   const [engDocs,           _setEngD]  = useState([]);
   const [enquiries,         _setEnq]   = useState([]);
+  const [contracts,         _setCon]   = useState([]);
+  const [channelPartners,   _setCP]    = useState([]);
+  const [termsLibrary,      _setTL]    = useState({ clauses: [], templates: [] });
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -7319,6 +8206,9 @@ export default function App() {
       _setParts(data.parts || []);
       _setEngD(data.engDocs || []);
       _setEnq(data.enquiries || []);
+      _setCon(data.contracts || []);
+      _setCP(data.channelPartners || []);
+      _setTL(data.termsLibrary || { clauses: [], templates: [] });
     });
     return unsub;
   }, [ownerUid]);
@@ -7365,7 +8255,10 @@ export default function App() {
   const setStockLedger      = mkSet(_setSL,    'stockLedger');
   const setParts            = mkSet(_setParts, 'parts');
   const setEngDocs          = mkSet(_setEngD,  'engDocs');
-  const setEnquiries        = mkSet(_setEnq,   'enquiries');
+  const setEnquiries        = mkSet(_setEnq,        'enquiries');
+  const setContracts        = mkSet(_setCon,        'contracts');
+  const setChannelPartners  = mkSet(_setCP,         'channelPartners');
+  const setTermsLibrary     = mkSet(_setTL,         'termsLibrary');
 
   // ── Document number helpers ───────────────────────────────────────────────
   // Indian financial year: April–March. Returns "25-26", "26-27", etc.
@@ -7751,6 +8644,36 @@ export default function App() {
               });
               setView('doceditor');
             }}
+          />
+        );
+      case 'contracts':
+        return (
+          <ContractList
+            contracts={contracts}
+            setContracts={setContracts}
+            customers={customers}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'channelpartners':
+        return (
+          <ChannelPartnerList
+            channelPartners={channelPartners}
+            setChannelPartners={setChannelPartners}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'termslibrary':
+        return (
+          <TermsLibraryView
+            termsLibrary={termsLibrary}
+            setTermsLibrary={setTermsLibrary}
+            userRole={userRole}
           />
         );
       case 'gstr1':
