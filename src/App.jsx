@@ -1083,7 +1083,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved }) 
           <input value={form.signatory || ''} onChange={(e) => setForm((p) => ({ ...p, signatory: e.target.value }))} style={styles.input} placeholder="e.g. Director / Manager" />
         </div>
 
-        <button onClick={handleSave} style={{ ...styles.primaryBtn, background: saved ? '#1A7A3E' : undefined, transition: 'background 0.3s' }}>
+        <button onClick={handleSave} style={{ ...styles.primaryBtn, ...(saved ? { background: '#1A7A3E' } : {}), transition: 'background 0.3s' }}>
           {saved ? '✓ Settings saved!' : 'Save profile'}
         </button>
 
