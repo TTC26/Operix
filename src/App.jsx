@@ -1571,19 +1571,19 @@ function ConvertDropdown({ doc, onConvert }) {
 
 // Which views belong to each section (for auto-expand when child is active)
 const SECTION_VIEWS = {
-  sales:       ['customers', 'enquiries', 'documents'],
+  sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn'],
-  stores:      ['stock', 'stockledger', 'bincard'],
-  engineering: ['items', 'partsmaster', 'engdocs'],
-  production:  ['rawmaterials', 'bom', 'productionorders', 'qualitycheck'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items'],
+  engineering: ['partsmaster', 'engdocs'],
+  production:  ['rawmaterials', 'bom', 'productionorders'],
+  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
   hr:          ['employees', 'payroll'],
-  services:    ['serviceorders'],
-  admin:       ['staff'],
+  scope:       ['scopeofwork'],
+  admin:       ['staff', 'contracts', 'termslibrary'],
 };
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, country }) {
-  // 'both' = Trade + Manufacture (not service)
   const showTrade      = companyType !== 'service';                                   // trading, manufacturing, both
   const showProduction = companyType === 'manufacturing' || companyType === 'both';   // manufacturing, both
   const showService    = companyType === 'service';                                   // service only
@@ -1714,10 +1714,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
       {/* Sales */}
       <Section sectionKey="sales" label="Sales">
-        <NavBtn id="customers"       label="Customers"         icon={Users} />
-        <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
-        <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
+        <NavBtn id="customers" label="Customers"    icon={Users} />
+        <NavBtn id="enquiries" label="Enquiries"    icon={FileSignature} />
+        {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
+        {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
         <CreateBtn docKey="quotation" />
+        {showService && <CreateBtn docKey="invoice" />}
       </Section>
 
       {/* Accounts */}
@@ -1726,50 +1728,62 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <CreateBtn docKey="creditnote" />
         <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
         <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
-        {country === 'india'  && <NavBtn id="gstr1"     label="GSTR-1 Report" icon={FileText} />}
-        {(country === 'uae' || country === 'saudi' || country === 'bahrain' || country === 'oman') && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+        {country === 'india' && <NavBtn id="gstr1" label="GSTR-1 Report" icon={FileText} />}
+        {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
         {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
       </Section>
 
-      {/* Purchase — hidden for service companies */}
-      {showTrade && (
-        <Section sectionKey="purchase" label="Purchase">
-          <NavBtn id="vendors" label="Vendors" icon={Truck} />
-          <CreateBtn docKey="purchase" />
-          <CreateBtn docKey="purchasebill" />
-          <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
-        </Section>
-      )}
+      {/* Purchase */}
+      <Section sectionKey="purchase" label="Purchase">
+        <NavBtn id="vendors" label="Vendors" icon={Truck} />
+        <CreateBtn docKey="purchase" />
+        <CreateBtn docKey="purchasebill" />
+        <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+      </Section>
 
       {/* Stores — hidden for service companies */}
       {showTrade && (
         <Section sectionKey="stores" label="Stores">
+          <NavBtn id="items"       label="Item Master"    icon={Package} />
           <CreateBtn docKey="delivery" />
           <CreateBtn docKey="packing_list" />
-          {/* Items shown here for trading; under Engineering for manufacturing */}
-          {!showProduction && <NavBtn id="items" label="Item Master" icon={Package} />}
           <NavBtn id="stock"       label="Stock Position" icon={ClipboardList} />
           <NavBtn id="stockledger" label="Stock Ledger"   icon={FileText} />
           <NavBtn id="bincard"     label="Bin Card"       icon={ClipboardList} />
         </Section>
       )}
 
-      {/* Engineering — only for manufacturing / both */}
-      {showProduction && (
-        <Section sectionKey="engineering" label="Engineering">
-          <NavBtn id="items"       label="Item Master"    icon={Package} />
-          <NavBtn id="partsmaster" label="Parts Master"   icon={Wrench} />
-          <NavBtn id="engdocs"     label="Eng Documents"  icon={BookOpen} />
+      {/* Scope of Work — service companies only (replaces Item Master) */}
+      {showService && (
+        <Section sectionKey="scope" label="Scope of Work">
+          <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
         </Section>
       )}
 
-      {/* Production — only for manufacturing / both */}
+      {/* Engineering — manufacturing only (Item Master is in Stores) */}
+      {showProduction && (
+        <Section sectionKey="engineering" label="Engineering">
+          <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
+          <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+        </Section>
+      )}
+
+      {/* Production — manufacturing only */}
       {showProduction && (
         <Section sectionKey="production" label="Production">
-          <NavBtn id="rawmaterials"     label="Raw Materials"      icon={Package} />
-          <NavBtn id="bom"              label="Bill of Materials"  icon={ClipboardList} />
-          <NavBtn id="productionorders" label="Production Orders"  icon={Factory} />
-          <NavBtn id="qualitycheck"     label="Quality Check"      icon={CheckCircle} />
+          <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+          <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+          <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+        </Section>
+      )}
+
+      {/* Quality — manufacturing only */}
+      {showProduction && (
+        <Section sectionKey="quality" label="Quality">
+          <NavBtn id="isoprinciples"  label="ISO Principles"  icon={CheckCircle} />
+          <NavBtn id="deptprocedures" label="Dept Procedures" icon={BookOpen} />
+          <NavBtn id="inprocessqa"    label="Inprocess QA"    icon={CheckSquare} />
+          <NavBtn id="qatesting"      label="QA Testing"      icon={CheckCircle} />
         </Section>
       )}
 
@@ -1779,19 +1793,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
       </Section>
 
-      {/* Services — only for service company type */}
-      {showService && (
-        <Section sectionKey="services" label="Services">
-          <NavBtn id="serviceorders" label="Service Orders" icon={Briefcase} />
-        </Section>
-      )}
-
       {/* Admin */}
       {userRole === 'admin' && (
         <Section sectionKey="admin" label="Admin">
-          <NavBtn id="staff"         label="Staff"          icon={Shield} />
-          <NavBtn id="contracts"     label="Contracts"      icon={FileSignature} />
-          <NavBtn id="termslibrary"  label="Terms Library"  icon={BookOpen} />
+          <NavBtn id="staff" label="Staff" icon={Shield} />
+          {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
+          {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
         </Section>
       )}
 
@@ -1860,7 +1867,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <Section sectionKey="production" label="Production">
           <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
           <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
-          <NavBtn id="qualitycheck"     label="Quality Check"     icon={CheckCircle} />
+        </Section>
+      )}
+      {showProduction && (
+        <Section sectionKey="quality" label="Quality">
+          <NavBtn id="qatesting" label="QA Testing" icon={CheckCircle} />
         </Section>
       )}
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} />
@@ -6897,9 +6908,11 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
             <div key={o.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{o.number} — {bom?.name || 'Unknown BOM'}</div>
-                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{o.quantity} units · {o.startDate || ''}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                  {o.quantity} units · {o.startDate || ''}{o.batchNumber ? ` · Batch: ${o.batchNumber}` : ''}
+                </div>
               </div>
-              <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace('_',' ')}</span>
+              <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace(/_/g,' ')}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                 <StatusBadge status={o.approvalStatus || 'draft'} />
                 <ApprovalActions
@@ -6909,7 +6922,13 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                   compact
                 />
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {(o.status === 'in_progress' || o.status === 'planned') && o.approvalStatus === 'approved' && (
+                  <button onClick={() => updateStatus(o.id, 'pending_qa')}
+                    style={{ ...styles.ghostBtn, fontSize: 11, background: '#EDE6F9', color: '#5B2DA0', border: 'none' }}>
+                    → QA
+                  </button>
+                )}
                 {o.approvalStatus !== 'submitted' && <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>}
                 {o.approvalStatus !== 'submitted' && <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>}
               </div>
@@ -6926,10 +6945,18 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
   );
 }
 
+function genBatchNumber() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const seq = String(Math.floor(Math.random() * 9000) + 1000);
+  return `BN-${mm}-${seq}`;
+}
+
 function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
   const [form, setForm] = useState({
     id: order?.id || '',
     number: order?.number || '',
+    batchNumber: order?.batchNumber || genBatchNumber(),
     bomId: order?.bomId || '',
     quantity: order?.quantity || 1,
     startDate: order?.startDate || new Date().toISOString().split('T')[0],
@@ -6953,6 +6980,13 @@ function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
       <div style={styles.formGroup}>
         <label style={styles.label}>Order Number *</label>
         <input value={form.number} onChange={e => set('number', e.target.value)} style={styles.input} placeholder="PO-001" />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Batch Number</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input value={form.batchNumber} onChange={e => set('batchNumber', e.target.value)} style={{ ...styles.input, flex: 1 }} placeholder="BN-MM-XXXX" />
+          <button type="button" onClick={() => set('batchNumber', genBatchNumber())} style={{ ...styles.ghostBtn, whiteSpace: 'nowrap', fontSize: 11 }}>New #</button>
+        </div>
       </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>BOM / Product *</label>
@@ -8127,6 +8161,460 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
 }
 
 
+// ─── Scope of Work (Service companies) ───────────────────────────────────────
+function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'sales';
+
+  function saveScope(form) {
+    const { _isNew, ...rest } = form;
+    setScopeOfWork(prev => _isNew ? [...prev, { ...rest, id: crypto.randomUUID(), createdAt: Date.now() }] : prev.map(s => s.id === rest.id ? rest : s));
+    setEditing(null); setCreating(false);
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div>
+          <h1 className="serif" style={styles.h1}>Scope of Work</h1>
+          <p style={styles.muted}>Service catalogue — link items to quotations and invoices.</p>
+        </div>
+        {canEdit && <button onClick={() => { setCreating(true); setEditing({ _isNew: true, name: '', category: '', description: '', unit: 'hrs', rate: '' }); }} style={styles.primaryBtn}><Plus size={15} /> New Scope Item</button>}
+      </div>
+      <div style={styles.list}>
+        {scopeOfWork.length === 0 && <div style={styles.emptyBox}>No scope items yet. Add your services and packages here.</div>}
+        {scopeOfWork.map(s => (
+          <div key={s.id} style={styles.recordRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{s.category || 'General'} · {s.unit || 'hrs'} · Rate: {s.rate || '—'}</div>
+              {s.description && <div style={{ fontSize: 12, color: '#555', marginTop: 4, maxWidth: 500 }}>{s.description}</div>}
+            </div>
+            {canEdit && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => { setEditing(s); setCreating(false); }} style={styles.iconBtn}><Pencil size={14} /></button>
+                <button onClick={() => { if (window.confirm('Delete this scope item?')) setScopeOfWork(prev => prev.filter(x => x.id !== s.id)); }} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {(creating || editing) && (
+        <Modal title={creating ? 'New Scope Item' : 'Edit Scope Item'} onClose={() => { setEditing(null); setCreating(false); }}>
+          <ScopeItemForm item={editing} onSave={saveScope} onClose={() => { setEditing(null); setCreating(false); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ScopeItemForm({ item, onSave, onClose }) {
+  const [form, setForm] = useState({ _isNew: !!item?._isNew, id: item?.id || crypto.randomUUID(), name: item?.name || '', category: item?.category || '', description: item?.description || '', unit: item?.unit || 'hrs', rate: item?.rate || '' });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={styles.formGroup}><label style={styles.label}>Item Name *</label><input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} placeholder="e.g. Software Development" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Category</label><input value={form.category} onChange={e => set('category', e.target.value)} style={styles.input} placeholder="e.g. Consulting" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Unit</label>
+        <select value={form.unit} onChange={e => set('unit', e.target.value)} style={styles.input}>
+          {['hrs','days','project','lump sum','visit','month','year'].map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}><label style={styles.label}>Rate</label><input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} style={styles.input} placeholder="0.00" /></div>
+      <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}><label style={styles.label}>Description</label><textarea value={form.description} onChange={e => set('description', e.target.value)} style={{ ...styles.input, minHeight: 70 }} placeholder="Detailed description of the scope..." /></div>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => { if (!form.name) return alert('Name required'); onSave(form); }}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Quality Modules (Manufacturing) ──────────────────────────────────────────
+
+function ISOPrinciplesView({ qualityDocs, setQualityDocs, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const items = qualityDocs.isoPrinciples || [];
+
+  function save(form) {
+    const { _isNew, ...rest } = form;
+    setQualityDocs(prev => ({ ...prev, isoPrinciples: _isNew ? [...(prev.isoPrinciples || []), { ...rest, id: crypto.randomUUID(), createdAt: Date.now() }] : (prev.isoPrinciples || []).map(x => x.id === rest.id ? rest : x) }));
+    setEditing(null);
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div><h1 className="serif" style={styles.h1}>ISO Principles</h1><p style={styles.muted}>Document your ISO quality management framework and principles.</p></div>
+        {canEdit && <button onClick={() => setEditing({ _isNew: true, title: '', clause: '', description: '', evidence: '' })} style={styles.primaryBtn}><Plus size={15} /> Add Principle</button>}
+      </div>
+      <div style={styles.list}>
+        {items.length === 0 && <div style={styles.emptyBox}>No ISO principles documented yet.</div>}
+        {items.map(item => (
+          <div key={item.id} style={styles.recordRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{item.clause && <span style={{ color: '#C9A24B', marginRight: 8 }}>§{item.clause}</span>}{item.title}</div>
+              {item.description && <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>{item.description}</div>}
+              {item.evidence && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Evidence: {item.evidence}</div>}
+            </div>
+            {canEdit && <div style={{ display: 'flex', gap: 6 }}><button onClick={() => setEditing(item)} style={styles.iconBtn}><Pencil size={14} /></button><button onClick={() => { if (window.confirm('Delete?')) setQualityDocs(prev => ({ ...prev, isoPrinciples: prev.isoPrinciples.filter(x => x.id !== item.id) })); }} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button></div>}
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <Modal title={editing._isNew ? 'Add ISO Principle' : 'Edit ISO Principle'} onClose={() => setEditing(null)}>
+          <QualityDocForm item={editing} fields={[{ key: 'clause', label: 'ISO Clause', placeholder: 'e.g. 4.1' }, { key: 'title', label: 'Title *', placeholder: 'Principle name' }, { key: 'description', label: 'Description', multiline: true }, { key: 'evidence', label: 'Evidence / Records' }]} onSave={save} onClose={() => setEditing(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function DeptProceduresView({ qualityDocs, setQualityDocs, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const items = qualityDocs.deptProcedures || [];
+
+  function save(form) {
+    const { _isNew, ...rest } = form;
+    const updated = { ...rest, approvalStatus: _isNew ? 'draft' : rest.approvalStatus };
+    setQualityDocs(prev => ({ ...prev, deptProcedures: _isNew ? [...(prev.deptProcedures || []), { ...updated, id: crypto.randomUUID(), createdAt: Date.now() }] : (prev.deptProcedures || []).map(x => x.id === updated.id ? updated : x) }));
+    setEditing(null);
+  }
+
+  function approve(id) {
+    setQualityDocs(prev => ({ ...prev, deptProcedures: prev.deptProcedures.map(x => x.id === id ? { ...x, approvalStatus: 'approved', approvedAt: Date.now() } : x) }));
+  }
+
+  const statusBg = { draft: '#EEEDE6', approved: '#D6F0E0', review: '#FFF3CD' };
+  const statusCol = { draft: '#5F5E5A', approved: '#1A5C35', review: '#856404' };
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div><h1 className="serif" style={styles.h1}>Dept Procedures</h1><p style={styles.muted}>Department-level procedures. Approved by Management before use.</p></div>
+        {canEdit && <button onClick={() => setEditing({ _isNew: true, title: '', department: '', procNumber: '', version: '1.0', description: '', steps: '', approvalStatus: 'draft' })} style={styles.primaryBtn}><Plus size={15} /> New Procedure</button>}
+      </div>
+      <div style={styles.list}>
+        {items.length === 0 && <div style={styles.emptyBox}>No procedures yet. Document your department-level SOPs here.</div>}
+        {items.map(item => (
+          <div key={item.id} style={styles.recordRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{item.procNumber && <span style={{ color: '#6B5BAE', marginRight: 8 }}>{item.procNumber}</span>}{item.title}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{item.department} · v{item.version || '1.0'}</div>
+              {item.description && <div style={{ fontSize: 12, color: '#555', marginTop: 3 }}>{item.description}</div>}
+            </div>
+            <span style={{ background: statusBg[item.approvalStatus] || '#EEEDE6', color: statusCol[item.approvalStatus] || '#5F5E5A', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {item.approvalStatus || 'draft'}
+            </span>
+            {userRole === 'admin' && item.approvalStatus !== 'approved' && (
+              <button onClick={() => approve(item.id)} style={{ ...styles.ghostBtn, fontSize: 11, background: '#D6F0E0', color: '#1A5C35', border: 'none' }}>Approve</button>
+            )}
+            {canEdit && <div style={{ display: 'flex', gap: 6 }}><button onClick={() => setEditing(item)} style={styles.iconBtn}><Pencil size={14} /></button><button onClick={() => { if (window.confirm('Delete?')) setQualityDocs(prev => ({ ...prev, deptProcedures: prev.deptProcedures.filter(x => x.id !== item.id) })); }} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button></div>}
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <Modal title={editing._isNew ? 'New Procedure' : 'Edit Procedure'} onClose={() => setEditing(null)} wide>
+          <QualityDocForm item={editing} fields={[{ key: 'procNumber', label: 'Proc. Number', placeholder: 'e.g. QP-001' }, { key: 'title', label: 'Title *', placeholder: 'Procedure name' }, { key: 'department', label: 'Department', placeholder: 'e.g. Production' }, { key: 'version', label: 'Version', placeholder: '1.0' }, { key: 'description', label: 'Objective', multiline: true }, { key: 'steps', label: 'Procedure Steps', multiline: true, placeholder: 'Step 1: ...\nStep 2: ...' }]} onSave={save} onClose={() => setEditing(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function InprocessQAView({ qualityDocs, setQualityDocs, productionOrders, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory';
+  const items = qualityDocs.inprocessQA || [];
+
+  function save(form) {
+    const { _isNew, ...rest } = form;
+    setQualityDocs(prev => ({ ...prev, inprocessQA: _isNew ? [...(prev.inprocessQA || []), { ...rest, id: crypto.randomUUID(), createdAt: Date.now() }] : (prev.inprocessQA || []).map(x => x.id === rest.id ? rest : x) }));
+    setEditing(null);
+  }
+
+  const resultColor = { pass: '#1A5C35', fail: '#B5453A', conditional: '#856404' };
+  const resultBg = { pass: '#D6F0E0', fail: '#FBEAE7', conditional: '#FFF3CD' };
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div><h1 className="serif" style={styles.h1}>Inprocess QA</h1><p style={styles.muted}>Record quality checks done during production.</p></div>
+        {canEdit && <button onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0,10), productionOrderId: '', checkType: '', findings: '', result: 'pass', checkedBy: '' })} style={styles.primaryBtn}><Plus size={15} /> New QA Record</button>}
+      </div>
+      <div style={styles.list}>
+        {items.length === 0 && <div style={styles.emptyBox}>No inprocess QA records yet.</div>}
+        {items.map(item => {
+          const po = productionOrders.find(p => p.id === item.productionOrderId);
+          return (
+            <div key={item.id} style={styles.recordRow}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{item.checkType || 'QA Check'} · {item.date}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{po ? `${po.number}${po.batchNumber ? ` · Batch: ${po.batchNumber}` : ''}` : 'No order linked'} · By: {item.checkedBy || '—'}</div>
+                {item.findings && <div style={{ fontSize: 12, color: '#555', marginTop: 3 }}>{item.findings}</div>}
+              </div>
+              <span style={{ background: resultBg[item.result] || '#EEEDE6', color: resultColor[item.result] || '#5F5E5A', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{item.result || 'pass'}</span>
+              {canEdit && <div style={{ display: 'flex', gap: 6 }}><button onClick={() => setEditing(item)} style={styles.iconBtn}><Pencil size={14} /></button><button onClick={() => { if (window.confirm('Delete?')) setQualityDocs(prev => ({ ...prev, inprocessQA: prev.inprocessQA.filter(x => x.id !== item.id) })); }} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button></div>}
+            </div>
+          );
+        })}
+      </div>
+      {editing && (
+        <Modal title={editing._isNew ? 'New Inprocess QA' : 'Edit QA Record'} onClose={() => setEditing(null)} wide>
+          <InprocessQAForm item={editing} productionOrders={productionOrders} onSave={save} onClose={() => setEditing(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function InprocessQAForm({ item, productionOrders, onSave, onClose }) {
+  const [form, setForm] = useState({ ...item });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={styles.formGroup}><label style={styles.label}>Date</label><input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={styles.input} /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Production Order</label>
+        <select value={form.productionOrderId} onChange={e => set('productionOrderId', e.target.value)} style={styles.input}>
+          <option value="">— None —</option>
+          {productionOrders.map(p => <option key={p.id} value={p.id}>{p.number}{p.batchNumber ? ` (${p.batchNumber})` : ''}</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}><label style={styles.label}>Check Type</label><input value={form.checkType} onChange={e => set('checkType', e.target.value)} style={styles.input} placeholder="e.g. Dimensional, Visual, Functional" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Checked By</label><input value={form.checkedBy} onChange={e => set('checkedBy', e.target.value)} style={styles.input} placeholder="Inspector name" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Result</label>
+        <select value={form.result} onChange={e => set('result', e.target.value)} style={styles.input}>
+          <option value="pass">Pass</option><option value="conditional">Conditional Pass</option><option value="fail">Fail</option>
+        </select>
+      </div>
+      <div style={styles.formGroup}><label style={styles.label}>Reference Standard</label><input value={form.standard || ''} onChange={e => set('standard', e.target.value)} style={styles.input} placeholder="e.g. ISO 9001:2015" /></div>
+      <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}><label style={styles.label}>Findings / Observations</label><textarea value={form.findings} onChange={e => set('findings', e.target.value)} style={{ ...styles.input, minHeight: 70 }} /></div>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => { if (!form.checkType) return alert('Check type required'); onSave(form); }}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── QA Testing + PDV (Production Delivery Voucher) ───────────────────────────
+function QATestingView({ productionOrders, setProductionOrders, pdvs, setPdvs, setStockLedger, boms, items, userRole, businessInfo }) {
+  const [viewingPdv, setViewingPdv] = useState(null);
+  const pending = productionOrders.filter(o => o.status === 'pending_qa');
+  const approved = pdvs;
+  const canApprove = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory';
+
+  function handleQADecision(orderId, decision, note = '') {
+    const now = Date.now();
+    const order = productionOrders.find(o => o.id === orderId);
+    if (!order) return;
+
+    if (decision === 'approve') {
+      // Generate PDV
+      const pdv = {
+        id: crypto.randomUUID(),
+        pdvNumber: `PDV-${new Date().toISOString().slice(0,7).replace('-','/')}-${String(pdvs.length + 1).padStart(3,'0')}`,
+        productionOrderId: orderId,
+        orderNumber: order.number,
+        batchNumber: order.batchNumber || '',
+        bomId: order.bomId,
+        quantity: order.quantity,
+        date: new Date().toISOString().slice(0,10),
+        approvedAt: now,
+        approvedBy: userRole,
+        status: 'approved',
+        note,
+      };
+      setPdvs(prev => [...prev, pdv]);
+
+      // Auto-update stock ledger (same logic as completed)
+      const bom = boms.find(b => b.id === order.bomId);
+      if (bom && setStockLedger) {
+        const factor = (order.quantity || 1) / (bom.outputQty || 1);
+        const date = new Date().toISOString().slice(0,10);
+        const entries = [];
+        (bom.materials || []).forEach(m => {
+          const rm = items.find(i => i.name === (m.name || ''));
+          if (!rm) return;
+          entries.push({ id: crypto.randomUUID(), date, itemId: rm.id, itemName: rm.name, type: 'out', qty: (parseFloat(m.qty)||0)*factor, sourceType: 'pdv', sourceId: pdv.id, sourceNumber: pdv.pdvNumber, createdAt: now });
+        });
+        const finItem = items.find(i => i.name === bom.outputItem || i.name === bom.name);
+        if (finItem) {
+          entries.push({ id: crypto.randomUUID(), date, itemId: finItem.id, itemName: finItem.name, type: 'in', qty: order.quantity || 1, sourceType: 'pdv', sourceId: pdv.id, sourceNumber: pdv.pdvNumber, createdAt: now });
+        }
+        if (entries.length) setStockLedger(prev => [...prev, ...entries]);
+      }
+
+      setProductionOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'completed', completedAt: now, qaApprovedAt: now } : o));
+    } else if (decision === 'reject') {
+      setProductionOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'failed', qaRejectedAt: now, qaNote: note } : o));
+    } else if (decision === 'resend') {
+      setProductionOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'in_progress', qaResendAt: now, qaNote: note } : o));
+    }
+  }
+
+  return (
+    <div style={styles.page}>
+      <h1 className="serif" style={styles.h1}>QA Testing</h1>
+      <p style={{ ...styles.muted, marginBottom: 24 }}>Review production orders forwarded for quality approval. Approved orders generate a PDV and auto-update stock.</p>
+
+      {/* Pending QA */}
+      <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+        Pending QA Approval ({pending.length})
+      </div>
+      <div style={styles.list}>
+        {pending.length === 0 && <div style={styles.emptyBox}>No production orders pending QA. Orders forwarded from Production Orders will appear here.</div>}
+        {pending.map(o => (
+          <QAOrderCard key={o.id} order={o} boms={boms} canApprove={canApprove} onDecision={(d, note) => handleQADecision(o.id, d, note)} />
+        ))}
+      </div>
+
+      {/* PDVs issued */}
+      <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '32px 0 10px' }}>
+        Production Delivery Vouchers — PDV ({approved.length})
+      </div>
+      <div style={styles.list}>
+        {approved.length === 0 && <div style={styles.emptyBox}>No PDVs generated yet.</div>}
+        {approved.map(pdv => (
+          <div key={pdv.id} style={styles.recordRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{pdv.pdvNumber}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Order: {pdv.orderNumber}{pdv.batchNumber ? ` · Batch: ${pdv.batchNumber}` : ''} · {pdv.date} · Qty: {pdv.quantity}</div>
+            </div>
+            <span style={{ background: '#D6F0E0', color: '#1A5C35', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>QA Approved</span>
+            <button onClick={() => setViewingPdv(pdv)} style={styles.iconBtn}><Printer size={14} /></button>
+          </div>
+        ))}
+      </div>
+
+      {viewingPdv && <PDVPrintModal pdv={viewingPdv} boms={boms} items={items} businessInfo={businessInfo} onClose={() => setViewingPdv(null)} />}
+    </div>
+  );
+}
+
+function QAOrderCard({ order, boms, canApprove, onDecision }) {
+  const [mode, setMode] = useState(null); // null | 'approve' | 'reject' | 'resend'
+  const [note, setNote] = useState('');
+  const bom = boms.find(b => b.id === order.bomId);
+
+  function submit() {
+    onDecision(mode, note);
+    setMode(null); setNote('');
+  }
+
+  return (
+    <div style={{ ...styles.recordRow, flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{order.number} — {bom?.name || 'Unknown BOM'}</div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+            {order.quantity} units{order.batchNumber ? ` · Batch: ${order.batchNumber}` : ''} · Start: {order.startDate || '—'}
+          </div>
+          {order.qaNote && <div style={{ fontSize: 12, color: '#B5453A', marginTop: 3 }}>Previous note: {order.qaNote}</div>}
+        </div>
+        <span style={{ background: '#EDE6F9', color: '#5B2DA0', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Pending QA</span>
+        {canApprove && !mode && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => setMode('approve')} style={{ ...styles.ghostBtn, fontSize: 12, background: '#D6F0E0', color: '#1A5C35', border: 'none' }}>Approve</button>
+            <button onClick={() => setMode('resend')} style={{ ...styles.ghostBtn, fontSize: 12, background: '#FFF3CD', color: '#856404', border: 'none' }}>Resend</button>
+            <button onClick={() => setMode('reject')} style={{ ...styles.ghostBtn, fontSize: 12, background: '#FBEAE7', color: '#B5453A', border: 'none' }}>Reject</button>
+          </div>
+        )}
+      </div>
+      {mode && (
+        <div style={{ background: '#F8F5EE', borderRadius: 8, padding: 12, display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>
+              {mode === 'approve' ? 'Approval note (optional)' : mode === 'resend' ? 'Reason to resend' : 'Rejection reason'}
+            </label>
+            <input value={note} onChange={e => setNote(e.target.value)} style={{ ...styles.input, margin: 0 }} placeholder={mode === 'approve' ? 'All checks passed...' : 'Describe the issue...'} />
+          </div>
+          <button onClick={submit} style={{ ...styles.primaryBtn, background: mode === 'approve' ? '#1A5C35' : mode === 'reject' ? '#B5453A' : '#856404' }}>
+            {mode === 'approve' ? 'Confirm Approve' : mode === 'resend' ? 'Resend to Production' : 'Confirm Reject'}
+          </button>
+          <button onClick={() => setMode(null)} style={styles.ghostBtn}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PDVPrintModal({ pdv, boms, items, businessInfo, onClose }) {
+  const bom = boms.find(b => b.id === pdv.bomId);
+  const bi = businessInfo || {};
+  return (
+    <PrintModal title="Production Delivery Voucher" onClose={onClose}>
+      <div style={{ padding: '0 8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 20, color: '#1E2A4A' }}>{bi.name || 'Company Name'}</div>
+            <div style={{ fontSize: 12, color: '#888' }}>{bi.address}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>PDV</div>
+            <div style={{ fontSize: 13, color: '#666' }}>{pdv.pdvNumber}</div>
+          </div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
+          <tbody>
+            {[['Production Order', pdv.orderNumber], ['Batch Number', pdv.batchNumber || '—'], ['Date', pdv.date], ['Quantity', pdv.quantity], ['Status', 'QA Approved']].map(([k,v]) => (
+              <tr key={k} style={{ borderBottom: '1px solid #EAE6DB' }}>
+                <td style={{ padding: '7px 0', fontWeight: 600, color: '#555', width: '40%' }}>{k}</td>
+                <td style={{ padding: '7px 0' }}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {bom && (
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Output: {bom.outputItem || bom.name}</div>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#888', marginBottom: 6 }}>COMPONENTS CONSUMED</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '6px 10px', textAlign: 'left' }}>Material</th><th style={{ padding: '6px 10px', textAlign: 'right' }}>Qty</th></tr></thead>
+              <tbody>{(bom.materials || []).map((m, i) => <tr key={i} style={{ borderBottom: '1px solid #EAE6DB' }}><td style={{ padding: '6px 10px' }}>{m.name || m.materialId}</td><td style={{ padding: '6px 10px', textAlign: 'right' }}>{(parseFloat(m.qty)||0) * (pdv.quantity||1)} {m.unit}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {pdv.note && <div style={{ marginTop: 16, background: '#F8F5EE', padding: 12, borderRadius: 8, fontSize: 13 }}><strong>QA Note:</strong> {pdv.note}</div>}
+        <div style={{ marginTop: 48, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
+          {['Production', 'QA', 'Store'].map(label => (
+            <div key={label} style={{ textAlign: 'center' }}>
+              <div style={{ borderTop: '1px solid #333', paddingTop: 8, fontSize: 11, color: '#888' }}>{label} Signature</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </PrintModal>
+  );
+}
+
+// ─── Shared Quality Doc Form ──────────────────────────────────────────────────
+function QualityDocForm({ item, fields, onSave, onClose }) {
+  const [form, setForm] = React.useState({ ...item });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  const titleField = fields.find(f => f.key === 'title');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {fields.map(f => (
+        <div key={f.key} style={styles.formGroup}>
+          <label style={styles.label}>{f.label}</label>
+          {f.multiline
+            ? <textarea value={form[f.key] || ''} onChange={e => set(f.key, e.target.value)} style={{ ...styles.input, minHeight: 90, resize: 'vertical' }} placeholder={f.placeholder || ''} />
+            : <input value={form[f.key] || ''} onChange={e => set(f.key, e.target.value)} style={styles.input} placeholder={f.placeholder || ''} />
+          }
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => { if (titleField && !form[titleField.key]) return alert(`${titleField.label} required`); onSave(form); }}>Save</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,             setView]           = useState('dashboard');
@@ -8163,6 +8651,9 @@ export default function App() {
   const [contracts,        _setCon]    = useState([]);
   const [channelPartners,  _setCP]     = useState([]);
   const [termsLibrary,     _setTL]     = useState({ clauses: [], templates: [] });
+  const [scopeOfWork,      _setSOW]    = useState([]);
+  const [qualityDocs,      _setQD]     = useState({ isoPrinciples: [], deptProcedures: [], inprocessQA: [] });
+  const [pdvs,             _setPdvs]   = useState([]);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -8218,6 +8709,9 @@ export default function App() {
       _setCon(data.contracts || []);
       _setCP(data.channelPartners || []);
       _setTL(data.termsLibrary || { clauses: [], templates: [] });
+      _setSOW(data.scopeOfWork || []);
+      _setQD(data.qualityDocs || { isoPrinciples: [], deptProcedures: [], inprocessQA: [] });
+      _setPdvs(data.pdvs || []);
     });
     return unsub;
   }, [ownerUid]);
@@ -8268,6 +8762,9 @@ export default function App() {
   const setContracts        = mkSet(_setCon,   'contracts');
   const setChannelPartners  = mkSet(_setCP,    'channelPartners');
   const setTermsLibrary     = mkSet(_setTL,    'termsLibrary');
+  const setScopeOfWork      = mkSet(_setSOW,   'scopeOfWork');
+  const setQualityDocs      = mkSet(_setQD,    'qualityDocs');
+  const setPdvs             = mkSet(_setPdvs,  'pdvs');
 
   // ── Document number helpers ──────────────────────────────────────────────────
   function getFY(dateStr) {
@@ -8327,7 +8824,6 @@ export default function App() {
     };
     const isNew = !documents.find((d) => d.id === saved.id);
     setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
-    // Auto-update stock ledger on first save of outgoing docs
     if (isNew && ['invoice', 'delivery'].includes(saved.type)) {
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
@@ -8359,27 +8855,10 @@ export default function App() {
     const payload = {
       exportedAt: new Date().toISOString(),
       exportedBy: user?.email || '',
-      businessInfo,
-      documents,
-      customers,
-      vendors,
-      items,
-      stockLedger,
-      grns,
-      vouchers,
-      pettyCash,
-      employees,
-      payrollRuns,
-      serviceOrders,
-      productionOrders,
-      rawMaterials,
-      boms,
-      parts,
-      engDocs,
-      enquiries,
-      contracts,
-      channelPartners,
-      termsLibrary,
+      businessInfo, documents, customers, vendors, items, stockLedger, grns,
+      vouchers, pettyCash, employees, payrollRuns, serviceOrders, productionOrders,
+      rawMaterials, boms, parts, engDocs, enquiries, contracts, channelPartners,
+      termsLibrary, scopeOfWork, qualityDocs, pdvs,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -8392,12 +8871,8 @@ export default function App() {
 
   const companyType = (businessInfo && businessInfo.companyType) || 'trading';
   const country     = (businessInfo && businessInfo.country)     || 'india';
-  const showTrade   = companyType === 'trading' || companyType === 'both' || companyType === 'manufacturing';
-  const showProduction = companyType === 'manufacturing' || companyType === 'both';
-  const showService    = companyType === 'service'       || companyType === 'both';
 
   const stats = useMemo(() => {
-    const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.india;
     const totalRevenue   = documents.filter(d => d.type === 'invoice').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const totalPurchases = documents.filter(d => d.type === 'purchasebill').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const outstanding    = documents.filter(d => d.type === 'invoice' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
@@ -8406,17 +8881,14 @@ export default function App() {
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
-    // Petty cash balance
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
     const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.type === 'income' ? (e.amount || 0) : -(e.amount || 0)), 0);
-    // Inventory stats
     const itemCount = items.length;
     const lowStockCount = items.filter(it => {
       if (!it.minStock) return false;
       const qty = (it.openingStock || 0) + stockLedger.filter(l => l.itemId === it.id).reduce((s, l) => s + (l.qty || 0), 0);
       return qty < it.minStock;
     }).length;
-    // Production stats
     const rmCount = rawMaterials.length;
     const poCount = productionOrders.length;
     const poOpen  = productionOrders.filter(p => p.status !== 'completed' && p.status !== 'done').length;
@@ -8475,7 +8947,7 @@ export default function App() {
       case 'documents':
         return (
           <DocumentsList
-            docs={documents}
+            docs={documents.filter(d => !docSearch || (d.number || '').toLowerCase().includes(docSearch.toLowerCase()) || (d.customerSnapshot?.name || '').toLowerCase().includes(docSearch.toLowerCase()))}
             customers={customers}
             vendors={vendors}
             search={docSearch}
@@ -8483,7 +8955,6 @@ export default function App() {
             openDoc={openDoc}
             deleteDoc={deleteDoc}
             startNewDoc={startNewDoc}
-            businessInfo={businessInfo}
           />
         );
       case 'customers':
@@ -8723,6 +9194,28 @@ export default function App() {
         return <VATReport documents={documents} customers={customers} businessInfo={businessInfo} />;
       case 'taxreport':
         return <TaxReport documents={documents} customers={customers} businessInfo={businessInfo} />;
+      case 'scopeofwork':
+        return <ScopeOfWorkView scopeOfWork={scopeOfWork} setScopeOfWork={setScopeOfWork} userRole={userRole} />;
+      case 'isoprinciples':
+        return <ISOPrinciplesView qualityDocs={qualityDocs} setQualityDocs={setQualityDocs} userRole={userRole} />;
+      case 'deptprocedures':
+        return <DeptProceduresView qualityDocs={qualityDocs} setQualityDocs={setQualityDocs} userRole={userRole} />;
+      case 'inprocessqa':
+        return <InprocessQAView qualityDocs={qualityDocs} setQualityDocs={setQualityDocs} productionOrders={productionOrders} userRole={userRole} />;
+      case 'qatesting':
+        return (
+          <QATestingView
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            pdvs={pdvs}
+            setPdvs={setPdvs}
+            setStockLedger={setStockLedger}
+            boms={boms}
+            items={items}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       default:
         return <div style={{ padding: 40, color: '#888780', fontSize: 14 }}>Section coming soon.</div>;
     }
@@ -8742,7 +9235,7 @@ export default function App() {
           .print-area, .print-area * { visibility: visible !important; }
           .print-area {
             position: absolute !important;
-               top: 0 !important; left: 0 !important;
+            top: 0 !important; left: 0 !important;
             right: auto !important; bottom: auto !important;
             width: 100% !important; height: auto !important;
             overflow: visible !important;
@@ -8814,6 +9307,22 @@ export default function App() {
       )}
 
       {editingItem && (
+        <ItemModal
+          item={editingItem}
+          businessInfo={businessInfo}
+          onSave={(it) => {
+            const saved = { ...it, id: it.id || crypto.randomUUID() };
+            const isNew = !it.id;
+            setItems((prev) => isNew ? [...prev, saved] : prev.map((x) => x.id === saved.id ? saved : x));
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
+    </div>
+  );
+}
+
         <ItemModal
           item={editingItem}
           businessInfo={businessInfo}
