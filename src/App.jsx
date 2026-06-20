@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword } from './firebase';
 
 
@@ -1604,6 +1604,7 @@ const SECTION_VIEWS = {
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
   hr:          ['employees', 'payroll'],
   scope:       ['scopeofwork'],
+  site:        ['siteprojects', 'dsrreports', 'clientmaterials', 'siteattendance', 'evaluation'],
   admin:       ['staff', 'contracts', 'termslibrary'],
 };
 
@@ -1781,6 +1782,17 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {showService && (
         <Section sectionKey="scope" label="Scope of Work">
           <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+        </Section>
+      )}
+
+      {/* Site Operations — service companies (MEP / manpower supply) */}
+      {showService && (
+        <Section sectionKey="site" label="Site Operations">
+          <NavBtn id="siteprojects"    label="Site Projects"    icon={MapPin} />
+          <NavBtn id="dsrreports"      label="Daily Reports"    icon={ClipboardList} />
+          <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+          <NavBtn id="siteattendance"  label="Attendance"       icon={Users} />
+          <NavBtn id="evaluation"      label="Quarterly Review" icon={BarChart2} />
         </Section>
       )}
 
@@ -8639,6 +8651,934 @@ function QualityDocForm({ item, fields, onSave, onClose }) {
   );
 }
 
+// ─── Site Operations (MEP / Manpower Supply) ─────────────────────────────────
+
+// ── Site Projects ──────────────────────────────────────────────────────────────
+function SiteProjectsView({ projects, setProjects, employees, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const filtered = projects.filter(p =>
+    (p.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.client || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.location || '').toLowerCase().includes(search.toLowerCase())
+  );
+  function save(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID() };
+    setProjects(prev => form.id ? prev.map(p => p.id === form.id ? rec : p) : [...prev, rec]);
+    setEditing(null);
+  }
+  function del(id) { if (confirm('Delete project?')) setProjects(prev => prev.filter(p => p.id !== id)); }
+  const STATUS_COLOR = { planning: '#C9A24B', active: '#1A7A3E', on_hold: '#B5453A', completed: '#3D7A5C' };
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 className="serif" style={styles.h2}>Site Projects</h2>
+          <p style={styles.muted}>{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, status: 'active', progress: 0 })}>+ New Project</button>}
+      </div>
+      <input value={search} onChange={e => setSearch(e.target.value)} style={{ ...styles.input, marginBottom: 16 }} placeholder="Search by name, client or location…" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+        {filtered.map(p => {
+          const team = employees.filter(e => (p.teamIds || []).includes(e.id));
+          return (
+            <div key={p.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '16px 18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{p.name}</div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLOR[p.status] || '#888', background: '#F5F3EE', borderRadius: 6, padding: '2px 8px', textTransform: 'uppercase' }}>{p.status}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: '#666', marginBottom: 4 }}>📍 {p.location || '—'} &nbsp;·&nbsp; 👤 {p.client || '—'}</div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>{p.startDate} → {p.endDate || 'ongoing'}</div>
+              {/* Progress bar */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#555', marginBottom: 4 }}>
+                  <span>Overall progress</span><span style={{ fontWeight: 600 }}>{p.progress || 0}%</span>
+                </div>
+                <div style={{ background: '#EAE6DB', borderRadius: 4, height: 6 }}>
+                  <div style={{ width: `${p.progress || 0}%`, background: '#1A7A3E', borderRadius: 4, height: 6, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 10 }}>Team: {team.length > 0 ? team.map(e => e.name).join(', ') : 'Not assigned'}</div>
+              {canEdit && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(p)}>Edit</button>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(p.id)}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filtered.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No projects found.</div>}
+      </div>
+      {editing && <SiteProjectForm project={editing} employees={employees} onSave={save} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function SiteProjectForm({ project, employees, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: '', client: '', location: '', type: 'villa', startDate: '', endDate: '',
+    status: 'active', progress: 0, teamIds: [], description: '',
+    ...project,
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function toggleTeam(id) {
+    setForm(f => ({ ...f, teamIds: f.teamIds.includes(id) ? f.teamIds.filter(x => x !== id) : [...f.teamIds, id] }));
+  }
+  const PROJECT_TYPES = ['villa', 'apartment', 'commercial', 'industrial', 'infrastructure', 'other'];
+  return (
+    <Modal title={form._isNew ? 'New Site Project' : 'Edit Project'} onClose={onClose} width={560}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {[['name','Project Name',true],['client','Client Name',true],['location','Site Location',false]].map(([k,l,req]) => (
+          <div key={k} style={{ gridColumn: k === 'location' ? '1/-1' : undefined, ...styles.formGroup }}>
+            <label style={styles.label}>{l}{req && ' *'}</label>
+            <input value={form[k] || ''} onChange={e => set(k, e.target.value)} style={styles.input} />
+          </div>
+        ))}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Type</label>
+          <select value={form.type} onChange={e => set('type', e.target.value)} style={styles.input}>
+            {PROJECT_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)} style={styles.input}>
+            {['planning','active','on_hold','completed'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Start Date</label>
+          <input type="date" value={form.startDate || ''} onChange={e => set('startDate', e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>End Date</label>
+          <input type="date" value={form.endDate || ''} onChange={e => set('endDate', e.target.value)} style={styles.input} />
+        </div>
+        <div style={{ gridColumn: '1/-1', ...styles.formGroup }}>
+          <label style={styles.label}>Overall Progress: {form.progress || 0}%</label>
+          <input type="range" min={0} max={100} value={form.progress || 0} onChange={e => set('progress', +e.target.value)}
+            style={{ width: '100%', accentColor: '#1A7A3E' }} />
+        </div>
+        <div style={{ gridColumn: '1/-1', ...styles.formGroup }}>
+          <label style={styles.label}>Description / Scope</label>
+          <textarea value={form.description || ''} onChange={e => set('description', e.target.value)} style={{ ...styles.input, height: 60 }} />
+        </div>
+        <div style={{ gridColumn: '1/-1', ...styles.formGroup }}>
+          <label style={styles.label}>Assign Team</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+            {employees.map(e => (
+              <button key={e.id} onClick={() => toggleTeam(e.id)}
+                style={{ fontSize: 12, padding: '4px 10px', borderRadius: 20, border: '1px solid #DDD8CC', cursor: 'pointer',
+                  background: form.teamIds.includes(e.id) ? '#1E2A4A' : '#F5F3EE',
+                  color: form.teamIds.includes(e.id) ? '#fff' : '#444' }}>
+                {e.name}
+              </button>
+            ))}
+            {employees.length === 0 && <span style={{ color: '#aaa', fontSize: 12 }}>No employees found — add them in HR first</span>}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => { if (!form.name) return alert('Project name required'); onSave(form); }}>Save Project</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Daily Site Reports (DSR) ────────────────────────────────────────────────────
+function DSRView({ dsrReports, setDsrReports, projects, employees, clientMaterials, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProject, setFilterProject] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'sales';
+  const sorted = [...dsrReports]
+    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterDate || r.date === filterDate))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  function save(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID() };
+    setDsrReports(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
+    setEditing(null);
+  }
+  function del(id) { if (confirm('Delete report?')) setDsrReports(prev => prev.filter(r => r.id !== id)); }
+  const TRADE_COLOR = { electrical: '#C9A24B', plumbing: '#3D7A5C', hvac: '#1E7A9A', civil: '#6B5BAE', other: '#888' };
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 className="serif" style={styles.h2}>Daily Site Reports</h2>
+          <p style={styles.muted}>{dsrReports.length} report{dsrReports.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0, 10), activities: [], progressItems: [] })}>+ New DSR</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ ...styles.input, width: 220 }}>
+          <option value="">All Projects</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...styles.input, width: 160 }} />
+        {(filterProject || filterDate) && <button style={styles.ghostBtn} onClick={() => { setFilterProject(''); setFilterDate(''); }}>Clear</button>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sorted.map(r => {
+          const proj = projects.find(p => p.id === r.projectId);
+          return (
+            <div key={r.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '14px 18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{r.date} — {proj?.name || 'Unknown project'}</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Reported by: {r.reportedBy || '—'} &nbsp;·&nbsp; Progress: <strong>{r.overallProgress || 0}%</strong></div>
+                </div>
+                {canEdit && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(r)}>Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(r.id)}>×</button>
+                  </div>
+                )}
+              </div>
+              {(r.activities || []).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                  {r.activities.map((a, i) => {
+                    const emp = employees.find(e => e.id === a.employeeId);
+                    return (
+                      <span key={i} style={{ fontSize: 11.5, background: '#F5F3EE', border: '1px solid #EAE6DB', borderRadius: 8, padding: '3px 8px', color: '#444' }}>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: TRADE_COLOR[a.trade] || '#888', marginRight: 5 }} />
+                        {emp?.name || '?'}: {a.task} ({a.hours}h)
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {r.notes && <div style={{ fontSize: 12, color: '#666', fontStyle: 'italic' }}>{r.notes}</div>}
+            </div>
+          );
+        })}
+        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No reports found.</div>}
+      </div>
+      {editing && (
+        <DSRForm report={editing} projects={projects} employees={employees} clientMaterials={clientMaterials}
+          onSave={save} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+function DSRForm({ report, projects, employees, clientMaterials, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10), projectId: '', reportedBy: '',
+    activities: [], progressItems: [], materialsUsedIds: [], overallProgress: 0,
+    weather: 'clear', notes: '', nextDayPlan: '',
+    ...report,
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  const TRADES = ['electrical', 'plumbing', 'hvac', 'civil', 'other'];
+  const WEATHER = ['clear', 'partly cloudy', 'cloudy', 'rain', 'heavy rain', 'sandstorm'];
+  function addActivity() {
+    set('activities', [...form.activities, { employeeId: '', trade: 'electrical', task: '', hours: 8 }]);
+  }
+  function updateActivity(i, k, v) {
+    const acts = [...form.activities]; acts[i] = { ...acts[i], [k]: v }; set('activities', acts);
+  }
+  function removeActivity(i) { set('activities', form.activities.filter((_, idx) => idx !== i)); }
+  function addProgress() {
+    set('progressItems', [...form.progressItems, { area: '', pct: 0 }]);
+  }
+  function updateProgress(i, k, v) {
+    const items = [...form.progressItems]; items[i] = { ...items[i], [k]: v }; set('progressItems', items);
+  }
+  function removeProgress(i) { set('progressItems', form.progressItems.filter((_, idx) => idx !== i)); }
+  function toggleMaterial(id) {
+    set('materialsUsedIds', form.materialsUsedIds.includes(id)
+      ? form.materialsUsedIds.filter(x => x !== id)
+      : [...form.materialsUsedIds, id]);
+  }
+  const projMaterials = clientMaterials.filter(m => m.projectId === form.projectId);
+  return (
+    <Modal title={form._isNew ? 'New Daily Site Report' : 'Edit DSR'} onClose={onClose} width={640}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Date *</label>
+          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Project *</label>
+          <select value={form.projectId} onChange={e => set('projectId', e.target.value)} style={styles.input}>
+            <option value="">— Select project —</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Reported by</label>
+          <input value={form.reportedBy || ''} onChange={e => set('reportedBy', e.target.value)} style={styles.input} placeholder="Site supervisor name" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Weather</label>
+          <select value={form.weather} onChange={e => set('weather', e.target.value)} style={styles.input}>
+            {WEATHER.map(w => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1/-1', ...styles.formGroup }}>
+          <label style={styles.label}>Overall Progress: {form.overallProgress || 0}%</label>
+          <input type="range" min={0} max={100} value={form.overallProgress || 0}
+            onChange={e => set('overallProgress', +e.target.value)}
+            style={{ width: '100%', accentColor: '#1A7A3E' }} />
+        </div>
+      </div>
+
+      {/* Activities */}
+      <div style={{ marginTop: 16, marginBottom: 6, fontWeight: 600, fontSize: 13, color: '#1E2A4A' }}>
+        Manpower Activities
+        <button style={{ ...styles.ghostBtn, fontSize: 11, marginLeft: 10 }} onClick={addActivity}>+ Add</button>
+      </div>
+      {form.activities.map((a, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 3fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+          <select value={a.employeeId} onChange={e => updateActivity(i, 'employeeId', e.target.value)} style={{ ...styles.input, fontSize: 12 }}>
+            <option value="">— Employee —</option>
+            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+          <select value={a.trade} onChange={e => updateActivity(i, 'trade', e.target.value)} style={{ ...styles.input, fontSize: 12 }}>
+            {TRADES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input value={a.task} onChange={e => updateActivity(i, 'task', e.target.value)} style={{ ...styles.input, fontSize: 12 }} placeholder="Task description" />
+          <input type="number" min={0} max={12} value={a.hours} onChange={e => updateActivity(i, 'hours', +e.target.value)} style={{ ...styles.input, fontSize: 12 }} placeholder="hrs" />
+          <button onClick={() => removeActivity(i)} style={{ ...styles.ghostBtn, color: '#B5453A', fontSize: 12, padding: '4px 8px' }}>×</button>
+        </div>
+      ))}
+      {form.activities.length === 0 && <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>No activities logged yet.</div>}
+
+      {/* Progress by area */}
+      <div style={{ marginTop: 14, marginBottom: 6, fontWeight: 600, fontSize: 13, color: '#1E2A4A' }}>
+        Progress by Area / System
+        <button style={{ ...styles.ghostBtn, fontSize: 11, marginLeft: 10 }} onClick={addProgress}>+ Add</button>
+      </div>
+      {form.progressItems.map((item, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '3fr 2fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+          <input value={item.area} onChange={e => updateProgress(i, 'area', e.target.value)} style={{ ...styles.input, fontSize: 12 }} placeholder="Area / system (e.g. Living room electrical)" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="range" min={0} max={100} value={item.pct} onChange={e => updateProgress(i, 'pct', +e.target.value)}
+              style={{ flex: 1, accentColor: '#1A7A3E' }} />
+            <span style={{ fontSize: 12, width: 32, textAlign: 'right' }}>{item.pct}%</span>
+          </div>
+          <button onClick={() => removeProgress(i)} style={{ ...styles.ghostBtn, color: '#B5453A', fontSize: 12, padding: '4px 8px' }}>×</button>
+        </div>
+      ))}
+
+      {/* Materials from client */}
+      {projMaterials.length > 0 && (
+        <>
+          <div style={{ marginTop: 14, marginBottom: 6, fontWeight: 600, fontSize: 13, color: '#1E2A4A' }}>Materials Received from Client (used today)</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            {projMaterials.map(m => (
+              <button key={m.id} onClick={() => toggleMaterial(m.id)}
+                style={{ fontSize: 12, padding: '4px 10px', borderRadius: 20, border: '1px solid #DDD8CC', cursor: 'pointer',
+                  background: form.materialsUsedIds.includes(m.id) ? '#1E2A4A' : '#F5F3EE',
+                  color: form.materialsUsedIds.includes(m.id) ? '#fff' : '#444' }}>
+                {m.refNo || m.id.slice(0,6)} — {(m.items || []).length} item(s)
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Notes / Observations</label>
+        <textarea value={form.notes || ''} onChange={e => set('notes', e.target.value)} style={{ ...styles.input, height: 56 }} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Next Day Plan</label>
+        <textarea value={form.nextDayPlan || ''} onChange={e => set('nextDayPlan', e.target.value)} style={{ ...styles.input, height: 48 }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => {
+          if (!form.date) return alert('Date required');
+          if (!form.projectId) return alert('Select a project');
+          onSave(form);
+        }}>Save Report</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Client Materials Received ───────────────────────────────────────────────────
+function ClientMaterialView({ clientMaterials, setClientMaterials, projects, employees, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProject, setFilterProject] = useState('');
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const sorted = [...clientMaterials]
+    .filter(m => !filterProject || m.projectId === filterProject)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  function save(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID() };
+    setClientMaterials(prev => form.id ? prev.map(m => m.id === form.id ? rec : m) : [...prev, rec]);
+    setEditing(null);
+  }
+  function del(id) { if (confirm('Delete record?')) setClientMaterials(prev => prev.filter(m => m.id !== id)); }
+  const COND_COLOR = { good: '#1A7A3E', damaged: '#B5453A', partial: '#C9A24B' };
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 className="serif" style={styles.h2}>Client Materials Received</h2>
+          <p style={styles.muted}>{clientMaterials.length} record{clientMaterials.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0, 10), items: [], status: 'received' })}>+ Log Receipt</button>}
+      </div>
+      <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ ...styles.input, width: 240, marginBottom: 14 }}>
+        <option value="">All Projects</option>
+        {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sorted.map(m => {
+          const proj = projects.find(p => p.id === m.projectId);
+          return (
+            <div key={m.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '14px 18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{m.date} — {proj?.name || '—'}</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Ref: {m.refNo || '—'} &nbsp;·&nbsp; Received by: {m.receivedBy || '—'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: COND_COLOR[m.status] || '#888', background: '#F5F3EE', borderRadius: 6, padding: '2px 8px', textTransform: 'uppercase' }}>{m.status}</span>
+                  {canEdit && <>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(m)}>Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(m.id)}>×</button>
+                  </>}
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: '#F5F3EE' }}>
+                    {['Description', 'Qty', 'Unit', 'Condition'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: '#666', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(m.items || []).map((it, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid #F0EDE6' }}>
+                      <td style={{ padding: '4px 8px' }}>{it.description}</td>
+                      <td style={{ padding: '4px 8px' }}>{it.qty}</td>
+                      <td style={{ padding: '4px 8px' }}>{it.unit}</td>
+                      <td style={{ padding: '4px 8px', color: COND_COLOR[it.condition] || '#888' }}>{it.condition}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {m.remarks && <div style={{ fontSize: 12, color: '#666', marginTop: 8, fontStyle: 'italic' }}>{m.remarks}</div>}
+            </div>
+          );
+        })}
+        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No material receipts logged.</div>}
+      </div>
+      {editing && <ClientMaterialForm record={editing} projects={projects} employees={employees} onSave={save} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function ClientMaterialForm({ record, projects, employees, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10), projectId: '', refNo: '',
+    receivedBy: '', status: 'received', items: [], remarks: '',
+    ...record,
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function addItem() { set('items', [...form.items, { description: '', qty: '', unit: 'nos', condition: 'good' }]); }
+  function updateItem(i, k, v) { const it = [...form.items]; it[i] = { ...it[i], [k]: v }; set('items', it); }
+  function removeItem(i) { set('items', form.items.filter((_, idx) => idx !== i)); }
+  return (
+    <Modal title={form._isNew ? 'Log Material Receipt' : 'Edit Receipt'} onClose={onClose} width={620}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Date *</label>
+          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Project *</label>
+          <select value={form.projectId} onChange={e => set('projectId', e.target.value)} style={styles.input}>
+            <option value="">— Select —</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Client Delivery Ref / DO No.</label>
+          <input value={form.refNo || ''} onChange={e => set('refNo', e.target.value)} style={styles.input} placeholder="e.g. DO-2024-001" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Received by</label>
+          <select value={form.receivedBy || ''} onChange={e => set('receivedBy', e.target.value)} style={styles.input}>
+            <option value="">— Select employee —</option>
+            {employees.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1/-1', ...styles.formGroup }}>
+          <label style={styles.label}>Overall Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)} style={{ ...styles.input, width: 200 }}>
+            {['received','partially received','returned','pending verification'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ marginTop: 14, marginBottom: 6, fontWeight: 600, fontSize: 13, color: '#1E2A4A' }}>
+        Items Received
+        <button style={{ ...styles.ghostBtn, fontSize: 11, marginLeft: 10 }} onClick={addItem}>+ Add item</button>
+      </div>
+      {form.items.map((it, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 1.2fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+          <input value={it.description} onChange={e => updateItem(i,'description',e.target.value)} style={{ ...styles.input, fontSize: 12 }} placeholder="Description" />
+          <input value={it.qty} onChange={e => updateItem(i,'qty',e.target.value)} style={{ ...styles.input, fontSize: 12 }} placeholder="Qty" />
+          <select value={it.unit} onChange={e => updateItem(i,'unit',e.target.value)} style={{ ...styles.input, fontSize: 12 }}>
+            {['nos','m','m²','kg','ltr','roll','set','lot'].map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <select value={it.condition} onChange={e => updateItem(i,'condition',e.target.value)} style={{ ...styles.input, fontSize: 12 }}>
+            {['good','damaged','partial'].map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <button onClick={() => removeItem(i)} style={{ ...styles.ghostBtn, color: '#B5453A', fontSize: 12, padding: '4px 8px' }}>×</button>
+        </div>
+      ))}
+      {form.items.length === 0 && <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>No items added.</div>}
+      <div style={{ ...styles.formGroup, marginTop: 10 }}>
+        <label style={styles.label}>Remarks</label>
+        <textarea value={form.remarks || ''} onChange={e => set('remarks', e.target.value)} style={{ ...styles.input, height: 50 }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => {
+          if (!form.date || !form.projectId) return alert('Date and project required');
+          onSave(form);
+        }}>Save Receipt</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Site Attendance ─────────────────────────────────────────────────────────────
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, projects, employees, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProject, setFilterProject] = useState('');
+  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const sorted = [...siteAttendance]
+    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  function save(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID() };
+    setSiteAttendance(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
+    setEditing(null);
+  }
+  function del(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
+  const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵' };
+  // Monthly summary per employee
+  const empSummary = employees.reduce((acc, emp) => {
+    const records = sorted.flatMap(r => (r.records || []).filter(x => x.employeeId === emp.id));
+    acc[emp.id] = {
+      present: records.filter(x => x.status === 'present').length,
+      halfDay: records.filter(x => x.status === 'half_day').length,
+      absent: records.filter(x => x.status === 'absent').length,
+      leave: records.filter(x => x.status === 'leave').length,
+      total: records.length,
+    };
+    return acc;
+  }, {});
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 className="serif" style={styles.h2}>Site Attendance</h2>
+          <p style={styles.muted}>{siteAttendance.length} daily record{siteAttendance.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0, 10), records: [] })}>+ Mark Attendance</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ ...styles.input, width: 220 }}>
+          <option value="">All Projects</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ ...styles.input, width: 160 }} />
+        <button style={styles.ghostBtn} onClick={() => setFilterMonth('')}>All months</button>
+      </div>
+
+      {/* Monthly summary */}
+      {employees.length > 0 && (
+        <>
+          <div style={styles.dashSection}>Monthly Summary — {filterMonth || 'All time'}</div>
+          <div style={{ overflowX: 'auto', marginBottom: 20 }}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={{ background: '#F5F3EE' }}>
+                  {['Employee', 'Days Logged', 'Present', 'Half Day', 'Absent', 'Leave', 'Attendance %'].map(h => (
+                    <th key={h} style={{ ...styles.th, textAlign: h === 'Employee' ? 'left' : 'center' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map(emp => {
+                  const s = empSummary[emp.id] || {};
+                  const pct = s.total ? Math.round(((s.present + s.halfDay * 0.5) / s.total) * 100) : 0;
+                  return (
+                    <tr key={emp.id} style={{ borderTop: '1px solid #EAE6DB' }}>
+                      <td style={styles.td}>{emp.name}</td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>{s.total || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center', color: '#1A7A3E', fontWeight: 600 }}>{s.present || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center', color: '#C9A24B' }}>{s.halfDay || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center', color: '#B5453A' }}>{s.absent || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center', color: '#6B5BAE' }}>{s.leave || 0}</td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>
+                        <span style={{ fontWeight: 700, color: pct >= 80 ? '#1A7A3E' : pct >= 60 ? '#C9A24B' : '#B5453A' }}>{s.total ? `${pct}%` : '—'}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Daily records */}
+      <div style={styles.dashSection}>Daily Records</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sorted.map(r => {
+          const proj = projects.find(p => p.id === r.projectId);
+          const presentCount = (r.records || []).filter(x => x.status === 'present').length;
+          return (
+            <div key={r.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '12px 16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{r.date}</span>
+                  <span style={{ fontSize: 12, color: '#888', marginLeft: 10 }}>{proj?.name || '—'}</span>
+                  <span style={{ fontSize: 12, color: '#1A7A3E', marginLeft: 10 }}>{presentCount}/{(r.records || []).length} present</span>
+                </div>
+                {canEdit && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(r)}>Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(r.id)}>×</button>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(r.records || []).map((rec, i) => {
+                  const emp = employees.find(e => e.id === rec.employeeId);
+                  return (
+                    <span key={i} style={{ fontSize: 12, background: '#F5F3EE', borderRadius: 8, padding: '3px 10px' }}>
+                      {STATUS_ICON[rec.status] || '?'} {emp?.name || '?'}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No attendance records for this period.</div>}
+      </div>
+      {editing && <AttendanceSheet sheet={editing} projects={projects} employees={employees} onSave={save} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function AttendanceSheet({ sheet, projects, employees, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10), projectId: '',
+    records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })),
+    ...sheet,
+  });
+  // If editing and records don't cover all employees, fill missing ones
+  useEffect(() => {
+    if (form.records.length === 0 && employees.length > 0) {
+      setForm(f => ({ ...f, records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })) }));
+    }
+  }, []);
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function setRecord(i, k, v) {
+    const recs = [...form.records]; recs[i] = { ...recs[i], [k]: v }; set('records', recs);
+  }
+  const STATUSES = [
+    { value: 'present',  label: 'Present',  color: '#1A7A3E' },
+    { value: 'absent',   label: 'Absent',   color: '#B5453A' },
+    { value: 'half_day', label: 'Half Day', color: '#C9A24B' },
+    { value: 'leave',    label: 'Leave',    color: '#6B5BAE' },
+  ];
+  // Filter to project team if project selected
+  const proj = projects.find(p => p.id === form.projectId);
+  const relevantEmps = proj?.teamIds?.length
+    ? employees.filter(e => proj.teamIds.includes(e.id))
+    : employees;
+  const displayRecords = form.records.filter(r => relevantEmps.some(e => e.id === r.employeeId));
+  return (
+    <Modal title="Mark Attendance" onClose={onClose} width={580}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Date *</label>
+          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Project</label>
+          <select value={form.projectId} onChange={e => set('projectId', e.target.value)} style={styles.input}>
+            <option value="">— All / General —</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#1E2A4A' }}>
+        Employees ({relevantEmps.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
+        {displayRecords.map((rec, i) => {
+          const emp = employees.find(e => e.id === rec.employeeId);
+          const allIdx = form.records.findIndex(r => r.employeeId === rec.employeeId);
+          return (
+            <div key={rec.employeeId} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 3fr', gap: 10, alignItems: 'center', padding: '8px 12px', background: '#FAF8F4', borderRadius: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>{emp?.name || '?'}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {STATUSES.map(s => (
+                  <button key={s.value} onClick={() => setRecord(allIdx, 'status', s.value)}
+                    style={{ fontSize: 11, padding: '3px 7px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                      background: rec.status === s.value ? s.color : '#EAE6DB',
+                      color: rec.status === s.value ? '#fff' : '#666', fontWeight: rec.status === s.value ? 700 : 400 }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <input value={rec.note || ''} onChange={e => setRecord(allIdx, 'note', e.target.value)}
+                style={{ ...styles.input, fontSize: 12, padding: '4px 8px' }} placeholder="Note (optional)" />
+            </div>
+          );
+        })}
+        {displayRecords.length === 0 && <div style={{ color: '#aaa', fontSize: 13 }}>No employees to show. Add team in the project settings.</div>}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => {
+          if (!form.date) return alert('Date required');
+          onSave(form);
+        }}>Save Attendance</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Quarterly Evaluation ────────────────────────────────────────────────────────
+function QuarterlyEvalView({ evaluations, setEvaluations, employees, siteAttendance, dsrReports, projects, userRole }) {
+  const [editing, setEditing] = useState(null);
+  const [filterEmp, setFilterEmp] = useState('');
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const sorted = [...evaluations]
+    .filter(e => !filterEmp || e.employeeId === filterEmp)
+    .sort((a, b) => `${b.year}${b.quarter}`.localeCompare(`${a.year}${a.quarter}`));
+
+  // Auto-compute stats for an employee in a given period
+  function computeStats(employeeId, quarter, year) {
+    const qMonths = { Q1: ['01','02','03'], Q2: ['04','05','06'], Q3: ['07','08','09'], Q4: ['10','11','12'] }[quarter];
+    const prefix = qMonths.map(m => `${year}-${m}`);
+    const attRecs = siteAttendance
+      .filter(r => prefix.some(p => (r.date || '').startsWith(p)))
+      .flatMap(r => (r.records || []).filter(x => x.employeeId === employeeId));
+    const total = attRecs.length;
+    const present = attRecs.filter(x => x.status === 'present').length;
+    const halfDay = attRecs.filter(x => x.status === 'half_day').length;
+    const attPct = total ? Math.round(((present + halfDay * 0.5) / total) * 100) : 0;
+    const dsrCount = dsrReports
+      .filter(r => prefix.some(p => (r.date || '').startsWith(p)))
+      .filter(r => (r.activities || []).some(a => a.employeeId === employeeId))
+      .length;
+    return { attPct, dsrCount, totalDays: total };
+  }
+
+  function save(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID() };
+    setEvaluations(prev => form.id ? prev.map(e => e.id === form.id ? rec : e) : [...prev, rec]);
+    setEditing(null);
+  }
+  function del(id) { if (confirm('Delete evaluation?')) setEvaluations(prev => prev.filter(e => e.id !== id)); }
+
+  const RATING_COLOR = { 5: '#1A7A3E', 4: '#3D7A5C', 3: '#C9A24B', 2: '#E07A2B', 1: '#B5453A' };
+  const currentYear = new Date().getFullYear();
+  const currentQ = `Q${Math.ceil((new Date().getMonth() + 1) / 3)}`;
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 className="serif" style={styles.h2}>Quarterly Evaluation</h2>
+          <p style={styles.muted}>{evaluations.length} evaluation{evaluations.length !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, quarter: currentQ, year: String(currentYear), ratings: { punctuality: 3, quality: 3, teamwork: 3, safety: 3, initiative: 3 } })}>+ New Evaluation</button>}
+      </div>
+      <select value={filterEmp} onChange={e => setFilterEmp(e.target.value)} style={{ ...styles.input, width: 240, marginBottom: 16 }}>
+        <option value="">All Employees</option>
+        {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+      </select>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {sorted.map(ev => {
+          const emp = employees.find(e => e.id === ev.employeeId);
+          const ratings = ev.ratings || {};
+          const ratingVals = Object.values(ratings).filter(v => typeof v === 'number');
+          const avgRating = ratingVals.length ? (ratingVals.reduce((a, b) => a + b, 0) / ratingVals.length).toFixed(1) : '—';
+          const overall = parseFloat(avgRating);
+          return (
+            <div key={ev.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '16px 18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 15, color: '#1E2A4A' }}>{emp?.name || '?'}</div>
+                  <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>{ev.quarter} {ev.year}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: RATING_COLOR[Math.round(overall)] || '#888' }}>{avgRating}</div>
+                    <div style={{ fontSize: 10, color: '#aaa' }}>avg / 5</div>
+                  </div>
+                  {canEdit && <>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(ev)}>Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(ev.id)}>×</button>
+                  </>}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 10 }}>
+                {[['punctuality','Punctuality'],['quality','Quality'],['teamwork','Teamwork'],['safety','Safety'],['initiative','Initiative']].map(([k, label]) => (
+                  <div key={k} style={{ textAlign: 'center', background: '#FAF8F4', borderRadius: 8, padding: '8px 4px' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: RATING_COLOR[ratings[k]] || '#aaa' }}>{ratings[k] || '—'}</div>
+                    <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12, color: '#555' }}>
+                <div>📅 Attendance: <strong style={{ color: ev.attPct >= 80 ? '#1A7A3E' : '#C9A24B' }}>{ev.attPct ?? '—'}%</strong></div>
+                <div>📋 DSR days: <strong>{ev.dsrCount ?? '—'}</strong></div>
+                <div>📝 Status: <strong>{ev.status || 'draft'}</strong></div>
+              </div>
+              {ev.comments && <div style={{ fontSize: 12, color: '#666', marginTop: 8, fontStyle: 'italic', borderTop: '1px solid #F0EDE6', paddingTop: 8 }}>{ev.comments}</div>}
+            </div>
+          );
+        })}
+        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No evaluations recorded.</div>}
+      </div>
+      {editing && (
+        <QuarterlyEvalForm
+          evaluation={editing} employees={employees} computeStats={computeStats}
+          onSave={save} onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuarterlyEvalForm({ evaluation, employees, computeStats, onSave, onClose }) {
+  const currentYear = new Date().getFullYear();
+  const [form, setForm] = useState({
+    employeeId: '', quarter: 'Q1', year: String(currentYear), status: 'draft',
+    ratings: { punctuality: 3, quality: 3, teamwork: 3, safety: 3, initiative: 3 },
+    attPct: null, dsrCount: null, comments: '',
+    ...evaluation,
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function setRating(k, v) { setForm(f => ({ ...f, ratings: { ...f.ratings, [k]: v } })); }
+  // Auto-compute when employee/quarter/year changes
+  useEffect(() => {
+    if (form.employeeId && form.quarter && form.year) {
+      const stats = computeStats(form.employeeId, form.quarter, form.year);
+      setForm(f => ({ ...f, attPct: stats.attPct, dsrCount: stats.dsrCount, totalDays: stats.totalDays }));
+    }
+  }, [form.employeeId, form.quarter, form.year]);
+  const RATING_LABELS = { 1: 'Poor', 2: 'Below avg', 3: 'Average', 4: 'Good', 5: 'Excellent' };
+  const CRITERIA = [
+    ['punctuality', 'Punctuality & Attendance'],
+    ['quality', 'Quality of Work'],
+    ['teamwork', 'Teamwork & Cooperation'],
+    ['safety', 'Safety Compliance'],
+    ['initiative', 'Initiative & Attitude'],
+  ];
+  const avgRating = (Object.values(form.ratings).reduce((a, b) => a + b, 0) / Object.values(form.ratings).length).toFixed(1);
+  return (
+    <Modal title={form._isNew ? 'New Quarterly Evaluation' : 'Edit Evaluation'} onClose={onClose} width={580}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Employee *</label>
+          <select value={form.employeeId} onChange={e => set('employeeId', e.target.value)} style={styles.input}>
+            <option value="">— Select —</option>
+            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Quarter</label>
+          <select value={form.quarter} onChange={e => set('quarter', e.target.value)} style={styles.input}>
+            {['Q1','Q2','Q3','Q4'].map(q => <option key={q} value={q}>{q}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Year</label>
+          <select value={form.year} onChange={e => set('year', e.target.value)} style={styles.input}>
+            {[currentYear, currentYear-1, currentYear-2].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Auto-computed stats */}
+      {form.employeeId && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+          {[['Attendance %', form.attPct !== null ? `${form.attPct}%` : '—', form.attPct >= 80 ? '#1A7A3E' : '#C9A24B'],
+            ['DSR Days', form.dsrCount ?? '—', '#1E2A4A'],
+            ['Working Days', form.totalDays ?? '—', '#555']].map(([label, val, color]) => (
+            <div key={label} style={{ background: '#FAF8F4', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color }}>{val}</div>
+              <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ratings */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, color: '#1E2A4A', marginBottom: 10 }}>
+          Performance Ratings &nbsp;
+          <span style={{ fontSize: 11, color: '#888', fontWeight: 400 }}>(1 = Poor → 5 = Excellent)</span>
+        </div>
+        {CRITERIA.map(([k, label]) => (
+          <div key={k} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+            <label style={{ fontSize: 13, color: '#444' }}>{label}</label>
+            <input type="range" min={1} max={5} value={form.ratings[k] || 3}
+              onChange={e => setRating(k, +e.target.value)}
+              style={{ accentColor: '#1E2A4A' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#1E2A4A', width: 80, textAlign: 'right' }}>
+              {form.ratings[k]}/5 — {RATING_LABELS[form.ratings[k]]}
+            </span>
+          </div>
+        ))}
+        <div style={{ textAlign: 'right', fontSize: 13, color: '#1E2A4A', fontWeight: 600, marginTop: 4 }}>
+          Overall average: {avgRating} / 5
+        </div>
+      </div>
+
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Comments / Recommendations</label>
+        <textarea value={form.comments || ''} onChange={e => set('comments', e.target.value)}
+          style={{ ...styles.input, height: 64 }} placeholder="Strengths, areas for improvement, promotion/training recommendations…" />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Evaluator</label>
+          <input value={form.evaluator || ''} onChange={e => set('evaluator', e.target.value)} style={styles.input} placeholder="Manager / Admin name" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)} style={styles.input}>
+            {['draft','submitted','acknowledged'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => {
+          if (!form.employeeId) return alert('Select an employee');
+          onSave(form);
+        }}>Save Evaluation</button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,             setView]           = useState('dashboard');
@@ -8678,6 +9618,11 @@ export default function App() {
   const [scopeOfWork,      _setSOW]    = useState([]);
   const [qualityDocs,      _setQD]     = useState({ isoPrinciples: [], deptProcedures: [], inprocessQA: [] });
   const [pdvs,             _setPdvs]   = useState([]);
+  const [siteProjects,     _setSP]     = useState([]);
+  const [dsrReports,       _setDSR]    = useState([]);
+  const [clientMaterials,  _setCM]     = useState([]);
+  const [siteAttendance,   _setSA]     = useState([]);
+  const [evaluations,      _setEvls]   = useState([]);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -8736,6 +9681,11 @@ export default function App() {
       _setSOW(data.scopeOfWork || []);
       _setQD(data.qualityDocs || { isoPrinciples: [], deptProcedures: [], inprocessQA: [] });
       _setPdvs(data.pdvs || []);
+      _setSP(data.siteProjects || []);
+      _setDSR(data.dsrReports || []);
+      _setCM(data.clientMaterials || []);
+      _setSA(data.siteAttendance || []);
+      _setEvls(data.evaluations || []);
     });
     return unsub;
   }, [ownerUid]);
@@ -8789,6 +9739,11 @@ export default function App() {
   const setScopeOfWork      = mkSet(_setSOW,   'scopeOfWork');
   const setQualityDocs      = mkSet(_setQD,    'qualityDocs');
   const setPdvs             = mkSet(_setPdvs,  'pdvs');
+  const setSiteProjects     = mkSet(_setSP,    'siteProjects');
+  const setDsrReports       = mkSet(_setDSR,   'dsrReports');
+  const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
+  const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
+  const setEvaluations      = mkSet(_setEvls,  'evaluations');
 
   // ── Document number helpers ──────────────────────────────────────────────────
   function getFY(dateStr) {
@@ -9220,6 +10175,16 @@ export default function App() {
         return <TaxReport documents={documents} customers={customers} businessInfo={businessInfo} />;
       case 'scopeofwork':
         return <ScopeOfWorkView scopeOfWork={scopeOfWork} setScopeOfWork={setScopeOfWork} userRole={userRole} />;
+      case 'siteprojects':
+        return <SiteProjectsView projects={siteProjects} setProjects={setSiteProjects} employees={employees} userRole={userRole} />;
+      case 'dsrreports':
+        return <DSRView dsrReports={dsrReports} setDsrReports={setDsrReports} projects={siteProjects} employees={employees} clientMaterials={clientMaterials} userRole={userRole} />;
+      case 'clientmaterials':
+        return <ClientMaterialView clientMaterials={clientMaterials} setClientMaterials={setClientMaterials} projects={siteProjects} employees={employees} userRole={userRole} />;
+      case 'siteattendance':
+        return <SiteAttendanceView siteAttendance={siteAttendance} setSiteAttendance={setSiteAttendance} projects={siteProjects} employees={employees} userRole={userRole} />;
+      case 'evaluation':
+        return <QuarterlyEvalView evaluations={evaluations} setEvaluations={setEvaluations} employees={employees} siteAttendance={siteAttendance} dsrReports={dsrReports} projects={siteProjects} userRole={userRole} />;
       case 'isoprinciples':
         return <ISOPrinciplesView qualityDocs={qualityDocs} setQualityDocs={setQualityDocs} userRole={userRole} />;
       case 'deptprocedures':
