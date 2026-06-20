@@ -857,7 +857,7 @@ function TemplateMiniPreview({ template, name }) {
 }
 
 
-function SettingsView({ businessInfo, setBusinessInfo }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData }) {
   const [form, setForm] = useState(businessInfo);
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
@@ -1077,6 +1077,35 @@ function SettingsView({ businessInfo, setBusinessInfo }) {
         </div>
 
         <button onClick={() => setBusinessInfo(form)} style={styles.primaryBtn}>Save profile</button>
+
+        {/* ── Data & Privacy ── */}
+        <div style={{ ...styles.sectionDivider, marginTop: 32 }}>Data &amp; Privacy</div>
+        <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 22px', marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <div style={{ fontSize: 26 }}>🔒</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>Your data belongs to you</div>
+              <div style={{ fontSize: 13, color: '#666', lineHeight: 1.6, marginBottom: 14 }}>
+                All your business data is stored securely on Google Cloud (256-bit encryption, TLS in transit).
+                We never sell, share, or use your data for advertising. You can export or delete everything at any time.
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button onClick={onExportData} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Download size={14} /> Export all my data (JSON)
+                </button>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer"
+                  style={{ ...styles.ghostBtn, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  Privacy Policy ↗
+                </a>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+                {['256-bit encrypted', 'Google Cloud India', 'No ads, ever', 'DPDP Act 2023 compliant'].map(tag => (
+                  <span key={tag} style={{ background: '#EEF5F0', color: '#1A7A3E', borderRadius: 10, padding: '3px 10px', fontSize: 11.5, fontWeight: 600 }}>✓ {tag}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -8326,6 +8355,41 @@ export default function App() {
 
   async function handleLogout() { await logOut(); }
 
+  function exportAllData() {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: user?.email || '',
+      businessInfo,
+      documents,
+      customers,
+      vendors,
+      items,
+      stockLedger,
+      grns,
+      vouchers,
+      pettyCash,
+      employees,
+      payrollRuns,
+      serviceOrders,
+      productionOrders,
+      rawMaterials,
+      boms,
+      parts,
+      engDocs,
+      enquiries,
+      contracts,
+      channelPartners,
+      termsLibrary,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `operix-data-${(businessInfo.name || 'export').replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const companyType = (businessInfo && businessInfo.companyType) || 'trading';
   const country     = (businessInfo && businessInfo.country)     || 'india';
   const showTrade   = companyType === 'trading' || companyType === 'both' || companyType === 'manufacturing';
@@ -8452,7 +8516,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} />;
       case 'pettycash':
         return (
           <PettyCashList
@@ -8678,7 +8742,7 @@ export default function App() {
           .print-area, .print-area * { visibility: visible !important; }
           .print-area {
             position: absolute !important;
-            top: 0 !important; left: 0 !important;
+               top: 0 !important; left: 0 !important;
             right: auto !important; bottom: auto !important;
             width: 100% !important; height: auto !important;
             overflow: visible !important;
