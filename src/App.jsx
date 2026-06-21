@@ -2259,6 +2259,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
   const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
+  const bizBadge = BIZ_BADGE[doc.bizType];
+  const showBizBadge = !!bizBadge;
 
   const t = DOC_TYPES[doc.type];
   if (!t) return <div style={{ padding: 32, color: '#B5453A' }}>Unknown document type: "{doc.type}". Please go back and try again.</div>;
