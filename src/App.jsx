@@ -1696,16 +1696,18 @@ function ApprovalActions({ item, onUpdate, userRole, compact = false }) {
 
 function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'] }) {
   const isMultiBiz = activeTypes.length > 1;
-  const [filterBizType, setFilterBizType] = React.useState('all');
+  const [filterBizType, setFilterBizType] = React.useState(
+    activeTypes.length === 1 ? activeTypes[0] : 'all'
+  );
   const BIZ_FILTER_TABS = [
     { key: 'all',           label: 'All' },
     { key: 'trading',       label: '🛒 Trading' },
     { key: 'manufacturing', label: '🏭 Manufacturing' },
     { key: 'service',       label: '🔧 Services' },
   ].filter(t => t.key === 'all' || activeTypes.includes(t.key));
-  const visibleDocs = isMultiBiz && filterBizType !== 'all'
-    ? docs.filter(d => (d.bizType || 'trading') === filterBizType)
-    : docs;
+  const visibleDocs = filterBizType === 'all'
+    ? docs
+    : docs.filter(d => (d.bizType || 'trading') === filterBizType);
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -1844,12 +1846,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     );
   }
 
-  function CreateBtn({ docKey }) {
+  function CreateBtn({ docKey, bizType: btnBizType }) {
     const t = DOC_TYPES[docKey];
     if (!t) return null;
     return (
       <button
-        onClick={() => startNewDoc(docKey)}
+        onClick={() => startNewDoc(docKey, btnBizType || activeTypes[0])}
         style={{ ...styles.navItem, fontSize: 12.5, color: '#A9B0C9', paddingLeft: 28 }}>
         <Plus size={13} strokeWidth={2} />{t.label}
       </button>
@@ -1939,7 +1941,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
         {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
         <CreateBtn docKey="quotation" />
-        {showService && <CreateBtn docKey="invoice" />}
+        {showService && <CreateBtn docKey="invoice" bizType="service" />}
       </Section>
 
       {/* Accounts */}
