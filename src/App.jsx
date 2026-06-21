@@ -1337,80 +1337,228 @@ const DASHBOARD_DOC_TYPES = {
   both:          ['quotation', 'invoice', 'delivery', 'packing_list', 'creditnote', 'purchase', 'purchasebill'],
 };
 
-function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading' }) {
-  const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
-  const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
-  const showProduction = companyType === 'manufacturing' || companyType === 'both';
-  const showService    = companyType === 'service';
-  const showTrade      = companyType !== 'service';
-  const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
-  const cur = (n) => currency(n, cc.currency);
+// ── Per-activity stats column ──────────────────────────────────────────────────
+function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, vendors, productionOrders, siteProjects, siteAttendance, startNewDoc, openDoc, setView, cur, items }) {
+  const BIZ_DOC_TYPES = {
+    trading:       ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
+    manufacturing: ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
+    service:       ['quotation','invoice','creditnote'],
+  };
+  const allowed = BIZ_DOC_TYPES[bizType] || [];
+  const bizDocs = docs.filter(d => (d.bizType || 'trading') === bizType);
+  const invoiced  = bizDocs.filter(d=>d.type==='invoice').reduce((s,d)=>s+(d.total||0),0);
+  const outstanding = bizDocs.filter(d=>d.type==='invoice'&&d.status!=='paid').reduce((s,d)=>s+(d.total||0),0);
+  const recent = [...bizDocs].sort((a,b)=>b.createdAt-a.createdAt).slice(0,3);
   return (
-    <div style={styles.page}>
-      <div style={styles.pageHeader}>
-        <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
-        <p style={styles.muted}>Here's what's happening across your business.</p>
-      </div>
-
-      <div style={styles.dashSection}>Sales</div>
-      <div style={styles.statGrid}>
-        <StatCard label="Total invoiced" value={cur(stats.totalRevenue)} accent="#1E2A4A" />
-        <StatCard label="Outstanding (receivable)" value={cur(stats.outstanding)} accent="#B5453A" />
-        <StatCard label="Quotations" value={stats.counts.quotation || 0} accent="#C9A24B" sub="created" />
-        {showTrade && <StatCard label="Delivery notes" value={stats.counts.delivery || 0} accent="#3D7A5C" sub="created" />}
-      </div>
-
-      {showTrade && <>
-        <div style={styles.dashSection}>Purchase</div>
-        <div style={styles.statGrid}>
-          <StatCard label="Total purchases" value={cur(stats.totalPurchases)} accent="#6B5BAE" />
-          <StatCard label="Payable to vendors" value={cur(stats.payable)} accent="#8A6FD6" />
-          <StatCard label="Purchase orders" value={stats.counts.purchase || 0} accent="#6B5BAE" sub="raised" />
-          <StatCard label="Vendors" value={vendors.length} accent="#555" sub="registered" />
+    <div style={{ background: '#fff', border: `2px solid ${color}22`, borderRadius: 14, padding: '18px 16px', flex: 1, minWidth: 260 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, paddingBottom: 10, borderBottom: `2px solid ${color}22` }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>{icon}</div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</div>
+          <div style={{ fontSize: 11, color: '#aaa' }}>{bizDocs.length} documents</div>
         </div>
-      </>}
-
-      <div style={styles.dashSection}>Accounts</div>
-      <div style={styles.statGrid}>
-        <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
-        <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
-        <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
-        <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
+        <button onClick={()=>setView('documents')} style={{ ...{padding:'3px 10px',borderRadius:8,border:'1px solid #EAE6DB',background:'#FAF8F4',cursor:'pointer',fontSize:11,color:'#666',marginLeft:'auto'} }}>View all</button>
       </div>
 
-      {showTrade && <>
-        <div style={styles.dashSection}>Inventory</div>
-        <div style={styles.statGrid}>
-          <StatCard label="Items master" value={stats.itemCount} accent="#3D7A5C" sub="products / services" />
-          <StatCard label="Low / out of stock" value={stats.lowStockCount || 0} accent={stats.lowStockCount > 0 ? '#B91C1C' : '#3D7A5C'} sub={stats.lowStockCount > 0 ? 'needs attention' : 'all items ok'} />
-          {showProduction && <StatCard label="Raw materials" value={stats.rmCount} accent="#C9A24B" sub="in master" />}
-          {showProduction && <StatCard label="Production orders" value={stats.poCount} accent="#1E2A4A" sub={`${stats.poOpen} open`} />}
+      {/* Key stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+        <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{cur(invoiced)}</div>
+          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Total invoiced</div>
         </div>
-      </>}
-
-      <div style={styles.sectionRow}>
-        <div className="serif" style={styles.h2}>Quick create</div>
+        <div style={{ background: '#FEF0E0', borderRadius: 8, padding: '8px 10px' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#B5453A' }}>{cur(outstanding)}</div>
+          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Outstanding</div>
+        </div>
+        {bizType !== 'service' && (
+          <>
+            <div style={{ background: '#F0EAF9', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#6B5BAE' }}>{bizDocs.filter(d=>d.type==='purchase').length}</div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Purchase orders</div>
+            </div>
+            <div style={{ background: '#E6F5EC', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1A7A3E' }}>{items?.length || 0}</div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Items in master</div>
+            </div>
+          </>
+        )}
+        {bizType === 'manufacturing' && (
+          <>
+            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px', gridColumn: '1/-1' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>
+                {productionOrders?.filter(o=>o.status==='in_progress').length || 0}
+                <span style={{ fontSize: 11, color: '#888', fontWeight: 400, marginLeft: 6 }}>in progress</span>
+              </div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Production orders</div>
+            </div>
+          </>
+        )}
+        {bizType === 'service' && (
+          <>
+            <div style={{ background: '#E0F2F9', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E7A9A' }}>{siteProjects?.filter(p=>p.status==='active').length || 0}</div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Active sites</div>
+            </div>
+            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{siteAttendance?.filter(r=>r.date===new Date().toISOString().slice(0,10)).reduce((s,r)=>(s+(r.records||[]).filter(x=>x.status==='present').length),0) || 0}</div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Present today</div>
+            </div>
+          </>
+        )}
       </div>
-      <div style={styles.quickGrid}>
-        {Object.entries(DOC_TYPES).filter(([key]) => allowedTypes.includes(key)).map(([key, t]) => (
-          <button key={key} onClick={() => startNewDoc(key)} style={styles.quickCard}>
-            <t.icon size={22} strokeWidth={1.6} color={t.color} />
-            <span style={styles.quickLabel}>{t.label}</span>
-            <span style={styles.quickCount}>{stats.counts[key] || 0} created</span>
+
+      {/* Quick create */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Quick create</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+        {Object.entries(DOC_TYPES).filter(([k])=>allowed.includes(k)).map(([k, t]) => (
+          <button key={k} onClick={()=>startNewDoc(k, bizType)}
+            style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, border:'1px solid #EAE6DB', background:'#FAF8F4', cursor:'pointer', fontSize:12, color:'#1E2A4A' }}>
+            <t.icon size={13} color={t.color} />
+            {t.label}
           </button>
         ))}
       </div>
 
-      <div style={styles.sectionRow}>
-        <div className="serif" style={styles.h2}>Recent documents</div>
-        <button onClick={() => setView('documents')} style={styles.linkBtn}>View all</button>
+      {/* Recent docs */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Recent</div>
+      {recent.length === 0
+        ? <div style={{ fontSize: 12, color: '#ccc', padding: '8px 0' }}>No documents yet</div>
+        : recent.map(d => (
+            <div key={d.id} onClick={()=>openDoc(d)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderTop:'1px solid #F0EDE6', cursor:'pointer' }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1E2A4A' }}>{d.number}</div>
+                <div style={{ fontSize: 11, color: '#aaa' }}>{DOC_TYPES[d.type]?.label || d.type}</div>
+              </div>
+              <div style={{ fontSize: 12, color: '#1E2A4A', fontWeight: 600 }}>{cur(d.total || 0)}</div>
+            </div>
+          ))
+      }
+    </div>
+  );
+}
+
+function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [] }) {
+  const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
+  const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  const showProduction = activeTypes.includes('manufacturing');
+  const showService    = activeTypes.includes('service');
+  const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
+  const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
+  const cur = (n) => currency(n, cc.currency);
+
+  const BIZ_META = {
+    trading:       { label: 'Trading',              icon: '🛒', color: '#C9A24B' },
+    manufacturing: { label: 'Manufacturing',         icon: '🏭', color: '#1E2A4A' },
+    service:       { label: 'Services / MEP Suite',  icon: '🔧', color: '#1E7A9A' },
+  };
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
+        <p style={styles.muted}>{isMultiBiz ? `${activeTypes.length} business activities running` : `Here's what's happening across your business.`}</p>
       </div>
-      {recent.length === 0 ? (
-        <div style={styles.emptyBox}>No documents yet. Pick a type above to create your first one.</div>
+
+      {/* ── MULTI-BUSINESS: column view ─────────────────────────────────────── */}
+      {isMultiBiz ? (
+        <>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 24 }}>
+            {activeTypes.map(bt => (
+              <ActivityColumn
+                key={bt}
+                bizType={bt}
+                label={BIZ_META[bt]?.label || bt}
+                color={BIZ_META[bt]?.color || '#888'}
+                icon={BIZ_META[bt]?.icon || '📁'}
+                docs={documents}
+                stats={stats}
+                customers={customers}
+                vendors={vendors}
+                productionOrders={productionOrders}
+                siteProjects={siteProjects}
+                siteAttendance={siteAttendance}
+                startNewDoc={startNewDoc}
+                openDoc={openDoc}
+                setView={setView}
+                cur={cur}
+                items={items}
+              />
+            ))}
+          </div>
+
+          {/* Shared accounts summary */}
+          <div style={styles.dashSection}>Accounts (shared)</div>
+          <div style={styles.statGrid}>
+            <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
+            <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
+            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
+            <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
+          </div>
+        </>
       ) : (
-        <div style={styles.list}>
-          {recent.map((d) => <DocRow key={d.id} doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={businessInfo} />)}
-        </div>
+        /* ── SINGLE BUSINESS: original layout ──────────────────────────────── */
+        <>
+          <div style={styles.dashSection}>Sales</div>
+          <div style={styles.statGrid}>
+            <StatCard label="Total invoiced" value={cur(stats.totalRevenue)} accent="#1E2A4A" />
+            <StatCard label="Outstanding (receivable)" value={cur(stats.outstanding)} accent="#B5453A" />
+            <StatCard label="Quotations" value={stats.counts.quotation || 0} accent="#C9A24B" sub="created" />
+            {showTrade && <StatCard label="Delivery notes" value={stats.counts.delivery || 0} accent="#3D7A5C" sub="created" />}
+          </div>
+
+          {showTrade && <>
+            <div style={styles.dashSection}>Purchase</div>
+            <div style={styles.statGrid}>
+              <StatCard label="Total purchases" value={cur(stats.totalPurchases)} accent="#6B5BAE" />
+              <StatCard label="Payable to vendors" value={cur(stats.payable)} accent="#8A6FD6" />
+              <StatCard label="Purchase orders" value={stats.counts.purchase || 0} accent="#6B5BAE" sub="raised" />
+              <StatCard label="Vendors" value={vendors.length} accent="#555" sub="registered" />
+            </div>
+          </>}
+
+          <div style={styles.dashSection}>Accounts</div>
+          <div style={styles.statGrid}>
+            <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
+            <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
+            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
+            <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
+          </div>
+
+          {showTrade && <>
+            <div style={styles.dashSection}>Inventory</div>
+            <div style={styles.statGrid}>
+              <StatCard label="Items master" value={stats.itemCount} accent="#3D7A5C" sub="products / services" />
+              <StatCard label="Low / out of stock" value={stats.lowStockCount || 0} accent={stats.lowStockCount > 0 ? '#B91C1C' : '#3D7A5C'} sub={stats.lowStockCount > 0 ? 'needs attention' : 'all items ok'} />
+              {showProduction && <StatCard label="Raw materials" value={stats.rmCount} accent="#C9A24B" sub="in master" />}
+              {showProduction && <StatCard label="Production orders" value={stats.poCount} accent="#1E2A4A" sub={`${stats.poOpen} open`} />}
+            </div>
+          </>}
+
+          <div style={styles.sectionRow}>
+            <div className="serif" style={styles.h2}>Quick create</div>
+          </div>
+          <div style={styles.quickGrid}>
+            {Object.entries(DOC_TYPES).filter(([key]) => allowedTypes.includes(key)).map(([key, t]) => (
+              <button key={key} onClick={() => startNewDoc(key, companyType)} style={styles.quickCard}>
+                <t.icon size={22} strokeWidth={1.6} color={t.color} />
+                <span style={styles.quickLabel}>{t.label}</span>
+                <span style={styles.quickCount}>{stats.counts[key] || 0} created</span>
+              </button>
+            ))}
+          </div>
+
+          <div style={styles.sectionRow}>
+            <div className="serif" style={styles.h2}>Recent documents</div>
+            <button onClick={() => setView('documents')} style={styles.linkBtn}>View all</button>
+          </div>
+          {recent.length === 0 ? (
+            <div style={styles.emptyBox}>No documents yet. Pick a type above to create your first one.</div>
+          ) : (
+            <div style={styles.list}>
+              {recent.map((d) => <DocRow key={d.id} doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={businessInfo} showBizBadge={true} />)}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1429,7 +1577,12 @@ function StatCard({ label, value, accent, sub }) {
   );
 }
 
-function DocRow({ doc, customers, vendors, onClick, businessInfo }) {
+const BIZ_BADGE = {
+  trading:       { label: 'Trading',       bg: '#FDF7E6', color: '#C9A24B' },
+  manufacturing: { label: 'Manufacturing', bg: '#EEF0F7', color: '#1E2A4A' },
+  service:       { label: 'MEP / Service', bg: '#E0F2F9', color: '#1E7A9A' },
+};
+function DocRow({ doc, customers, vendors, onClick, businessInfo, showBizBadge = false }) {
   const t = DOC_TYPES[doc.type];
   if (!t) return null;
   const partyList = t.party === 'vendor' ? (vendors || []) : customers;
@@ -1524,7 +1677,18 @@ function ApprovalActions({ item, onUpdate, userRole, compact = false }) {
   );
 }
 
-function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc }) {
+function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'] }) {
+  const isMultiBiz = activeTypes.length > 1;
+  const [filterBizType, setFilterBizType] = React.useState('all');
+  const BIZ_FILTER_TABS = [
+    { key: 'all',           label: 'All' },
+    { key: 'trading',       label: '🛒 Trading' },
+    { key: 'manufacturing', label: '🏭 Manufacturing' },
+    { key: 'service',       label: '🔧 Services' },
+  ].filter(t => t.key === 'all' || activeTypes.includes(t.key));
+  const visibleDocs = isMultiBiz && filterBizType !== 'all'
+    ? docs.filter(d => (d.bizType || 'trading') === filterBizType)
+    : docs;
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -1532,28 +1696,41 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
         <p style={styles.muted}>Every invoice, delivery note, quotation, purchase order, bill and credit note in one place.</p>
       </div>
 
+      {isMultiBiz && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+          {BIZ_FILTER_TABS.map(t => (
+            <button key={t.key} onClick={() => setFilterBizType(t.key)}
+              style={{ padding: '5px 14px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                background: filterBizType === t.key ? '#1E2A4A' : '#EAE6DB',
+                color: filterBizType === t.key ? '#fff' : '#555' }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={styles.toolbar}>
         <div style={styles.searchWrap}>
           <Search size={15} color="#888780" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by number, customer or vendor" style={styles.searchInput} />
         </div>
         <button style={styles.ghostBtn} onClick={() => downloadCSV('documents.csv',
-          ['Type', 'Number', 'Date', 'Party', 'Status', 'Amount'],
-          docs.map(d => {
+          ['Type', 'Number', 'Date', 'Party', 'Status', 'Amount', 'Activity'],
+          visibleDocs.map(d => {
             const party = customers.find(c => c.id === d.customerId) || vendors.find(v => v.id === d.customerId);
             const t = computeTotals(d, '', '');
-            return [d.type, d.number, d.date, party ? party.name : (d.customerSnapshot?.name || ''), d.status || '', t.grandTotal.toFixed(2)];
+            return [d.type, d.number, d.date, party ? party.name : (d.customerSnapshot?.name || ''), d.status || '', t.grandTotal.toFixed(2), d.bizType || 'trading'];
           })
         )}><Download size={14} /> Export CSV</button>
       </div>
 
-      {docs.length === 0 ? (
-        <div style={styles.emptyBox}>No documents found. Try a different search, or create a new document from the sidebar.</div>
+      {visibleDocs.length === 0 ? (
+        <div style={styles.emptyBox}>No documents found. Try a different search or activity filter, or create a new document from the sidebar.</div>
       ) : (
         <div style={styles.list}>
-          {docs.map((d) => (
+          {visibleDocs.map((d) => (
             <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1 }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} /></div>
+              <div style={{ flex: 1 }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} showBizBadge={isMultiBiz} /></div>
               <button onClick={() => deleteDoc(d.id)} style={styles.iconBtn} title="Delete"><Trash2 size={15} color="#B5453A" /></button>
             </div>
           ))}
@@ -1608,10 +1785,11 @@ const SECTION_VIEWS = {
   admin:       ['staff', 'contracts', 'termslibrary'],
 };
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, country }) {
-  const showTrade      = companyType !== 'service';                                   // trading, manufacturing, both
-  const showProduction = companyType === 'manufacturing' || companyType === 'both';   // manufacturing, both
-  const showService    = companyType === 'service';                                   // service only
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country }) {
+  const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
+  const showProduction = activeTypes.includes('manufacturing');
+  const showService    = activeTypes.includes('service');
+  const isMultiBiz     = activeTypes.length > 1;
 
   // Track manually collapsed sections (set of section keys)
   const [collapsed, setCollapsed] = useState(new Set());
@@ -1785,6 +1963,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         </Section>
       )}
 
+      {/* MEP Suite divider */}
+      {isMultiBiz && showService && (
+        <div style={{ fontSize: 10, fontWeight: 800, color: '#1E7A9A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid #EAE6DB' }}>🔧 Services / MEP Suite</div>
+      )}
       {/* MEP Suite — service / MEP manpower companies */}
       {showService && (
         <Section sectionKey="site" label="MEP Suite">
@@ -2140,6 +2322,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           <t.icon size={18} color={t.color} />
           <span className="serif">{t.label}</span>
           <StatusBadge status={doc.status} />
+            {showBizBadge && bizBadge && (
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: bizBadge.bg, color: bizBadge.color, letterSpacing: '0.04em' }}>{bizBadge.label}</span>
+            )}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Previous docs dropdown */}
@@ -10181,11 +10366,12 @@ export default function App() {
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
-  function startNewDoc(type) {
+  function startNewDoc(type, bizType) {
     const today = new Date().toISOString().slice(0, 10);
     setActiveDoc({
       ...blankDoc(type, businessInfo),
       number: nextDocNumber(type, today),
+      bizType: bizType || activeTypes[0] || 'trading',
     });
     setView('doceditor');
   }
@@ -10196,9 +10382,11 @@ export default function App() {
   }
 
   function convertDoc(srcDoc, newType) {
+    // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
     setActiveDoc({
       ...blankDoc(newType, businessInfo),
+      bizType: srcDoc.bizType || activeTypes[0] || 'trading',
       number: nextDocNumber(newType, today),
       customerId: srcDoc.customerId,
       customerSnapshot: srcDoc.customerSnapshot,
@@ -10267,7 +10455,21 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  const companyType = (businessInfo && businessInfo.companyType) || 'trading';
+  // Derive activeTypes array (new) — with backward compat for old companyType string
+  const activeTypes = (() => {
+    if (businessInfo?.activeTypes?.length) return businessInfo.activeTypes;
+    const ct = businessInfo?.companyType || 'trading';
+    if (ct === 'both') return ['trading','manufacturing'];
+    if (ct === 'all')  return ['trading','manufacturing','service'];
+    return [ct];
+  })();
+  const isMultiBiz = activeTypes.length > 1;
+  // Keep companyType string for legacy components that still read it
+  const companyType = activeTypes.length === 1 ? activeTypes[0]
+    : activeTypes.includes('service') && activeTypes.includes('manufacturing') ? 'both'
+    : activeTypes.includes('manufacturing') ? 'both'
+    : activeTypes.includes('service') ? 'service'
+    : 'trading';
   const country     = (businessInfo && businessInfo.country)     || 'india';
 
   const stats = useMemo(() => {
@@ -10353,6 +10555,7 @@ export default function App() {
             openDoc={openDoc}
             deleteDoc={deleteDoc}
             startNewDoc={startNewDoc}
+            activeTypes={activeTypes}
           />
         );
       case 'customers':
@@ -10677,6 +10880,7 @@ export default function App() {
         onLogout={handleLogout}
         userRole={userRole}
         companyType={companyType}
+        activeTypes={activeTypes}
         country={country}
       />
 
