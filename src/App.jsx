@@ -11486,7 +11486,7 @@ export default function App() {
       case 'siteprojects':
         return <MEPProjectsView siteProjects={siteProjects} setSiteProjects={setSiteProjects} employees={employees} siteActivities={siteActivities} progressUpdates={progressUpdates} userRole={userRole} />;
       case 'activityplanner':
-        return <ActivityPlannerView siteActivities={siteActivities} setSiteActivities={setSiteActivities} siteProjects={siteProjects} progressUpdates={progressUpdates} userRole={userRole} />;
+        return <ActivityPlannerView siteActivities={siteActivities} setSiteActivities={setSiteActivities} siteProjects={siteProjects} progressUpdates={progressUpdates} setProgressUpdates={setProgressUpdates} employees={employees} userRole={userRole} />;
       case 'dailyupdates':
         return <DailyUpdateView progressUpdates={progressUpdates} setProgressUpdates={setProgressUpdates} siteActivities={siteActivities} siteProjects={siteProjects} employees={employees} userRole={userRole} />;
       case 'progressboard':
