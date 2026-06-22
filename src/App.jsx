@@ -1995,6 +1995,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
           <NavBtn id="siteattendance"  label="Attendance"       icon={Users} />
           <NavBtn id="evaluation"      label="Quarterly Review" icon={BarChart2} />
+          <NavBtn id="mepreports"      label="MEP Reports"      icon={FileText} />
         </Section>
       )}
 
@@ -9551,7 +9552,7 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
 
   function handleSave() {
     if (!form.date) return alert('Select date');
-    const rec = { id: crypto.randomUUID(), activityId, projectId: project?.id||'', ...form };
+    const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2), activityId, projectId: project?.id||'', ...form };
     setProgressUpdates(prev => [...prev, rec]);
     onClose();
   }
