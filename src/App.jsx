@@ -9537,6 +9537,7 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
     materialConsumed: [],
     notes: '',
   });
+  const [saved, setSaved] = useState(false);
   const set = (k,v) => setForm(p=>({...p,[k]:v}));
 
   function setEmpHour(empId, hours) {
@@ -9551,10 +9552,18 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
   function removeMat(id) { setForm(p=>({...p,materialConsumed:p.materialConsumed.filter(m=>m.id!==id)})); }
 
   function handleSave() {
-    if (!form.date) return alert('Select date');
-    const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2), activityId, projectId: project?.id||'', ...form };
+    if (!form.date) { alert('Select a date'); return; }
+    const rec = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+      activityId, projectId: project?.id || '',
+      ...form,
+      cumProgress: Number(form.cumProgress) || 0,
+      mpCount: Number(form.mpCount) || 0,
+      totalManhours: Number(form.totalManhours) || 0,
+    };
     setProgressUpdates(prev => [...prev, rec]);
-    onClose();
+    setSaved(true);
+    setTimeout(() => onClose(), 1000);
   }
 
   const bom = activity?.bom || [];
@@ -9634,8 +9643,11 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
       </div>
 
       <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:8 }}>
-        <button onClick={onClose} style={styles.ghostBtn}>Cancel</button>
-        <button onClick={handleSave} style={styles.primaryBtn}>Save Daily Update</button>
+        {!saved && <button onClick={onClose} style={styles.ghostBtn}>Cancel</button>}
+        <button onClick={handleSave} disabled={saved}
+          style={{ ...styles.primaryBtn, background: saved ? '#1A7A3E' : undefined, transition: 'background 0.3s' }}>
+          {saved ? '✓ Saved! Updating...' : 'Save Daily Update'}
+        </button>
       </div>
     </Modal>
   );
