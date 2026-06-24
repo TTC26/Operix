@@ -9036,8 +9036,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         {c.status === 'Draft' && <span style={{ background:'#FEE2E2', color:'#B91C1C', padding:'4px 12px', borderRadius:20, fontSize:12, fontWeight:700 }}>DRAFT status — change to Approved to remove watermark</span>}
       </div>
       <div className="print-area contract-print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-        {useLH && (effLHH||effLHF) && <LetterpadPrintStyle />}
-        {effLHH && <div className="lh-pad-header" style={{ borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block', objectFit:'contain', objectPosition:'top' }} /></div>}
+        {effLHH && <div style={{ borderBottom:'2px solid #1E2A4A', background:'#fff', lineHeight:0 }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ padding: '32px 56px' }}>
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
           {!effLHH && bi.name && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
@@ -9147,7 +9146,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           ))}
         </div>
         </div>{/* end inner content */}
-        {effLHF && <div className="lh-pad-footer" style={{ borderTop:'2px solid #1E2A4A', background:'#fff' }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', display:'block', objectFit:'contain', objectPosition:'bottom' }} /></div>}
+        {effLHF && <div style={{ borderTop:'2px solid #1E2A4A', background:'#fff', lineHeight:0 }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', display:'block' }} /></div>}
       </div>
     </div>
   );
