@@ -869,6 +869,15 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved }) 
     setTimeout(() => { setSaved(false); if (onSaved) onSaved(); }, 1200);
   }
 
+  function handleLetterheadUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 1500 * 1024) { alert('Please choose an image under 1.5 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setForm(p => ({ ...p, letterhead: reader.result }));
+    reader.readAsDataURL(file);
+  }
+
   function handleLogoUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -929,6 +938,18 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved }) 
           )}
           <input type="file" accept="image/*" onChange={handleLogoUpload} style={styles.input} />
           <div style={{ ...styles.muted, fontSize: 11.5, marginTop: 4 }}>PNG or JPG · Max 500 KB · Recommended size: 400 × 400 px (square) or 800 × 300 px (horizontal). Appears on every document.</div>
+        </div>
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Letterhead Image (for Contract / PO printing)</label>
+          {form.letterhead && (
+            <div style={{ marginBottom: 8, border:'1px solid #EAE6DB', borderRadius:8, overflow:'hidden', maxWidth:400 }}>
+              <img src={form.letterhead} alt="Letterhead preview" style={{ width:'100%', maxHeight:160, objectFit:'contain', background:'#fff' }} />
+            </div>
+          )}
+          <input type="file" accept="image/*" onChange={handleLetterheadUpload} style={styles.input} />
+          {form.letterhead && <button onClick={()=>setForm(p=>({...p,letterhead:''}))} style={{ ...styles.ghostBtn, marginTop:6, fontSize:12 }}>Remove Letterhead</button>}
+          <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>PNG or JPG · Max 1.5 MB · Full A4-width header image (2480 × 350 px recommended). Used when printing contracts with letterhead.</div>
         </div>
 
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Region &amp; Tax</div>
@@ -7670,16 +7691,16 @@ const CLAUSE_CATEGORIES = ['Payment', 'Delivery', 'Warranty', 'Liability', 'Forc
 const DEFAULT_PO_CLAUSES = [
   { id:'dc1',  category:'Other',            title:'Clause 1: Scope of Supply',                        text:'1.1 The Supplier shall design, manufacture, supply, inspect, test, pack, and deliver the equipment/materials as detailed in the Purchase Order (PO) and its annexures, which form an integral part of this PO.\n1.2 The scope includes all necessary accessories, fittings, hardware, documentation, drawings, operation & maintenance manuals, and test certificates as applicable.\n1.3 Any item not explicitly mentioned but necessary to complete the intended function of the supplied equipment shall be deemed included in the scope at no extra cost.\n1.4 Deviations from the scope, if any, shall only be accepted in writing from the authorised representative of the Buyer prior to execution.' },
   { id:'dc2',  category:'Payment',          title:'Clause 2: Payment Terms',                          text:'2.1 Payment shall be made as per the schedule defined in the PO. Typical structure: 30% advance against Bank Guarantee, 60% against dispatch documents, 10% after successful commissioning and acceptance.\n2.2 All invoices shall be submitted with supporting documents including dispatch advice, inspection report, test certificates, and packing list.\n2.3 Payment shall be released within 30 days of receipt of invoice subject to verification and acceptance of documents.\n2.4 The Supplier shall submit a Bank Guarantee (BG) for advance payment, valid until delivery and acceptance.\n2.5 Taxes and duties shall be paid as applicable and indicated separately on the invoice as per prevailing statutory requirements.' },
-  { id:'dc3',  category:'Delivery',         title:'Clause 3: Delivery',                               text:'3.1 The Supplier shall deliver the goods to the destination specified in the PO within the agreed delivery schedule.\n3.2 Time is of the essence. Any delay beyond the agreed delivery date shall attract Liquidated Damages as per Clause 6.\n3.3 Partial deliveries are permitted only with prior written approval from the Buyer.\n3.4 The Supplier shall submit a delivery schedule within 7 days of PO placement and provide weekly updates on progress.\n3.5 Risk and title shall transfer to the Buyer upon delivery at the designated destination and acceptance by the Buyer's representative.' },
+  { id:'dc3',  category:'Delivery',         title:'Clause 3: Delivery',                               text:'3.1 The Supplier shall deliver the goods to the destination specified in the PO within the agreed delivery schedule.\n3.2 Time is of the essence. Any delay beyond the agreed delivery date shall attract Liquidated Damages as per Clause 6.\n3.3 Partial deliveries are permitted only with prior written approval from the Buyer.\n3.4 The Supplier shall submit a delivery schedule within 7 days of PO placement and provide weekly updates on progress.\n3.5 Risk and title shall transfer to the Buyer upon delivery at the designated destination and acceptance by the Buyer\'\2 representative.' },
   { id:'dc4',  category:'Other',            title:'Clause 4: Packing & Freight',                      text:'4.1 All equipment and materials shall be packed suitably to prevent damage during transport, storage, and handling. Packing shall be sea/air-worthy as applicable.\n4.2 Each package shall be clearly marked with PO number, item description, gross/net weight, dimensions, and handling instructions (e.g., "Fragile", "This Side Up").\n4.3 Freight shall be on FOR/CIF/DDP basis as specified in the PO. Unless otherwise stated, all freight, insurance, and handling charges are included in the PO price.\n4.4 A detailed packing list and material dispatch advice (MDA) shall be submitted to the Buyer prior to or at the time of dispatch.\n4.5 Any loss or damage due to inadequate packing shall be borne entirely by the Supplier.' },
-  { id:'dc5',  category:'Other',            title:'Clause 5: Technical Terms',                        text:'5.1 All equipment shall strictly conform to the technical specifications, standards, and drawings referenced in the PO or its annexures.\n5.2 The Supplier shall comply with applicable national and international standards (IS, IEC, ISO, ASME, etc.) as specified.\n5.3 Any change in design, material, or specifications shall require prior written approval from the Buyer's engineering team.\n5.4 The Supplier shall provide detailed engineering drawings, GA drawings, wiring diagrams, and documentation for Buyer's review and approval before commencing manufacturing.\n5.5 The equipment shall be designed for the site conditions (temperature, humidity, power supply, etc.) as specified in the technical specification document.' },
-  { id:'dc6',  category:'Liability',        title:'Clause 6: Liquidated Damages (Delay Penalty)',     text:'6.1 In the event of delay in delivery beyond the agreed schedule, the Supplier shall be liable to pay Liquidated Damages (LD) at the rate of 0.5% of the total PO value per week of delay, subject to a maximum of 5% of the total PO value.\n6.2 LD shall be deducted from the Supplier's pending invoices or the retention amount.\n6.3 LD shall apply unless the delay is caused by Force Majeure as defined in Clause 14 or by delays attributable to the Buyer.\n6.4 The Buyer reserves the right to cancel the PO if delay exceeds 8 weeks beyond the agreed delivery date, without prejudice to any other remedy available.' },
+  { id:'dc5',  category:'Other',            title:'Clause 5: Technical Terms',                        text:'5.1 All equipment shall strictly conform to the technical specifications, standards, and drawings referenced in the PO or its annexures.\n5.2 The Supplier shall comply with applicable national and international standards (IS, IEC, ISO, ASME, etc.) as specified.\n5.3 Any change in design, material, or specifications shall require prior written approval from the Buyer\'\2 engineering team.\n5.4 The Supplier shall provide detailed engineering drawings, GA drawings, wiring diagrams, and documentation for Buyer\'\2 review and approval before commencing manufacturing.\n5.5 The equipment shall be designed for the site conditions (temperature, humidity, power supply, etc.) as specified in the technical specification document.' },
+  { id:'dc6',  category:'Liability',        title:'Clause 6: Liquidated Damages (Delay Penalty)',     text:'6.1 In the event of delay in delivery beyond the agreed schedule, the Supplier shall be liable to pay Liquidated Damages (LD) at the rate of 0.5% of the total PO value per week of delay, subject to a maximum of 5% of the total PO value.\n6.2 LD shall be deducted from the Supplier\'\2 pending invoices or the retention amount.\n6.3 LD shall apply unless the delay is caused by Force Majeure as defined in Clause 14 or by delays attributable to the Buyer.\n6.4 The Buyer reserves the right to cancel the PO if delay exceeds 8 weeks beyond the agreed delivery date, without prejudice to any other remedy available.' },
   { id:'dc7',  category:'Warranty',         title:'Clause 7: Performance Guarantee',                  text:'7.1 The Supplier guarantees that the equipment shall achieve the performance parameters specified in the technical specification and PO annexures.\n7.2 The Supplier shall furnish a Performance Bank Guarantee (PBG) of 10% of the PO value, valid for the warranty period plus 3 months.\n7.3 If the equipment fails to meet the specified performance parameters during commissioning or the warranty period, the Supplier shall rectify or replace at no cost to the Buyer.\n7.4 The PBG shall be returned to the Supplier upon successful completion of the warranty period, provided all obligations under the PO are fulfilled.' },
   { id:'dc8',  category:'Other',            title:'Clause 8: Spare Parts & Service Support',          text:'8.1 The Supplier shall provide a recommended list of spare parts (consumable and critical) along with unit prices, valid for at least 2 years from the date of supply.\n8.2 The Supplier shall guarantee availability of spare parts for a minimum period of 10 years from the date of commissioning.\n8.3 The Supplier shall provide trained service engineers for installation, commissioning, and any warranty-related repairs at site.\n8.4 Emergency service support shall be made available within 48 hours of intimation.\n8.5 Operation & Maintenance (O&M) manuals, spare parts catalogue, and as-built drawings shall be provided in both hard copy and soft copy formats.' },
-  { id:'dc9',  category:'Other',            title:'Clause 9: Trial & Final Acceptance',                text:'9.1 Upon completion of installation, the Supplier shall conduct trial runs of the equipment in the presence of the Buyer's representatives.\n9.2 The trial run period shall be as specified in the PO. During this period, the equipment shall demonstrate stable operation meeting all performance parameters.\n9.3 Final Acceptance shall be issued by the Buyer only after successful completion of the trial run and verification of all performance parameters.\n9.4 The warranty period shall commence from the date of Final Acceptance.\n9.5 Any defects or deficiencies identified during trial shall be rectified by the Supplier at no cost before Final Acceptance is granted.' },
-  { id:'dc10', category:'Other',            title:'Clause 10: Factory Acceptance Test (FAT)',          text:'10.1 The equipment shall be subjected to a Factory Acceptance Test (FAT) at the Supplier's works prior to dispatch.\n10.2 The Buyer reserves the right to depute inspection personnel to witness the FAT. The Supplier shall provide a minimum of 14 days' advance notice for FAT.\n10.3 FAT shall be conducted as per the agreed test procedure and shall include functional testing, performance testing, safety checks, and documentation review.\n10.4 Any non-conformances identified during FAT shall be rectified before the equipment is cleared for dispatch.\n10.5 An FAT report duly signed by both parties shall be submitted along with dispatch documents.' },
+  { id:'dc9',  category:'Other',            title:'Clause 9: Trial & Final Acceptance',                text:'9.1 Upon completion of installation, the Supplier shall conduct trial runs of the equipment in the presence of the Buyer\'\2 representatives.\n9.2 The trial run period shall be as specified in the PO. During this period, the equipment shall demonstrate stable operation meeting all performance parameters.\n9.3 Final Acceptance shall be issued by the Buyer only after successful completion of the trial run and verification of all performance parameters.\n9.4 The warranty period shall commence from the date of Final Acceptance.\n9.5 Any defects or deficiencies identified during trial shall be rectified by the Supplier at no cost before Final Acceptance is granted.' },
+  { id:'dc10', category:'Other',            title:'Clause 10: Factory Acceptance Test (FAT)',          text:'10.1 The equipment shall be subjected to a Factory Acceptance Test (FAT) at the Supplier\'\2 works prior to dispatch.\n10.2 The Buyer reserves the right to depute inspection personnel to witness the FAT. The Supplier shall provide a minimum of 14 days' advance notice for FAT.\n10.3 FAT shall be conducted as per the agreed test procedure and shall include functional testing, performance testing, safety checks, and documentation review.\n10.4 Any non-conformances identified during FAT shall be rectified before the equipment is cleared for dispatch.\n10.5 An FAT report duly signed by both parties shall be submitted along with dispatch documents.' },
   { id:'dc11', category:'Other',            title:'Clause 11: Material Consumption & Process Efficiency', text:'11.1 The equipment shall achieve the material consumption and process efficiency figures specified in the technical specifications.\n11.2 The Supplier shall provide guaranteed figures for raw material consumption per unit output, energy consumption, water consumption, and waste generation.\n11.3 Performance tests at site shall verify these figures. Any shortfall shall be subject to price adjustment as per Clause 12.\n11.4 The Supplier shall provide process flow diagrams and material balance sheets as part of the documentation package.' },
-  { id:'dc12', category:'Liability',        title:'Clause 12: Performance Shortfall & Price Adjustment', text:'12.1 If the equipment fails to achieve the guaranteed performance parameters (capacity, efficiency, consumption) during the acceptance test, a price adjustment shall be applied.\n12.2 For shortfall up to 5% of guaranteed parameters: proportionate price reduction shall be applied.\n12.3 For shortfall exceeding 5%: the Buyer reserves the right to reject the equipment or demand replacement/modification at the Supplier's cost.\n12.4 The price adjustment formula and tolerance bands shall be as mutually agreed and documented in the PO annexure.\n12.5 Acceptance of price adjustment by the Buyer does not relieve the Supplier of its warranty obligations.' },
+  { id:'dc12', category:'Liability',        title:'Clause 12: Performance Shortfall & Price Adjustment', text:'12.1 If the equipment fails to achieve the guaranteed performance parameters (capacity, efficiency, consumption) during the acceptance test, a price adjustment shall be applied.\n12.2 For shortfall up to 5% of guaranteed parameters: proportionate price reduction shall be applied.\n12.3 For shortfall exceeding 5%: the Buyer reserves the right to reject the equipment or demand replacement/modification at the Supplier\'\2 cost.\n12.4 The price adjustment formula and tolerance bands shall be as mutually agreed and documented in the PO annexure.\n12.5 Acceptance of price adjustment by the Buyer does not relieve the Supplier of its warranty obligations.' },
   { id:'dc13', category:'Dispute Resolution',title:'Clause 13: Governing Law & Jurisdiction',         text:'13.1 This Purchase Order shall be governed by and construed in accordance with the laws of India.\n13.2 Any disputes arising out of or in connection with this PO shall first be resolved through mutual negotiation within 30 days of written notice.\n13.3 If not resolved through negotiation, disputes shall be referred to arbitration under the Arbitration and Conciliation Act, 1996.\n13.4 The seat of arbitration shall be [City], and proceedings shall be conducted in English.\n13.5 The courts of [City] shall have exclusive jurisdiction over any matters not subject to arbitration.' },
   { id:'dc14', category:'Force Majeure',    title:'Clause 14: Force Majeure',                         text:'14.1 Neither party shall be liable for delay or failure to perform obligations under this PO if such delay or failure is caused by events beyond the reasonable control of the affected party, including but not limited to acts of God, war, natural disasters, government actions, pandemics, or strikes.\n14.2 The affected party shall notify the other party in writing within 7 days of the occurrence of the Force Majeure event, providing details and estimated duration.\n14.3 The delivery schedule shall be extended by the period of Force Majeure, provided timely notice is given.\n14.4 If the Force Majeure event continues for more than 90 days, either party may terminate this PO by giving 14 days written notice.' },
   { id:'dc15', category:'Termination',      title:'Clause 15: Termination',                           text:'15.1 The Buyer may terminate this PO in whole or in part by giving 30 days written notice to the Supplier.\n15.2 In the event of termination for convenience, the Buyer shall pay for work completed up to the date of termination and reasonable documented costs incurred.\n15.3 The Buyer may terminate this PO immediately for cause if the Supplier: (a) becomes insolvent or files for bankruptcy; (b) commits a material breach that remains unrectified for 14 days after notice; (c) fails to deliver within the LD cap period.\n15.4 Upon termination, the Supplier shall promptly return any advance paid (less work completed) and hand over all work in progress, drawings, and documents related to the PO.' },
@@ -7956,6 +7977,8 @@ function blankContract() {
     status: 'Draft',
     signatoryOurName: '', signatoryOurDesignation: '',
     signatoryClientName: '', signatoryClientDesignation: '',
+    buyerContactPerson: '', buyerGst: '',
+    vendorContactPerson: '', vendorGst: '', vendorAuthorized: '', vendorAuthorizedDesig: '',
     notes: '',
   };
 }
@@ -8115,11 +8138,68 @@ function ContractEditor({ contract, customers, termsLibrary, businessInfo, userR
       </div>
       <div style={{ marginTop: 14 }}><label style={labelStyle}>Contract Title</label><input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Supply & Installation of Solar Panels" style={inputStyle} /></div>
       <div style={{ marginTop: 14 }}>
-        <label style={labelStyle}>Customer / Client</label>
-        <select value={form.customerId} onChange={e => { const c = customers.find(x => x.id === e.target.value); set('customerId', e.target.value); set('customerSnapshot', c || null); }} style={inputStyle}>
+        <label style={labelStyle}>Customer / Client (Vendor)</label>
+        <select value={form.customerId} onChange={e => {
+          const c = customers.find(x => x.id === e.target.value);
+          set('customerId', e.target.value);
+          set('customerSnapshot', c || null);
+          if (c?.taxId && !form.vendorGst) set('vendorGst', c.taxId);
+        }} style={inputStyle}>
           <option value="">— Select customer —</option>
           {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+      </div>
+
+      <div style={sectionHead}>Preamble — Buyer &amp; Vendor Details</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <div style={{ background:'#F5F3EE', borderRadius:8, padding:'14px 16px' }}>
+          <div style={{ fontWeight:700, fontSize:12, color:'#1E2A4A', marginBottom:10 }}>BUYER (Your Company)</div>
+          <div style={{ fontSize:12, color:'#555', marginBottom:6 }}><b>{businessInfo?.companyName || '—'}</b></div>
+          <div style={{ fontSize:11, color:'#888', marginBottom:8 }}>{businessInfo?.address || ''}</div>
+          {(businessInfo?.country === 'india' || businessInfo?.country === 'India') && (
+            <div style={styles.formGroup}>
+              <label style={labelStyle}>Buyer GST No.</label>
+              <input value={form.buyerGst} onChange={e=>set('buyerGst',e.target.value)}
+                placeholder={businessInfo?.gstin || 'e.g. 29ABCDE1234F1Z5'} style={inputStyle} />
+            </div>
+          )}
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Contact Person</label>
+            <input value={form.buyerContactPerson} onChange={e=>set('buyerContactPerson',e.target.value)} style={inputStyle} placeholder="Name / Designation" />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Authorized Signatory</label>
+            <input value={form.signatoryOurName} onChange={e=>set('signatoryOurName',e.target.value)} style={inputStyle} placeholder="Full name" />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Designation</label>
+            <input value={form.signatoryOurDesignation} onChange={e=>set('signatoryOurDesignation',e.target.value)} style={inputStyle} placeholder="e.g. Director / Manager" />
+          </div>
+        </div>
+        <div style={{ background:'#F5F3EE', borderRadius:8, padding:'14px 16px' }}>
+          <div style={{ fontWeight:700, fontSize:12, color:'#1E2A4A', marginBottom:10 }}>VENDOR / CLIENT</div>
+          <div style={{ fontSize:12, color:'#555', marginBottom:6 }}><b>{form.customerSnapshot?.name || '—'}</b></div>
+          <div style={{ fontSize:11, color:'#888', marginBottom:8 }}>{form.customerSnapshot?.address || ''}</div>
+          {(businessInfo?.country === 'india' || businessInfo?.country === 'India') && (
+            <div style={styles.formGroup}>
+              <label style={labelStyle}>Vendor GST No.</label>
+              <input value={form.vendorGst} onChange={e=>set('vendorGst',e.target.value)}
+                placeholder={form.customerSnapshot?.taxId || 'e.g. 33ABCDE1234F1Z5'} style={inputStyle} />
+            </div>
+          )}
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Contact Person</label>
+            <input value={form.vendorContactPerson} onChange={e=>set('vendorContactPerson',e.target.value)} style={inputStyle} placeholder="Name / Phone" />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Authorized Signatory</label>
+            <input value={form.signatoryClientName} onChange={e=>set('signatoryClientName',e.target.value)} style={inputStyle} placeholder="Full name" />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={labelStyle}>Designation</label>
+            <input value={form.signatoryClientDesignation} onChange={e=>set('signatoryClientDesignation',e.target.value)} style={inputStyle} placeholder="e.g. Proprietor / MD" />
+          </div>
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
         <div><label style={labelStyle}>Status</label>
@@ -8208,6 +8288,10 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
   const clauses   = termsLibrary?.clauses   || [];
   const templates = termsLibrary?.templates || [];
   const fmt = makeFmt(bi);
+  const [useLH, setUseLH] = React.useState(!!bi?.letterhead);
+  const [orient, setOrient] = React.useState('portrait');
+  const isIndia = (bi?.country||'').toLowerCase() === 'india';
+  const isDraft = c.status !== 'Approved';
 
   function getTermsText() {
     if (c.termsTemplateId) {
@@ -8223,12 +8307,171 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
 
   const terms = getTermsText();
   const enabledScopes = SCOPE_SECTIONS.filter(s => c.scope?.[s.key]?.enabled);
+  const totalVal = c.contractValue || enabledScopes.reduce((s,sc)=>s+(parseFloat(c.scope?.[sc.key]?.value)||0),0);
+
+  function handlePrint() {
+    const lhImg = useLH && bi?.letterhead ? `<img src="${bi.letterhead}" style="width:100%;max-height:180px;object-fit:contain;display:block;margin-bottom:8px;" />` : '';
+    const companyHeader = !lhImg ? `
+      <div style="text-align:center;border-bottom:2px solid #1E2A4A;padding-bottom:16px;margin-bottom:24px;">
+        ${bi?.logo ? `<img src="${bi.logo}" style="height:60px;object-fit:contain;display:block;margin:0 auto 8px;" />` : ''}
+        <div style="font-size:20px;font-weight:700;color:#1E2A4A;">${bi?.companyName||''}</div>
+        <div style="font-size:11px;color:#666;margin-top:4px;">${bi?.address||''}</div>
+        ${isIndia && bi?.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${bi.gstin}</div>` : ''}
+      </div>` : '';
+
+    const draftWm = isDraft ? `
+      <style>
+        body::before { content:'DRAFT'; position:fixed; top:38%;left:12%;font-size:130px;font-weight:900;
+          color:rgba(200,0,0,0.10);transform:rotate(-35deg);z-index:9999;pointer-events:none;letter-spacing:10px; }
+      </style>` : '';
+
+    const preamble = `
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;font-size:12px;">
+        <tr style="background:#1E2A4A;color:#fff;">
+          <th style="padding:8px 12px;text-align:left;width:50%">BUYER</th>
+          <th style="padding:8px 12px;text-align:left;width:50%">VENDOR / SUPPLIER</th>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;border:1px solid #ddd;vertical-align:top;">
+            <b>${bi?.companyName||''}</b><br/>
+            <span style="color:#555;font-size:11px;">${bi?.address||''}</span><br/>
+            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.buyerGst||bi?.gstin||'—'}</b></span><br/>` : ''}
+            <span style="font-size:11px;">Contact: ${c.buyerContactPerson||'—'}</span>
+          </td>
+          <td style="padding:10px 12px;border:1px solid #ddd;vertical-align:top;">
+            <b>${c.customerSnapshot?.name||'—'}</b><br/>
+            <span style="color:#555;font-size:11px;">${c.customerSnapshot?.address||''}</span><br/>
+            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.vendorGst||c.customerSnapshot?.taxId||'—'}</b></span><br/>` : ''}
+            <span style="font-size:11px;">Contact: ${c.vendorContactPerson||'—'}</span>
+          </td>
+        </tr>
+      </table>`;
+
+    const scopeTable = enabledScopes.length > 0 ? `
+      <h3>Scope of Work</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px;">
+        <thead><tr style="background:#1E2A4A;color:#fff;">
+          <th style="padding:7px 10px;text-align:left">Section</th>
+          <th style="padding:7px 10px;text-align:left">Description</th>
+          <th style="padding:7px 10px;text-align:right">Value</th>
+          <th style="padding:7px 10px;text-align:center">Timeline</th>
+        </tr></thead>
+        <tbody>
+          ${enabledScopes.map((sc,i)=>`<tr style="background:${i%2===0?'#fff':'#fafaf8'};border-bottom:1px solid #eee;">
+            <td style="padding:7px 10px;font-weight:600">${sc.label}</td>
+            <td style="padding:7px 10px">${c.scope[sc.key]?.description||'—'}</td>
+            <td style="padding:7px 10px;text-align:right">${fmt(c.scope[sc.key]?.value||0)}</td>
+            <td style="padding:7px 10px;text-align:center">${c.scope[sc.key]?.timeline||'—'}</td>
+          </tr>`).join('')}
+          <tr style="background:#f0ede6;font-weight:700;">
+            <td colspan="2" style="padding:7px 10px;text-align:right">Total Contract Value</td>
+            <td style="padding:7px 10px;text-align:right">${fmt(totalVal)}</td><td></td>
+          </tr>
+        </tbody>
+      </table>` : '';
+
+    const milestoneTable = (c.paymentMilestones||[]).length > 0 ? `
+      <h3>Payment Schedule</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px;">
+        <thead><tr style="background:#1E2A4A;color:#fff;">
+          <th style="padding:7px 10px;text-align:left">Milestone</th>
+          <th style="padding:7px 10px;text-align:right">%</th>
+          <th style="padding:7px 10px;text-align:right">Amount</th>
+          <th style="padding:7px 10px;text-align:center">Due Date</th>
+        </tr></thead>
+        <tbody>
+          ${c.paymentMilestones.map((m,i)=>`<tr style="background:${i%2===0?'#fff':'#fafaf8'};border-bottom:1px solid #eee;">
+            <td style="padding:7px 10px">${m.milestone}</td>
+            <td style="padding:7px 10px;text-align:right">${m.percentage}%</td>
+            <td style="padding:7px 10px;text-align:right">${fmt((parseFloat(m.percentage)/100)*totalVal)}</td>
+            <td style="padding:7px 10px;text-align:center">${m.dueDate||'—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '';
+
+    const termsHTML = terms.items.length > 0 ? `
+      <h3>Terms &amp; Conditions</h3>
+      ${terms.items.map((item,i)=>`
+        <div style="margin-bottom:10px;font-size:12px;line-height:1.7;">
+          ${item.title ? `<div style="font-weight:700;color:#1E2A4A;">${item.title}</div>` : ''}
+          <div style="margin-left:${item.title?12:0}px;white-space:pre-line">${item.text}</div>
+        </div>`).join('')}
+      ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
+
+    const sigBlock = `
+      <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
+        <div>
+          <div style="font-weight:700;color:#555;margin-bottom:36px">For ${bi?.companyName||'Buyer'}</div>
+          <div style="border-top:1px solid #333;padding-top:6px;">
+            <b>${c.signatoryOurName||'Authorised Signatory'}</b>
+            ${c.signatoryOurDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryOurDesignation}</div>` : ''}
+            ${c.buyerContactPerson ? `<div style="color:#888;font-size:11px">${c.buyerContactPerson}</div>` : ''}
+          </div>
+        </div>
+        <div>
+          <div style="font-weight:700;color:#555;margin-bottom:36px">For ${c.customerSnapshot?.name||'Vendor'}</div>
+          <div style="border-top:1px solid #333;padding-top:6px;">
+            <b>${c.signatoryClientName||'Authorised Signatory'}</b>
+            ${c.signatoryClientDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryClientDesignation}</div>` : ''}
+            ${c.vendorContactPerson ? `<div style="color:#888;font-size:11px">${c.vendorContactPerson}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+
+    const html = `<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <title>Contract — ${c.number}</title>
+      <style>
+        @page { size: A4 ${orient}; margin: ${lhImg ? '5mm 15mm 15mm' : '15mm'}; }
+        body { font-family: Georgia, serif; font-size: 13px; color: #222; line-height: 1.7; }
+        h3 { font-size: 14px; font-weight: 700; color: #1E2A4A; border-bottom: 1px solid #ccc;
+             padding-bottom: 6px; margin: 20px 0 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+      </style>
+      ${draftWm}
+    </head><body>
+      ${lhImg}
+      ${companyHeader}
+      <div style="text-align:center;margin-bottom:20px;">
+        <div style="font-size:17px;font-weight:700;letter-spacing:2px;color:#1E2A4A;text-transform:uppercase;">CONTRACT AGREEMENT</div>
+        <div style="font-size:12px;color:#888;margin-top:4px;">Contract No: ${c.number} &nbsp;|&nbsp; Date: ${c.date}${isDraft?' &nbsp;|&nbsp; <span style="color:red;font-weight:700">DRAFT</span>':''}</div>
+      </div>
+      <div style="background:#f7f6f3;border:1px solid #ddd;border-radius:4px;padding:10px 16px;margin-bottom:20px;font-size:14px;font-weight:700;color:#1E2A4A;">
+        Subject: ${c.title}
+      </div>
+      <p style="font-size:12px;margin-bottom:16px;">This Contract Agreement is entered into between <b>${bi?.companyName||'Buyer'}</b> (hereinafter referred to as the "Buyer") and <b>${c.customerSnapshot?.name||'the Vendor'}</b> (hereinafter referred to as the "Vendor"), both parties agreeing to the terms set forth below.</p>
+      ${preamble}
+      ${scopeTable}
+      ${milestoneTable}
+      ${termsHTML}
+      ${sigBlock}
+    </body></html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=750');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 600);
+  }
 
   return (
     <div>
-      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12 }}>
+      <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12, alignItems:'center', flexWrap:'wrap' }}>
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
-        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print / PDF</button>
+        {bi?.letterhead && (
+          <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+            <input type="checkbox" checked={useLH} onChange={e=>setUseLH(e.target.checked)} />
+            Use my letterhead
+          </label>
+        )}
+        <div style={{ display:'flex', border:'1px solid #DDD8CC', borderRadius:7, overflow:'hidden', fontSize:12 }}>
+          {[['portrait','📄 Portrait'],['landscape','⬜ Landscape']].map(([v,l])=>(
+            <button key={v} onClick={()=>setOrient(v)}
+              style={{ padding:'6px 12px', background:orient===v?'#1E2A4A':'#fff', color:orient===v?'#fff':'#555', border:'none', cursor:'pointer', fontWeight:orient===v?600:400 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <button onClick={handlePrint} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, display:'flex', alignItems:'center', gap:6 }}>🖨 Print / PDF</button>
+        {isDraft && <span style={{ background:'#FEE2E2', color:'#B91C1C', padding:'4px 12px', borderRadius:20, fontSize:12, fontWeight:700 }}>DRAFT — will show watermark</span>}
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
