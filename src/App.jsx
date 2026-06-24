@@ -8782,8 +8782,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Section</th><th style={{ padding: '8px 12px', textAlign: 'left' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Value (ex-GST)</th>{isIndia && <><th style={{ padding: '8px 12px', textAlign: 'center' }}>GST%</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>GST Amt</th></>}<th style={{ padding: '8px 12px', textAlign: 'center' }}>Timeline</th></tr></thead>
               <tbody>
-                {enabledScopes.map(({ key, label }, i) => (
-                  {(() => {
+                {enabledScopes.map(({ key, label }, i) => {
                     const val = parseFloat(c.scope[key]?.value)||0;
                     const rate = parseFloat(c.scope[key]?.gstRate)||0;
                     const gstAmt = val*rate/100;
@@ -8794,8 +8793,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
                       {isIndia && <><td style={{ padding: '8px 12px', textAlign: 'center' }}>{rate}%</td><td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(gstAmt)}</td></>}
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>{c.scope[key]?.timeline || '—'}</td>
                     </tr>;
-                  })()}
-                ))}
+                })}
                 {(() => {
                   const subtotal = enabledScopes.reduce((s,sc)=>s+(parseFloat(c.scope?.[sc.key]?.value)||0),0);
                   const gstTotal = enabledScopes.reduce((s,sc)=>{
