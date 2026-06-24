@@ -311,6 +311,7 @@ function OnboardingSetup({ setBusinessInfo }) {
       taxRate: (p && p.taxRate != null) ? p.taxRate : cc.defaultTaxRate,
       activeTypes,
       companyType: activeTypes[0],
+      trialStartDate: (p && p.trialStartDate) ? p.trialStartDate : new Date().toISOString(),
     }));
   }
 
@@ -438,6 +439,113 @@ function OnboardingSetup({ setBusinessInfo }) {
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Trial Banner ─────────────────────────────────────────────────────────────
+function TrialBanner({ daysLeft, onUpgrade }) {
+  const urgent = daysLeft <= 3;
+  const bg    = urgent ? '#FEF3C7' : '#EFF6FF';
+  const color = urgent ? '#92400E' : '#1E40AF';
+  const border= urgent ? '#FCD34D' : '#BFDBFE';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 20px', background: bg, borderBottom: `1px solid ${border}`,
+      fontSize: 13, color, flexShrink: 0,
+    }}>
+      <span>
+        {urgent ? '⚠️' : '⏳'}{' '}
+        <strong>{daysLeft === 0 ? 'Last day' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}</strong>
+        {' '}in your free trial
+      </span>
+      <button onClick={onUpgrade} style={{
+        background: urgent ? '#D97706' : '#2563EB', color: '#fff',
+        border: 'none', borderRadius: 6, padding: '4px 14px',
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+      }}>
+        Upgrade now
+      </button>
+    </div>
+  );
+}
+
+// ─── Paywall Screen ───────────────────────────────────────────────────────────
+function PaywallScreen({ businessInfo, onLogout, isStaff }) {
+  const [showContact, setShowContact] = React.useState(false);
+
+  const panelStyle = {
+    width: '100%', maxWidth: 480, background: '#FAF8F4', borderRadius: 20,
+    padding: '44px 48px', boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+    fontFamily: "'Inter', sans-serif", textAlign: 'center',
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', background: 'linear-gradient(135deg, #1E2A4A 0%, #2D3E6A 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div style={panelStyle}>
+        {/* Logo */}
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Georgia, serif', fontSize: 26, margin: '0 auto 20px' }}>O</div>
+
+        {isStaff ? (
+          <>
+            <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#1E2A4A', marginBottom: 10 }}>Subscription required</div>
+            <div style={{ fontSize: 14, color: '#666', lineHeight: 1.6, marginBottom: 28 }}>
+              Your company's free trial has ended.<br />Please ask <strong>{businessInfo?.name || 'your admin'}</strong>'s owner to subscribe to continue.
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#1E2A4A', marginBottom: 10 }}>Your free trial has ended</div>
+            <div style={{ fontSize: 14, color: '#666', lineHeight: 1.6, marginBottom: 28 }}>
+              Subscribe to keep your data and continue using Operix.
+            </div>
+
+            {/* Plan card */}
+            <div style={{ background: '#1E2A4A', borderRadius: 14, padding: '24px 28px', marginBottom: 24, textAlign: 'left' }}>
+              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Operix Pro</div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 16 }}>
+                <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹999</span>
+                <span style={{ color: '#9BABB8', fontSize: 13, marginBottom: 8 }}>/month</span>
+              </div>
+              {[
+                'All modules — Trading, Manufacturing, Services',
+                'Unlimited documents & storage',
+                'Staff accounts & role management',
+                'Letterpad printing & contracts',
+                'Priority support',
+              ].map(f => (
+                <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#E2E8F0', fontSize: 13, marginBottom: 8 }}>
+                  <span style={{ color: '#C9A24B', fontWeight: 700 }}>✓</span> {f}
+                </div>
+              ))}
+            </div>
+
+            {/* Subscribe button — wire Razorpay here later */}
+            <button
+              onClick={() => setShowContact(true)}
+              style={{ width: '100%', padding: '14px', background: '#C9A24B', color: '#1E2A4A', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}
+            >
+              Subscribe — ₹999/month
+            </button>
+
+            {showContact && (
+              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '14px 16px', marginBottom: 12, fontSize: 13, color: '#1E40AF', textAlign: 'left' }}>
+                📩 Payment gateway coming soon! To activate your subscription now, contact us at{' '}
+                <strong>support@operix.in</strong> with your business name and we'll activate manually.
+              </div>
+            )}
+          </>
+        )}
+
+        <button onClick={onLogout} style={{ fontSize: 13, color: '#999', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+          Sign out
+        </button>
       </div>
     </div>
   );
@@ -12060,6 +12168,18 @@ export default function App() {
     return <OnboardingSetup setBusinessInfo={setBusinessInfo} />;
   }
 
+  // ── Trial / subscription ─────────────────────────────────────────────────────
+  const TRIAL_DAYS = 7;
+  const _trialStart    = businessInfo.trialStartDate ? new Date(businessInfo.trialStartDate) : null;
+  const _trialDaysUsed = _trialStart ? Math.floor((Date.now() - _trialStart.getTime()) / 86400000) : null;
+  const trialDaysLeft  = _trialDaysUsed !== null ? Math.max(0, TRIAL_DAYS - _trialDaysUsed) : null;
+  const trialExpired   = _trialDaysUsed !== null && _trialDaysUsed >= TRIAL_DAYS;
+  const isSubscribed   = !!businessInfo.subscriptionActive;
+
+  if (biReady && trialExpired && !isSubscribed) {
+    return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
+  }
+
   // ── Content router ───────────────────────────────────────────────────────────
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
@@ -12449,6 +12569,9 @@ export default function App() {
       />
 
       <main style={styles.main}>
+        {trialDaysLeft !== null && !isSubscribed && (
+          <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
+        )}
         {renderContent()}
       </main>
 
