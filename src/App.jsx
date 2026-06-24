@@ -8111,7 +8111,7 @@ function blankContract() {
     customerId: '',
     customerSnapshot: null,
     contractValue: 0,
-    scope: { supply: { enabled: true, description: '', value: 0, timeline: '' }, installation: { enabled: false, description: '', value: 0, timeline: '' }, testing: { enabled: false, description: '', value: 0, timeline: '' }, commissioning: { enabled: false, description: '', value: 0, timeline: '' } },
+    scope: { supply: { enabled: true, description: '', value: 0, gstRate: 18, timeline: '' }, installation: { enabled: false, description: '', value: 0, gstRate: 18, timeline: '' }, testing: { enabled: false, description: '', value: 0, gstRate: 18, timeline: '' }, commissioning: { enabled: false, description: '', value: 0, gstRate: 18, timeline: '' } },
     paymentMilestones: [],
     termsTemplateId: '',
     customTerms: '',
@@ -8121,6 +8121,7 @@ function blankContract() {
     buyerContactPerson: '', buyerGst: '',
     vendorContactPerson: '', vendorGst: '', vendorAuthorized: '', vendorAuthorizedDesig: '',
     poRef: '', poRefNumber: '',
+    buyerRole: 'Buyer', supplierRole: 'Supplier',
     selectedClauseIds: [],
     notes: '',
   };
@@ -8318,6 +8319,27 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
         {form.poRefNumber && <div style={{ fontSize:11, color:'#1A7A3E', marginTop:4 }}>✓ Linked: <b>{form.poRefNumber}</b></div>}
       </div>
 
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
+        <div>
+          <label style={labelStyle}>Our Company Role Label</label>
+          <select value={form.buyerRole||'Buyer'} onChange={e=>set('buyerRole',e.target.value)} style={inputStyle}>
+            <option value="Buyer">Buyer</option>
+            <option value="Contractor">Contractor</option>
+            <option value="the Company">the Company</option>
+            <option value="Purchaser">Purchaser</option>
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Other Party Role Label</label>
+          <select value={form.supplierRole||'Supplier'} onChange={e=>set('supplierRole',e.target.value)} style={inputStyle}>
+            <option value="Supplier">Supplier</option>
+            <option value="Seller">Seller</option>
+            <option value="Vendor">Vendor</option>
+            <option value="Client">Client</option>
+          </select>
+        </div>
+      </div>
+
       <div style={sectionHead}>Preamble — Buyer &amp; Vendor Details</div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
         <div style={{ background:'#F5F3EE', borderRadius:8, padding:'14px 16px' }}>
@@ -8388,15 +8410,31 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
             <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</span>
           </label>
           {form.scope[key]?.enabled && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 160px', gap: 10 }}>
-              <div><label style={labelStyle}>Scope Description</label><input value={form.scope[key]?.description || ''} onChange={e => setScope(key, 'description', e.target.value)} placeholder={`Describe ${label.toLowerCase()} scope`} style={inputStyle} /></div>
-              <div><label style={labelStyle}>Value</label><input type="number" value={form.scope[key]?.value || 0} onChange={e => setScope(key, 'value', parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 70px 150px', gap: 10 }}>
+              <div><label style={labelStyle}>Description</label><input value={form.scope[key]?.description || ''} onChange={e => setScope(key, 'description', e.target.value)} placeholder={`Describe ${label.toLowerCase()} scope`} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Value (ex-GST)</label><input type="number" value={form.scope[key]?.value || 0} onChange={e => setScope(key, 'value', parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
+              <div><label style={labelStyle}>GST %</label><input type="number" value={form.scope[key]?.gstRate ?? 18} onChange={e => setScope(key, 'gstRate', parseFloat(e.target.value) || 0)} style={inputStyle} /></div>
               <div><label style={labelStyle}>Timeline</label><input value={form.scope[key]?.timeline || ''} onChange={e => setScope(key, 'timeline', e.target.value)} placeholder="e.g. 45 days" style={inputStyle} /></div>
             </div>
           )}
         </div>
       ))}
-      {totalScopeValue > 0 && <div style={{ textAlign: 'right', fontSize: 13, color: '#888', marginBottom: 4 }}>Total scope: <strong style={{ color: '#1E2A4A' }}>{makeFmt(businessInfo)(totalScopeValue)}</strong></div>}
+{(() => {
+        const isInd = (businessInfo?.country||'').toLowerCase() === 'india';
+        const totalGst = SCOPE_SECTIONS.filter(s => form.scope[s.key]?.enabled).reduce((sum, s) => {
+          const val = parseFloat(form.scope[s.key]?.value)||0;
+          const rate = parseFloat(form.scope[s.key]?.gstRate)||0;
+          return sum + (val*rate/100);
+        }, 0);
+        const grandTotal = totalScopeValue + totalGst;
+        return totalScopeValue > 0 ? (
+          <div style={{ background:'#F5F3EE', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px', marginTop:4, marginBottom:4, fontSize:13 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', color:'#555' }}><span>Subtotal (ex-GST)</span><strong>{makeFmt(businessInfo)(totalScopeValue)}</strong></div>
+            {isInd && totalGst > 0 && <div style={{ display:'flex', justifyContent:'space-between', color:'#888' }}><span>GST</span><span>{makeFmt(businessInfo)(totalGst)}</span></div>}
+            {isInd && <div style={{ display:'flex', justifyContent:'space-between', color:'#1E2A4A', fontWeight:700, fontSize:14, borderTop:'1px solid #DDD8CE', marginTop:6, paddingTop:6 }}><span>Grand Total</span><span>{makeFmt(businessInfo)(grandTotal)}</span></div>}
+          </div>
+        ) : null;
+      })()}
 
       <div style={sectionHead}>Payment Milestones</div>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 140px 36px', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
@@ -8486,8 +8524,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
   const clauses   = termsLibrary?.clauses   || [];
   const templates = termsLibrary?.templates || [];
   const fmt = makeFmt(bi);
-  const [useLH, setUseLH] = React.useState(!!bi?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(bi?.letterhead || bi?.letterheadFooter));
   const [orient, setOrient] = React.useState('portrait');
+  const [localLHHeader, setLocalLHHeader] = React.useState(null);
+  const [localLHFooter, setLocalLHFooter] = React.useState(null);
+  const effLHH = localLHHeader || (useLH ? bi?.letterhead : null);
+  const effLHF = localLHFooter || (useLH ? bi?.letterheadFooter : null);
   const isIndia = (bi?.country||'').toLowerCase() === 'india';
   const isDraft = c.status !== 'Approved';
 
@@ -8512,8 +8554,8 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
   const totalVal = c.contractValue || enabledScopes.reduce((s,sc)=>s+(parseFloat(c.scope?.[sc.key]?.value)||0),0);
 
   function handlePrint() {
-    const lhImg = useLH && bi?.letterhead ? `<div style="position:fixed;top:0;left:0;right:0;background:#fff;z-index:9999;padding-bottom:8px;border-bottom:2px solid #1E2A4A;"><img src="${bi.letterhead}" style="width:100%;max-height:200px;object-fit:contain;object-position:top;display:block;" /></div>` : '';
-    const lhFooterImg = useLH && bi?.letterheadFooter ? `<div style="position:fixed;bottom:0;left:0;right:0;background:#fff;z-index:9999;padding-top:8px;border-top:2px solid #1E2A4A;"><img src="${bi.letterheadFooter}" style="width:100%;max-height:120px;object-fit:contain;object-position:bottom;display:block;" /></div>` : '';
+    const lhImg = effLHH ? `<div style="position:fixed;top:0;left:0;right:0;background:#fff;z-index:9999;padding-bottom:8px;border-bottom:2px solid #1E2A4A;"><img src="${effLHH}" style="width:100%;max-height:200px;object-fit:contain;object-position:top;display:block;" /></div>` : '';
+    const lhFooterImg = effLHF ? `<div style="position:fixed;bottom:0;left:0;right:0;background:#fff;z-index:9999;padding-top:8px;border-top:2px solid #1E2A4A;"><img src="${effLHF}" style="width:100%;max-height:120px;object-fit:contain;object-position:bottom;display:block;" /></div>` : '';
     const companyHeader = !lhImg ? `
       <div style="text-align:center;border-bottom:2px solid #1E2A4A;padding-bottom:16px;margin-bottom:24px;">
         ${bi?.logo ? `<img src="${bi.logo}" style="height:60px;object-fit:contain;display:block;margin:0 auto 8px;" />` : ''}
@@ -8531,8 +8573,8 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     const preamble = `
       <table style="width:100%;border-collapse:collapse;margin-bottom:24px;font-size:12px;">
         <tr style="background:#1E2A4A;color:#fff;">
-          <th style="padding:8px 12px;text-align:left;width:50%">BUYER</th>
-          <th style="padding:8px 12px;text-align:left;width:50%">SUPPLIER</th>
+          <th style="padding:8px 12px;text-align:left;width:50%">${(c.buyerRole||'BUYER').toUpperCase()}</th>
+          <th style="padding:8px 12px;text-align:left;width:50%">${(c.supplierRole||'SUPPLIER').toUpperCase()}</th>
         </tr>
         <tr>
           <td style="padding:10px 12px;border:1px solid #ddd;vertical-align:top;">
@@ -8550,26 +8592,46 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </tr>
       </table>`;
 
+    const scopeSubtotal = enabledScopes.reduce((s,sc)=>s+(parseFloat(c.scope?.[sc.key]?.value)||0),0);
+    const scopeGst = enabledScopes.reduce((s,sc)=>{
+      const v=parseFloat(c.scope?.[sc.key]?.value)||0, r=parseFloat(c.scope?.[sc.key]?.gstRate)||0;
+      return s+(v*r/100);
+    },0);
+    const scopeGrandTotal = scopeSubtotal + scopeGst;
     const scopeTable = enabledScopes.length > 0 ? `
       <h3>Scope of Work</h3>
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px;">
         <thead><tr style="background:#1E2A4A;color:#fff;">
           <th style="padding:7px 10px;text-align:left">Section</th>
           <th style="padding:7px 10px;text-align:left">Description</th>
-          <th style="padding:7px 10px;text-align:right">Value</th>
+          <th style="padding:7px 10px;text-align:right">Value (ex-GST)</th>
+          ${isIndia ? '<th style="padding:7px 10px;text-align:center">GST%</th><th style="padding:7px 10px;text-align:right">GST Amt</th>' : ''}
           <th style="padding:7px 10px;text-align:center">Timeline</th>
         </tr></thead>
         <tbody>
-          ${enabledScopes.map((sc,i)=>`<tr style="background:${i%2===0?'#fff':'#fafaf8'};border-bottom:1px solid #eee;">
-            <td style="padding:7px 10px;font-weight:600">${sc.label}</td>
-            <td style="padding:7px 10px">${c.scope[sc.key]?.description||'—'}</td>
-            <td style="padding:7px 10px;text-align:right">${fmt(c.scope[sc.key]?.value||0)}</td>
-            <td style="padding:7px 10px;text-align:center">${c.scope[sc.key]?.timeline||'—'}</td>
-          </tr>`).join('')}
-          <tr style="background:#f0ede6;font-weight:700;">
-            <td colspan="2" style="padding:7px 10px;text-align:right">Total Contract Value</td>
-            <td style="padding:7px 10px;text-align:right">${fmt(totalVal)}</td><td></td>
+          ${enabledScopes.map((sc,i)=>{
+            const val=parseFloat(c.scope[sc.key]?.value)||0;
+            const rate=parseFloat(c.scope[sc.key]?.gstRate)||0;
+            const gstAmt=val*rate/100;
+            return `<tr style="background:${i%2===0?'#fff':'#fafaf8'};border-bottom:1px solid #eee;">
+              <td style="padding:7px 10px;font-weight:600">${sc.label}</td>
+              <td style="padding:7px 10px">${c.scope[sc.key]?.description||'—'}</td>
+              <td style="padding:7px 10px;text-align:right">${fmt(val)}</td>
+              ${isIndia ? `<td style="padding:7px 10px;text-align:center">${rate}%</td><td style="padding:7px 10px;text-align:right">${fmt(gstAmt)}</td>` : ''}
+              <td style="padding:7px 10px;text-align:center">${c.scope[sc.key]?.timeline||'—'}</td>
+            </tr>`;
+          }).join('')}
+          <tr style="background:#f0ede6;">
+            <td colspan="${isIndia?'2':'2'}" style="padding:7px 10px;text-align:right;font-weight:600">Subtotal (ex-GST)</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt(scopeSubtotal)}</td>
+            ${isIndia ? `<td></td><td style="padding:7px 10px;text-align:right;font-weight:600">${fmt(scopeGst)}</td>` : ''}
+            <td></td>
           </tr>
+          ${isIndia ? `<tr style="background:#1E2A4A;color:#fff;font-weight:700;">
+            <td colspan="2" style="padding:8px 10px;text-align:right">GRAND TOTAL (incl. GST)</td>
+            <td colspan="${isIndia?'3':'1'}" style="padding:8px 10px;text-align:right;font-size:13px">${fmt(scopeGrandTotal)}</td>
+            <td></td>
+          </tr>` : `<tr style="background:#1E2A4A;color:#fff;font-weight:700;"><td colspan="2" style="padding:8px 10px;text-align:right">Total Contract Value</td><td style="padding:8px 10px;text-align:right">${fmt(scopeSubtotal)}</td><td></td></tr>`}
         </tbody>
       </table>` : '';
 
@@ -8609,7 +8671,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     const sigBlock = `
       <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
         <div>
-          <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the Contractor / Buyer</div>
+          <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.buyerRole||'Buyer'}</div>
           <div style="font-size:11px;color:#555;margin-bottom:36px;">${bi?.name||bi?.companyName||''}</div>
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryOurName||'Authorised Signatory'}</b>
@@ -8618,7 +8680,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           </div>
         </div>
         <div>
-          <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the Supplier</div>
+          <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.supplierRole||'Supplier'}</div>
           <div style="font-size:11px;color:#555;margin-bottom:36px;">${c.customerSnapshot?.name||''}</div>
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryClientName||'Authorised Signatory'}</b>
@@ -8648,7 +8710,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       <div style="background:#f7f6f3;border:1px solid #ddd;border-radius:4px;padding:10px 16px;margin-bottom:20px;font-size:14px;font-weight:700;color:#1E2A4A;">
         Subject: ${c.title}
       </div>
-      <p style="font-size:12px;margin-bottom:16px;">This Contract Agreement is entered into between <b>${bi?.name||bi?.companyName||'the Buyer'}</b> (hereinafter referred to as the "Buyer") and <b>${c.customerSnapshot?.name||'the Supplier'}</b> (hereinafter referred to as the "Supplier"), both parties agreeing to the terms set forth below.</p>
+      <p style="font-size:12px;margin-bottom:16px;">This Contract Agreement is entered into between <b>${bi?.name||bi?.companyName||'the Buyer'}</b> (hereinafter referred to as the "${c.buyerRole||'Buyer'}") and <b>${c.customerSnapshot?.name||'the Supplier'}</b> (hereinafter referred to as the "${c.supplierRole||'Supplier'}"), both parties agreeing to the terms set forth below.</p>
       ${preamble}
       ${scopeTable}
       ${milestoneTable}
@@ -8667,11 +8729,27 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     <div>
       <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12, alignItems:'center', flexWrap:'wrap' }}>
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
-        {bi?.letterhead && (
-          <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
-            <input type="checkbox" checked={useLH} onChange={e=>setUseLH(e.target.checked)} />
-            Use my letterhead
-          </label>
+        <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+          <input type="checkbox" checked={useLH} onChange={e=>setUseLH(e.target.checked)} />
+          Use letterpad
+        </label>
+        {useLH && (
+          <div style={{ display:'flex', gap:12, alignItems:'center', background:'#F5F3EE', border:'1px solid #DDD8CE', borderRadius:8, padding:'6px 12px' }}>
+            <label style={{ fontSize:11, color:'#555', cursor:'pointer' }}>
+              Header image: <input type="file" accept="image/*" style={{ fontSize:11 }} onChange={e=>{
+                const f=e.target.files[0]; if(!f) return;
+                const r=new FileReader(); r.onload=()=>setLocalLHHeader(r.result); r.readAsDataURL(f);
+              }} />
+              {effLHH && <span style={{ color:'#1A7A3E', marginLeft:4 }}>✓</span>}
+            </label>
+            <label style={{ fontSize:11, color:'#555', cursor:'pointer' }}>
+              Footer image: <input type="file" accept="image/*" style={{ fontSize:11 }} onChange={e=>{
+                const f=e.target.files[0]; if(!f) return;
+                const r=new FileReader(); r.onload=()=>setLocalLHFooter(r.result); r.readAsDataURL(f);
+              }} />
+              {effLHF && <span style={{ color:'#1A7A3E', marginLeft:4 }}>✓</span>}
+            </label>
+          </div>
         )}
         <div style={{ display:'flex', border:'1px solid #DDD8CC', borderRadius:7, overflow:'hidden', fontSize:12 }}>
           {[['portrait','📄 Portrait'],['landscape','⬜ Landscape']].map(([v,l])=>(
@@ -8684,37 +8762,60 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         <button onClick={handlePrint} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, display:'flex', alignItems:'center', gap:6 }}>🖨 Print / PDF</button>
         {isDraft && <span style={{ background:'#FEE2E2', color:'#B91C1C', padding:'4px 12px', borderRadius:20, fontSize:12, fontWeight:700 }}>DRAFT — will show watermark</span>}
       </div>
-      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
+      <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: `${effLHH?'230px':'48px'} 56px ${effLHF?'150px':'48px'}`, fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)', position:'relative' }}>
+        {useLH && (effLHH||effLHF) && <LetterpadPrintStyle />}
+        {effLHH && <div className="lh-pad-header" style={{ paddingBottom:12, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', maxHeight:'200px', objectFit:'contain', objectPosition:'top', display:'block' }} /></div>}
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
-          {bi.companyName && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.companyName}</div>}
-          {bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
+          {!effLHH && bi.name && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
+          {!effLHH && bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>CONTRACT AGREEMENT</div>
-          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}</div>
+          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}{c.poRefNumber ? ` | PO Ref: ${c.poRefNumber}` : ''}</div>
         </div>
         <div style={{ marginBottom: 28 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: '#1E2A4A', textTransform: 'uppercase' }}>Parties</div>
-          <p>This Contract Agreement is entered into between <strong>{bi.companyName || 'the Company'}</strong> (the "Contractor") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "Client").</p>
+          <p>This Contract Agreement is entered into between <strong>{bi.name || bi.companyName || 'the Company'}</strong> (the "{c.buyerRole || 'Buyer'}") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "{c.supplierRole || 'Supplier'}").</p>
         </div>
         <div style={{ background: '#F7F6F3', border: '1px solid #DDD8CE', borderRadius: 6, padding: '14px 20px', marginBottom: 28, fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>Subject: {c.title}</div>
         {enabledScopes.length > 0 && (
           <div style={{ marginBottom: 28 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Scope of Work</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Section</th><th style={{ padding: '8px 12px', textAlign: 'left' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Value</th><th style={{ padding: '8px 12px', textAlign: 'center' }}>Timeline</th></tr></thead>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}><th style={{ padding: '8px 12px', textAlign: 'left' }}>Section</th><th style={{ padding: '8px 12px', textAlign: 'left' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>Value (ex-GST)</th>{isIndia && <><th style={{ padding: '8px 12px', textAlign: 'center' }}>GST%</th><th style={{ padding: '8px 12px', textAlign: 'right' }}>GST Amt</th></>}<th style={{ padding: '8px 12px', textAlign: 'center' }}>Timeline</th></tr></thead>
               <tbody>
                 {enabledScopes.map(({ key, label }, i) => (
-                  <tr key={key} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
-                    <td style={{ padding: '8px 12px', fontWeight: 600 }}>{label}</td>
-                    <td style={{ padding: '8px 12px' }}>{c.scope[key]?.description || '—'}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.scope[key]?.value || 0)}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>{c.scope[key]?.timeline || '—'}</td>
-                  </tr>
+                  {(() => {
+                    const val = parseFloat(c.scope[key]?.value)||0;
+                    const rate = parseFloat(c.scope[key]?.gstRate)||0;
+                    const gstAmt = val*rate/100;
+                    return <tr key={key} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8', borderBottom: '1px solid #EAE6DB' }}>
+                      <td style={{ padding: '8px 12px', fontWeight: 600 }}>{label}</td>
+                      <td style={{ padding: '8px 12px' }}>{c.scope[key]?.description || '—'}</td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(val)}</td>
+                      {isIndia && <><td style={{ padding: '8px 12px', textAlign: 'center' }}>{rate}%</td><td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(gstAmt)}</td></>}
+                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>{c.scope[key]?.timeline || '—'}</td>
+                    </tr>;
+                  })()}
                 ))}
-                <tr style={{ background: '#F0EDE6', fontWeight: 700 }}>
-                  <td colSpan={2} style={{ padding: '8px 12px' }}>Total Contract Value</td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmt(c.contractValue || 0)}</td>
-                  <td />
-                </tr>
+                {(() => {
+                  const subtotal = enabledScopes.reduce((s,sc)=>s+(parseFloat(c.scope?.[sc.key]?.value)||0),0);
+                  const gstTotal = enabledScopes.reduce((s,sc)=>{
+                    const v=parseFloat(c.scope?.[sc.key]?.value)||0, r=parseFloat(c.scope?.[sc.key]?.gstRate)||0;
+                    return s+(v*r/100);
+                  },0);
+                  return <>
+                    <tr style={{ background: '#F0EDE6' }}>
+                      <td colSpan={2} style={{ padding: '8px 12px', fontWeight: 600 }}>Subtotal (ex-GST)</td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(subtotal)}</td>
+                      {isIndia && <><td /><td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>{fmt(gstTotal)}</td></>}
+                      <td />
+                    </tr>
+                    {isIndia && <tr style={{ background: '#1E2A4A', color: '#fff', fontWeight: 700 }}>
+                      <td colSpan={2} style={{ padding: '8px 12px' }}>GRAND TOTAL (incl. GST)</td>
+                      <td colSpan={isIndia ? 3 : 1} style={{ padding: '8px 12px', textAlign: 'right', fontSize: 14 }}>{fmt(subtotal+gstTotal)}</td>
+                      <td />
+                    </tr>}
+                  </>;
+                })()}
               </tbody>
             </table>
           </div>
@@ -8740,17 +8841,23 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         {terms.items.length > 0 && (
           <div style={{ marginBottom: 32 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
-            {terms.items.map((item, i) => (
-              <div key={i} style={{ marginBottom: 12 }}>
-                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
-                <div style={{ marginLeft: item.title ? 16 : 0 }}>{item.title ? '' : `${i + 1}. `}{item.text}</div>
-              </div>
-            ))}
+            {terms.items.map((item, i) => {
+              const clauseLines = (item.text||'').replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l=>l.trim());
+              return (
+                <div key={i} style={{ marginBottom: 14 }}>
+                  {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{i + 1}. {item.title}</div>}
+                  <div style={{ marginLeft: item.title ? 16 : 0, lineHeight: 1.9 }}>
+                    {clauseLines.map((line, j) => <div key={j} style={{ marginBottom: 2 }}>{j===0&&!item.title?`${i+1}. `:''}{line.trim()}</div>)}
+                  </div>
+                </div>
+              );
+            })}
             {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
           </div>
         )}
+        {effLHF && <div className="lh-pad-footer" style={{ paddingTop:12, borderTop:'2px solid #1E2A4A', background:'#fff' }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', maxHeight:'120px', objectFit:'contain', objectPosition:'bottom', display:'block' }} /></div>}
         <div style={{ marginTop: 48, borderTop: '1px solid #DDD8CE', paddingTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48 }}>
-          {[{ label: 'For ' + (bi.companyName || 'the Contractor'), name: c.signatoryOurName, desig: c.signatoryOurDesignation }, { label: 'For ' + (c.customerSnapshot?.name || 'the Client'), name: c.signatoryClientName, desig: c.signatoryClientDesignation }].map((sig, i) => (
+          {[{ label: 'For the ' + (c.buyerRole || 'Buyer') + ' (' + (bi.name || bi.companyName || '') + ')', name: c.signatoryOurName, desig: c.signatoryOurDesignation }, { label: 'For the ' + (c.supplierRole || 'Supplier') + ' (' + (c.customerSnapshot?.name || '') + ')', name: c.signatoryClientName, desig: c.signatoryClientDesignation }].map((sig, i) => (
             <div key={i}>
               <div style={{ fontWeight: 700, marginBottom: 40, fontSize: 13, color: '#555' }}>{sig.label}</div>
               <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>
