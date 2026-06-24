@@ -3125,7 +3125,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         <div style={styles.preview} className="print-area">
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
           {useLH && businessInfo?.letterhead && (
-            <div className="lh-pad-header" style={{ paddingBottom: 12, borderBottom: '2px solid #1E2A4A', background: '#fff' }}>
+            <div className="lh-pad-header" style={{ background: '#fff' }}>
               <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} />
             </div>
           )}
@@ -3697,7 +3697,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           </div>
           {useLH && businessInfo?.letterheadFooter && (
-            <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+            <div className="lh-pad-footer" style={{ background: '#fff' }}>
               <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
             </div>
           )}
@@ -3983,7 +3983,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:12, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
         {/* Header */}
         <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           {!useLH && <div>
@@ -4028,7 +4028,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
           Closing Balance: {fmtStmt(ledger.length ? ledger[ledger.length - 1].runningBalance : openingBalance)}
         </div>
         {useLH && businessInfo?.letterheadFooter && (
-          <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+          <div className="lh-pad-footer" style={{ background: '#fff' }}>
             <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
           </div>
         )}
@@ -4335,6 +4335,26 @@ function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
 function LetterpadPrintStyle() {
   return (
     <style>{`
+      /* ── Screen: force footer to fill full width edge-to-edge ── */
+      @media screen {
+        .lh-pad-footer {
+          height: 130px !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+        }
+        .lh-pad-footer img {
+          width: 100% !important;
+          height: 130px !important;
+          object-fit: cover !important;
+          object-position: center !important;
+          display: block !important;
+        }
+        .lh-pad-header img {
+          width: 100% !important;
+          height: auto !important;
+          display: block !important;
+        }
+      }
       /* ── Print: fixed position so header/footer repeat on every page ── */
       @media print {
         .lh-pad-header {
@@ -4357,7 +4377,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
     return (
       <>
         <LetterpadPrintStyle />
-        <div className="lh-pad-header" style={{ paddingBottom: 12, borderBottom: '2px solid #1E2A4A', background: '#fff' }}>
+        <div className="lh-pad-header" style={{ background: '#fff' }}>
           <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} />
         </div>
         <div style={{ paddingTop: 215, paddingTop: 0 }} />
@@ -4542,7 +4562,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         </div>
         <VoucherSignatory businessInfo={businessInfo} leftLabel="Prepared By" />
         {useLH && businessInfo?.letterheadFooter && (
-          <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+          <div className="lh-pad-footer" style={{ background: '#fff' }}>
             <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
           </div>
         )}
@@ -4844,7 +4864,7 @@ function BinCard({ items, stockLedger, businessInfo }) {
       {/* Print header */}
       <div className="print-only" style={{ marginBottom: 16 }}>
         {useLHBin && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLHBin && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:10, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLHBin && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           {!useLHBin && <div>
             <div style={{ fontWeight: 700, fontSize: 18 }}>{businessInfo.name}</div>
@@ -4909,7 +4929,7 @@ function BinCard({ items, stockLedger, businessInfo }) {
         </tbody>
       </table>
       {useLHBin && businessInfo?.letterheadFooter && (
-        <div className="lh-pad-footer print-only" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+        <div className="lh-pad-footer print-only" style={{ background: '#fff' }}>
           <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
         </div>
       )}
@@ -5670,7 +5690,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:12, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, borderBottom: '2px solid #1E2A4A', paddingBottom: 12 }}>
           {!useLH && <div>
             <div className="serif" style={{ fontWeight: 700, fontSize: 20, color: '#1E2A4A' }}>{businessInfo.name}</div>
@@ -5731,7 +5751,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
           </tfoot>
         </table>
         {useLH && businessInfo?.letterheadFooter && (
-          <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+          <div className="lh-pad-footer" style={{ background: '#fff' }}>
             <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
           </div>
         )}
@@ -5760,7 +5780,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
         {lines.map((l, i) => (
           <div key={i} style={{ padding: '36px 48px', pageBreakAfter: i < lines.length - 1 ? 'always' : 'auto', borderBottom: i < lines.length - 1 ? '3px dashed #EAE6DB' : 'none' }}>
             {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-            {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:10, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+            {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 10 }}>
               {!useLH && <div>
@@ -5820,7 +5840,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
           </div>
         ))}
         {useLH && businessInfo?.letterheadFooter && (
-          <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+          <div className="lh-pad-footer" style={{ background: '#fff' }}>
             <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
           </div>
         )}
@@ -6099,7 +6119,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
         </div>
         <div className="print-area" style={{ background: '#fff', padding: 32, fontFamily: 'Georgia, serif' }}>
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:14, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 28 }}>
             {!useLH && <div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{businessInfo.name || 'Company Name'}</div>
@@ -6174,7 +6194,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 140 }}>Authorised Signatory</div></div>
           </div>
           {useLH && businessInfo?.letterheadFooter && (
-            <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+            <div className="lh-pad-footer" style={{ background: '#fff' }}>
               <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
             </div>
           )}
@@ -6707,7 +6727,7 @@ function TaxReport({ documents, customers, businessInfo }) {
       </div>
 
       {useLHTax && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-      {useLHTax && businessInfo?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:12, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+      {useLHTax && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
       <DateRangePicker from={from} setFrom={setFrom} to={to} setTo={setTo} count={invRows.length} label="invoice(s)" />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 24 }}>
@@ -6763,7 +6783,7 @@ function TaxReport({ documents, customers, businessInfo }) {
 
       {invRows.length === 0 && purRows.length === 0 && <div style={styles.emptyBox}>No approved documents found for the selected period.</div>}
       {useLHTax && businessInfo?.letterheadFooter && (
-        <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+        <div className="lh-pad-footer" style={{ background: '#fff' }}>
           <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
         </div>
       )}
@@ -9017,7 +9037,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         {c.status === 'Draft' && <span style={{ background:'#FEE2E2', color:'#B91C1C', padding:'4px 12px', borderRadius:20, fontSize:12, fontWeight:700 }}>DRAFT status — change to Approved to remove watermark</span>}
       </div>
       <div className="print-area contract-print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-        {effLHH && <div style={{ borderBottom:'2px solid #1E2A4A', background:'#fff', lineHeight:0 }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block' }} /></div>}
+        {effLHH && <div style={{ background:'#fff', lineHeight:0 }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ padding: '32px 56px' }}>
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
           {!effLHH && bi.name && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
@@ -9127,7 +9147,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           ))}
         </div>
         </div>{/* end inner content */}
-        {effLHF && <div style={{ borderTop:'2px solid #1E2A4A', background:'#fff', lineHeight:0 }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', display:'block' }} /></div>}
+        {effLHF && <div style={{ background:'#fff', width:'100%', height:130, overflow:'hidden' }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', height:130, objectFit:'cover', objectPosition:'center', display:'block' }} /></div>}
       </div>
     </div>
   );
@@ -9337,7 +9357,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
         {useLHPartner && (bi?.letterhead || bi?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLHPartner && bi?.letterhead && <div className="lh-pad-header" style={{ paddingBottom:14, borderBottom:'2px solid #1E2A4A', background:'#fff' }}><img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLHPartner && bi?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
           {!useLHPartner && (bi.name || bi.companyName) && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>Dealership / Channel Partner Agreement</div>
@@ -9385,7 +9405,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
           ))}
         </div>
         {useLHPartner && bi?.letterheadFooter && (
-          <div className="lh-pad-footer" style={{ paddingTop: 12, borderTop: '2px solid #1E2A4A', background: '#fff' }}>
+          <div className="lh-pad-footer" style={{ background: '#fff' }}>
             <img src={bi.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
           </div>
         )}
