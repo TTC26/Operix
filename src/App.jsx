@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword } from './firebase';
 
 
@@ -2518,6 +2518,16 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <div className="serif" style={styles.brandName}>Operix</div>
           <div style={styles.brandSub}>Business Suite</div>
         </div>
+        {/* Notifications bell */}
+        <button
+          title="Notifications"
+          onClick={onShowNotifications}
+          style={{ background: view === 'notifications' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'notifications' ? '#C9A24B' : '#6B7494', display: 'flex', alignItems: 'center', position: 'relative' }}>
+          <Bell size={16} strokeWidth={1.8} />
+          {unreadCount > 0 && (
+            <span style={{ position: 'absolute', top: 1, right: 1, background: '#C9A24B', color: '#fff', borderRadius: 10, fontSize: 9, fontWeight: 700, padding: '0 4px', minWidth: 14, textAlign: 'center', lineHeight: '14px' }}>{unreadCount}</span>
+          )}
+        </button>
         {/* Settings icon — admin only */}
         {userRole === 'admin' && (
           <button
@@ -2616,6 +2626,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="evaluation"      label="Quarterly Review" icon={BarChart2} />
           <NavBtn id="mepreports"      label="MEP Reports"      icon={FileText} />
         </Section>
+      )}
+
+      {/* Manufacturing divider */}
+      {showProduction && (
+        <div style={{ fontSize: 10, fontWeight: 800, color: '#E07A3A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.08)' }}>🏭 Manufacturing</div>
       )}
 
       {/* Engineering — manufacturing only (Item Master is in Stores) */}
@@ -3242,13 +3257,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <label style={styles.label}>Due date</label>
               <input type="date" value={doc.dueDate || ''} onChange={(e) => update('dueDate', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
-            {cc.hasTax && (
-              <div style={{ ...styles.formGroup, flex: 1 }}>
-                <label style={styles.label}>{cc.splitTax ? 'Place of supply (state)' : 'Place of supply'}</label>
-                <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
-              </div>
-            )}
           </div>
+          {cc.hasTax && (
+            <div style={styles.formGroup}>
+              <label style={styles.label}>{cc.splitTax ? 'Place of supply (state)' : 'Place of supply'}</label>
+              <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+            </div>
+          )}
 
           <div style={styles.formGroup}>
             <label style={styles.label}>{isVendorDoc ? 'Vendor' : 'Customer'}</label>
@@ -4411,10 +4426,20 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
 // ─── Single Voucher Print ────────────────────────────────────────────────────
 
 function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
+  const voucherRef = React.useRef(null);
   return (
-    <Modal title="Petty Cash Voucher" onClose={onClose}>
-      {/* print-area INSIDE the no-print overlay — visibility:visible overrides the hidden parent */}
-      <div className="print-area" style={{ padding: 0 }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,40,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Header toolbar — hidden during print */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1E2A4A' }} className="no-print">
+        <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Petty Cash Voucher</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
+          <button onClick={() => downloadDocPDF('.petty-voucher-print', `petty-voucher-${entry.voucherNo || ''}.pdf`)} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Download size={14}/> PDF</button>
+          <button onClick={onClose} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14}/></button>
+        </div>
+      </div>
+      {/* Voucher content — shown in print mode */}
+      <div className="print-area petty-voucher-print" ref={voucherRef} style={{ background: '#fff', borderRadius: 8, width: 480, padding: 28, marginTop: 52, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
@@ -4438,8 +4463,8 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
               ...(entry.remarks ? [['Remarks', entry.remarks]] : []),
             ].map(([label, val]) => (
               <tr key={label}>
-                <td style={{ padding: '5px 0', color: '#888780', width: '35%', fontWeight: 500 }}>{label}</td>
-                <td style={{ padding: '5px 0', color: '#1E2A4A', fontWeight: label === 'Amount' ? 700 : 400, fontSize: label === 'Amount' ? 15 : 13 }}>{val}</td>
+                <td style={{ padding: '6px 0', color: '#888780', width: '35%', fontWeight: 500 }}>{label}</td>
+                <td style={{ padding: '6px 0', color: '#1E2A4A', fontWeight: label === 'Amount' ? 700 : 400, fontSize: label === 'Amount' ? 15 : 13 }}>{val}</td>
               </tr>
             ))}
           </tbody>
@@ -4453,7 +4478,7 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
           </div>
         </div>
       </div>
-    </Modal>
+    </div>
   );
 }
 
