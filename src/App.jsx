@@ -176,6 +176,102 @@ function computeTotals(doc, sellerState, country) {
   return { subtotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
 }
 
+// ─── Shared tax helper for non-DocEditor modules (Tender, RA Bill, AMC, etc.) ─
+function calcModuleTax(subtotal, taxRate, cc, placeOfSupply, sellerState) {
+  if (!cc || !cc.hasTax || !(parseFloat(taxRate) > 0)) return { cgst:0, sgst:0, igst:0, vat:0, totalTax:0, grandTotal:subtotal, sameState:false };
+  const taxAmt = subtotal * (parseFloat(taxRate)||0) / 100;
+  if (cc.splitTax) {
+    const sameState = !!(sellerState && placeOfSupply && sellerState.trim().toLowerCase() === placeOfSupply.trim().toLowerCase());
+    return sameState
+      ? { cgst:taxAmt/2, sgst:taxAmt/2, igst:0, vat:0, totalTax:taxAmt, grandTotal:subtotal+taxAmt, sameState:true }
+      : { cgst:0, sgst:0, igst:taxAmt, vat:0, totalTax:taxAmt, grandTotal:subtotal+taxAmt, sameState:false };
+  }
+  return { cgst:0, sgst:0, igst:0, vat:taxAmt, totalTax:taxAmt, grandTotal:subtotal+taxAmt, sameState:false };
+}
+
+function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onChangeTax, onChangePOS, readOnly }) {
+  if (!cc || !cc.hasTax) return null;
+  const t = calcModuleTax(subtotal, taxRate, cc, placeOfSupply, sellerState);
+  return (
+    <div style={{ background:'#F8F7F4', borderRadius:8, padding:'12px 16px', border:'1px solid #EAE6DB', marginTop:8 }}>
+      {/* Tax rate + place of supply row */}
+      {!readOnly && (
+        <div style={{ display:'flex', gap:12, marginBottom:10, flexWrap:'wrap' }}>
+          <div style={{ ...styles.formGroup, flex:1, minWidth:140 }}>
+            <label style={styles.label}>{cc.taxLabel||'Tax'} Rate (%)</label>
+            <input type='number' value={taxRate||0} onChange={e=>onChangeTax&&onChangeTax(e.target.value)} style={{ ...styles.input, margin:0 }}/>
+          </div>
+          {cc.splitTax && (
+            <div style={{ ...styles.formGroup, flex:2, minWidth:180 }}>
+              <label style={styles.label}>Place of Supply (State)</label>
+              <input value={placeOfSupply||''} onChange={e=>onChangePOS&&onChangePOS(e.target.value)} placeholder={`e.g. ${sellerState||'Tamil Nadu'}`} style={{ ...styles.input, margin:0 }}/>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Tax breakdown */}
+      <div style={{ borderTop:'1px solid #EAE6DB', paddingTop:10 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:3 }}>
+          <span>Subtotal</span><span>{subtotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        </div>
+        {t.cgst > 0 && <>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>CGST ({(parseFloat(taxRate)||0)/2}%)</span><span>{t.cgst.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>SGST ({(parseFloat(taxRate)||0)/2}%)</span><span>{t.sgst.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+        </>}
+        {t.igst > 0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>IGST ({parseFloat(taxRate)||0}%)</span><span>{t.igst.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>}
+        {t.vat > 0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>{cc.taxLabel||'Tax'} ({parseFloat(taxRate)||0}%)</span><span>{t.vat.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>}
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, fontWeight:700, color:'#1E2A4A', borderTop:'1px solid #EAE6DB', paddingTop:6, marginTop:4 }}>
+          <span>Grand Total</span><span>{t.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared Print Overlay (used by Tender, RA Bill, AMC, Sub WO, PTW, Handover)
+function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
+  const [pdfLoading, setPdfLoading] = React.useState(false);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead));
+  const cur = (cc) => (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency || '';
+  return (
+    <>
+      <div className="no-print" onClick={onClose}
+        style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:998 }}/>
+      <div className="no-print" style={{ position:'fixed', top:16, right:24, zIndex:1001, display:'flex', gap:8 }}>
+        <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={onClose}><X size={15}/> Close</button>
+        {businessInfo?.letterhead && (
+          <button onClick={()=>setUseLH(v=>!v)} style={{ ...styles.ghostBtn, background:'#fff', ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>
+            📃 {useLH?'Letterhead ON':'Use Letterhead'}
+          </button>
+        )}
+        <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
+          {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
+        </button>
+        <button style={styles.primaryBtn} onClick={()=>window.print()}><Printer size={15}/> Print</button>
+      </div>
+      <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
+        {useLH && businessInfo?.letterhead && (
+          <img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }}/>
+        )}
+        <div style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
+          {!useLH && businessInfo && (
+            <div style={{ marginBottom:24, borderBottom:'2px solid #1E2A4A', paddingBottom:16 }}>
+              <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A' }}>{businessInfo.name||'Company Name'}</div>
+              {businessInfo.address && <div style={{ fontSize:12, color:'#555', marginTop:2 }}>{businessInfo.address}</div>}
+              {businessInfo.phone && <div style={{ fontSize:12, color:'#555' }}>📞 {businessInfo.phone}{businessInfo.email?' | ✉ '+businessInfo.email:''}</div>}
+              {businessInfo.gst && <div style={{ fontSize:12, color:'#555' }}>GSTIN: {businessInfo.gst}</div>}
+            </div>
+          )}
+          {children}
+          {useLH && businessInfo?.letterheadFooter && (
+            <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'100%', display:'block', marginTop:32 }}/>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── PDF Download & OCR Utilities ────────────────────────────────────────────
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -2414,7 +2510,7 @@ function ConvertDropdown({ doc, onConvert }) {
 // Which views belong to each section (for auto-expand when child is active)
 const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
-  accounts:    ['pettycash', 'vouchers', 'gstr1', 'vatreport', 'taxreport'],
+  accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn'],
   stores:      ['stock', 'stockledger', 'bincard', 'items'],
   engineering: ['partsmaster', 'engdocs'],
@@ -2573,7 +2669,8 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <CreateBtn docKey="creditnote" />
         <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
         <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
-        {country === 'india' && <NavBtn id="gstr1" label="GSTR-1 Report" icon={FileText} />}
+        {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+        {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
         {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
         {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
       </Section>
@@ -6863,6 +6960,247 @@ function GSTR1Report({ documents, customers, businessInfo }) {
 }
 
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// GSTR-3B REPORT (India only)
+// ─────────────────────────────────────────────
+function GSTR3BReport({ documents, customers, vendors, businessInfo }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.toISOString().slice(0, 7));
+  const [showPrint, setShowPrint] = useState(false);
+  const cc = COUNTRY_CONFIG['india'];
+  const fmt = (n) => '₹' + (n||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const from = month + '-01';
+  const lastDay = new Date(new Date(month).getFullYear(), new Date(month).getMonth()+1, 0).getDate();
+  const to = month + '-' + String(lastDay).padStart(2,'0');
+
+  // Outward supplies — invoices & credit notes
+  const outDocs = (documents||[]).filter(d => {
+    if (!['invoice','creditnote'].includes(d.type)) return false;
+    const dt = d.date || d.invoiceDate || '';
+    return dt >= from && dt <= to;
+  });
+
+  // ITC — purchase bills from registered vendors (with GSTIN)
+  const inDocs = (documents||[]).filter(d => {
+    if (d.type !== 'purchasebill') return false;
+    const dt = d.date || '';
+    const vendor = vendors?.find(v=>v.id===d.vendorId);
+    return dt >= from && dt <= to && vendor?.gstin;
+  });
+
+  // Compute totals
+  function sumTotals(docs) {
+    let subtotal=0, cgst=0, sgst=0, igst=0;
+    docs.forEach(d => {
+      const t = computeTotals(d, businessInfo?.state||'', 'india');
+      const sign = d.type==='creditnote' ? -1 : 1;
+      subtotal += t.subtotal * sign;
+      cgst += t.cgst * sign;
+      sgst += t.sgst * sign;
+      igst += t.igst * sign;
+    });
+    return { subtotal, cgst, sgst, igst, totalTax: cgst+sgst+igst };
+  }
+
+  const out = sumTotals(outDocs);
+  const itc = sumTotals(inDocs);
+  const netCGST = Math.max(0, out.cgst - itc.cgst);
+  const netSGST = Math.max(0, out.sgst - itc.sgst);
+  const netIGST = Math.max(0, out.igst - itc.igst);
+  const netTax  = netCGST + netSGST + netIGST;
+
+  // Table 3.2 — interstate to unregistered (IGST only, no GSTIN)
+  const unreg = outDocs.filter(d => {
+    const c = customers?.find(x=>x.id===d.customerId);
+    return d.type==='invoice' && !c?.gstin;
+  });
+  const unreg3p2 = sumTotals(unreg);
+
+  // Rows for output breakdown
+  const outRows = [
+    ['3.1(a)','Outward taxable supplies (other than zero rated/nil/exempt)', out.subtotal, out.cgst, out.sgst, out.igst],
+    ['3.1(b)','Zero rated supplies (Exports)', 0, 0, 0, 0],
+    ['3.1(c)','Nil rated / Exempt supplies', 0, 0, 0, 0],
+    ['3.2','Supplies to unregistered / composition (IGST only)', unreg3p2.subtotal, '-', '-', unreg3p2.igst],
+  ];
+
+  const tableHeaderStyle = { background:'#1E2A4A', color:'#fff', padding:'8px 10px', textAlign:'left', fontSize:11, fontWeight:700 };
+  const tdStyle = (right=false) => ({ padding:'7px 10px', fontSize:13, textAlign: right?'right':'left', borderBottom:'1px solid #f0ece5' });
+
+  const PrintContent = () => (
+    <div style={{ fontFamily:'Georgia, serif' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:18, fontWeight:700 }}>{businessInfo?.name||''}</div>
+          {businessInfo?.address && <div style={{ fontSize:11, color:'#555' }}>{businessInfo.address}</div>}
+          {businessInfo?.gst && <div style={{ fontSize:11 }}>GSTIN: {businessInfo.gst}</div>}
+        </div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:20, fontWeight:700 }}>GSTR-3B</div>
+          <div style={{ fontSize:12, color:'#555' }}>Return Period: {month}</div>
+        </div>
+      </div>
+      {/* Table 3.1 — Outward Supplies */}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:6, background:'#E8F0FE', padding:'6px 10px', borderRadius:4 }}>
+          Table 3 — Details of Outward Supplies and Inward Supplies Liable to Reverse Charge
+        </div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+          <thead><tr>
+            {['Row','Nature of Supplies','Taxable Value','CGST','SGST','IGST'].map(h=><th key={h} style={tableHeaderStyle}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {outRows.map(([row,label,taxable,cgst,sgst,igst])=>(
+              <tr key={row} style={{ background:'#fff' }}>
+                <td style={tdStyle()}>{row}</td>
+                <td style={tdStyle()}>{label}</td>
+                <td style={tdStyle(true)}>{typeof taxable==='number'?fmt(taxable):taxable}</td>
+                <td style={tdStyle(true)}>{typeof cgst==='number'?fmt(cgst):cgst}</td>
+                <td style={tdStyle(true)}>{typeof sgst==='number'?fmt(sgst):sgst}</td>
+                <td style={tdStyle(true)}>{typeof igst==='number'?fmt(igst):igst}</td>
+              </tr>
+            ))}
+            <tr style={{ background:'#F8F7F4', fontWeight:700 }}>
+              <td colSpan={2} style={{ ...tdStyle(), fontWeight:700 }}>Total Output Tax</td>
+              <td style={tdStyle(true)}>{fmt(out.subtotal)}</td>
+              <td style={tdStyle(true)}>{fmt(out.cgst)}</td>
+              <td style={tdStyle(true)}>{fmt(out.sgst)}</td>
+              <td style={tdStyle(true)}>{fmt(out.igst)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {/* Table 4 — ITC */}
+      <div style={{ marginBottom:16 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:6, background:'#E8F0FE', padding:'6px 10px', borderRadius:4 }}>
+          Table 4 — Eligible Input Tax Credit (ITC)
+        </div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+          <thead><tr>
+            {['Row','Details','Taxable Value','CGST','SGST','IGST'].map(h=><th key={h} style={tableHeaderStyle}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td style={tdStyle()}>4(A)</td>
+              <td style={tdStyle()}>ITC available — Inputs from registered suppliers</td>
+              <td style={tdStyle(true)}>{fmt(itc.subtotal)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.cgst)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.sgst)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.igst)}</td>
+            </tr>
+            <tr style={{ background:'#F8F7F4', fontWeight:700 }}>
+              <td colSpan={2} style={{ ...tdStyle(), fontWeight:700 }}>Total ITC</td>
+              <td style={tdStyle(true)}>{fmt(itc.subtotal)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.cgst)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.sgst)}</td>
+              <td style={tdStyle(true)}>{fmt(itc.igst)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {/* Net Tax Payable */}
+      <div style={{ background:'#1E2A4A', color:'#fff', borderRadius:8, padding:'14px 20px' }}>
+        <div style={{ fontSize:13, fontWeight:700, marginBottom:10, borderBottom:'1px solid rgba(255,255,255,0.2)', paddingBottom:8 }}>
+          Net GST Payable (Output Tax − ITC)
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+          {[['CGST', out.cgst, itc.cgst, netCGST],['SGST', out.sgst, itc.sgst, netSGST],['IGST', out.igst, itc.igst, netIGST],['Total', out.totalTax, itc.totalTax, netTax]].map(([l,o,i,n])=>(
+            <div key={l} style={{ background:'rgba(255,255,255,0.1)', borderRadius:6, padding:'10px 12px' }}>
+              <div style={{ fontSize:11, opacity:0.7, marginBottom:4 }}>{l}</div>
+              <div style={{ fontSize:11, opacity:0.7 }}>Output: {fmt(o)}</div>
+              <div style={{ fontSize:11, opacity:0.7 }}>ITC: {fmt(i)}</div>
+              <div style={{ fontSize:16, fontWeight:700, marginTop:6, borderTop:'1px solid rgba(255,255,255,0.2)', paddingTop:4 }}>{fmt(n)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding:'24px 32px' }}>
+      {showPrint && (
+        <DocPrintOverlay onClose={()=>setShowPrint(false)} filename={`GSTR-3B-${month}.pdf`} businessInfo={businessInfo}>
+          <PrintContent/>
+        </DocPrintOverlay>
+      )}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <div>
+          <h2 className="serif" style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', margin:0 }}>GSTR-3B Report</h2>
+          <div style={{ fontSize:13, color:'#888', marginTop:2 }}>Monthly GST summary return — outward supplies, ITC, net payable</div>
+        </div>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <input type='month' value={month} onChange={e=>setMonth(e.target.value)} style={{ ...{ padding:'8px 12px', borderRadius:8, border:'1px solid #EAE6DB', fontSize:13, background:'#fff' } }}/>
+          <button onClick={()=>setShowPrint(true)} style={styles.primaryBtn}><Printer size={15}/> Print / PDF</button>
+        </div>
+      </div>
+      {/* Summary stat cards */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
+        {[['Output CGST', out.cgst,'#1E2A4A'],['Output SGST', out.sgst,'#1E2A4A'],['Output IGST', out.igst,'#1E2A4A'],['Total Output Tax', out.totalTax,'#C9A24B'],['ITC CGST', itc.cgst,'#1a6b30'],['ITC SGST', itc.sgst,'#1a6b30'],['ITC IGST', itc.igst,'#1a6b30'],['Total ITC', itc.totalTax,'#1a6b30']].map(([l,v,c])=>(
+          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'12px 16px' }}>
+            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+            <div style={{ fontSize:18, fontWeight:700, color:c, marginTop:4 }}>{fmt(v)}</div>
+          </div>
+        ))}
+      </div>
+      {/* Net Payable Banner */}
+      <div style={{ background:'#1E2A4A', color:'#fff', borderRadius:10, padding:'16px 24px', marginBottom:24, display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16 }}>
+        {[['Net CGST Payable', netCGST],['Net SGST Payable', netSGST],['Net IGST Payable', netIGST],['Total GST Payable', netTax]].map(([l,v])=>(
+          <div key={l} style={{ borderRight: l!=='Total GST Payable'?'1px solid rgba(255,255,255,0.2)':'none', paddingRight:16 }}>
+            <div style={{ fontSize:11, opacity:0.7 }}>{l}</div>
+            <div style={{ fontSize:22, fontWeight:700, marginTop:4 }}>{fmt(v)}</div>
+          </div>
+        ))}
+      </div>
+      {/* Table 3.1 */}
+      <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, overflow:'hidden', marginBottom:20 }}>
+        <div style={{ padding:'12px 16px', fontWeight:700, fontSize:13, color:'#1E2A4A', borderBottom:'1px solid #EAE6DB', background:'#F8F7F4' }}>Table 3 — Outward Supplies</div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+          <thead><tr style={{ background:'#F8F7F4' }}>
+            {['Row','Nature','Taxable Value','CGST','SGST','IGST'].map(h=><th key={h} style={{ padding:'8px 12px', textAlign:h==='Row'||h==='Nature'?'left':'right', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {outRows.map(([row,label,taxable,cgst,sgst,igst])=>(
+              <tr key={row} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                <td style={{ padding:'9px 12px', fontWeight:600, width:80 }}>{row}</td>
+                <td style={{ padding:'9px 12px', color:'#555' }}>{label}</td>
+                <td style={{ padding:'9px 12px', textAlign:'right', fontWeight:600 }}>{typeof taxable==='number'?fmt(taxable):taxable}</td>
+                <td style={{ padding:'9px 12px', textAlign:'right' }}>{typeof cgst==='number'?fmt(cgst):cgst}</td>
+                <td style={{ padding:'9px 12px', textAlign:'right' }}>{typeof sgst==='number'?fmt(sgst):sgst}</td>
+                <td style={{ padding:'9px 12px', textAlign:'right' }}>{typeof igst==='number'?fmt(igst):igst}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* Table 4 — ITC */}
+      <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, overflow:'hidden' }}>
+        <div style={{ padding:'12px 16px', fontWeight:700, fontSize:13, color:'#1E2A4A', borderBottom:'1px solid #EAE6DB', background:'#F8F7F4' }}>Table 4 — Input Tax Credit (ITC)</div>
+        <div style={{ padding:'14px 16px', fontSize:13, color:'#555' }}>
+          ITC is computed from purchase bills where vendor GSTIN is on record.
+          {inDocs.length === 0 && <span style={{ color:'#B5453A', marginLeft:8 }}>No eligible purchase bills found for {month}.</span>}
+        </div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+          <thead><tr style={{ background:'#F8F7F4' }}>
+            {['Row','Details','Taxable Value','CGST','SGST','IGST'].map(h=><th key={h} style={{ padding:'8px 12px', textAlign:h==='Row'||h==='Details'?'left':'right', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            <tr style={{ borderBottom:'1px solid #F0ECE5' }}>
+              <td style={{ padding:'9px 12px', fontWeight:600 }}>4(A)</td>
+              <td style={{ padding:'9px 12px', color:'#555' }}>Inputs from registered suppliers (purchase bills with GSTIN)</td>
+              <td style={{ padding:'9px 12px', textAlign:'right', fontWeight:600 }}>{fmt(itc.subtotal)}</td>
+              <td style={{ padding:'9px 12px', textAlign:'right' }}>{fmt(itc.cgst)}</td>
+              <td style={{ padding:'9px 12px', textAlign:'right' }}>{fmt(itc.sgst)}</td>
+              <td style={{ padding:'9px 12px', textAlign:'right' }}>{fmt(itc.igst)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // UAE VAT RETURN REPORT
 // ─────────────────────────────────────────────
 function VATReport({ documents, customers, businessInfo }) {
@@ -12717,16 +13055,20 @@ function FMWorkOrderView({ fmWorkOrders, setFmWorkOrders, assets, fmSpareParts, 
 }
 
 // ─── FM: AMC Contracts / SLA ──────────────────────────────────────────────────
-function AMCContractView({ amcContracts, setAmcContracts, customers, assets, userRole }) {
+function AMCContractView({ amcContracts, setAmcContracts, customers, assets, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
+  const [printDoc, setPrintDoc] = useState(null);
   const canEdit = ['admin','manager','accounts'].includes(userRole);
   const today = new Date().toISOString().slice(0,10);
   const ST_COLOR = { active:'#1a6b30', expired:'#842029', draft:'#555', terminated:'#888' };
   const ST_BG    = { active:'#d4edda', expired:'#f8d7da', draft:'#f0ece5', terminated:'#f0ece5' };
+  const country = businessInfo?.country || 'other';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
+  const sellerState = businessInfo?.state || '';
 
   function blank() {
     const n = `AMC-${String(amcContracts.length+1).padStart(3,'0')}`;
-    return { id:'', contractNo:n, customerId:'', title:'', startDate:'', endDate:'', value:0, slaResponse:'4', slaPriority:'P2', coveredAssets:[], scope:'', billingCycle:'Annual', status:'active', notes:'' };
+    return { id:'', contractNo:n, customerId:'', title:'', startDate:'', endDate:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', slaResponse:'4', slaPriority:'P2', coveredAssets:[], scope:'', billingCycle:'Annual', status:'active', notes:'' };
   }
   function save(c) {
     const rec = { ...c, id:c.id||crypto.randomUUID(), updatedAt:Date.now() };
@@ -12769,10 +13111,17 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
                 {customers.map(cu=><option key={cu.id} value={cu.id}>{cu.name}</option>)}
               </select>
             </div>
-            <div style={styles.formGroup}><label style={styles.label}>Annual / Contract Value</label><input type='number' value={c.value||0} onChange={e=>set('value',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Annual / Contract Value (excl. tax)</label><input type='number' value={c.value||0} onChange={e=>set('value',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Start Date</label><input type='date' value={c.startDate||''} onChange={e=>set('startDate',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>End Date</label><input type='date' value={c.endDate||''} onChange={e=>set('endDate',e.target.value)} style={styles.input}/></div>
           </div>
+          {cc.hasTax && (
+            <TaxSummaryBox
+              subtotal={parseFloat(c.value)||0} taxRate={c.taxRate} cc={cc}
+              placeOfSupply={c.placeOfSupply} sellerState={sellerState}
+              onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
+            />
+          )}
           {/* SLA */}
           <div style={{ background:'#F0F8FF', borderRadius:8, padding:14, border:'1px solid #b8d9f8' }}>
             <div style={{ fontSize:12, fontWeight:700, color:'#0a58ca', marginBottom:10 }}>SLA Terms</div>
@@ -12819,7 +13168,7 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
         {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New Contract</button>}
       </div>
       <div style={{ display:'flex', gap:12, marginBottom:20 }}>
-        {[['Active',active.length,'#1a6b30'],['Expiring ≤30d',expiringSoon.length,'#856404'],['Total Value',active.reduce((s,c)=>s+(parseFloat(c.value)||0),0).toLocaleString(undefined,{maximumFractionDigits:0}),'#C9A24B'],['Expired',list.filter(c=>c.status==='expired').length,'#842029']].map(([l,v,c])=>(
+        {[['Active',active.length,'#1a6b30'],['Expiring ≤30d',expiringSoon.length,'#856404'],['Total Value (incl. tax)',(cc.currency||'')+active.reduce((s,c)=>s+calcModuleTax(parseFloat(c.value)||0,c.taxRate||0,cc,c.placeOfSupply,sellerState).grandTotal,0).toLocaleString(undefined,{maximumFractionDigits:0}),'#C9A24B'],['Expired',list.filter(c=>c.status==='expired').length,'#842029']].map(([l,v,c])=>(
           <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'12px 18px' }}>
             <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
             <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
@@ -12830,7 +13179,7 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
         <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead><tr style={{ background:'#F8F7F4' }}>
-              {['Contract No.','Title','Client','Value','Start','End','Days Left','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              {['Contract No.','Title','Client','Value',cc.hasTax?'Grand Total':'','Start','End','Days Left','Status',''].filter(h=>h!=='').map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {list.map(c=>{
@@ -12842,16 +13191,18 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
                     <td style={{ padding:'10px 12px', fontWeight:600 }}>{c.contractNo}</td>
                     <td style={{ padding:'10px 12px', color:'#333' }}>{c.title||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555' }}>{client?.name||'—'}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{parseFloat(c.value||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{(cc.currency||'')+parseFloat(c.value||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    {cc.hasTax && <td style={{ padding:'10px 12px', fontWeight:700, color:'#1E2A4A' }}>{(cc.currency||'')+calcModuleTax(parseFloat(c.value)||0,c.taxRate||0,cc,c.placeOfSupply,sellerState).grandTotal.toLocaleString(undefined,{maximumFractionDigits:0})}</td>}
                     <td style={{ padding:'10px 12px', color:'#555' }}>{c.startDate||'—'}</td>
                     <td style={{ padding:'10px 12px', color:dl!==null&&dl<0?'#B5453A':'#555' }}>{c.endDate||'—'}</td>
                     <td style={{ padding:'10px 12px', fontWeight:warn?700:400, color:warn?'#856404':dl!==null&&dl<0?'#B5453A':'#555' }}>{dl!==null?(dl<0?'Expired':`${dl}d`):('—')}</td>
                     <td style={{ padding:'10px 12px' }}><span style={{ background:ST_BG[c.status], color:ST_COLOR[c.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{c.status.toUpperCase()}</span></td>
                     <td style={{ padding:'10px 12px' }}>
-                      {canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing(c)} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))setAmcContracts(prev=>prev.filter(x=>x.id!==c.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setPrintDoc(c)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                        {canEdit && <><button onClick={()=>setEditing(c)} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))setAmcContracts(prev=>prev.filter(x=>x.id!==c.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -12861,6 +13212,73 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
         </div>
       )}
     </div>
+    {/* ── AMC Contract Print Overlay ── */}
+    {printDoc && (()=>{
+      const c = printDoc;
+      const client = customers.find(cu=>cu.id===c.customerId);
+      const covAssets = assets.filter(a=>c.coveredAssets?.includes(a.id));
+      const cVal = parseFloat(c.value||0);
+      const tax = cc.hasTax ? calcModuleTax(cVal, c.taxRate||0, cc, c.placeOfSupply, sellerState) : null;
+      const dl = c.endDate ? Math.ceil((new Date(c.endDate)-new Date(today))/(1000*86400)) : null;
+      return (
+        <DocPrintOverlay onClose={()=>setPrintDoc(null)} filename={`AMC-Contract-${c.contractNo}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>AMC CONTRACT / SERVICE AGREEMENT</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{c.contractNo} &nbsp;|&nbsp; {c.status?.toUpperCase()}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:16 }}>
+            {[['Client', client?.name||'—'], ['Title', c.title||'—'], ['Start Date', c.startDate||'—'], ['End Date', c.endDate||'—'], ['Billing Cycle', c.billingCycle||'—'], ['Days Remaining', dl!==null?(dl<0?'Expired':`${dl} days`):('—')]].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:120 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {/* Contract Value */}
+          <div style={{ background:'#F8F7F4', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:4 }}>
+              <span>Contract Value (excl. tax)</span><span style={{ fontWeight:600 }}>{(cc.currency||'')+cVal.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+            </div>
+            {tax && tax.cgst>0 && <>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>CGST ({(c.taxRate||0)/2}%)</span><span>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>SGST ({(c.taxRate||0)/2}%)</span><span>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+            </>}
+            {tax && tax.igst>0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>IGST ({c.taxRate||0}%)</span><span>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+            {tax && tax.vat>0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>{cc.taxLabel||'Tax'} ({c.taxRate||0}%)</span><span>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, fontWeight:700, color:'#1E2A4A', borderTop:'1px solid #ddd', paddingTop:6, marginTop:4 }}>
+              <span>Total Value</span><span>{(cc.currency||'')+(tax?tax.grandTotal:cVal).toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+            </div>
+          </div>
+          {/* SLA */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>SLA Terms</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:13 }}>
+              <div style={{ background:'#F0F8FF', borderRadius:6, padding:'8px 12px' }}><b>Response Time:</b> {c.slaResponse||'4'} hours</div>
+              <div style={{ background:'#F0F8FF', borderRadius:6, padding:'8px 12px' }}><b>Resolution:</b> {c.slaPriority||'P2'}</div>
+            </div>
+          </div>
+          {/* Scope */}
+          {c.scope && <div style={{ marginBottom:16, fontSize:13 }}><b>Scope / Inclusions:</b><div style={{ color:'#555', marginTop:4, lineHeight:1.6 }}>{c.scope}</div></div>}
+          {/* Covered Assets */}
+          {covAssets.length>0 && (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:6, textTransform:'uppercase' }}>Assets Covered</div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                {covAssets.map(a=><span key={a.id} style={{ background:'#f0ece5', borderRadius:4, padding:'3px 8px', fontSize:12 }}>{a.assetId} — {a.name}</span>)}
+              </div>
+            </div>
+          )}
+          {c.notes && <div style={{ fontSize:12, color:'#555', borderTop:'1px solid #eee', paddingTop:10, marginBottom:16 }}><b>Notes:</b> {c.notes}</div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:40 }}>
+            {['Client Signature & Stamp','Service Provider Signature & Stamp'].map(s=>(
+              <div key={s}>
+                <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+                <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Date: _______________</div>
+              </div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
@@ -13060,19 +13478,28 @@ function FMKPIView({ assets, pmSchedules, fmWorkOrders, amcContracts, fmSparePar
 }
 
 // ─── Tender & Estimation ─────────────────────────────────────────────────────
-function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) {
+function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
+  const [printDoc, setPrintDoc] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
   const STATUS_BG    = { draft:'#f0ece5', submitted:'#cfe2ff', won:'#d4edda', lost:'#f8d7da', cancelled:'#f0f0f0' };
+  const country = businessInfo?.country || 'other';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
+  const sellerState = businessInfo?.state || '';
 
   function blank() {
-    return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], notes:'' };
+    return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
   }
   function blankLine() { return { id:crypto.randomUUID(), description:'', unit:'', qty:0, rate:0 }; }
   function lineTotal(l) { return (parseFloat(l.qty)||0)*(parseFloat(l.rate)||0); }
-  function grandTotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
+  function boqSubtotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
+  function grandTotal(t) {
+    const sub = boqSubtotal(t);
+    if (!cc.hasTax) return sub;
+    return calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState).grandTotal;
+  }
   function save(t) {
     const rec = { ...t, id:t.id||crypto.randomUUID(), updatedAt:Date.now() };
     setTenders(prev => prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
@@ -13082,7 +13509,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) 
   if (editing) {
     const t = editing;
     const set = (k,v) => setEditing(p=>({...p,[k]:v}));
-    const total = grandTotal(t);
+    const subtotal = boqSubtotal(t);
     return (
       <div style={{ maxWidth:760, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
@@ -13131,8 +13558,15 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) 
             </table>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8 }}>
               <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
-              <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Total: {total.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+              {!cc.hasTax && <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Total: {subtotal.toLocaleString(undefined,{maximumFractionDigits:2})}</div>}
             </div>
+            {cc.hasTax && (
+              <TaxSummaryBox
+                subtotal={subtotal} taxRate={t.taxRate} cc={cc}
+                placeOfSupply={t.placeOfSupply} sellerState={sellerState}
+                onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
+              />
+            )}
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
@@ -13153,7 +13587,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) 
         {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New Tender</button>}
       </div>
       <div style={{ display:'flex', gap:16, marginBottom:20 }}>
-        {[['Total',tenders.length,''],['Won',tenders.filter(t=>t.status==='won').length,'#1a6b30'],['Submitted',tenders.filter(t=>t.status==='submitted').length,'#0a58ca'],['Won Value',wonValue.toLocaleString(undefined,{maximumFractionDigits:0}),'#C9A24B']].map(([l,v,c])=>(
+        {[['Total',tenders.length,''],['Won',tenders.filter(t=>t.status==='won').length,'#1a6b30'],['Submitted',tenders.filter(t=>t.status==='submitted').length,'#0a58ca'],['Won Value',(cc.currency||'')+wonValue.toLocaleString(undefined,{maximumFractionDigits:0}),'#C9A24B']].map(([l,v,c])=>(
           <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'12px 18px', minWidth:100 }}>
             <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
             <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
@@ -13164,24 +13598,28 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) 
         <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead><tr style={{ background:'#F8F7F4' }}>
-              {['Tender No.','Title','Client','Submission','BOQ Value','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              {['Tender No.','Title','Client','Submission','BOQ Value',cc.hasTax?'Grand Total (incl. tax)':'','Status',''].map(h=>h&&<th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {list.map(t=>{
                 const client = customers.find(c=>c.id===t.customerId);
+                const sub = boqSubtotal(t);
+                const gt = grandTotal(t);
                 return (
                   <tr key={t.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
                     <td style={{ padding:'10px 12px', fontWeight:600 }}>{t.number}</td>
                     <td style={{ padding:'10px 12px', color:'#333' }}>{t.title||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555' }}>{client?.name||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555' }}>{t.submissionDate||'—'}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{grandTotal(t).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    {cc.hasTax && <td style={{ padding:'10px 12px', fontWeight:700, color:'#1E2A4A' }}>{(cc.currency||'')+gt.toLocaleString(undefined,{maximumFractionDigits:0})}</td>}
                     <td style={{ padding:'10px 12px' }}><span style={{ background:STATUS_BG[t.status], color:STATUS_COLOR[t.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{t.status.toUpperCase()}</span></td>
                     <td style={{ padding:'10px 12px' }}>
-                      {canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                        {canEdit && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -13191,21 +13629,90 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole }) 
         </div>
       )}
     </div>
+    {/* ── Tender Print Overlay ── */}
+    {printDoc && (()=>{
+      const t = printDoc;
+      const client = customers.find(c=>c.id===t.customerId);
+      const sub = boqSubtotal(t);
+      const tax = cc.hasTax ? calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState) : null;
+      return (
+        <DocPrintOverlay onClose={()=>setPrintDoc(null)} filename={`Tender-${t.number}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>TENDER / BILL OF QUANTITIES</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{t.number} &nbsp;|&nbsp; Status: {t.status?.toUpperCase()}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:20 }}>
+            {[['Client / Employer', client?.name||'—'], ['Tender Title', t.title||'—'], ['Submission Date', t.submissionDate||'—'], ['Valid Until', t.validUntil||'—']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:130 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, marginBottom:16 }}>
+            <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
+              {['#','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Qty'||h==='Rate'||h==='Amount'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {(t.boq||[]).map((l,i)=>(
+                <tr key={l.id} style={{ background:i%2===0?'#fff':'#F8F7F4', borderBottom:'1px solid #eee' }}>
+                  <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                  <td style={{ padding:'7px 10px' }}>{l.description}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'center' }}>{l.unit||'—'}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(l.qty||0).toLocaleString()}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+parseFloat(l.rate||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:'2px solid #1E2A4A' }}>
+                <td colSpan={5} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>Subtotal</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>
+              {tax && tax.cgst>0 && <>
+                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+              </>}
+              {tax && tax.igst>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.vat>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td>
+                <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+tax.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>}
+              {!tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td>
+                <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>}
+            </tfoot>
+          </table>
+          {t.notes && <div style={{ fontSize:12, color:'#555', borderTop:'1px solid #eee', paddingTop:10, marginTop:4 }}><b>Notes:</b> {t.notes}</div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:48 }}>
+            {['Prepared By','Authorised Signatory'].map(s=>(
+              <div key={s} style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
 // ─── Subcontractor Management ─────────────────────────────────────────────────
-function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole }) {
+function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole, businessInfo }) {
   const [tab, setTab] = useState('register');
   const [editing, setEditing] = useState(null);
   const [editingWO, setEditingWO] = useState(null);
+  const [printWO, setPrintWO] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
+  const country = businessInfo?.country || 'other';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
+  const sellerState = businessInfo?.state || '';
 
   // All work orders across all subcontractors
   const allWOs = subcontractors.flatMap(s=>(s.workOrders||[]).map(w=>({...w,subId:s.id,subName:s.name})));
 
   function blankSub() { return { id:'', name:'', trade:'', contact:'', email:'', phone:'', taxId:'', workOrders:[] }; }
-  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active' }; }
+  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active' }; }
 
   function saveSub(sub) {
     const rec = { ...sub, id:sub.id||crypto.randomUUID() };
@@ -13253,7 +13760,14 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
             <div style={styles.formGroup}><label style={styles.label}>End Date</label><input type='date' value={wo.endDate||''} onChange={e=>set('endDate',e.target.value)} style={styles.input}/></div>
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Scope of Work</label><textarea value={wo.scope||''} onChange={e=>set('scope',e.target.value)} style={{ ...styles.input, height:72 }}/></div>
-          <div style={styles.formGroup}><label style={styles.label}>Contract Value</label><input type='number' value={wo.value||0} onChange={e=>set('value',e.target.value)} style={styles.input}/></div>
+          <div style={styles.formGroup}><label style={styles.label}>Contract Value (excl. tax)</label><input type='number' value={wo.value||0} onChange={e=>set('value',e.target.value)} style={styles.input}/></div>
+          {cc.hasTax && (
+            <TaxSummaryBox
+              subtotal={parseFloat(wo.value)||0} taxRate={wo.taxRate} cc={cc}
+              placeOfSupply={wo.placeOfSupply} sellerState={sellerState}
+              onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
+            />
+          )}
           <div style={{ background:'#F8F7F4', borderRadius:8, padding:14 }}>
             <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:10 }}>Payment Tracker</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
@@ -13340,21 +13854,29 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
           <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
               <thead><tr style={{ background:'#F8F7F4' }}>
-                {['Subcontractor','Project','Scope','Value','Balance','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+                {['Subcontractor','Project','Scope','Value',cc.hasTax?'Grand Total':'','Balance','Status',''].filter(h=>h!==false&&h!=='').map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {allWOs.map(wo=>{
                   const proj = siteProjects.find(p=>p.id===wo.projectId);
                   const bal = balance(wo);
+                  const woValue = parseFloat(wo.value||0);
+                  const woGrand = cc.hasTax ? calcModuleTax(woValue, wo.taxRate||0, cc, wo.placeOfSupply, sellerState).grandTotal : woValue;
                   return (
                     <tr key={wo.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
                       <td style={{ padding:'10px 12px', fontWeight:600 }}>{wo.subName}</td>
                       <td style={{ padding:'10px 12px', color:'#555' }}>{proj?.name||'—'}</td>
                       <td style={{ padding:'10px 12px', color:'#333', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{wo.scope||'—'}</td>
-                      <td style={{ padding:'10px 12px', fontWeight:600 }}>{parseFloat(wo.value||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:600 }}>{(cc.currency||'')+woValue.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      {cc.hasTax && <td style={{ padding:'10px 12px', fontWeight:700, color:'#1E2A4A' }}>{(cc.currency||'')+woGrand.toLocaleString(undefined,{maximumFractionDigits:0})}</td>}
                       <td style={{ padding:'10px 12px', color:bal<0?'#B5453A':'#1a6b30', fontWeight:600 }}>{bal.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
                       <td style={{ padding:'10px 12px' }}><span style={{ background:wo.status==='active'?'#cfe2ff':wo.status==='completed'?'#d4edda':'#f0ece5', color:wo.status==='active'?'#0a58ca':wo.status==='completed'?'#1a6b30':'#555', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{wo.status.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())}</span></td>
-                      <td style={{ padding:'10px 12px' }}>{canEdit && <button onClick={()=>setEditingWO(wo)} style={styles.iconBtn}><Pencil size={14}/></button>}</td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <div style={{ display:'flex', gap:6 }}>
+                          <button onClick={()=>setPrintWO(wo)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                          {canEdit && <button onClick={()=>setEditingWO(wo)} style={styles.iconBtn}><Pencil size={14}/></button>}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -13364,13 +13886,80 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
         )
       )}
     </div>
+    {/* ── Subcontractor WO Print Overlay ── */}
+    {printWO && (()=>{
+      const wo = printWO;
+      const sub = subcontractors.find(s=>s.id===wo.subId);
+      const proj = siteProjects.find(p=>p.id===wo.projectId);
+      const woVal = parseFloat(wo.value||0);
+      const tax = cc.hasTax ? calcModuleTax(woVal, wo.taxRate||0, cc, wo.placeOfSupply, sellerState) : null;
+      const paid = (parseFloat(wo.advancePaid||0)+parseFloat(wo.progressPaid||0)+parseFloat(wo.retentionHeld||0)+parseFloat(wo.finalPaid||0));
+      const bal = woVal - paid;
+      return (
+        <DocPrintOverlay onClose={()=>setPrintWO(null)} filename={`SubWO-${sub?.name||'WO'}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>SUBCONTRACTOR WORK ORDER</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>Issued by: {businessInfo?.name||'—'}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:16 }}>
+            {[['Subcontractor', sub?.name||'—'], ['Trade', sub?.trade||'—'], ['Project', proj?.name||'—'], ['Status', wo.status?.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())||'—'], ['Start Date', wo.startDate||'—'], ['End Date', wo.endDate||'—']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:120 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {wo.scope && <div style={{ marginBottom:16, fontSize:13 }}><b>Scope of Work:</b><div style={{ color:'#555', marginTop:4, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{wo.scope}</div></div>}
+          {/* Value & Tax */}
+          <div style={{ background:'#F8F7F4', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:10, textTransform:'uppercase' }}>Contract Value</div>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:4 }}>
+              <span>Value (excl. tax)</span><span style={{ fontWeight:600 }}>{(cc.currency||'')+woVal.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+            </div>
+            {tax && tax.cgst>0 && <>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>CGST ({(wo.taxRate||0)/2}%)</span><span>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>SGST ({(wo.taxRate||0)/2}%)</span><span>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+            </>}
+            {tax && tax.igst>0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>IGST ({wo.taxRate||0}%)</span><span>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+            {tax && tax.vat>0 && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginBottom:2 }}><span>{cc.taxLabel||'Tax'} ({wo.taxRate||0}%)</span><span>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:15, fontWeight:700, color:'#1E2A4A', borderTop:'1px solid #ddd', paddingTop:6, marginTop:4 }}>
+              <span>Total Contract Value</span><span>{(cc.currency||'')+(tax?tax.grandTotal:woVal).toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+            </div>
+          </div>
+          {/* Payment Tracker */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Payment Tracker</div>
+            <table style={{ width:'100%', fontSize:13, borderCollapse:'collapse' }}>
+              {[['Advance Paid', wo.advancePaid||0],['Progress Payments', wo.progressPaid||0],['Retention Held', wo.retentionHeld||0],['Final Payment', wo.finalPaid||0]].map(([l,v])=>(
+                <tr key={l} style={{ borderBottom:'1px solid #f0ece5' }}>
+                  <td style={{ padding:'6px 0', color:'#555' }}>{l}</td>
+                  <td style={{ padding:'6px 0', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+parseFloat(v).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop:'2px solid #1E2A4A' }}>
+                <td style={{ padding:'8px 0', fontWeight:700, color:bal<0?'#B5453A':'#1a6b30' }}>Balance Due</td>
+                <td style={{ padding:'8px 0', textAlign:'right', fontWeight:700, color:bal<0?'#B5453A':'#1a6b30' }}>{(cc.currency||'')+bal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>
+            </table>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:40 }}>
+            {['Subcontractor Signature','Authorised Signatory'].map(s=>(
+              <div key={s}>
+                <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+                <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Date: _______________</div>
+              </div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
 // ─── HSE ──────────────────────────────────────────────────────────────────────
-function HSEView({ hseRecords, setHseRecords, siteProjects, userRole }) {
+function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessInfo }) {
   const [tab, setTab] = useState('incidents');
   const [editing, setEditing] = useState(null);
+  const [printPermit, setPrintPermit] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
 
   const incidents    = hseRecords.incidents    || [];
@@ -13598,10 +14187,13 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole }) {
                       <td style={{ padding:'10px 12px', color:expired?'#B5453A':'#555', fontWeight:expired?700:400 }}>{pt.validUntil||'—'}{expired?' ⚠':''}</td>
                       <td style={{ padding:'10px 12px', color:'#555' }}>{pt.issuedBy||'—'}</td>
                       <td style={{ padding:'10px 12px' }}><span style={{ background:pt.status==='active'?'#d4edda':pt.status==='suspended'?'#fff3cd':'#f0ece5', color:pt.status==='active'?'#1a6b30':pt.status==='suspended'?'#856404':'#555', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{pt.status.toUpperCase()}</span></td>
-                      <td style={{ padding:'10px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing({ section:'permits', data:pt })} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))updateSection('permits',prev=>prev.filter(x=>x.id!==pt.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}</td>
+                      <td style={{ padding:'10px 12px' }}>
+                        <div style={{ display:'flex', gap:6 }}>
+                          <button onClick={()=>setPrintPermit(pt)} style={styles.iconBtn} title="Print PTW"><Printer size={14}/></button>
+                          {canEdit && <><button onClick={()=>setEditing({ section:'permits', data:pt })} style={styles.iconBtn}><Pencil size={14}/></button>
+                          <button onClick={()=>{if(window.confirm('Delete?'))updateSection('permits',prev=>prev.filter(x=>x.id!==pt.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -13611,16 +14203,78 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole }) {
         )
       )}
     </div>
+    {/* ── HSE Permit to Work Print Overlay ── */}
+    {printPermit && (()=>{
+      const pt = printPermit;
+      const proj = siteProjects.find(p=>p.id===pt.projectId);
+      const expired = pt.validUntil && pt.validUntil < new Date().toISOString().slice(0,10);
+      return (
+        <DocPrintOverlay onClose={()=>setPrintPermit(null)} filename={`PTW-${pt.number}.pdf`} businessInfo={businessInfo}>
+          {/* Title Banner */}
+          <div style={{ background:'#1E2A4A', color:'#fff', borderRadius:8, padding:'16px 24px', marginBottom:20, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontSize:20, fontWeight:700, letterSpacing:1 }}>PERMIT TO WORK</div>
+              <div style={{ fontSize:13, opacity:0.8, marginTop:3 }}>{pt.type}</div>
+            </div>
+            <div style={{ textAlign:'right' }}>
+              <div style={{ fontSize:18, fontWeight:700 }}>{pt.number}</div>
+              <div style={{ fontSize:12, opacity:0.8, marginTop:3 }}>
+                <span style={{ background:pt.status==='active'?'#22c55e':'#ef4444', borderRadius:4, padding:'2px 8px', fontWeight:700 }}>{pt.status?.toUpperCase()}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:16 }}>
+            {[['Project', proj?.name||'—'], ['Location', pt.location||'—'], ['Issue Date', pt.date||'—'], ['Valid From', pt.validFrom||'—'], ['Valid Until', pt.validUntil||(expired?'EXPIRED':'—')], ['Issued By', pt.issuedBy||'—'], ['Work Receiver', pt.receiver||'—']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:120 }}>{l}</span>
+                <span style={{ fontWeight:600, color:l==='Valid Until'&&expired?'#B5453A':'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {pt.description && <div style={{ marginBottom:16, fontSize:13 }}><b>Work Description:</b><div style={{ color:'#555', marginTop:4, lineHeight:1.6, border:'1px solid #eee', borderRadius:6, padding:'10px 14px' }}>{pt.description}</div></div>}
+          {/* Safety Checklist */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:10, textTransform:'uppercase' }}>Safety Precautions Checklist</div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              {['Fire extinguisher available at work site','Area barricaded / cordoned off','All energised equipment de-energised & locked out','PPE — Helmet, Gloves, Safety Shoes, Harness (as applicable)','Emergency contact numbers displayed','First aid kit available','Hot work permit (if applicable) obtained','Gas test / atmosphere check carried out'].map((item,i)=>(
+                <tr key={i} style={{ borderBottom:'1px solid #f0ece5' }}>
+                  <td style={{ padding:'6px 10px', width:24, textAlign:'center', fontSize:14 }}>☐</td>
+                  <td style={{ padding:'6px 10px' }}>{item}</td>
+                  <td style={{ padding:'6px 10px', width:80, textAlign:'center', color:'#888', fontSize:11 }}>Initials</td>
+                </tr>
+              ))}
+            </table>
+          </div>
+          {/* Signature Block */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:20, marginTop:32 }}>
+            {['Issuing Authority','Work Receiver','Safety Officer'].map(s=>(
+              <div key={s} style={{ borderTop:'1px solid #555', paddingTop:8 }}>
+                <div style={{ fontSize:11, color:'#555', textAlign:'center', marginBottom:16 }}>{s}</div>
+                <div style={{ borderBottom:'1px solid #aaa', marginBottom:4, height:36 }}></div>
+                <div style={{ fontSize:10, color:'#aaa', textAlign:'center' }}>Signature & Date</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop:20, fontSize:11, color:'#888', textAlign:'center', borderTop:'1px solid #eee', paddingTop:12 }}>
+            This permit is valid only for the date and scope stated above. Any deviation requires fresh permit issuance.
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
 // ─── RA Billing ───────────────────────────────────────────────────────────────
 function RABillingView({ raBillings, setRaBillings, siteProjects, customers, tenders, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
+  const [printDoc, setPrintDoc] = useState(null);
   const canEdit = ['admin','manager','accounts'].includes(userRole);
+  const country = businessInfo?.country || 'other';
+  const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
+  const sellerState = businessInfo?.state || '';
 
   function blank() {
-    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], status:'draft', notes:'' };
+    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], taxRate:cc.defaultTaxRate||0, placeOfSupply:'', status:'draft', notes:'' };
   }
   function blankItem() { return { id:crypto.randomUUID(), description:'', contractValue:0, previousQty:0, thisQty:0, unit:'%' }; }
   function itemAmount(item, tender) {
@@ -13640,7 +14294,7 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
   if (editing) {
     const b = editing;
     const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
-    const total = billTotal(b);
+    const subtotal = billTotal(b);
     return (
       <div style={{ maxWidth:800, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
@@ -13695,8 +14349,15 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
             </table>
             <div style={{ display:'flex', justifyContent:'space-between', marginTop:8 }}>
               <button onClick={()=>set('items',[...(b.items||[]),blankItem()])} style={styles.ghostBtn}><Plus size={13}/> Add Item</button>
-              <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>This Bill: {total.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+              {!cc.hasTax && <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>This Bill: {subtotal.toLocaleString(undefined,{maximumFractionDigits:0})}</div>}
             </div>
+            {cc.hasTax && (
+              <TaxSummaryBox
+                subtotal={subtotal} taxRate={b.taxRate} cc={cc}
+                placeOfSupply={b.placeOfSupply} sellerState={sellerState}
+                onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
+              />
+            )}
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={b.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:56 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
@@ -13711,7 +14372,11 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
   const ST_COLOR = { draft:'#555', submitted:'#0a58ca', approved:'#1a6b30', paid:'#C9A24B', rejected:'#842029' };
   const ST_BG    = { draft:'#f0ece5', submitted:'#cfe2ff', approved:'#d4edda', paid:'#FFF8E7', rejected:'#f8d7da' };
   const list = [...raBillings].sort((a,b)=>b.date>a.date?1:-1);
-  const totalBilled = list.reduce((s,b)=>s+billTotal(b),0);
+  function billGrandTotal(b) {
+    const sub = billTotal(b);
+    return cc.hasTax ? calcModuleTax(sub, b.taxRate||0, cc, b.placeOfSupply, sellerState).grandTotal : sub;
+  }
+  const totalBilled = list.reduce((s,b)=>s+billGrandTotal(b),0);
   return (
     <div style={{ padding:'24px 32px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
@@ -13719,7 +14384,7 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
         {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New RA Bill</button>}
       </div>
       <div style={{ display:'flex', gap:16, marginBottom:20 }}>
-        {[['Total Bills',list.length],['Total Billed',totalBilled.toLocaleString(undefined,{maximumFractionDigits:0})],['Approved',list.filter(b=>b.status==='approved').length],['Paid',list.filter(b=>b.status==='paid').length]].map(([l,v])=>(
+        {[['Total Bills',list.length],['Total Billed',(cc.currency||'')+totalBilled.toLocaleString(undefined,{maximumFractionDigits:0})],['Approved',list.filter(b=>b.status==='approved').length],['Paid',list.filter(b=>b.status==='paid').length]].map(([l,v])=>(
           <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'12px 18px' }}>
             <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
             <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A' }}>{v}</div>
@@ -13730,12 +14395,14 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
         <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead><tr style={{ background:'#F8F7F4' }}>
-              {['Bill No.','Date','Project','Client','Period','Amount','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              {['Bill No.','Date','Project','Client','Period','Subtotal',cc.hasTax?'Grand Total (incl. tax)':'','Status',''].filter(h=>h!=='').map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {list.map(b=>{
                 const proj = siteProjects.find(p=>p.id===b.projectId);
                 const client = customers.find(c=>c.id===b.customerId);
+                const sub = billTotal(b);
+                const grand = billGrandTotal(b);
                 return (
                   <tr key={b.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
                     <td style={{ padding:'10px 12px', fontWeight:600 }}>{b.billNumber}</td>
@@ -13743,13 +14410,15 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
                     <td style={{ padding:'10px 12px', color:'#555' }}>{proj?.name||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555' }}>{client?.name||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555', fontSize:11 }}>{b.periodFrom||'—'} → {b.periodTo||'—'}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:700 }}>{billTotal(b).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                    {cc.hasTax && <td style={{ padding:'10px 12px', fontWeight:700, color:'#1E2A4A' }}>{(cc.currency||'')+grand.toLocaleString(undefined,{maximumFractionDigits:0})}</td>}
                     <td style={{ padding:'10px 12px' }}><span style={{ background:ST_BG[b.status], color:ST_COLOR[b.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{b.status.toUpperCase()}</span></td>
                     <td style={{ padding:'10px 12px' }}>
-                      {canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing(b)} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))setRaBillings(prev=>prev.filter(x=>x.id!==b.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setPrintDoc(b)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                        {canEdit && <><button onClick={()=>setEditing(b)} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))setRaBillings(prev=>prev.filter(x=>x.id!==b.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -13759,6 +14428,68 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
         </div>
       )}
     </div>
+    {/* ── RA Bill Print Overlay ── */}
+    {printDoc && (()=>{
+      const b = printDoc;
+      const proj = siteProjects.find(p=>p.id===b.projectId);
+      const client = customers.find(c=>c.id===b.customerId);
+      const sub = billTotal(b);
+      const tax = cc.hasTax ? calcModuleTax(sub, b.taxRate||0, cc, b.placeOfSupply, sellerState) : null;
+      return (
+        <DocPrintOverlay onClose={()=>setPrintDoc(null)} filename={`RA-Bill-${b.billNumber}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>RUNNING ACCOUNT BILL</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{b.billNumber} &nbsp;|&nbsp; {b.status?.toUpperCase()}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:20 }}>
+            {[['Client', client?.name||'—'], ['Project', proj?.name||'—'], ['Bill Date', b.date||'—'], ['Period', (b.periodFrom||'—')+' → '+(b.periodTo||'—')]].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:100 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, marginBottom:16 }}>
+            <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
+              {['#','Description','Contract Value','Prev %','This Bill %','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Prev %'||h==='This Bill %'||h==='Amount'||h==='Contract Value'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {(b.items||[]).map((item,i)=>(
+                <tr key={item.id} style={{ background:i%2===0?'#fff':'#F8F7F4', borderBottom:'1px solid #eee' }}>
+                  <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                  <td style={{ padding:'7px 10px' }}>{item.description||'—'}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+parseFloat(item.contractValue||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(item.previousQty||0)}%</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(item.thisQty||0)}%</td>
+                  <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+itemAmount(item).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:'2px solid #1E2A4A' }}>
+                <td colSpan={5} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>This Bill Subtotal</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>
+              {tax && tax.cgst>0 && <>
+                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(b.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(b.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+              </>}
+              {tax && tax.igst>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({b.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.vat>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({b.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              <tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{tax?'Grand Total':'Total'}</td>
+                <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+(tax?tax.grandTotal:sub).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              </tr>
+            </tfoot>
+          </table>
+          {b.notes && <div style={{ fontSize:12, color:'#555', borderTop:'1px solid #eee', paddingTop:10 }}><b>Notes:</b> {b.notes}</div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:48 }}>
+            {['Contractor Signature','Client / Engineer Signature'].map(s=>(
+              <div key={s} style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
@@ -13913,8 +14644,9 @@ function TCView({ tcChecklists, setTcChecklists, siteProjects, userRole }) {
 }
 
 // ─── Project Handover ─────────────────────────────────────────────────────────
-function HandoverView({ handoverDocs, setHandoverDocs, siteProjects, customers, userRole }) {
+function HandoverView({ handoverDocs, setHandoverDocs, siteProjects, customers, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
+  const [printDoc, setPrintDoc] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
 
   const CHECKLIST_ITEMS = [
@@ -14049,10 +14781,11 @@ function HandoverView({ handoverDocs, setHandoverDocs, siteProjects, customers, 
                     <td style={{ padding:'10px 12px' }}>{openDefects>0?<span style={{ background:'#f8d7da', color:'#842029', borderRadius:5, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{openDefects} open</span>:'—'}</td>
                     <td style={{ padding:'10px 12px' }}><span style={{ background:ST_BG[r.status]||'#f0ece5', color:ST_COLOR[r.status]||'#555', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(r.status||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</span></td>
                     <td style={{ padding:'10px 12px' }}>
-                      {canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing(r)} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))setHandoverDocs(prev=>prev.filter(x=>x.id!==r.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setPrintDoc(r)} style={styles.iconBtn} title="Print Certificate"><Printer size={14}/></button>
+                        {canEdit && <><button onClick={()=>setEditing(r)} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))setHandoverDocs(prev=>prev.filter(x=>x.id!==r.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -14062,6 +14795,77 @@ function HandoverView({ handoverDocs, setHandoverDocs, siteProjects, customers, 
         </div>
       )}
     </div>
+    {/* ── Handover Certificate Print Overlay ── */}
+    {printDoc && (()=>{
+      const r = printDoc;
+      const proj = siteProjects.find(p=>p.id===r.projectId);
+      const client = customers.find(c=>c.id===r.customerId);
+      const cl = r.checklist||[];
+      const done = cl.filter(c=>c.done).length;
+      const openDefects = (r.defects||[]).filter(d=>d.status==='open').length;
+      return (
+        <DocPrintOverlay onClose={()=>setPrintDoc(null)} filename={`Handover-${proj?.name||'Project'}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PROJECT HANDOVER CERTIFICATE</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>Practical Completion &amp; Defect Liability Period</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:20 }}>
+            {[['Project', proj?.name||'—'], ['Client', client?.name||'—'], ['Handover Date', r.handoverDate||'—'], ['DLP Start', r.dlpStart||'—'], ['DLP End', r.dlpEnd||'—'], ['Status', (r.status||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())], ['Our Representative', r.ourRep||'—'], ['Client Representative', r.clientRep||'—']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:150 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {/* Checklist */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase', display:'flex', justifyContent:'space-between' }}>
+              <span>Handover Checklist</span>
+              <span style={{ color: done===cl.length?'#1a6b30':'#856404' }}>{done}/{cl.length} Complete</span>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                <th style={{ padding:'6px 8px', width:24 }}></th>
+                <th style={{ padding:'6px 8px', textAlign:'left', fontWeight:700, color:'#888' }}>Item</th>
+                <th style={{ padding:'6px 8px', textAlign:'left', fontWeight:700, color:'#888', width:180 }}>Notes</th>
+              </tr></thead>
+              <tbody>
+                {cl.map((c,i)=>(
+                  <tr key={i} style={{ borderBottom:'1px solid #f0ece5', background:c.done?'#f0fdf4':'#fff' }}>
+                    <td style={{ padding:'6px 8px', textAlign:'center', fontSize:15 }}>{c.done?'✓':'☐'}</td>
+                    <td style={{ padding:'6px 8px', color: c.done?'#1a6b30':'#333' }}>{c.item}</td>
+                    <td style={{ padding:'6px 8px', color:'#888', fontSize:11 }}>{c.notes||''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Open Defects */}
+          {(r.defects||[]).filter(d=>d.status==='open').length>0 && (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#B5453A', marginBottom:8, textTransform:'uppercase' }}>Open Defects / Snag Items ({openDefects})</div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                {(r.defects||[]).filter(d=>d.status==='open').map((d,i)=>(
+                  <tr key={d.id} style={{ borderBottom:'1px solid #f0ece5' }}>
+                    <td style={{ padding:'5px 8px', color:'#888', width:24 }}>{i+1}</td>
+                    <td style={{ padding:'5px 8px' }}>{d.description}</td>
+                    <td style={{ padding:'5px 8px', color:'#888', fontSize:11 }}>Raised: {d.raisedDate||'—'}</td>
+                  </tr>
+                ))}
+              </table>
+            </div>
+          )}
+          {r.notes && <div style={{ fontSize:12, color:'#555', borderTop:'1px solid #eee', paddingTop:10, marginBottom:16 }}><b>Notes:</b> {r.notes}</div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:40 }}>
+            {['Client Representative','Contractor Representative'].map(s=>(
+              <div key={s}>
+                <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+                <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Name &amp; Signature &amp; Date</div>
+              </div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
   );
 }
 
@@ -15384,6 +16188,7 @@ export default function App() {
             customers={customers}
             assets={assets}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'fmspareparts':
@@ -15501,6 +16306,15 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'gstr3b':
+        return (
+          <GSTR3BReport
+            documents={documents}
+            customers={customers}
+            vendors={vendors}
+            businessInfo={businessInfo}
+          />
+        );
       case 'vatreport':
         return (
           <VATReport
@@ -15536,6 +16350,7 @@ export default function App() {
             customers={customers}
             siteProjects={siteProjects}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'subcontractors':
@@ -15545,6 +16360,7 @@ export default function App() {
             setSubcontractors={setSubcontractors}
             siteProjects={siteProjects}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'hse':
@@ -15554,6 +16370,7 @@ export default function App() {
             setHseRecords={setHseRecords}
             siteProjects={siteProjects}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'rabilling':
@@ -15585,6 +16402,7 @@ export default function App() {
             siteProjects={siteProjects}
             customers={customers}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'activityplanner':
