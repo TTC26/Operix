@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -813,23 +813,22 @@ function OnboardingSetup({ setBusinessInfo }) {
 
         {step === 2 && (
           <>
-            <div style={{ fontFamily: 'Georgia, serif', fontSize: 20, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>What does your business do?</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Select one or more. You can adjust this later in Settings.</div>
+            <div style={{ fontFamily: 'Georgia, serif', fontSize: 20, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>What type of business are you?</div>
+            <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Choose one — this sets up your modules and <strong>cannot be changed</strong> after setup.</div>
+            <div style={{ fontSize: 11, color: '#C9A24B', fontWeight: 600, marginBottom: 18 }}>⚠ Choose carefully. Contact support to switch plans later.</div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {BIZ_TYPES.map(t => {
-                const on = activeTypes.includes(t.id);
+                const on = activeTypes[0] === t.id;
                 return (
-                  <div key={t.id} onClick={() => {
-                    const next = on ? activeTypes.filter(x => x !== t.id) : [...activeTypes, t.id];
-                    if (next.length) setActiveTypes(next);
-                  }} style={{
+                  <div key={t.id} onClick={() => setActiveTypes([t.id])} style={{
                     display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 16px',
                     border: on ? '2px solid #1E2A4A' : '2px solid #EAE6DB',
                     borderRadius: 12, cursor: 'pointer', background: on ? '#F0EFE9' : '#fff',
+                    transition: 'all 0.15s',
                   }}>
-                    <div style={{ width: 22, height: 22, borderRadius: 5, border: on ? '2px solid #1E2A4A' : '2px solid #BDB9B0', background: on ? '#1E2A4A' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
-                      {on && <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>✓</span>}
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: on ? '2px solid #1E2A4A' : '2px solid #BDB9B0', background: on ? '#1E2A4A' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
+                      {on && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A', marginBottom: 3 }}>{t.icon} {t.label}</div>
@@ -1527,6 +1526,165 @@ function TemplateMiniPreview({ template, name }) {
 }
 
 
+// ─── Delete Account Modal ─────────────────────────────────────────────────────
+function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClose, onDeleted }) {
+  const [step, setStep] = useState(1); // 1=warning 2=confirm-email 3=password 4=done
+  const [emailInput, setEmailInput]     = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [error, setError]   = useState('');
+  const [busy, setBusy]     = useState('');
+  const [exported, setExported] = useState(false);
+
+  // Paid customers get 30-day grace period; trial gets immediate hard delete
+  const gracePeriod  = !!isSubscribed;
+  const deletionDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const deletionDateStr = deletionDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  async function execute() {
+    setBusy(true);
+    setError('');
+    try {
+      await reauthenticateUser(user, passwordInput);
+      setStep(4);
+      if (gracePeriod) {
+        // Option B — schedule
+        await saveCompanyData(ownerUid, {
+          deletionScheduled: true,
+          deletionDate: deletionDate.toISOString(),
+          deletionRequestedAt: new Date().toISOString(),
+        });
+        onDeleted('scheduled');
+      } else {
+        // Option A — immediate
+        await deleteAllCompanyFirestore(ownerUid);
+        await deleteCompanyStorage(ownerUid);
+        await deleteFirebaseUser(user);
+        onDeleted('deleted');
+      }
+    } catch (e) {
+      const msg = e.message || '';
+      if (msg.includes('wrong-password') || msg.includes('invalid-credential') || msg.includes('INVALID_LOGIN')) {
+        setError('Incorrect password. Please try again.');
+      } else {
+        setError('Error: ' + msg);
+      }
+      setStep(3);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const dangerBtn = (label, onClick, disabled) => (
+    <button onClick={onClick} disabled={disabled}
+      style={{ flex:2, padding:'10px 16px', background: disabled ? '#ccc' : '#B91C1C', color:'#fff', border:'none', borderRadius:8, fontWeight:600, fontSize:14, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+      {label}
+    </button>
+  );
+  const backBtn = (toStep) => (
+    <button onClick={() => { setStep(toStep); setError(''); }}
+      style={{ ...styles.ghostBtn, flex:1 }}>← Back</button>
+  );
+
+  return (
+    <Modal onClose={step < 4 ? onClose : undefined} title={step < 4 ? 'Delete Account' : ''}>
+      {step === 1 && (
+        <>
+          <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:16, marginBottom:16 }}>
+            <div style={{ fontWeight:700, color:'#B91C1C', marginBottom:6 }}>⚠ {gracePeriod ? 'This will schedule your account for deletion' : 'This will permanently delete your account'}</div>
+            <div style={{ fontSize:13, color:'#7F1D1D', lineHeight:1.6 }}>
+              {gracePeriod
+                ? `Your account and all data will be permanently deleted on ${deletionDateStr} (30-day grace period). You can cancel anytime before that date from Settings.`
+                : 'Your trial account and all data will be permanently and immediately deleted. This cannot be undone.'}
+            </div>
+          </div>
+          <div style={{ fontSize:13, color:'#555', marginBottom:16 }}>
+            <strong>What will be deleted:</strong>
+            <div style={{ marginTop:6, lineHeight:2, paddingLeft:4 }}>
+              {'All documents · Customers & vendors · Employees & payroll · Stock & production · Quality records · Uploaded files (logos, drawings) · All staff accounts'.split(' · ').map(item => (
+                <div key={item} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ color:'#B91C1C', fontWeight:700 }}>×</span> {item}
+                </div>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => { onExportData(); setExported(true); }}
+            style={{ ...styles.ghostBtn, width:'100%', marginBottom:10, borderColor:'#1E2A4A', color:'#1E2A4A' }}>
+            ↓ Export all my data first {exported ? '✓' : '(recommended)'}
+          </button>
+          <div style={{ display:'flex', gap:10, marginTop:4 }}>
+            <button onClick={onClose} style={{ ...styles.ghostBtn, flex:1 }}>Cancel</button>
+            {dangerBtn('Continue →', () => setStep(2))}
+          </div>
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <div style={{ fontSize:14, color:'#333', marginBottom:8 }}>Type your account email address to confirm:</div>
+          <div style={{ fontSize:12, color:'#888', background:'#F8F7F4', borderRadius:6, padding:'6px 10px', marginBottom:12 }}>
+            {user.email}
+          </div>
+          <input value={emailInput} onChange={e => setEmailInput(e.target.value)}
+            placeholder="Enter your email"
+            style={{ ...styles.input, marginBottom:4 }}
+            autoFocus
+          />
+          {error && <div style={{ color:'#B91C1C', fontSize:12, marginBottom:8 }}>{error}</div>}
+          <div style={{ display:'flex', gap:10, marginTop:12 }}>
+            {backBtn(1)}
+            {dangerBtn('Confirm →', () => {
+              if (emailInput.trim() !== user.email) { setError('Email does not match.'); return; }
+              setError(''); setStep(3);
+            })}
+          </div>
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <div style={{ fontSize:14, color:'#333', marginBottom:12 }}>Enter your password to verify it's you:</div>
+          <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)}
+            placeholder="Your password"
+            style={{ ...styles.input, marginBottom:4 }}
+            onKeyDown={e => e.key === 'Enter' && !busy && passwordInput && execute()}
+            autoFocus
+          />
+          {error && <div style={{ color:'#B91C1C', fontSize:12, marginBottom:8 }}>{error}</div>}
+          <div style={{ display:'flex', gap:10, marginTop:12 }}>
+            {backBtn(2)}
+            {dangerBtn(
+              busy ? 'Verifying…' : gracePeriod ? 'Schedule Deletion' : 'Delete Permanently',
+              execute,
+              busy || !passwordInput,
+            )}
+          </div>
+        </>
+      )}
+
+      {step === 4 && (
+        <div style={{ textAlign:'center', padding:'32px 16px' }}>
+          <div style={{ fontSize:48, marginBottom:16 }}>{gracePeriod ? '🗓' : '🗑'}</div>
+          {gracePeriod ? (
+            <>
+              <div style={{ fontSize:18, fontWeight:700, color:'#1E2A4A', marginBottom:8 }}>Deletion Scheduled</div>
+              <div style={{ fontSize:13, color:'#666', lineHeight:1.7 }}>
+                Your account is scheduled for permanent deletion on<br/>
+                <strong>{deletionDateStr}</strong>.<br/><br/>
+                You can cancel this from <strong>Settings → Danger Zone</strong> before that date.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize:18, fontWeight:700, color:'#B91C1C', marginBottom:8 }}>Account Deleted</div>
+              <div style={{ fontSize:13, color:'#666' }}>All your data has been permanently removed.<br/>You have been signed out.</div>
+            </>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function LockedModuleScreen() {
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'60vh', gap:16, textAlign:'center', padding:32 }}>
@@ -1543,7 +1701,7 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', userEmail = '' }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   useEffect(() => setForm(businessInfo), [businessInfo]);
@@ -1918,6 +2076,24 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
                 <div style={{ fontSize: 11, color: '#3D7A5C', fontWeight: 600, marginTop: 6 }}>✓ Email notifications active</div>
               )}
             </div>
+
+            {/* ── Danger Zone ── */}
+            {userRole === 'admin' && (
+              <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #FECACA' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>⚠ Danger Zone</div>
+                <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '16px 20px' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#B91C1C', marginBottom: 4 }}>Delete Account</div>
+                  <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
+                    Permanently delete your Operix account and all associated data. This cannot be undone.
+                  </div>
+                  <button
+                    onClick={() => onRequestDelete && onRequestDelete()}
+                    style={{ padding: '8px 20px', background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    Delete my account
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -15591,6 +15767,7 @@ export default function App() {
   const [tcChecklists,     _setTC]     = useState([]);
   const [handoverDocs,     _setHDocs]  = useState([]);
   const [notifications,    setNotifications] = useState([]);
+  const [showDeleteModal,  setShowDeleteModal] = useState(false);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -15619,6 +15796,16 @@ export default function App() {
       }
     });
   }, []);
+
+  // ── Grace period expiry check — auto-open delete modal if 30-day window passed ──
+  useEffect(() => {
+    if (!biReady) return;
+    if (businessInfo?.deletionScheduled && businessInfo?.deletionDate) {
+      if (new Date(businessInfo.deletionDate) <= new Date()) {
+        setShowDeleteModal(true);
+      }
+    }
+  }, [biReady, businessInfo?.deletionScheduled, businessInfo?.deletionDate]);
 
   // ── Firestore subscription ───────────────────────────────────────────────────
   useEffect(() => {
@@ -15872,6 +16059,11 @@ export default function App() {
 
   async function handleLogout() { await logOut(); }
 
+  async function cancelDeletion() {
+    if (!ownerUid) return;
+    await saveCompanyData(ownerUid, { deletionScheduled: false, deletionDate: null });
+  }
+
   function exportAllData() {
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -16055,7 +16247,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} userEmail={user?.email || ''} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList
@@ -16689,11 +16881,55 @@ export default function App() {
       </button>
 
       <div style={styles.main}>
-        {trialDaysLeft !== null && trialDaysLeft <= 3 && !isSubscribed && (
+        {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && (
           <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
+        )}
+        {/* Deletion-scheduled banner */}
+        {businessInfo?.deletionScheduled && businessInfo?.deletionDate && (
+          <div style={{
+            background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10,
+            padding: '12px 20px', margin: '12px 24px 0', display: 'flex',
+            alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <div>
+              <span style={{ fontWeight: 700, color: '#B91C1C', fontSize: 13 }}>⚠ Account deletion scheduled — </span>
+              <span style={{ fontSize: 13, color: '#555' }}>
+                Your account and all data will be permanently deleted on{' '}
+                <strong>{new Date(businessInfo.deletionDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.
+              </span>
+            </div>
+            <button
+              onClick={cancelDeletion}
+              style={{ padding: '6px 16px', background: '#fff', border: '1.5px solid #B91C1C', borderRadius: 7, color: '#B91C1C', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Cancel deletion
+            </button>
+          </div>
         )}
         {renderContent()}
       </div>
+
+      {/* Powered-by watermark — shown during trial, hidden once subscribed */}
+      {!isSubscribed && trialDaysLeft !== null && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '5px 16px',
+          background: 'rgba(30,42,74,0.92)',
+          backdropFilter: 'blur(4px)',
+          borderTop: '1px solid rgba(201,162,75,0.3)',
+          pointerEvents: 'none',
+        }}>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5 }}>
+            Powered by{' '}
+            <span style={{ color: '#C9A24B', fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: 1 }}>Operix</span>
+            {trialDaysLeft > 0 && (
+              <span style={{ marginLeft: 10, color: 'rgba(255,255,255,0.45)', fontSize: 10 }}>
+                · {trialDaysLeft} day{trialDaysLeft === 1 ? '' : 's'} free trial remaining
+              </span>
+            )}
+          </span>
+        </div>
+      )}
 
       {editingCustomer && (
         <CustomerModal
@@ -16732,6 +16968,25 @@ export default function App() {
           }}
           onClose={() => setEditingItem(null)}
           businessInfo={businessInfo}
+        />
+      )}
+
+      {/* Delete Account Modal */}
+      {showDeleteModal && (
+        <DeleteAccountModal
+          user={user}
+          ownerUid={ownerUid}
+          isSubscribed={isSubscribed}
+          onExportData={exportAllData}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={(result) => {
+            if (result === 'deleted') {
+              handleLogout();
+            } else {
+              // 'scheduled' — grace period set; close modal
+              setShowDeleteModal(false);
+            }
+          }}
         />
       )}
     </div>
