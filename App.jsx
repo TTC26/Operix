@@ -49,7 +49,7 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn',
+    'stock','bincard','grn','storeissue',
   ],
   trading:       [],
   manufacturing: [
@@ -2940,7 +2940,7 @@ const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn'],
-  stores:      ['stock', 'stockledger', 'bincard', 'items'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue'],
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
@@ -3118,9 +3118,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
           <CreateBtn docKey="delivery" />
           <CreateBtn docKey="packing_list" />
-          <NavBtn id="stock"       label="Stock Position" icon={ClipboardList} />
-          <NavBtn id="stockledger" label="Stock Ledger"   icon={FileText} />
-          <NavBtn id="bincard"     label="Bin Card"       icon={ClipboardList} />
+          <NavBtn id="stock"       label="Stock Position"      icon={ClipboardList} />
+          <NavBtn id="stockledger" label="Stock Ledger"        icon={FileText} />
+          <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+          <NavBtn id="bincard"     label="Bin Card"            icon={ClipboardList} />
         </Section>
       )}
 
@@ -3276,9 +3277,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {showTrade && (
         <Section sectionKey="stores" label="Stores">
           <NavBtn id="items"       label="Items"          icon={Package} />
-          <NavBtn id="stock"       label="Stock Position" icon={Package} />
-          <NavBtn id="stockledger" label="Stock Ledger"   icon={ClipboardList} />
-          <NavBtn id="grn"         label="GRN"            icon={Truck} />
+          <NavBtn id="stock"       label="Stock Position"      icon={Package} />
+          <NavBtn id="stockledger" label="Stock Ledger"        icon={ClipboardList} />
+          <NavBtn id="grn"         label="GRN"                icon={Truck} />
+          <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
         </Section>
       )}
       {showProduction && (
@@ -5761,7 +5763,7 @@ function BinCard({ items, stockLedger, businessInfo }) {
   const item = items.find(i => i.id === selectedItemId);
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
-    packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN' };
+    packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN', siv: 'Issue Voucher' };
 
   const entries = (stockLedger || [])
     .filter(e => e.itemId === selectedItemId)
@@ -5930,6 +5932,238 @@ function GRNPrint({ grn, businessInfo, onClose }) {
         </div>
         {useLH && businessInfo?.letterheadFooter && <img src={businessInfo.letterheadFooter} alt="footer" style={{width:'100%',display:'block',marginTop:16}} />}
       </div>
+    </div>
+  );
+}
+
+// ─── Stores Issue Voucher ──────────────────────────────────────
+function StoreIssuePrint({ siv, businessInfo, onClose }) {
+  const useLH = !!(businessInfo?.letterhead);
+  return (
+    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+      <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
+        <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
+        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+      </div>
+      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+        {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
+        {!useLH && (
+          <div style={{textAlign:'center',marginBottom:12}}>
+            <div style={{fontSize:16,fontWeight:700}}>{businessInfo?.name}</div>
+            <div style={{fontSize:11,color:'#555'}}>{businessInfo?.address}</div>
+          </div>
+        )}
+        <div style={{textAlign:'center',fontSize:15,fontWeight:700,letterSpacing:1,borderTop:'2px solid #1E2A4A',borderBottom:'2px solid #1E2A4A',padding:'6px 0',marginBottom:16}}>STORES ISSUE VOUCHER</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px 24px',marginBottom:16,padding:'12px 16px',background:'#F8F6F2',borderRadius:8}}>
+          <div><strong>SIV No:</strong> {siv.sivNumber}</div>
+          <div><strong>Date:</strong> {siv.date}</div>
+          <div><strong>Issued To / Dept:</strong> {siv.issuedTo || '—'}</div>
+          <div><strong>Purpose / Ref:</strong> {siv.purpose || '—'}</div>
+          {siv.projectRef && <div><strong>Project Ref:</strong> {siv.projectRef}</div>}
+          {siv.productionRef && <div><strong>Production Order:</strong> {siv.productionRef}</div>}
+        </div>
+        <table style={{width:'100%',borderCollapse:'collapse',marginBottom:20,fontSize:11}}>
+          <thead>
+            <tr style={{background:'#1E2A4A',color:'#fff'}}>
+              {['#','Item / Material','Unit','Qty Requested','Qty Issued','Rate','Value','Remarks'].map(h=>(
+                <th key={h} style={{padding:'6px 8px',textAlign:h==='Qty Requested'||h==='Qty Issued'||h==='Rate'||h==='Value'?'right':'left'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(siv.lines||[]).map((l,i)=>(
+              <tr key={i} style={{borderBottom:'1px solid #EEE',background:i%2===0?'#fff':'#F9F8F5'}}>
+                <td style={{padding:'5px 8px'}}>{i+1}</td>
+                <td style={{padding:'5px 8px'}}>{l.itemName}</td>
+                <td style={{padding:'5px 8px'}}>{l.unit||'pcs'}</td>
+                <td style={{padding:'5px 8px',textAlign:'right'}}>{l.qtyRequested||l.qty}</td>
+                <td style={{padding:'5px 8px',textAlign:'right',fontWeight:600}}>{l.qty}</td>
+                <td style={{padding:'5px 8px',textAlign:'right'}}>{l.rate?Number(l.rate).toFixed(2):'—'}</td>
+                <td style={{padding:'5px 8px',textAlign:'right'}}>{l.rate?((parseFloat(l.qty)||0)*(parseFloat(l.rate)||0)).toFixed(2):'—'}</td>
+                <td style={{padding:'5px 8px'}}>{l.remarks||''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {siv.notes && <div style={{marginBottom:16,padding:'8px 12px',background:'#F8F6F2',borderRadius:6}}><strong>Notes:</strong> {siv.notes}</div>}
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:40,paddingTop:16,borderTop:'1px solid #CCC'}}>
+          <div style={{textAlign:'center',minWidth:130}}><div style={{borderTop:'1px solid #333',paddingTop:4,fontSize:11}}>Requested By</div></div>
+          <div style={{textAlign:'center',minWidth:130}}><div style={{borderTop:'1px solid #333',paddingTop:4,fontSize:11}}>Issued By<br/><strong>{siv.issuedBy||''}</strong></div></div>
+          <div style={{textAlign:'center',minWidth:130}}><div style={{borderTop:'1px solid #333',paddingTop:4,fontSize:11}}>Received By<br/><strong>{siv.receivedBy||''}</strong></div></div>
+          <div style={{textAlign:'center',minWidth:130}}><div style={{borderTop:'1px solid #333',paddingTop:4,fontSize:11}}>Authorised By</div></div>
+        </div>
+        {useLH && businessInfo?.letterheadFooter && <img src={businessInfo.letterheadFooter} alt="footer" style={{width:'100%',display:'block',marginTop:16}} />}
+      </div>
+    </div>
+  );
+}
+
+function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [] }) {
+  const [editing, setEditing] = useState(null);
+  const [printSiv, setPrintSiv] = useState(null);
+  const canEdit = ['admin','manager','inventory','purchase'].includes(userRole);
+
+  function nextNumber() {
+    const nums = storeIssues.map(s=>parseInt((s.sivNumber||'').replace(/\D/g,''))||0);
+    return `SIV-${String(Math.max(0,...nums)+1).padStart(4,'0')}`;
+  }
+  function blank() {
+    return { id:'', sivNumber:nextNumber(), date:new Date().toISOString().slice(0,10), issuedTo:'', purpose:'', projectRef:'', productionRef:'', lines:[], issuedBy:'', receivedBy:'', notes:'', approvalStatus:'draft', approvalNote:'' };
+  }
+  function blankLine() { return { id:crypto.randomUUID(), itemId:'', itemName:'', unit:'pcs', qtyRequested:1, qty:1, rate:0, remarks:'' }; }
+
+  function saveSIV(siv) {
+    const isNew = !storeIssues.find(s=>s.id===siv.id);
+    const rec = { ...siv, id:siv.id||crypto.randomUUID(), approvalStatus:siv.approvalStatus||'draft', approvalNote:siv.approvalNote||'', updatedAt:Date.now() };
+    // Create OUT stock ledger entries
+    const now = new Date().toISOString();
+    const newEntries = (rec.lines||[]).filter(l=>l.itemId&&l.qty>0).map(l=>({
+      id: crypto.randomUUID(), date: rec.date, itemId: l.itemId, itemName: l.itemName,
+      type: 'out', qty: parseFloat(l.qty)||0, rate: parseFloat(l.rate)||0,
+      sourceType: 'siv', sourceId: rec.id, sourceNumber: rec.sivNumber, createdAt: now,
+    }));
+    setStockLedger(prev => [...prev.filter(e=>e.sourceId!==rec.id), ...newEntries]);
+    setStoreIssues(prev => isNew ? [rec,...prev] : prev.map(s=>s.id===rec.id?rec:s));
+    setEditing(null);
+  }
+
+  function deleteSIV(id) {
+    if (!window.confirm('Delete this SIV? Stock ledger entries will be removed.')) return;
+    setStockLedger(prev => prev.filter(e=>e.sourceId!==id));
+    setStoreIssues(prev => prev.filter(s=>s.id!==id));
+  }
+
+  function updateApproval(id, patch) {
+    setStoreIssues(prev=>prev.map(s=>s.id===id?{...s,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:s));
+  }
+
+  // ── FORM ────────────────────────────────────────────────────────
+  if (editing) {
+    const s = editing;
+    const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
+    const setLine = (idx,k,v)=>set('lines',s.lines.map((l,i)=>i===idx?{...l,[k]:v}:l));
+    return (
+      <div style={{ maxWidth:820, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{s.id?'Edit':'New'} Stores Issue Voucher — {s.sivNumber}</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          {/* Header grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>SIV Number</label><input value={s.sivNumber} onChange={e=>set('sivNumber',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input type="date" value={s.date} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Issued To / Dept</label><input value={s.issuedTo||''} onChange={e=>set('issuedTo',e.target.value)} style={styles.input} placeholder="Dept or person name"/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Purpose</label><input value={s.purpose||''} onChange={e=>set('purpose',e.target.value)} style={styles.input} placeholder="e.g. Site consumption, production"/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Project Ref</label><input value={s.projectRef||''} onChange={e=>set('projectRef',e.target.value)} style={styles.input} placeholder="Project name or number"/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Production Order Ref</label>
+              <select value={s.productionRef||''} onChange={e=>set('productionRef',e.target.value)} style={styles.input}>
+                <option value=''>None</option>
+                {productionOrders.map(o=><option key={o.id} value={o.number}>{o.number}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Issued By</label><input value={s.issuedBy||''} onChange={e=>set('issuedBy',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Received By</label><input value={s.receivedBy||''} onChange={e=>set('receivedBy',e.target.value)} style={styles.input}/></div>
+          </div>
+          {/* Lines */}
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Items to Issue</div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Item','Unit','Qty Requested','Qty Issued','Rate (opt.)','Remarks',''].map(h=>(
+                  <th key={h} style={{ padding:'6px 8px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {(s.lines||[]).map((l,i)=>(
+                  <tr key={l.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                    <td style={{ padding:'4px 4px' }}>
+                      <select value={l.itemId||''} onChange={e=>{
+                        const it = items.find(x=>x.id===e.target.value);
+                        setLine(i,'itemId',e.target.value);
+                        if(it){setLine(i,'itemName',it.name);setLine(i,'unit',it.unit||'pcs');setLine(i,'rate',it.purchaseRate||it.saleRate||0);}
+                      }} style={{ ...styles.input, margin:0, minWidth:160, fontSize:12 }}>
+                        <option value=''>Select item</option>
+                        {items.map(it=><option key={it.id} value={it.id}>{it.name}</option>)}
+                      </select>
+                    </td>
+                    <td style={{ padding:'4px 4px', width:70 }}><input value={l.unit||'pcs'} onChange={e=>setLine(i,'unit',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12 }}/></td>
+                    <td style={{ padding:'4px 4px', width:90 }}><input type="number" value={l.qtyRequested||1} onChange={e=>setLine(i,'qtyRequested',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12, textAlign:'right' }}/></td>
+                    <td style={{ padding:'4px 4px', width:90 }}><input type="number" value={l.qty||1} onChange={e=>setLine(i,'qty',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12, textAlign:'right', background:'#FFFBE6' }}/></td>
+                    <td style={{ padding:'4px 4px', width:90 }}><input type="number" value={l.rate||0} onChange={e=>setLine(i,'rate',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12, textAlign:'right' }}/></td>
+                    <td style={{ padding:'4px 4px' }}><input value={l.remarks||''} onChange={e=>setLine(i,'remarks',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12 }} placeholder="Remarks"/></td>
+                    <td style={{ padding:'4px 4px', width:28 }}><button onClick={()=>set('lines',s.lines.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button onClick={()=>set('lines',[...(s.lines||[]),blankLine()])} style={{ ...styles.ghostBtn, marginTop:8, fontSize:12 }}><Plus size={13}/> Add Item</button>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={s.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:56 }}/></div>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', borderTop:'1px solid #EAE6DB', paddingTop:14 }}>
+            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>saveSIV(s)} style={styles.primaryBtn} disabled={!s.lines?.some(l=>l.itemId&&l.qty>0)}>Save SIV</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST ────────────────────────────────────────────────────────
+  return (
+    <div style={styles.page}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24 }}>
+        <div>
+          <h1 className="serif" style={styles.h1}>Stores Issue Vouchers</h1>
+          <p style={styles.muted}>Track material outflows from stores. Each SIV auto-creates OUT entries in the stock ledger and bin card.</p>
+        </div>
+        {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New SIV</button>}
+      </div>
+      {storeIssues.length === 0 ? (
+        <div style={{ textAlign:'center', padding:60, color:'#888', background:'#fff', borderRadius:10, border:'1px solid #EAE6DB' }}>
+          <FileMinus size={36} style={{ color:'#DDD', marginBottom:12 }}/><br/>No issue vouchers yet.<br/>
+          <span style={{ fontSize:12 }}>Create one to issue materials from stores — it will automatically update the bin card with OUT entries.</span>
+        </div>
+      ) : (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <thead><tr style={{ background:'#F8F7F4' }}>
+              {['SIV No.','Date','Issued To','Purpose','Items','Approval',''].map(h=>(
+                <th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {[...storeIssues].sort((a,b)=>b.date>a.date?1:-1).map(s=>(
+                <tr key={s.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                  <td style={{ padding:'10px 12px', fontWeight:700, color:'#1E2A4A' }}>{s.sivNumber}</td>
+                  <td style={{ padding:'10px 12px', color:'#555' }}>{s.date}</td>
+                  <td style={{ padding:'10px 12px', color:'#333' }}>{s.issuedTo||'—'}</td>
+                  <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{s.purpose||s.projectRef||s.productionRef||'—'}</td>
+                  <td style={{ padding:'10px 12px', color:'#555' }}>
+                    {(s.lines||[]).length} item{(s.lines||[]).length!==1?'s':''}
+                    {(s.lines||[]).length>0 && <div style={{ fontSize:11, color:'#888' }}>{(s.lines||[]).slice(0,2).map(l=>l.itemName).filter(Boolean).join(', ')}{(s.lines||[]).length>2?' …':''}</div>}
+                  </td>
+                  <td style={{ padding:'10px 12px' }}>
+                    <div style={{ display:'flex', gap:5, flexWrap:'wrap', alignItems:'center' }}>
+                      <StatusBadge status={s.approvalStatus||'draft'} />
+                      <ApprovalActions item={{ status:s.approvalStatus||'draft', rejectionNote:s.approvalNote||'' }} onUpdate={(patch)=>updateApproval(s.id,patch)} userRole={userRole} compact />
+                    </div>
+                    {s.approvalStatus==='rejected' && s.approvalNote && <div style={{ fontSize:11, color:'#B5453A', marginTop:3, fontStyle:'italic' }}>"{s.approvalNote}"</div>}
+                  </td>
+                  <td style={{ padding:'10px 12px' }}>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setPrintSiv(s)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                      {canEdit && s.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(s)} style={styles.iconBtn}><Pencil size={14}/></button>
+                      <button onClick={()=>deleteSIV(s.id)} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {printSiv && <StoreIssuePrint siv={printSiv} businessInfo={businessInfo} onClose={()=>setPrintSiv(null)} />}
     </div>
   );
 }
@@ -16195,6 +16429,7 @@ export default function App() {
   const [payrollRuns,      _setPR]     = useState([]);
   const [pettyCash,        _setPC]     = useState({ openingBalance: 0, entries: [] });
   const [vouchers,         _setVouch]  = useState([]);
+  const [storeIssues,      _setSIV]    = useState([]);
   const [grns,             _setGrns]   = useState([]);
   const [serviceOrders,    _setSO]     = useState([]);
   const [productionOrders, _setPO]     = useState([]);
@@ -16288,6 +16523,7 @@ export default function App() {
       _setPR(data.payrollRuns || []);
       _setPC(data.pettyCash || { openingBalance: 0, entries: [] });
       _setVouch(data.vouchers || []);
+      _setSIV(data.storeIssues || []);
       _setGrns(data.grns || []);
       _setSO(data.serviceOrders || []);
       _setPO(data.productionOrders || []);
@@ -16361,6 +16597,7 @@ export default function App() {
   const setPayrollRuns      = mkSet(_setPR,    'payrollRuns');
   const setPettyCash        = mkSet(_setPC,    'pettyCash');
   const setVouchers         = mkSet(_setVouch, 'vouchers');
+  const setStoreIssues      = mkSet(_setSIV,   'storeIssues');
   const setGrns             = mkSet(_setGrns,  'grns');
   const setServiceOrders    = mkSet(_setSO,    'serviceOrders');
   const setProductionOrders = mkSet(_setPO,    'productionOrders');
@@ -16749,6 +16986,18 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'storeissue':
+        return (
+          <StoreIssueList
+            storeIssues={storeIssues}
+            setStoreIssues={setStoreIssues}
+            items={items}
+            setStockLedger={setStockLedger}
+            productionOrders={productionOrders}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       case 'stock':
       case 'stockledger':
         return (
@@ -16760,7 +17009,7 @@ export default function App() {
         );
       case 'bincard':
         return (
-          <BinCardView
+          <BinCard
             items={items}
             stockLedger={stockLedger}
             businessInfo={businessInfo}
