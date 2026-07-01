@@ -5321,7 +5321,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
         <div className="lh-pad-header" style={{ background: '#fff' }}>
           <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} />
         </div>
-        <div style={{ paddingTop: 215, paddingTop: 0 }} />
+        <div style={{ paddingTop: 0 }} />
       </>
     );
   }

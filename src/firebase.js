@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, getDocFromCache, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -14,6 +14,9 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  deleteUser,
 } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -162,4 +165,41 @@ export async function deleteDrawing(filePath) {
   } catch (e) {
     console.warn('deleteDrawing:', e.message);
   }
+}
+
+// ─── Account deletion helpers ─────────────────────────────────────────────────
+
+export async function reauthenticateUser(user, password) {
+  const credential = EmailAuthProvider.credential(user.email, password);
+  await reauthenticateWithCredential(user, credential);
+}
+
+export async function deleteAllCompanyFirestore(ownerUid) {
+  // Delete staff sub-docs + their staff_memberships
+  const staffSnap = await getDocs(collection(db, 'companies', ownerUid, 'staff'));
+  await Promise.all([
+    ...staffSnap.docs.map(d => deleteDoc(d.ref)),
+    ...staffSnap.docs.map(d => deleteDoc(doc(db, 'staff_memberships', d.id))),
+  ]);
+  // Delete the main company document
+  await deleteDoc(doc(db, 'companies', ownerUid));
+}
+
+export async function deleteCompanyStorage(ownerUid) {
+  try {
+    async function deleteFolder(folderRef) {
+      const { items, prefixes } = await listAll(folderRef);
+      await Promise.all([
+        ...items.map(item => deleteObject(item).catch(() => {})),
+        ...prefixes.map(p => deleteFolder(p)),
+      ]);
+    }
+    await deleteFolder(ref(storage, `companies/${ownerUid}`));
+  } catch (e) {
+    console.warn('deleteCompanyStorage:', e.message);
+  }
+}
+
+export async function deleteFirebaseUser(user) {
+  await deleteUser(user);
 }
