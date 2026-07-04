@@ -1339,23 +1339,46 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 
 // ─── Items ─────────────────────────────────────────────────────
 
+const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+
 function ItemsList({ items, setEditing, setItems, businessInfo }) {
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
+  const [catFilter, setCatFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const filtered = items.filter(it => {
+    const matchCat = !catFilter || it.category === catFilter;
+    const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+  const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Items & services</h1>
         <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
       </div>
-      <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
-      <div style={{ ...styles.list, marginTop: 16 }}>
+      <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
+        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
+        <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
+          <option value=''>All categories</option>
+          {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <span style={{ fontSize:12, color:'#888' }}>{filtered.length} item{filtered.length!==1?'s':''}</span>
+      </div>
+      <div style={{ ...styles.list, marginTop: 0 }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
-        {items.map((it) => (
+        {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
+        {filtered.map((it) => (
           <div key={it.id} style={styles.recordRow}>
             <div style={{ flex: 1 }}>
-              <div style={styles.docRowTitle}>{it.name}</div>
-              <div style={styles.docRowSub}>{cc.splitTax && <>HSN {it.hsn || '—'} · </>}Tax {it.gst}%</div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
+                <span style={styles.docRowTitle}>{it.name}</span>
+                {it.category && <span style={{ fontSize:11, color:'#888', background:'#F0ECE5', borderRadius:4, padding:'1px 6px' }}>{it.category}</span>}
+              </div>
+              <div style={styles.docRowSub}>{it.unit && <>{it.unit} · </>}{cc.splitTax && <>HSN {it.hsn || '—'} · </>}Tax {it.gst}%</div>
             </div>
             <div style={{ textAlign: 'right', marginRight: 8 }}>
               <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
@@ -1372,10 +1395,24 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
 
 function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
-  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', ...item });
+  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
     <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
+      {/* Item code + category */}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Item Code</label>
+          <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={styles.input} placeholder="e.g. RM-001, ST-002" />
+        </div>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Category</label>
+          <select value={form.category||''} onChange={e=>set('category',e.target.value)} style={styles.input}>
+            <option value=''>— Select —</option>
+            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
         <input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} />
@@ -6089,11 +6126,16 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
                     <td style={{ padding:'4px 4px' }}>
                       <select value={l.itemId||''} onChange={e=>{
                         const it = items.find(x=>x.id===e.target.value);
-                        setLine(i,'itemId',e.target.value);
-                        if(it){setLine(i,'itemName',it.name);setLine(i,'unit',it.unit||'pcs');setLine(i,'rate',it.purchaseRate||it.saleRate||0);}
+                        set('lines', s.lines.map((ln,j)=>j!==i?ln:{
+                          ...ln,
+                          itemId: e.target.value,
+                          itemName: it ? it.name : '',
+                          unit: it ? (it.unit||'pcs') : ln.unit,
+                          rate: it ? (parseFloat(it.purchaseRate)||parseFloat(it.saleRate)||0) : ln.rate,
+                        }));
                       }} style={{ ...styles.input, margin:0, minWidth:160, fontSize:12 }}>
                         <option value=''>Select item</option>
-                        {items.map(it=><option key={it.id} value={it.id}>{it.name}</option>)}
+                        {items.map(it=><option key={it.id} value={it.id}>{it.itemCode ? `[${it.itemCode}] ` : ''}{it.name}</option>)}
                       </select>
                     </td>
                     <td style={{ padding:'4px 4px', width:70 }}><input value={l.unit||'pcs'} onChange={e=>setLine(i,'unit',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12 }}/></td>
@@ -17027,7 +17069,7 @@ export default function App() {
       case 'hr':
       case 'employees':
         return (
-          <HRView
+          <EmployeesView
             employees={employees}
             setEmployees={setEmployees}
             userRole={userRole}
