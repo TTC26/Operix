@@ -1585,7 +1585,20 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
     }
   }, [step, gracePeriod]); // eslint-disable-line
 
+  // Wrap a promise with a timeout — if it hangs, resolve silently after ms
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise(resolve => setTimeout(resolve, ms)),
+    ]);
+  }
+
   async function execute() {
+    // Block test accounts from self-deleting
+    if (TEST_EMAILS.includes(user?.email)) {
+      setError('Test accounts cannot be deleted through this flow.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -1600,16 +1613,20 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
         setStep(4);
         onDeleted('scheduled');
       } else {
-        // Option A — delete everything first, THEN show success
-        await deleteAllCompanyFirestore(ownerUid);
-        await deleteCompanyStorage(ownerUid);
+        // Option A — best-effort data cleanup, then delete Auth user
+        // Firestore + Storage are non-critical; 10s timeout each to prevent hang
+        await withTimeout(deleteAllCompanyFirestore(ownerUid).catch(e => console.warn('Firestore delete:', e)), 10000);
+        await withTimeout(deleteCompanyStorage(ownerUid).catch(e => console.warn('Storage delete:', e)), 10000);
+        // Auth user deletion is the critical step — if this fails, throw
         await deleteFirebaseUser(user);
-        setStep(4); // show success only after real deletion
+        setStep(4);
       }
     } catch (e) {
       const msg = e.message || '';
       if (msg.includes('wrong-password') || msg.includes('invalid-credential') || msg.includes('INVALID_LOGIN')) {
         setError('Incorrect password. Please try again.');
+      } else if (msg.includes('requires-recent-login')) {
+        setError('Session expired. Please close and try again.');
       } else {
         setError('Error: ' + (msg || 'Deletion failed. Please try again.'));
       }
@@ -5928,12 +5945,12 @@ function BinCard({ items, stockLedger, businessInfo }) {
 function GRNPrint({ grn, businessInfo, onClose }) {
   const useLH = !!(businessInfo?.letterhead);
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
@@ -5986,12 +6003,12 @@ function GRNPrint({ grn, businessInfo, onClose }) {
 function StoreIssuePrint({ siv, businessInfo, onClose }) {
   const useLH = !!(businessInfo?.letterhead);
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
@@ -9136,12 +9153,12 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
   const useLH = !!(businessInfo?.letterhead);
   const rmLines = bom?.materials || [];
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
@@ -15386,12 +15403,12 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
   const punch = checklist.punchList || [];
   const fails = tests.filter(t => t.result === 'fail').length;
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
@@ -17727,13 +17744,13 @@ export default function App() {
         @media print {
           .no-print, .no-print * { display: none !important; }
           .no-print-bg { background: transparent !important; }
-          body > * { visibility: hidden !important; }
+          html, body { overflow: visible !important; height: auto !important; background: #fff !important; }
+          body > * { visibility: hidden !important; overflow: visible !important; }
           .print-area { visibility: visible !important; }
-          .print-area * { visibility: visible !important; }
+          .print-area * { visibility: visible !important; overflow: visible !important; }
           .print-area {
-            position: fixed !important;
+            position: absolute !important;
             top: 0 !important; left: 0 !important;
-            right: 0 !important; bottom: auto !important;
             width: 100% !important; height: auto !important;
             overflow: visible !important;
             border: none !important;
@@ -17743,6 +17760,8 @@ export default function App() {
             padding: 12mm !important;
             margin: 0 !important;
             background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .draft-watermark {
             -webkit-print-color-adjust: exact !important;
@@ -17750,7 +17769,7 @@ export default function App() {
             color: rgba(185, 28, 28, 0.13) !important;
           }
         }
-        @page { size: A4; margin: 0; }
+        @page { size: A4; margin: 15mm; }
       `}</style>
       <Sidebar
         view={view}
