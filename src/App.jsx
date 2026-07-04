@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -967,13 +967,33 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
 
 function AuthScreen() {
   const [mode, setMode] = useState('signup'); // signup | login | forgot
+  // login has two steps: 'email' (enter email + check company) → 'password'
+  const [loginStep, setLoginStep]     = useState('email');
+  const [staffCompany, setStaffCompany] = useState(null); // { companyName } if staff email
   const [companyName, setCompanyName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
+  const [email, setEmail]             = useState('');
+  const [password, setPassword]       = useState('');
+  const [error, setError]             = useState('');
+  const [busy, setBusy]               = useState(false);
+  const [resetSent, setResetSent]     = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+
+  // Step 1 of login: look up email, then advance to password step
+  async function handleEmailContinue(e) {
+    e.preventDefault();
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const lookup = await lookupStaffEmail(email.trim());
+      setStaffCompany(lookup); // null if owner/not found, { companyName } if staff
+    } catch (_) {
+      setStaffCompany(null);
+    } finally {
+      setBusy(false);
+      setLoginStep('password');
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -1021,7 +1041,7 @@ function AuthScreen() {
     }
   }
 
-  function switchMode(m) { setMode(m); setError(''); setResetSent(false); }
+  function switchMode(m) { setMode(m); setError(''); setResetSent(false); setLoginStep('email'); setStaffCompany(null); }
 
   return (
     <div style={styles.loginScreen}>
@@ -1068,14 +1088,64 @@ function AuthScreen() {
               ← Back to log in
             </button>
           </div>
-        ) : (
+        ) : mode === 'login' && loginStep === 'email' ? (
+          /* ── Login step 1: enter email ── */
+          <form onSubmit={handleEmailContinue} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@business.com" style={styles.input} autoFocus />
+            </div>
+            {error && <div style={styles.authError}>{error}</div>}
+            <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Checking…' : 'Continue →'}
+            </button>
+          </form>
+        ) : mode === 'login' && loginStep === 'password' ? (
+          /* ── Login step 2: show company name (if staff) + enter password ── */
           <form onSubmit={handleSubmit} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {mode === 'signup' && (
-              <div style={{ textAlign: 'left' }}>
-                <label style={styles.label}>Company name</label>
-                <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Enter your company name" style={styles.input} />
+            {staffCompany?.companyName && (
+              <div style={{ background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#1E2A4A', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                  {staffCompany.companyName.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Signing in to</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#1E2A4A' }}>{staffCompany.companyName}</div>
+                </div>
               </div>
             )}
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Email</label>
+              <div style={{ ...styles.input, background: '#F5F5F5', color: '#666', display: 'flex', alignItems: 'center' }}>{email}</div>
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" style={styles.input} autoFocus />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: -4 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#555', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={keepLoggedIn} onChange={(e) => setKeepLoggedIn(e.target.checked)} style={{ accentColor: '#1E2A4A', width: 15, height: 15 }} />
+                Keep me logged in
+              </label>
+              <button type="button" onClick={() => switchMode('forgot')} style={{ background: 'none', border: 'none', color: '#1E2A4A', fontSize: 12, padding: 0, textDecoration: 'underline', cursor: 'pointer' }}>
+                Forgot password?
+              </button>
+            </div>
+            {error && <div style={styles.authError}>{error}</div>}
+            <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Signing in…' : 'Log in'}
+            </button>
+            <button type="button" onClick={() => { setLoginStep('email'); setStaffCompany(null); setError(''); }} style={{ background: 'none', border: 'none', color: '#888', fontSize: 13, padding: 0, cursor: 'pointer' }}>
+              ← Use a different email
+            </button>
+          </form>
+        ) : (
+          /* ── Sign up ── */
+          <form onSubmit={handleSubmit} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Company name</label>
+              <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Enter your company name" style={styles.input} />
+            </div>
             <div style={{ textAlign: 'left' }}>
               <label style={styles.label}>Email</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@business.com" style={styles.input} />
@@ -1084,20 +1154,9 @@ function AuthScreen() {
               <label style={styles.label}>Password</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={styles.input} />
             </div>
-            {mode === 'login' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: -4 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#555', cursor: 'pointer', userSelect: 'none' }}>
-                  <input type="checkbox" checked={keepLoggedIn} onChange={(e) => setKeepLoggedIn(e.target.checked)} style={{ accentColor: '#1E2A4A', width: 15, height: 15 }} />
-                  Keep me logged in
-                </label>
-                <button type="button" onClick={() => switchMode('forgot')} style={{ background: 'none', border: 'none', color: '#1E2A4A', fontSize: 12, padding: 0, textDecoration: 'underline', cursor: 'pointer' }}>
-                  Forgot password?
-                </button>
-              </div>
-            )}
             {error && <div style={styles.authError}>{error}</div>}
             <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
-              {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
+              {busy ? 'Please wait…' : 'Create account'}
             </button>
           </form>
         )}
@@ -2166,7 +2225,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
 
 // ─── Staff ─────────────────────────────────────────────────────
 
-function StaffPage({ ownerUid, employees = [] }) {
+function StaffPage({ ownerUid, employees = [], companyName = '' }) {
   const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2190,7 +2249,8 @@ function StaffPage({ ownerUid, employees = [] }) {
   async function handleRemove(staffUid) {
     if (!window.confirm('Remove this staff member? They will lose access immediately.')) return;
     try {
-      await removeStaff(ownerUid, staffUid);
+      const member = staffList.find(x => x.uid === staffUid);
+      await removeStaff(ownerUid, staffUid, member?.email || '');
       setStaffList((s) => s.filter((x) => x.uid !== staffUid));
     } catch {
       setError('Could not remove staff member.');
@@ -2268,6 +2328,7 @@ function StaffPage({ ownerUid, employees = [] }) {
       {addingStaff && (
         <StaffModal
           ownerUid={ownerUid}
+          companyName={companyName}
           employees={employees}
           onSaved={() => { setAddingStaff(false); loadStaff(); }}
           onClose={() => setAddingStaff(false)}
@@ -2277,7 +2338,7 @@ function StaffPage({ ownerUid, employees = [] }) {
   );
 }
 
-function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
+function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = [] }) {
   const [form, setForm] = useState({ empId: '', name: '', email: '', password: '', role: 'sales' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -2310,7 +2371,7 @@ function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
     try {
       const emp = employees.find((e) => e.id === empId);
       const empNo = emp ? (emp.employeeId || emp.empNo || '') : '';
-      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role, empId, empNo);
+      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role, companyName, empId, empNo);
       onSaved();
     } catch (err) {
       const code = (err && err.code) || '';
@@ -17018,7 +17079,7 @@ export default function App() {
           />
         );
       case 'staff':
-        return <StaffPage ownerUid={ownerUid} employees={employees} />;
+        return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
         return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
