@@ -14,6 +14,7 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
+  inMemoryPersistence,
   reauthenticateWithCredential,
   EmailAuthProvider,
   deleteUser,
@@ -38,6 +39,10 @@ export const storage = getStorage(app);
 
 const secondaryApp = getApps().find(a => a.name === 'secondary') || initializeApp(firebaseConfig, 'secondary');
 const secondaryAuth = getAuth(secondaryApp);
+// Use in-memory persistence — secondary auth is signed out immediately after creating
+// a staff account, so we never need to restore its session. This skips IndexedDB
+// initialization which can cause the first createUserWithEmailAndPassword call to hang.
+setPersistence(secondaryAuth, inMemoryPersistence).catch(() => {});
 
 export async function signUp(email, password, companyName) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -112,7 +117,7 @@ export async function getMembership(uid) {
 
 export async function createStaffAccount(ownerUid, email, password, name, role, empId = '', empNo = '') {
   // Every async step gets a timeout so the UI can never freeze indefinitely.
-  const withTimeout = (promise, ms = 12000) => Promise.race([
+  const withTimeout = (promise, ms = 20000) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
