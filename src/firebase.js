@@ -111,26 +111,28 @@ export async function getMembership(uid) {
 }
 
 export async function createStaffAccount(ownerUid, email, password, name, role, empId = '', empNo = '') {
-  // Timeout wrapper so the UI never hangs forever
-  const withTimeout = (promise, ms = 15000) => Promise.race([
+  // Every async step gets a timeout so the UI can never freeze indefinitely.
+  const withTimeout = (promise, ms = 12000) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
   const cred = await withTimeout(createUserWithEmailAndPassword(secondaryAuth, email, password));
   const staffUid = cred.user.uid;
-  await updateProfile(cred.user, { displayName: name });
-  // Sign the secondary auth out so it doesn't interfere with the owner session
+
+  // updateProfile and signOut are fire-and-forget; don't let them block.
+  try { await withTimeout(updateProfile(cred.user, { displayName: name }), 5000); } catch (_) {}
   try { await signOut(secondaryAuth); } catch (_) {}
 
-  await setDoc(doc(db, 'staff_memberships', staffUid), {
+  // Firestore writes also need timeouts — setDoc can hang on slow networks.
+  await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
     ownerUid, role, name, email,
-  });
+  }));
 
-  await setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
+  await withTimeout(setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
     uid: staffUid, name, email, role, createdAt: Date.now(),
     ...(empId ? { empId, empNo } : {}),
-  });
+  }));
 
   return staffUid;
 }
@@ -175,14 +177,20 @@ export async function reauthenticateUser(user, password) {
 }
 
 export async function deleteAllCompanyFirestore(ownerUid) {
-  // Delete staff sub-docs + their staff_memberships
-  const staffSnap = await getDocs(collection(db, 'companies', ownerUid, 'staff'));
-  await Promise.all([
-    ...staffSnap.docs.map(d => deleteDoc(d.ref)),
-    ...staffSnap.docs.map(d => deleteDoc(doc(db, 'staff_memberships', d.id))),
-  ]);
-  // Delete the main company document
+  // Delete main company document FIRST — all business data lives here.
+  // Even if staff cleanup below fails or the caller's timeout hits, the primary data is gone.
   await deleteDoc(doc(db, 'companies', ownerUid));
+  // Best-effort: clean up staff subcollection docs + their memberships.
+  // Failures here are non-fatal; orphaned docs don't affect new sign-ups (new UID).
+  try {
+    const staffSnap = await getDocs(collection(db, 'companies', ownerUid, 'staff'));
+    await Promise.all([
+      ...staffSnap.docs.map(d => deleteDoc(d.ref)),
+      ...staffSnap.docs.map(d => deleteDoc(doc(db, 'staff_memberships', d.id))),
+    ]);
+  } catch (e) {
+    console.warn('Staff subcollection cleanup (non-fatal):', e);
+  }
 }
 
 export async function deleteCompanyStorage(ownerUid) {
