@@ -14,7 +14,6 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
-  inMemoryPersistence,
   reauthenticateWithCredential,
   EmailAuthProvider,
   deleteUser,
@@ -37,12 +36,8 @@ export const db = initializeFirestore(app, {
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-const secondaryApp = getApps().find(a => a.name === 'secondary') || initializeApp(firebaseConfig, 'secondary');
-const secondaryAuth = getAuth(secondaryApp);
-// Use in-memory persistence — secondary auth is signed out immediately after creating
-// a staff account, so we never need to restore its session. This skips IndexedDB
-// initialization which can cause the first createUserWithEmailAndPassword call to hang.
-setPersistence(secondaryAuth, inMemoryPersistence).catch(() => {});
+// Secondary app removed — staff accounts are now created via REST API (no SDK,
+// no IndexedDB init, no auth session interference).
 
 export async function signUp(email, password, companyName) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -115,31 +110,75 @@ export async function getMembership(uid) {
   return null;
 }
 
-export async function createStaffAccount(ownerUid, email, password, name, role, empId = '', empNo = '') {
-  // Every async step gets a timeout so the UI can never freeze indefinitely.
+export async function createStaffAccount(ownerUid, email, password, name, role, companyName = '', empId = '', empNo = '') {
   const withTimeout = (promise, ms = 20000) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-  const cred = await withTimeout(createUserWithEmailAndPassword(secondaryAuth, email, password));
-  const staffUid = cred.user.uid;
+  // Use Firebase Auth REST API — no secondary SDK app, no IndexedDB init, no auth
+  // session interference. Just a plain fetch that returns the new user's UID.
+  const signUpRes = await withTimeout(
+    fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    }).then(r => r.json())
+  );
 
-  // updateProfile and signOut are fire-and-forget; don't let them block.
-  try { await withTimeout(updateProfile(cred.user, { displayName: name }), 5000); } catch (_) {}
-  try { await signOut(secondaryAuth); } catch (_) {}
+  if (signUpRes.error) {
+    const code = (signUpRes.error.message || 'UNKNOWN').toLowerCase().replace(/_/g, '-');
+    const err = new Error(signUpRes.error.message);
+    err.code = `auth/${code}`;
+    throw err;
+  }
 
-  // Firestore writes also need timeouts — setDoc can hang on slow networks.
+  const staffUid = signUpRes.localId;
+  const idToken  = signUpRes.idToken;
+
+  // Set display name via REST (best-effort, non-blocking)
+  if (name && idToken) {
+    try {
+      await withTimeout(
+        fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, displayName: name }),
+        }),
+        5000
+      );
+    } catch (_) {}
+  }
+
+  // Firestore writes — all with individual timeouts
   await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
-    ownerUid, role, name, email,
+    ownerUid, role, name, email, companyName,
   }));
 
   await withTimeout(setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
-    uid: staffUid, name, email, role, createdAt: Date.now(),
+    uid: staffUid, name, email, role, companyName, createdAt: Date.now(),
     ...(empId ? { empId, empNo } : {}),
   }));
 
+  // Write email index so the sign-in page can show the company name before login
+  try {
+    await withTimeout(setDoc(doc(db, 'staff_email_index', email.toLowerCase()), {
+      companyName, ownerUid,
+    }), 5000);
+  } catch (_) {} // non-fatal
+
   return staffUid;
+}
+
+// Lookup company name for a given email (used on sign-in page before auth)
+export async function lookupStaffEmail(email) {
+  try {
+    const snap = await getDoc(doc(db, 'staff_email_index', email.toLowerCase()));
+    if (snap.exists()) return snap.data(); // { companyName, ownerUid }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getStaffList(ownerUid) {
@@ -147,9 +186,12 @@ export async function getStaffList(ownerUid) {
   return snap.docs.map((d) => d.data());
 }
 
-export async function removeStaff(ownerUid, staffUid) {
+export async function removeStaff(ownerUid, staffUid, email = '') {
   await deleteDoc(doc(db, 'companies', ownerUid, 'staff', staffUid));
   await deleteDoc(doc(db, 'staff_memberships', staffUid));
+  if (email) {
+    try { await deleteDoc(doc(db, 'staff_email_index', email.toLowerCase())); } catch (_) {}
+  }
 }
 
 export async function updateStaffRole(ownerUid, staffUid, newRole) {
