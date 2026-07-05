@@ -17624,49 +17624,6 @@ export default function App() {
             userRole={userRole}
           />
         );
-      case 'tender':
-        return (
-          <TenderView
-            tenders={tenders}
-            setTenders={setTenders}
-            customers={customers}
-            siteProjects={siteProjects}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'subcontractors':
-        return (
-          <SubcontractorView
-            subcontractors={subcontractors}
-            setSubcontractors={setSubcontractors}
-            siteProjects={siteProjects}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'hse':
-        return (
-          <HSEView
-            hseRecords={hseRecords}
-            setHseRecords={setHseRecords}
-            siteProjects={siteProjects}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'rabilling':
-        return (
-          <RABillingView
-            raBillings={raBillings}
-            setRaBillings={setRaBillings}
-            siteProjects={siteProjects}
-            customers={customers}
-            tenders={tenders}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
       case 'tcommissioning':
         return (
           <TCView
@@ -17674,48 +17631,6 @@ export default function App() {
             setTcChecklists={setTcChecklists}
             siteProjects={siteProjects}
             userRole={userRole}
-          />
-        );
-      case 'handover':
-        return (
-          <HandoverView
-            handoverDocs={handoverDocs}
-            setHandoverDocs={setHandoverDocs}
-            siteProjects={siteProjects}
-            customers={customers}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'activityplanner':
-        return (
-          <ActivityPlannerView
-            siteActivities={siteActivities}
-            setSiteActivities={setSiteActivities}
-            siteProjects={siteProjects}
-            progressUpdates={progressUpdates}
-            setProgressUpdates={setProgressUpdates}
-            userRole={userRole}
-            employees={employees}
-          />
-        );
-      case 'dailyupdates':
-        return (
-          <DailyUpdateView
-            progressUpdates={progressUpdates}
-            setProgressUpdates={setProgressUpdates}
-            siteActivities={siteActivities}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
-          />
-        );
-      case 'progressboard':
-        return (
-          <ProgressBoardView
-            siteProjects={siteProjects}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
           />
         );
       case 'mepreports':
@@ -17726,26 +17641,6 @@ export default function App() {
             progressUpdates={progressUpdates}
             employees={employees}
             businessInfo={businessInfo}
-          />
-        );
-      case 'clientmaterials':
-        return (
-          <ClientMaterialView
-            clientMaterials={clientMaterials}
-            setClientMaterials={setClientMaterials}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
-          />
-        );
-      case 'siteattendance':
-        return (
-          <SiteAttendanceView
-            siteAttendance={siteAttendance}
-            setSiteAttendance={setSiteAttendance}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
           />
         );
       case 'evaluations':
