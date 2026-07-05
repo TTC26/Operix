@@ -978,15 +978,20 @@ function AuthScreen() {
   const [resetSent, setResetSent]     = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
 
-  // Step 1 of login: look up email, then advance to password step
+  // Step 1 of login: look up email, then advance to password step.
+  // The Firestore lookup is best-effort with a 2s cap — if it hangs or fails
+  // (e.g. unauthenticated Firestore rules), we still advance immediately.
   async function handleEmailContinue(e) {
     e.preventDefault();
     if (!email.trim()) { setError('Please enter your email address.'); return; }
     setBusy(true);
     setError('');
     try {
-      const lookup = await lookupStaffEmail(email.trim());
-      setStaffCompany(lookup); // null if owner/not found, { companyName } if staff
+      const lookup = await Promise.race([
+        lookupStaffEmail(email.trim()),
+        new Promise(resolve => setTimeout(() => resolve(null), 2000)),
+      ]);
+      setStaffCompany(lookup);
     } catch (_) {
       setStaffCompany(null);
     } finally {
@@ -16932,14 +16937,15 @@ export default function App() {
   const stats = useMemo(() => {
     const totalRevenue   = documents.filter(d => d.type === 'invoice').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const totalPurchases = documents.filter(d => d.type === 'purchasebill').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const outstanding    = documents.filter(d => d.type === 'invoice' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const payable        = documents.filter(d => d.type === 'purchasebill' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const voucherList    = Array.isArray(vouchers) ? vouchers : [];
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    // Outstanding = invoiced minus receipts collected; payable = purchases minus payments made
+    const outstanding    = Math.max(0, totalRevenue - totalReceived);
+    const payable        = Math.max(0, totalPurchases - totalPaid);
     const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
-    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.type === 'income' ? (e.amount || 0) : -(e.amount || 0)), 0);
+    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
     const itemCount = items.length;
     const lowStockCount = items.filter(it => {
       if (!it.minStock) return false;
