@@ -3360,6 +3360,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
     const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view);
     const [open, setOpen] = React.useState(defaultOpen ?? true);
+    // When a view inside this section becomes active, latch open=true so the
+    // section stays expanded even when view changes to 'doceditor' (no section owns it).
+    React.useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
     const isOpen = hasActive || open;
     return (
       <div style={{ marginBottom: 2 }}>
@@ -17664,6 +17667,9 @@ export default function App() {
             items={items}
             companyType={companyType}
             activeTypes={activeTypes}
+            isMultiBiz={isMultiBiz}
+            siteProjects={siteProjects}
+            siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
           />
         );
@@ -18316,6 +18322,11 @@ export default function App() {
             rawMaterials={rawMaterials}
             items={items}
             companyType={companyType}
+            activeTypes={activeTypes}
+            isMultiBiz={isMultiBiz}
+            siteProjects={siteProjects}
+            siteAttendance={siteAttendance}
+            serviceOrders={serviceOrders}
           />
         );
     }
