@@ -37,6 +37,16 @@ const ROLE_MODULES = {
     docTypes: ['invoice', 'delivery', 'quotation', 'purchase', 'purchasebill', 'creditnote'],
     canEdit: false,
   },
+  hr: {
+    nav: ['dashboard', 'hr', 'payroll'],
+    docTypes: [],
+    canEdit: true,
+  },
+  viewer: {
+    nav: ['dashboard', 'documents', 'customers', 'vendors', 'items'],
+    docTypes: ['invoice', 'delivery', 'quotation', 'purchase', 'purchasebill', 'creditnote'],
+    canEdit: false,
+  },
 };
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
@@ -49,9 +59,11 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn','storeissue',
+    'stock','bincard','grn','storeissue','stockledger',
   ],
-  trading:       [],
+  trading: [
+    'hr','payroll','employees',
+  ],
   manufacturing: [
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
@@ -2347,7 +2359,15 @@ function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = 
   const [form, setForm] = useState({ empId: '', name: '', email: '', password: '', role: 'sales' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
+  const ROLES = [
+    { value: 'manager',   label: 'Manager',          desc: 'Full access except staff & settings. Can approve documents.' },
+    { value: 'sales',     label: 'Sales',             desc: 'Quotations, invoices, delivery notes, customers.' },
+    { value: 'purchase',  label: 'Purchase',          desc: 'Purchase orders, purchase bills, vendors.' },
+    { value: 'inventory', label: 'Inventory / Stores',desc: 'Items, stock, GRN, store issue, bin card.' },
+    { value: 'accounts',  label: 'Accounts',          desc: 'Petty cash, vouchers, tax reports.' },
+    { value: 'hr',        label: 'HR / Payroll',       desc: 'Employees, payroll, attendance.' },
+    { value: 'viewer',    label: 'Viewer (read-only)', desc: 'Can view all documents but cannot create or edit.' },
+  ];
 
   function handleEmpSelect(empId) {
     if (!empId) {
@@ -2420,10 +2440,15 @@ function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = 
           <input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} style={styles.input} placeholder="Min 6 characters" />
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.label}>Role</label>
+          <label style={styles.label}>Role & Access</label>
           <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} style={styles.input}>
-            {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+            {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
+          {(() => { const r = ROLES.find(x => x.value === form.role); return r ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: '#555', background: '#F5F3EE', borderRadius: 6, padding: '6px 10px' }}>
+              <strong>Access:</strong> {r.desc}
+            </div>
+          ) : null; })()}
         </div>
         {error && <div style={{ ...styles.authError, marginBottom: 12 }}>{error}</div>}
         <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, justifyContent: 'center', opacity: busy ? 0.6 : 1 }}>
@@ -3187,8 +3212,8 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     return (
       <button
         onClick={() => startNewDoc(docKey, btnBizType || activeTypes[0])}
-        style={{ ...styles.navItem, fontSize: 12.5, color: '#A9B0C9', paddingLeft: 28 }}>
-        <Icon size={13} strokeWidth={1.8} />{t.label}
+        style={{ ...styles.navItem }}>
+        <Icon size={17} strokeWidth={1.8} />{t.label}
       </button>
     );
   }
@@ -6042,7 +6067,7 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 // ─────────────────────────────────────────────
 // HR / PAYROLL MODULE
 // ─────────────────────────────────────────────
-function BinCard({ items, stockLedger, businessInfo }) {
+function BinCard({ items, stockLedger, businessInfo, storeIssues = [] }) {
   const [useLHBin, setUseLHBin] = React.useState(!!businessInfo?.letterhead);
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
   const item = items.find(i => i.id === selectedItemId);
@@ -6061,8 +6086,12 @@ function BinCard({ items, stockLedger, businessInfo }) {
     const qty = parseFloat(e.qty) || 0;
     const isIn = e.type === 'in';
     running = isIn ? running + qty : running - qty;
-    return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running };
+    const siv = e.sourceType === 'siv' ? storeIssues.find(s => s.id === e.sourceId) : null;
+    return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running, siv };
   });
+
+  // SIV rows that appear in this item's card (for print signature blocks)
+  const sivRows = rows.filter(r => r.siv);
 
   const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -6140,19 +6169,79 @@ function BinCard({ items, stockLedger, businessInfo }) {
             <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No stock movements for this item yet.</td></tr>
           )}
           {rows.map((e, i) => (
-            <tr key={e.id || i} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
-              <td style={styles.td}>{e.date}</td>
-              <td style={{ ...styles.td, fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{e.sourceNumber || '—'}</td>
-              <td style={styles.td}><span style={{ fontSize: 11, background: '#F0EDE6', borderRadius: 4, padding: '2px 7px' }}>{SOURCE_LABEL[e.sourceType] || e.sourceType}</span></td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#1A7A3E', fontWeight: e.inQty > 0 ? 700 : 400 }}>{e.inQty > 0 ? e.inQty : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#B91C1C', fontWeight: e.outQty > 0 ? 700 : 400 }}>{e.outQty > 0 ? e.outQty : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: e.balance <= 0 ? '#B91C1C' : '#1E2A4A' }}>{e.balance}</td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#555' }}>{e.rate ? fmt(e.rate) : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{e.rate ? fmt(e.balance * e.rate) : '—'}</td>
-            </tr>
+            <React.Fragment key={e.id || i}>
+              <tr style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
+                <td style={styles.td}>{e.date}</td>
+                <td style={{ ...styles.td, fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{e.sourceNumber || '—'}</td>
+                <td style={styles.td}><span style={{ fontSize: 11, background: '#F0EDE6', borderRadius: 4, padding: '2px 7px' }}>{SOURCE_LABEL[e.sourceType] || e.sourceType}</span></td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#1A7A3E', fontWeight: e.inQty > 0 ? 700 : 400 }}>{e.inQty > 0 ? e.inQty : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#B91C1C', fontWeight: e.outQty > 0 ? 700 : 400 }}>{e.outQty > 0 ? e.outQty : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: e.balance <= 0 ? '#B91C1C' : '#1E2A4A' }}>{e.balance}</td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#555' }}>{e.rate ? fmt(e.rate) : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{e.rate ? fmt(e.balance * e.rate) : '—'}</td>
+              </tr>
+              {/* Screen only: show Issued By / Received By for SIV entries */}
+              {e.siv && (e.siv.issuedBy || e.siv.receivedBy) && (
+                <tr className="no-print" style={{ background: i % 2 === 0 ? '#F9FFF9' : '#F4FBF4' }}>
+                  <td colSpan={8} style={{ ...styles.td, paddingTop: 3, paddingBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 24, fontSize: 11.5, color: '#444' }}>
+                      {e.siv.issuedBy && (
+                        <span>
+                          <span style={{ color: '#888', marginRight: 4 }}>Issued By:</span>
+                          <strong>{e.siv.issuedBy}</strong>
+                          <span style={{ color: '#888', marginLeft: 6 }}>{e.siv.date}</span>
+                        </span>
+                      )}
+                      {e.siv.receivedBy && (
+                        <span>
+                          <span style={{ color: '#888', marginRight: 4 }}>Received By:</span>
+                          <strong>{e.siv.receivedBy}</strong>
+                          <span style={{ color: '#888', marginLeft: 6 }}>{e.siv.date}</span>
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
+      {/* Print: signature blocks — one row per SIV, or generic if no SIVs */}
+      <div className="print-only" style={{ marginTop: 40, borderTop: '1px solid #CCC', paddingTop: 20 }}>
+        {sivRows.length > 0 ? sivRows.map((r, idx) => (
+          <div key={r.id || idx} style={{ marginBottom: 24 }}>
+            {sivRows.length > 1 && (
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 10 }}>
+                {r.sourceNumber} — {r.date}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {[
+                { label: 'Prepared By',  name: '',                     date: r.date },
+                { label: 'Issued By',    name: r.siv?.issuedBy || '',  date: r.siv?.date || r.date },
+                { label: 'Approved By',  name: '',                     date: r.date },
+                { label: 'Received By',  name: r.siv?.receivedBy || '', date: r.siv?.date || r.date },
+              ].map(({ label, name, date }) => (
+                <div key={label} style={{ textAlign: 'center', minWidth: 130 }}>
+                  {name && <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', marginBottom: 2 }}>{name}</div>}
+                  {name && <div style={{ fontSize: 10, color: '#666', marginBottom: 6 }}>{date}</div>}
+                  <div style={{ borderTop: '1px solid #333', paddingTop: 4, fontSize: 11 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {['Prepared By', 'Issued By', 'Approved By', 'Received By'].map(label => (
+              <div key={label} style={{ textAlign: 'center', minWidth: 130 }}>
+                <div style={{ borderTop: '1px solid #333', paddingTop: 4, fontSize: 11 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {useLHBin && businessInfo?.letterheadFooter && (
         <div className="lh-pad-footer print-only" style={{ background: '#fff' }}>
           <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
@@ -16827,17 +16916,23 @@ export default function App() {
       if (firebaseUser) {
         setUser(firebaseUser);
         setAuthReady(true);
-        if (!firebaseUser.emailVerified) return;
         try {
+          // Check membership FIRST — staff accounts don't go through email verification
           const membership = await getMembership(firebaseUser.uid);
           if (membership) {
+            // Staff member — use owner's company data, no email verification needed
             setOwnerUid(membership.ownerUid);
             setUserRole(membership.role);
+          } else if (!firebaseUser.emailVerified) {
+            // Owner account not yet verified — stay on verify screen
+            return;
           } else {
+            // Verified owner
             setOwnerUid(firebaseUser.uid);
             setUserRole('admin');
           }
         } catch {
+          if (!firebaseUser.emailVerified) return;
           setOwnerUid(firebaseUser.uid);
           setUserRole('admin');
         }
@@ -17226,8 +17321,9 @@ export default function App() {
     }
 
     // ── Subscription gate ──────────────────────────────────────────────────────
-    // Build the set of sections this account can access
-    if (!isTestAccount) {
+    // Trial users get full access to evaluate — only gate subscribed users on a specific plan
+    const inTrial = !trialExpired && !isSubscribed;
+    if (!isTestAccount && !inTrial) {
       const _allowed = new Set(PLAN_MODULES.common);
       for (const t of activeTypes) (PLAN_MODULES[t] || []).forEach(m => _allowed.add(m));
       // Sections that belong exclusively to paid plans (not in common)
@@ -17372,6 +17468,7 @@ export default function App() {
             items={items}
             stockLedger={stockLedger}
             businessInfo={businessInfo}
+            storeIssues={storeIssues}
           />
         );
       case 'hr':

@@ -136,14 +136,16 @@ export async function createStaffAccount(ownerUid, email, password, name, role, 
   const staffUid = signUpRes.localId;
   const idToken  = signUpRes.idToken;
 
-  // Set display name via REST (best-effort, non-blocking)
-  if (name && idToken) {
+  // Set display name + mark email verified in one REST call (best-effort)
+  // emailVerified: true is critical — without it the app's auth handler silently
+  // blocks staff login (emailVerified check runs before membership lookup).
+  if (idToken) {
     try {
       await withTimeout(
         fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken, displayName: name }),
+          body: JSON.stringify({ idToken, displayName: name || '', emailVerified: true }),
         }),
         5000
       );
@@ -151,9 +153,13 @@ export async function createStaffAccount(ownerUid, email, password, name, role, 
   }
 
   // Firestore writes — all with individual timeouts
-  await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
-    ownerUid, role, name, email, companyName,
-  }));
+  // staff_memberships is best-effort (Firestore rules may block owner writing
+  // to another uid's doc); the auth handler also falls back to email index lookup.
+  try {
+    await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
+      ownerUid, role, name, email, companyName,
+    }));
+  } catch (_) {}
 
   await withTimeout(setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
     uid: staffUid, name, email, role, companyName, createdAt: Date.now(),
