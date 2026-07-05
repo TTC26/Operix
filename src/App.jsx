@@ -51,7 +51,7 @@ const ROLE_MODULES = {
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
 // Emails that bypass all plan gates (dev / owner accounts)
-const TEST_EMAILS = ['srm10988@gmail.com'];
+const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com'];
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
 const PLAN_MODULES = {
@@ -2476,98 +2476,96 @@ const DASHBOARD_DOC_TYPES = {
 function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, vendors, productionOrders, siteProjects, siteAttendance, startNewDoc, openDoc, setView, cur, items }) {
   const BIZ_DOC_TYPES = {
     trading:       ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
-    manufacturing: ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
-    service:       ['quotation','invoice','creditnote'],
+    manufacturing: ['quotation','invoice','creditnote','purchase','purchasebill'],
+    service:       ['quotation','invoice','creditnote','purchase','purchasebill'],
+    fmamc:         ['quotation','invoice','creditnote','purchase','purchasebill'],
   };
   const allowed = BIZ_DOC_TYPES[bizType] || [];
-  const bizDocs = docs.filter(d => (d.bizType || 'trading') === bizType);
+  const bizDocs  = docs.filter(d => (d.bizType || 'trading') === bizType);
   const invoiced  = bizDocs.filter(d=>d.type==='invoice').reduce((s,d)=>s+(d.total||0),0);
   const outstanding = bizDocs.filter(d=>d.type==='invoice'&&d.status!=='paid').reduce((s,d)=>s+(d.total||0),0);
-  const recent = [...bizDocs].sort((a,b)=>b.createdAt-a.createdAt).slice(0,3);
+  const purchases = bizDocs.filter(d=>d.type==='purchase').reduce((s,d)=>s+(d.total||0),0);
+  const payable   = bizDocs.filter(d=>d.type==='purchasebill'&&d.status!=='paid').reduce((s,d)=>s+(d.total||0),0);
+  const recent    = [...bizDocs].sort((a,b)=>b.createdAt-a.createdAt).slice(0,4);
+
+  const isService = bizType === 'service' || bizType === 'fmamc';
+
+  function MiniStat({ val, label: lbl, bg, textColor }) {
+    return (
+      <div style={{ background: bg, borderRadius: 8, padding: '8px 10px' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: textColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{val}</div>
+        <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{lbl}</div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ background: '#fff', border: `2px solid ${color}22`, borderRadius: 14, padding: '18px 16px', flex: 1, minWidth: 260 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, paddingBottom: 10, borderBottom: `2px solid ${color}22` }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>{icon}</div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</div>
-          <div style={{ fontSize: 11, color: '#aaa' }}>{bizDocs.length} documents</div>
+    <div style={{ background: '#fff', border: `1.5px solid ${color}30`, borderTop: `3px solid ${color}`, borderRadius: 12, padding: '16px 15px', flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 7, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{icon}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+          <div style={{ fontSize: 10.5, color: '#aaa' }}>{bizDocs.length} docs total</div>
         </div>
-        <button onClick={()=>setView('documents')} style={{ ...{padding:'3px 10px',borderRadius:8,border:'1px solid #EAE6DB',background:'#FAF8F4',cursor:'pointer',fontSize:11,color:'#666',marginLeft:'auto'} }}>View all</button>
+        <button onClick={()=>setView('documents')} style={{ padding:'3px 9px', borderRadius:6, border:'1px solid #EAE6DB', background:'none', cursor:'pointer', fontSize:10.5, color:'#888' }}>All →</button>
       </div>
 
-      {/* Key stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-        <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{cur(invoiced)}</div>
-          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Total invoiced</div>
-        </div>
-        <div style={{ background: '#FEF0E0', borderRadius: 8, padding: '8px 10px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#B5453A' }}>{cur(outstanding)}</div>
-          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Outstanding</div>
-        </div>
-        {bizType !== 'service' && (
-          <>
-            <div style={{ background: '#F0EAF9', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#6B5BAE' }}>{bizDocs.filter(d=>d.type==='purchase').length}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Purchase orders</div>
-            </div>
-            <div style={{ background: '#E6F5EC', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1A7A3E' }}>{items?.length || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Items in master</div>
-            </div>
-          </>
-        )}
+      {/* Sales KPIs */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: color, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Sales</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
+        <MiniStat val={cur(invoiced)}    label="Total invoiced"   bg="#FAF8F4" textColor="#1E2A4A" />
+        <MiniStat val={cur(outstanding)} label="Receivable"       bg="#FEF0E0" textColor="#B5453A" />
         {bizType === 'manufacturing' && (
-          <>
-            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px', gridColumn: '1/-1' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>
-                {productionOrders?.filter(o=>o.status==='in_progress').length || 0}
-                <span style={{ fontSize: 11, color: '#888', fontWeight: 400, marginLeft: 6 }}>in progress</span>
-              </div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Production orders</div>
-            </div>
-          </>
+          <MiniStat val={productionOrders?.filter(o=>o.status==='in_progress').length || 0} label="Production (WIP)" bg="#FFF7E0" textColor="#C9A24B" />
         )}
-        {bizType === 'service' && (
-          <>
-            <div style={{ background: '#E0F2F9', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E7A9A' }}>{siteProjects?.filter(p=>p.status==='active').length || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Active sites</div>
-            </div>
-            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{siteAttendance?.filter(r=>r.date===new Date().toISOString().slice(0,10)).reduce((s,r)=>(s+(r.records||[]).filter(x=>x.status==='present').length),0) || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Present today</div>
-            </div>
-          </>
+        {isService && (
+          <MiniStat val={siteProjects?.filter(p=>p.status==='active').length || 0} label="Active projects" bg="#E0F2F9" textColor="#1E7A9A" />
         )}
+        {isService && (
+          <MiniStat val={bizDocs.filter(d=>d.type==='invoice'&&d.status==='approved').length} label="RA bills raised" bg="#FAF8F4" textColor="#1E2A4A" />
+        )}
+      </div>
+
+      {/* Purchase KPIs */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#6B5BAE', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Purchase</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
+        <MiniStat val={cur(purchases)} label="Total purchased" bg="#F0EAF9" textColor="#6B5BAE" />
+        <MiniStat val={cur(payable)}   label="Payable"         bg="#FFF0F0" textColor="#B91C1C" />
+        <MiniStat val={bizDocs.filter(d=>d.type==='purchase').length} label="POs raised" bg="#FAF8F4" textColor="#1E2A4A" />
+        {!isService && <MiniStat val={items?.length || 0} label="Items in master" bg="#E6F5EC" textColor="#1A7A3E" />}
+        {isService && <MiniStat val={siteAttendance?.filter(r=>r.date===new Date().toISOString().slice(0,10)).reduce((s,r)=>(s+(r.records||[]).filter(x=>x.status==='present').length),0)||0} label="Present today" bg="#E6F5EC" textColor="#1A7A3E" />}
       </div>
 
       {/* Quick create */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Quick create</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Quick create</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 14 }}>
         {Object.entries(DOC_TYPES).filter(([k])=>allowed.includes(k)).map(([k, t]) => (
           <button key={k} onClick={()=>startNewDoc(k, bizType)}
-            style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, border:'1px solid #EAE6DB', background:'#FAF8F4', cursor:'pointer', fontSize:12, color:'#1E2A4A' }}>
-            <t.icon size={13} color={t.color} />
+            style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 9px', borderRadius:7, border:`1px solid ${color}30`, background:`${color}08`, cursor:'pointer', fontSize:11, color:'#1E2A4A' }}>
+            <t.icon size={12} color={color} />
             {t.label}
           </button>
         ))}
       </div>
 
       {/* Recent docs */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Recent</div>
-      {recent.length === 0
-        ? <div style={{ fontSize: 12, color: '#ccc', padding: '8px 0' }}>No documents yet</div>
-        : recent.map(d => (
-            <div key={d.id} onClick={()=>openDoc(d)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderTop:'1px solid #F0EDE6', cursor:'pointer' }}>
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1E2A4A' }}>{d.number}</div>
-                <div style={{ fontSize: 11, color: '#aaa' }}>{DOC_TYPES[d.type]?.label || d.type}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Recent</div>
+      <div style={{ flex: 1 }}>
+        {recent.length === 0
+          ? <div style={{ fontSize: 12, color: '#ccc', padding: '6px 0' }}>No documents yet</div>
+          : recent.map(d => (
+              <div key={d.id} onClick={()=>openDoc(d)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderTop:'1px solid #F4F2EE', cursor:'pointer' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1E2A4A' }}>{d.number}</div>
+                  <div style={{ fontSize: 10.5, color: '#bbb' }}>{DOC_TYPES[d.type]?.label || d.type}</div>
+                </div>
+                <div style={{ fontSize: 12, color: '#555', fontWeight: 600 }}>{cur(d.total || 0)}</div>
               </div>
-              <div style={{ fontSize: 12, color: '#1E2A4A', fontWeight: 600 }}>{cur(d.total || 0)}</div>
-            </div>
-          ))
-      }
+            ))
+        }
+      </div>
     </div>
   );
 }
@@ -2582,9 +2580,10 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const cur = (n) => currency(n, cc.currency);
 
   const BIZ_META = {
-    trading:       { label: 'Trading',              icon: '🛒', color: '#C9A24B' },
-    manufacturing: { label: 'Manufacturing',         icon: '🏭', color: '#1E2A4A' },
-    service:       { label: 'Services / MEP Suite',  icon: '🔧', color: '#1E7A9A' },
+    trading:       { label: 'Trading',       icon: '🛒', color: '#1A7A3E' },
+    manufacturing: { label: 'Manufacturing', icon: '🏭', color: '#C9752A' },
+    service:       { label: 'MEP / Service', icon: '🔧', color: '#1E7A9A' },
+    fmamc:         { label: 'FM / AMC',      icon: '🏢', color: '#0E9DB5' },
   };
 
   // ── Payment due date alerts ──────────────────────────────────────────────────
@@ -2654,7 +2653,8 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
       {/* ── MULTI-BUSINESS: column view ─────────────────────────────────────── */}
       {isMultiBiz ? (
         <>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 24 }}>
+          {/* ── Top: one column per business type ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, minmax(220px, 1fr))`, gap: 14, marginBottom: 24, overflowX: 'auto' }}>
             {activeTypes.map(bt => (
               <ActivityColumn
                 key={bt}
@@ -2678,14 +2678,38 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             ))}
           </div>
 
-          {/* Shared accounts summary */}
-          <div style={styles.dashSection}>Accounts (shared)</div>
+          {/* ── Shared accounts summary ── */}
+          <div style={styles.dashSection}>Accounts — Shared</div>
           <div style={styles.statGrid}>
-            <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
-            <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
-            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
-            <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
+            <StatCard label="Cash received"      value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
+            <StatCard label="Cash paid"          value={cur(stats.totalPaid)}     accent="#B91C1C" sub="payment vouchers" />
+            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)}     accent="#C9A24B" />
+            <StatCard label="Customers"          value={customers.length}         accent="#1E2A4A" sub="registered" />
+            <StatCard label="Vendors"            value={vendors.length}           accent="#6B5BAE" sub="registered" />
           </div>
+
+          {/* ── Department trend chart (reuse same chart, multi-type aware) ── */}
+          <DeptChart
+            documents={documents}
+            productionOrders={productionOrders}
+            serviceOrders={serviceOrders}
+            activeTypes={activeTypes}
+            cur={cur}
+          />
+
+          {/* ── Recent documents (cross-type) ── */}
+          <div style={styles.sectionRow}>
+            <div className="serif" style={styles.h2}>Recent documents</div>
+            <button onClick={() => setView('documents')} style={styles.linkBtn}>View all</button>
+          </div>
+          {(() => {
+            const recentAll = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6);
+            return recentAll.length === 0
+              ? <div style={styles.emptyBox}>No documents yet.</div>
+              : <div style={styles.list}>
+                  {recentAll.map(d => <DocRow key={d.id} doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={businessInfo} showBizBadge={true} />)}
+                </div>;
+          })()}
         </>
       ) : (
         /* ── SINGLE BUSINESS: original layout ──────────────────────────────── */
@@ -3160,6 +3184,15 @@ const SECTION_VIEWS = {
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
+  shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
+};
+
+// Which views each biz-type accordion "owns" (for auto-open on navigation)
+const BIZ_SECTION_VIEWS = {
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue'],
+  manufacturing: ['serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport'],
+  service:       ['siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport'],
+  fmamc:         ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers'],
 };
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications }) {
@@ -3250,6 +3283,56 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     );
   }
 
+  // ── Top-level business-type accordion (multi-biz mode) ───────────────────
+  function BizSection({ bizType, defaultOpen, children }) {
+    const BIZ_CFG = {
+      trading:       { label: 'Trading',       color: '#1A7A3E', bg: 'rgba(26,122,62,0.10)' },
+      manufacturing: { label: 'Manufacturing', color: '#C9752A', bg: 'rgba(201,117,42,0.10)' },
+      service:       { label: 'MEP / Service', color: '#1E7A9A', bg: 'rgba(30,122,154,0.10)' },
+      fmamc:         { label: 'FM / AMC',      color: '#0E9DB5', bg: 'rgba(14,157,181,0.10)' },
+    };
+    const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
+    const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view);
+    const [open, setOpen] = React.useState(defaultOpen ?? true);
+    const isOpen = hasActive || open;
+    return (
+      <div style={{ marginBottom: 2 }}>
+        <button
+          onClick={() => { if (!hasActive) setOpen(o => !o); }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
+            cursor: 'pointer', padding: '8px 12px 8px 10px',
+            borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
+            color: isOpen ? cfg.color : '#6B7494',
+            fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+            transition: 'all 0.15s',
+          }}>
+          <span>{cfg.label}</span>
+          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {isOpen && (
+          <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Sub-section label inside a BizSection (non-collapsible, just a visual divider)
+  function SubLabel({ label }) {
+    return (
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
+        color: '#6B7494', padding: '7px 12px 2px 14px', marginTop: 3,
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        {label}
+      </div>
+    );
+  }
+
   const Brand = () => (
     <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 10, marginBottom: 6 }}>
       {/* Top row: logo + settings + logout */}
@@ -3288,137 +3371,277 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
 
-      {/* Top-level always-visible */}
+      {/* Dashboard — always at top */}
       <div style={{ ...styles.navGroup, marginBottom: 4 }}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
-        <NavBtn id="documents" label="All Documents" icon={FileText} />
       </div>
 
-      {/* Sales */}
-      <Section sectionKey="sales" label="Sales">
-        <NavBtn id="customers" label="Customers"    icon={Users} />
-        <NavBtn id="enquiries" label="Enquiries"    icon={FileSignature} />
-        {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
-        {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
-        <CreateBtn docKey="quotation" />
-      </Section>
+      {isMultiBiz ? (
+        /* ── MULTI-BIZ: accordion per business type ──────────────────────── */
+        <>
+          {/* Shared master data — customers/vendors/items/all docs */}
+          <Section sectionKey="shared" label="Master Data">
+            <NavBtn id="customers"      label="Customers"      icon={Users} />
+            <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
+            <NavBtn id="items"          label="Items"          icon={Package} />
+            <NavBtn id="enquiries"      label="Enquiries"      icon={FileSignature} />
+            <NavBtn id="documents"      label="All Documents"  icon={FileText} />
+          </Section>
 
-      {/* Accounts */}
-      <Section sectionKey="accounts" label="Accounts">
-        <CreateBtn docKey="invoice" />
-        <CreateBtn docKey="creditnote" />
-        <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
-        <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
-        {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
-        {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
-        {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
-        {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
-      </Section>
+          {/* One BizSection per active type */}
+          {activeTypes.map((bt, idx) => (
+            <BizSection key={bt} bizType={bt} defaultOpen={idx === 0}>
 
-      {/* Purchase */}
-      <Section sectionKey="purchase" label="Purchase">
-        <NavBtn id="vendors" label="Vendors" icon={Truck} />
-        <CreateBtn docKey="purchase" />
-        <CreateBtn docKey="purchasebill" />
-        <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
-        {showProduction && <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />}
-      </Section>
+              {/* ── TRADING ─────────────────────────────────────────── */}
+              {bt === 'trading' && <>
+                <SubLabel label="Sales" />
+                <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />
+                <CreateBtn docKey="quotation"    bizType="trading" />
+                <CreateBtn docKey="invoice"      bizType="trading" />
+                <CreateBtn docKey="creditnote"   bizType="trading" />
+                <CreateBtn docKey="delivery"     bizType="trading" />
+                <CreateBtn docKey="packing_list" bizType="trading" />
 
-      {/* Stores — hidden for service companies */}
-      {showTrade && (
-        <Section sectionKey="stores" label="Stores">
-          {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
-          <CreateBtn docKey="delivery" />
-          <CreateBtn docKey="packing_list" />
-          <NavBtn id="stock"       label="Stock Position"      icon={ClipboardList} />
-          <NavBtn id="stockledger" label="Stock Ledger"        icon={FileText} />
-          <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
-          <NavBtn id="bincard"     label="Bin Card"            icon={ClipboardList} />
-        </Section>
+                <SubLabel label="Purchase" />
+                <CreateBtn docKey="purchase"     bizType="trading" />
+                <CreateBtn docKey="purchasebill" bizType="trading" />
+                <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+              </>}
+
+              {/* ── MANUFACTURING ───────────────────────────────────── */}
+              {bt === 'manufacturing' && <>
+                <SubLabel label="Sales" />
+                <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />
+                <CreateBtn docKey="quotation"  bizType="manufacturing" />
+                <CreateBtn docKey="invoice"    bizType="manufacturing" />
+                <CreateBtn docKey="creditnote" bizType="manufacturing" />
+
+                <SubLabel label="Purchase" />
+                <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />
+                <CreateBtn docKey="purchase"     bizType="manufacturing" />
+                <CreateBtn docKey="purchasebill" bizType="manufacturing" />
+                <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
+                <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
+
+                <SubLabel label="Engineering" />
+                <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
+                <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+
+                <SubLabel label="Production" />
+                <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+                <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+
+                <SubLabel label="Quality" />
+                <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
+                <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
+                <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
+                <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+                <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
+                <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
+                <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+              </>}
+
+              {/* ── MEP / SERVICE ────────────────────────────────────── */}
+              {(bt === 'service' || bt === 'fmamc') && <>
+                <SubLabel label="Sales" />
+                <CreateBtn docKey="quotation"  bizType={bt} />
+                <CreateBtn docKey="invoice"    bizType={bt} />
+                <NavBtn id="rabilling"   label="RA Billing"    icon={FileMinus} />
+                <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+
+                <SubLabel label="Purchase" />
+                <CreateBtn docKey="purchase"     bizType={bt} />
+                <CreateBtn docKey="purchasebill" bizType={bt} />
+                <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+
+                <SubLabel label="Site Operations" />
+                <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+                <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+                <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+                <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+                <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+                <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+                <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+
+                {bt === 'fmamc' && <>
+                  <SubLabel label="FM Suite" />
+                  <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
+                  <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
+                  <NavBtn id="pmschedules"   label="PM Schedules"    icon={ClipboardList} />
+                  <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
+                  <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
+                  <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
+                </>}
+
+                <SubLabel label="Compliance" />
+                <NavBtn id="hse"            label="HSE"              icon={Shield} />
+                <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
+                <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
+                <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
+                <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+              </>}
+
+            </BizSection>
+          ))}
+        </>
+      ) : (
+        /* ── SINGLE BIZ: existing flat-section layout (unchanged) ──────── */
+        <>
+          <div style={{ ...styles.navGroup, marginBottom: 4 }}>
+            <NavBtn id="documents" label="All Documents" icon={FileText} />
+          </div>
+
+          {/* Sales */}
+          <Section sectionKey="sales" label="Sales">
+            <NavBtn id="customers" label="Customers"    icon={Users} />
+            <NavBtn id="enquiries" label="Enquiries"    icon={FileSignature} />
+            {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
+            {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
+            <CreateBtn docKey="quotation" />
+          </Section>
+
+          {/* Accounts */}
+          <Section sectionKey="accounts" label="Accounts">
+            <CreateBtn docKey="invoice" />
+            <CreateBtn docKey="creditnote" />
+            <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
+            <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
+            {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+            {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+            {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+            {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+          </Section>
+
+          {/* Purchase */}
+          <Section sectionKey="purchase" label="Purchase">
+            <NavBtn id="vendors" label="Vendors" icon={Truck} />
+            <CreateBtn docKey="purchase" />
+            <CreateBtn docKey="purchasebill" />
+            <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+            {showProduction && <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />}
+          </Section>
+
+          {/* Stores — trading/manufacturing only */}
+          {showTrade && (
+            <Section sectionKey="stores" label="Stores">
+              {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
+              <CreateBtn docKey="delivery" />
+              <CreateBtn docKey="packing_list" />
+              <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
+              <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
+              <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+              <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
+            </Section>
+          )}
+
+          {/* Scope of Work — service only */}
+          {showService && (
+            <Section sectionKey="scope" label="Scope of Work">
+              <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+            </Section>
+          )}
+
+          {/* MEP Suite */}
+          {showService && (
+            <Section sectionKey="site" label="MEP Suite">
+              <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+              <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+              <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+              <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
+              <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
+              <NavBtn id="hse"             label="HSE"                icon={Shield} />
+              <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
+              <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+              <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+              <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+              <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+              <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
+              <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
+            </Section>
+          )}
+
+          {/* Engineering */}
+          {showProduction && (
+            <Section sectionKey="engineering" label="Engineering">
+              <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
+              <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+            </Section>
+          )}
+
+          {/* Production */}
+          {showProduction && (
+            <Section sectionKey="production" label="Production">
+              <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+              <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+              <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+            </Section>
+          )}
+
+          {/* Quality */}
+          {showProduction && (
+            <Section sectionKey="quality" label="Quality">
+              <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
+              <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
+              <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
+              <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+              <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
+              <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
+              <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+            </Section>
+          )}
+
+          {/* FM / AMC */}
+          {showFMAMC && (
+            <Section sectionKey="fmamc" label="FM Suite">
+              <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
+              <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
+              <NavBtn id="pmschedules"   label="PM Schedules"    icon={ClipboardList} />
+              <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
+              <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
+              <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
+            </Section>
+          )}
+        </>
       )}
 
-      {/* Scope of Work — service companies only (replaces Item Master) */}
-      {showService && (
-        <Section sectionKey="scope" label="Scope of Work">
-          <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
-        </Section>
-      )}
-
-      {/* MEP Suite divider */}
-      {isMultiBiz && showService && (
-        <div style={{ fontSize: 10, fontWeight: 800, color: '#1E7A9A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid #EAE6DB' }}>🔧 Services / MEP Suite</div>
-      )}
-      {/* MEP Suite — service / MEP manpower companies */}
-      {showService && (
-        <Section sectionKey="site" label="MEP Suite">
-          <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-          <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-          <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-          <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
-          <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
-          <NavBtn id="hse"             label="HSE"                icon={Shield} />
-          <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
-          <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
-          <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-          <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-          <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-          <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-          <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
-          <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
-        </Section>
-      )}
-
-      {/* Manufacturing divider */}
-      {showProduction && (
-        <div style={{ fontSize: 10, fontWeight: 800, color: '#E07A3A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.08)' }}>🏭 Manufacturing</div>
-      )}
-
-      {/* Engineering — manufacturing only (Item Master is in Stores) */}
-      {showProduction && (
-        <Section sectionKey="engineering" label="Engineering">
-          <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
-          <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
-        </Section>
-      )}
-
-      {/* Production — manufacturing only */}
-      {showProduction && (
-        <Section sectionKey="production" label="Production">
-          <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
-          <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
-          <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
-        </Section>
-      )}
-
-      {/* Quality — manufacturing only */}
-      {showProduction && (
-        <Section sectionKey="quality" label="Quality">
-          <NavBtn id="isoprinciples"  label="ISO Principles"  icon={CheckCircle} />
-          <NavBtn id="deptprocedures" label="Dept Procedures" icon={BookOpen} />
-          <NavBtn id="inprocessqa"    label="Inprocess QA"    icon={CheckSquare} />
-          <NavBtn id="qatesting"      label="QA Testing"      icon={CheckCircle} />
-          <NavBtn id="capa"           label="CAPA"            icon={AlertTriangle} />
-          <NavBtn id="internalaudit"  label="Internal Audit"  icon={ClipboardList} />
-          <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
-        </Section>
-      )}
-
-      {/* FM / AMC */}
-      {showFMAMC && (
-        <div style={{ fontSize:10, fontWeight:800, color:'#1AADCE', textTransform:'uppercase', letterSpacing:'0.1em', padding:'6px 14px 2px', marginTop:4, borderTop:'1px solid rgba(255,255,255,0.08)' }}>🏢 FM / AMC</div>
-      )}
-      {showFMAMC && (
-        <Section sectionKey="fmamc" label="FM Suite">
-          <NavBtn id="fmkpi"         label="KPI Dashboard"   icon={BarChart2} />
-          <NavBtn id="assetregister" label="Asset Register"   icon={Package} />
-          <NavBtn id="pmschedules"   label="PM Schedules"     icon={ClipboardList} />
-          <NavBtn id="fmworkorders"  label="Work Orders"      icon={Wrench} />
-          <NavBtn id="amccontracts"  label="AMC Contracts"    icon={FileSignature} />
-          <NavBtn id="fmspareparts"  label="Spare Parts"      icon={Package} />
-        </Section>
-      )}
-
-      {/* HR */}
+      {/* HR & Payroll — always at bottom */}
       <Section sectionKey="hr" label="HR & Payroll">
         <NavBtn id="employees" label="Employees" icon={Users} />
         <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
@@ -18158,6 +18381,36 @@ export default function App() {
         />
       )}
       {editingVendor && (
+        <VendorModal
+          vendor={editingVendor}
+          onSave={(v) => {
+            const isNew = !vendors.find(x => x.id === v.id);
+            const saved = isNew ? { ...v, id: crypto.randomUUID() } : v;
+            setVendors(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
+            setEditingVendor(null);
+          }}
+          onClose={() => setEditingVendor(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+
+      {showDeleteModal && (
+        <DeleteAccountModal
+          user={user}
+          ownerUid={ownerUid}
+          isSubscribed={isSubscribed}
+          onExportData={exportAllData}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={() => {
+            setShowDeleteModal(false);
+            logOut();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+&& (
         <VendorModal
           vendor={editingVendor}
           onSave={(v) => {
