@@ -2678,8 +2678,70 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             ))}
           </div>
 
-          {/* ── Shared accounts summary ── */}
-          <div style={styles.dashSection}>Accounts — Shared</div>
+          {/* ── Sales dept data by division ── */}
+          <div style={styles.dashSection}>Sales — by Division</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, 1fr)`, gap: 12, marginBottom: 20 }}>
+            {activeTypes.map(bt => {
+              const bm = BIZ_META[bt] || { label: bt, color: '#888', icon: '📁' };
+              const bd = documents.filter(d => (d.bizType || 'trading') === bt);
+              const invoiced    = bd.filter(d => d.type === 'invoice').reduce((s, d) => s + (d.total || 0), 0);
+              const outstanding = bd.filter(d => d.type === 'invoice' && d.status !== 'paid').reduce((s, d) => s + (d.total || 0), 0);
+              const quotes      = bd.filter(d => d.type === 'quotation').length;
+              return (
+                <div key={bt} style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: `3px solid ${bm.color}`, borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: bm.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{bm.icon} {bm.label}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Invoiced</span>
+                      <span style={{ fontWeight: 700, color: '#1E2A4A' }}>{cur(invoiced)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Receivable</span>
+                      <span style={{ fontWeight: 700, color: '#B5453A' }}>{cur(outstanding)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Quotations</span>
+                      <span style={{ fontWeight: 600, color: '#555' }}>{quotes}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Purchase dept data by division ── */}
+          <div style={styles.dashSection}>Purchase — by Division</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, 1fr)`, gap: 12, marginBottom: 20 }}>
+            {activeTypes.map(bt => {
+              const bm = BIZ_META[bt] || { label: bt, color: '#888', icon: '📁' };
+              const bd = documents.filter(d => (d.bizType || 'trading') === bt);
+              const purchased = bd.filter(d => d.type === 'purchase').reduce((s, d) => s + (d.total || 0), 0);
+              const payable   = bd.filter(d => d.type === 'purchasebill' && d.status !== 'paid').reduce((s, d) => s + (d.total || 0), 0);
+              const pos       = bd.filter(d => d.type === 'purchase').length;
+              return (
+                <div key={bt} style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: `3px solid ${bm.color}`, borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: bm.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{bm.icon} {bm.label}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Purchased</span>
+                      <span style={{ fontWeight: 700, color: '#1E2A4A' }}>{cur(purchased)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Payable</span>
+                      <span style={{ fontWeight: 700, color: '#B91C1C' }}>{cur(payable)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>POs raised</span>
+                      <span style={{ fontWeight: 600, color: '#555' }}>{pos}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Accounts summary (combined) ── */}
+          <div style={styles.dashSection}>Accounts</div>
           <div style={styles.statGrid}>
             <StatCard label="Cash received"      value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
             <StatCard label="Cash paid"          value={cur(stats.totalPaid)}     accent="#B91C1C" sub="payment vouchers" />
@@ -3193,6 +3255,8 @@ const BIZ_SECTION_VIEWS = {
   manufacturing: ['serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport'],
   service:       ['siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport'],
   fmamc:         ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers'],
+  hr:            ['employees','payroll'],
+  admin:         ['staff','contracts','termslibrary'],
 };
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications }) {
@@ -3290,6 +3354,8 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       manufacturing: { label: 'Manufacturing', color: '#C9752A', bg: 'rgba(201,117,42,0.10)' },
       service:       { label: 'MEP / Service', color: '#1E7A9A', bg: 'rgba(30,122,154,0.10)' },
       fmamc:         { label: 'FM / AMC',      color: '#0E9DB5', bg: 'rgba(14,157,181,0.10)' },
+      hr:            { label: 'HR & Payroll',  color: '#7C3AED', bg: 'rgba(124,58,237,0.10)' },
+      admin:         { label: 'Admin',         color: '#374151', bg: 'rgba(55,65,81,0.10)'   },
     };
     const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
     const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view);
@@ -3379,14 +3445,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {isMultiBiz ? (
         /* ── MULTI-BIZ: accordion per business type ──────────────────────── */
         <>
-          {/* Shared master data — customers/vendors/items/all docs */}
-          <Section sectionKey="shared" label="Master Data">
-            <NavBtn id="customers"      label="Customers"      icon={Users} />
-            <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
-            <NavBtn id="items"          label="Items"          icon={Package} />
-            <NavBtn id="enquiries"      label="Enquiries"      icon={FileSignature} />
-            <NavBtn id="documents"      label="All Documents"  icon={FileText} />
-          </Section>
+          {/* All Documents — cross-type shortcut */}
+          <div style={{ padding: '2px 6px 6px' }}>
+            <NavBtn id="documents" label="All Documents" icon={FileText} />
+          </div>
 
           {/* One BizSection per active type */}
           {activeTypes.map((bt, idx) => (
@@ -3395,7 +3457,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               {/* ── TRADING ─────────────────────────────────────────── */}
               {bt === 'trading' && <>
                 <SubLabel label="Sales" />
-                <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />
+                <NavBtn id="customers"       label="Customers"         icon={Users} />
+                <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
+                <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
                 <CreateBtn docKey="quotation"    bizType="trading" />
                 <CreateBtn docKey="invoice"      bizType="trading" />
                 <CreateBtn docKey="creditnote"   bizType="trading" />
@@ -3403,11 +3467,13 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="packing_list" bizType="trading" />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="vendors" label="Vendors" icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType="trading" />
                 <CreateBtn docKey="purchasebill" bizType="trading" />
                 <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
 
                 <SubLabel label="Stores" />
+                <NavBtn id="items"       label="Items"                icon={Package} />
                 <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
@@ -3425,18 +3491,21 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               {/* ── MANUFACTURING ───────────────────────────────────── */}
               {bt === 'manufacturing' && <>
                 <SubLabel label="Sales" />
-                <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />
+                <NavBtn id="customers"     label="Customers" icon={Users} />
+                <NavBtn id="serviceorders" label="SAS"       icon={Briefcase} />
                 <CreateBtn docKey="quotation"  bizType="manufacturing" />
                 <CreateBtn docKey="invoice"    bizType="manufacturing" />
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
 
                 <SubLabel label="Purchase" />
-                <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />
+                <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
+                <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
                 <CreateBtn docKey="purchase"     bizType="manufacturing" />
                 <CreateBtn docKey="purchasebill" bizType="manufacturing" />
                 <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
 
                 <SubLabel label="Stores" />
+                <NavBtn id="items"        label="Items"                icon={Package} />
                 <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
@@ -3472,12 +3541,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               {/* ── MEP / SERVICE ────────────────────────────────────── */}
               {(bt === 'service' || bt === 'fmamc') && <>
                 <SubLabel label="Sales" />
+                <NavBtn id="customers"   label="Customers"     icon={Users} />
                 <CreateBtn docKey="quotation"  bizType={bt} />
                 <CreateBtn docKey="invoice"    bizType={bt} />
                 <NavBtn id="rabilling"   label="RA Billing"    icon={FileMinus} />
                 <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType={bt} />
                 <CreateBtn docKey="purchasebill" bizType={bt} />
                 <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
@@ -3641,20 +3712,33 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         </>
       )}
 
-      {/* HR & Payroll — always at bottom */}
-      <Section sectionKey="hr" label="HR & Payroll">
-        <NavBtn id="employees" label="Employees" icon={Users} />
-        <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
-      </Section>
+      {/* HR & Payroll */}
+      {isMultiBiz ? (
+        <BizSection bizType="hr" defaultOpen={false}>
+          <NavBtn id="employees" label="Employees" icon={Users} />
+          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
+        </BizSection>
+      ) : (
+        <Section sectionKey="hr" label="HR & Payroll">
+          <NavBtn id="employees" label="Employees" icon={Users} />
+          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
+        </Section>
+      )}
 
       {/* Admin */}
-      {userRole === 'admin' && (
+      {userRole === 'admin' && (isMultiBiz ? (
+        <BizSection bizType="admin" defaultOpen={false}>
+          <NavBtn id="staff" label="Staff" icon={Shield} />
+          {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
+          {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+        </BizSection>
+      ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
         </Section>
-      )}
+      ))}
 
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} unreadCount={unreadCount} onShowNotifications={onShowNotifications} />
     </div>
