@@ -111,67 +111,83 @@ export async function getMembership(uid) {
 }
 
 export async function createStaffAccount(ownerUid, email, password, name, role, companyName = '', empId = '', empNo = '') {
-  const withTimeout = (promise, ms = 20000) => Promise.race([
+  const withTimeout = (promise, ms = 45000) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-  // Use Firebase Auth REST API — no secondary SDK app, no IndexedDB init, no auth
-  // session interference. Just a plain fetch that returns the new user's UID.
-  const signUpRes = await withTimeout(
-    fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
+  const REST = (endpoint, body) =>
+    fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${endpoint}?key=${firebaseConfig.apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, returnSecureToken: true }),
-    }).then(r => r.json())
-  );
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+
+  // ── Step 1: Create Firebase Auth account via REST ──────────────────────────
+  let staffUid, idToken;
+
+  const signUpRes = await withTimeout(REST('signUp', { email, password, returnSecureToken: true }));
 
   if (signUpRes.error) {
-    const code = (signUpRes.error.message || 'UNKNOWN').toLowerCase().replace(/_/g, '-');
-    const err = new Error(signUpRes.error.message);
-    err.code = `auth/${code}`;
-    throw err;
+    const msg = (signUpRes.error.message || 'UNKNOWN');
+
+    // EMAIL_EXISTS = account was created in a previous timed-out attempt.
+    // Recover by signing in with the same password to obtain the existing UID.
+    if (msg === 'EMAIL_EXISTS') {
+      const signInRes = await withTimeout(
+        REST('signInWithPassword', { email, password, returnSecureToken: true }),
+        15000
+      );
+      if (signInRes.error) {
+        // Wrong password or other error — can't recover automatically
+        const err = new Error('EMAIL_EXISTS');
+        err.code = 'auth/email-already-in-use';
+        throw err;
+      }
+      staffUid = signInRes.localId;
+      idToken  = signInRes.idToken;
+      // Fall through to write/overwrite the Firestore docs
+    } else {
+      const code = msg.toLowerCase().replace(/_/g, '-');
+      const err = new Error(msg);
+      err.code = `auth/${code}`;
+      throw err;
+    }
+  } else {
+    staffUid = signUpRes.localId;
+    idToken  = signUpRes.idToken;
   }
 
-  const staffUid = signUpRes.localId;
-  const idToken  = signUpRes.idToken;
-
-  // Set display name + mark email verified in one REST call (best-effort)
-  // emailVerified: true is critical — without it the app's auth handler silently
-  // blocks staff login (emailVerified check runs before membership lookup).
+  // ── Step 2: Set displayName + emailVerified (best-effort, 8s) ─────────────
   if (idToken) {
     try {
       await withTimeout(
-        fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken, displayName: name || '', emailVerified: true }),
-        }),
-        5000
+        REST('update', { idToken, displayName: name || '', emailVerified: true }),
+        8000
       );
     } catch (_) {}
   }
 
-  // Firestore writes — all with individual timeouts
-  // staff_memberships is best-effort (Firestore rules may block owner writing
-  // to another uid's doc); the auth handler also falls back to email index lookup.
+  // ── Step 3: Firestore writes ───────────────────────────────────────────────
+  // staff_memberships — best-effort (Firestore rules may block cross-uid writes)
   try {
     await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
       ownerUid, role, name, email, companyName,
-    }));
+    }), 15000);
   } catch (_) {}
 
+  // company staff subcollection — owner writing to own company, should always succeed
   await withTimeout(setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
     uid: staffUid, name, email, role, companyName, createdAt: Date.now(),
     ...(empId ? { empId, empNo } : {}),
-  }));
+  }), 15000);
 
-  // Write email index so the sign-in page can show the company name before login
+  // email index — best-effort
   try {
     await withTimeout(setDoc(doc(db, 'staff_email_index', email.toLowerCase()), {
       companyName, ownerUid,
-    }), 5000);
-  } catch (_) {} // non-fatal
+    }), 8000);
+  } catch (_) {}
 
   return staffUid;
 }
