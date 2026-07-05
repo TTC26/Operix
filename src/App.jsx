@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail } from './firebase';
 
 
@@ -2562,12 +2562,69 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
     service:       { label: 'Services / MEP Suite',  icon: '🔧', color: '#1E7A9A' },
   };
 
+  // ── Payment due date alerts ──────────────────────────────────────────────────
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const weekStr  = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const dueDocs  = documents.filter(d =>
+    ['invoice', 'purchasebill'].includes(d.type) && d.status === 'approved' && d.dueDate
+  );
+  const overdueDocs  = dueDocs.filter(d => d.dueDate < todayStr);
+  const dueSoonDocs  = dueDocs.filter(d => d.dueDate >= todayStr && d.dueDate <= weekStr);
+  const allAlerts    = [...overdueDocs, ...dueSoonDocs];
+
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
         <p style={styles.muted}>{isMultiBiz ? `${activeTypes.length} business activities running` : `Here's what's happening across your business.`}</p>
       </div>
+
+      {/* ── Payment Due Alerts ───────────────────────────────────────────────── */}
+      {allAlerts.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+            <Bell size={15} color="#B5453A" />
+            <span style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>Payment Alerts</span>
+            <span style={{ fontSize: 12, color: '#888' }}>— due this week or overdue</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {overdueDocs.map(d => {
+              const daysOver = Math.floor((new Date(todayStr) - new Date(d.dueDate)) / 86400000);
+              const party = d.type === 'invoice'
+                ? customers.find(c => c.id === d.customerId)?.name
+                : vendors.find(v => v.id === d.customerId)?.name;
+              return (
+                <div key={d.id} onClick={() => openDoc(d)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#FFF5F5', border: '1px solid #FCA5A5', borderRadius: 8, cursor: 'pointer', flexWrap: 'wrap' }}>
+                  <AlertTriangle size={13} color="#B91C1C" />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#B91C1C', minWidth: 80 }}>OVERDUE {daysOver}d</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#C9A24B' }}>{d.number}</span>
+                  <span style={{ fontSize: 12, color: '#555' }}>Due: {d.dueDate}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: d.type === 'invoice' ? '#1A7A3E' : '#B91C1C' }}>{d.type === 'invoice' ? '↑ Receivable' : '↓ Payable'}</span>
+                  <span style={{ fontSize: 12, color: '#444' }}>{party || d.partyName || '—'}</span>
+                  <span style={{ fontSize: 12, color: '#888' }}>{cur(d.items ? d.items.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.rate)||0), 0) : 0)}</span>
+                </div>
+              );
+            })}
+            {dueSoonDocs.map(d => {
+              const daysLeft = Math.ceil((new Date(d.dueDate) - new Date(todayStr)) / 86400000);
+              const party = d.type === 'invoice'
+                ? customers.find(c => c.id === d.customerId)?.name
+                : vendors.find(v => v.id === d.customerId)?.name;
+              return (
+                <div key={d.id} onClick={() => openDoc(d)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 8, cursor: 'pointer', flexWrap: 'wrap' }}>
+                  <Clock size={13} color="#C9A24B" />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', minWidth: 80 }}>{daysLeft === 0 ? 'DUE TODAY' : `${daysLeft}d left`}</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#C9A24B' }}>{d.number}</span>
+                  <span style={{ fontSize: 12, color: '#555' }}>Due: {d.dueDate}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: d.type === 'invoice' ? '#1A7A3E' : '#B91C1C' }}>{d.type === 'invoice' ? '↑ Receivable' : '↓ Payable'}</span>
+                  <span style={{ fontSize: 12, color: '#444' }}>{party || d.partyName || '—'}</span>
+                  <span style={{ fontSize: 12, color: '#888' }}>{cur(d.items ? d.items.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.rate)||0), 0) : 0)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── MULTI-BUSINESS: column view ─────────────────────────────────────── */}
       {isMultiBiz ? (
@@ -3126,11 +3183,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   function CreateBtn({ docKey, bizType: btnBizType }) {
     const t = DOC_TYPES[docKey];
     if (!t) return null;
+    const Icon = t.icon;
     return (
       <button
         onClick={() => startNewDoc(docKey, btnBizType || activeTypes[0])}
         style={{ ...styles.navItem, fontSize: 12.5, color: '#A9B0C9', paddingLeft: 28 }}>
-        <Plus size={13} strokeWidth={2} />{t.label}
+        <Icon size={13} strokeWidth={1.8} />{t.label}
       </button>
     );
   }
@@ -5169,7 +5227,7 @@ const VOUCHER_ACCOUNT_HEADS = [
   'Professional Fees', 'Loan', 'Capital', 'Other',
 ];
 
-function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, userRole }) {
+function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, documents = [], userRole }) {
   const [tab, setTab] = useState('payment');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -5288,7 +5346,15 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
             {filtered.map(v => (
               <tr key={v.id}>
                 <td style={styles.td}>{v.date}</td>
-                <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{v.voucherNo}</span></td>
+                <td style={styles.td}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{v.voucherNo}</span>
+                  {v.voucherSubtype === 'nonorder' && (
+                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#888', background: '#F0F0F0', borderRadius: 3, padding: '1px 5px' }}>NON-ORDER</span>
+                  )}
+                  {v.linkedDocNo && (
+                    <div style={{ fontSize: 10.5, color: '#666', marginTop: 2 }}>→ {v.linkedDocNo}</div>
+                  )}
+                </td>
                 <td style={styles.td}>{v.party}</td>
                 <td style={styles.td}>{v.accountHead}</td>
                 <td style={styles.td}><span style={{ background: '#F5F3EE', borderRadius: 4, padding: '2px 7px', fontSize: 11.5 }}>{v.mode}</span></td>
@@ -5312,7 +5378,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
       </div>
 
       {showForm && (
-        <VoucherForm voucher={editing} customers={customers} vendors={vendors} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <VoucherForm voucher={editing} customers={customers} vendors={vendors} documents={documents} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printVoucher && (
         <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
@@ -5324,31 +5390,86 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   );
 }
 
-function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
+function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onClose }) {
   const [form, setForm] = useState({
-    id: voucher && voucher.id ? voucher.id : '',
-    type: voucher && voucher.type ? voucher.type : 'payment',
-    voucherNo: voucher && voucher.voucherNo ? voucher.voucherNo : '',
-    date: voucher && voucher.date ? voucher.date : new Date().toISOString().split('T')[0],
-    party: voucher && voucher.party ? voucher.party : '',
-    accountHead: voucher && voucher.accountHead ? voucher.accountHead : 'Cash',
-    amount: voucher && voucher.amount ? voucher.amount : '',
-    mode: voucher && voucher.mode ? voucher.mode : 'Cash',
-    refNo: voucher && voucher.refNo ? voucher.refNo : '',
-    narration: voucher && voucher.narration ? voucher.narration : '',
+    id:           voucher?.id || '',
+    type:         voucher?.type || 'payment',
+    voucherSubtype: voucher?.voucherSubtype || 'order', // 'order' | 'nonorder'
+    linkedDocNo:  voucher?.linkedDocNo || '',
+    voucherNo:    voucher?.voucherNo || '',
+    date:         voucher?.date || new Date().toISOString().split('T')[0],
+    party:        voucher?.party || '',
+    accountHead:  voucher?.accountHead || 'Cash',
+    amount:       voucher?.amount || '',
+    mode:         voucher?.mode || 'Cash',
+    refNo:        voucher?.refNo || '',
+    narration:    voucher?.narration || '',
   });
+  const [linkError, setLinkError] = useState('');
 
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); if (k === 'linkedDocNo') setLinkError(''); }
 
   const parties = [...customers.map(c => c.name), ...vendors.map(v => v.name)];
 
+  // Invoices / POs available for linking (receipt → invoices; payment → purchase bills)
+  const linkableDocs = documents.filter(d =>
+    form.type === 'receipt'
+      ? d.type === 'invoice'
+      : d.type === 'purchasebill' || d.type === 'purchaseorder'
+  );
+  const linkableNos = [...new Set(linkableDocs.map(d => d.number || d.docNumber || d.id).filter(Boolean))];
+
+  function validateLink() {
+    if (form.voucherSubtype !== 'order' || !form.linkedDocNo.trim()) {
+      setLinkError('');
+      return true;
+    }
+    const linked = linkableDocs.find(d =>
+      (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()
+    );
+    if (!linked) {
+      setLinkError('Document not found. Check the invoice/PO number.');
+      return false;
+    }
+    if (linked.status !== 'approved') {
+      const label = form.type === 'receipt' ? 'Invoice' : 'Purchase bill / PO';
+      setLinkError(`${label} "${form.linkedDocNo}" is not approved yet. Only approved documents can be linked to a voucher.`);
+      return false;
+    }
+    setLinkError('');
+    return true;
+  }
+
   function handleSave() {
     if (!form.date || !form.amount || !form.party) { alert('Date, party and amount are required.'); return; }
+    if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !validateLink()) return;
     onSave({ ...form, amount: parseFloat(form.amount) || 0 });
   }
 
+  const isReceipt = form.type === 'receipt';
+
   return (
-    <Modal title={(form.type === 'payment' ? 'Payment' : 'Receipt') + ' Voucher'} onClose={onClose} wide>
+    <Modal title={(isReceipt ? 'Receipt' : 'Payment') + ' Voucher'} onClose={onClose} wide>
+      {/* Order vs Non-order toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, background: '#F5F3EE', borderRadius: 8, padding: 4 }}>
+        <button
+          type="button"
+          onClick={() => set('voucherSubtype', 'order')}
+          style={{ flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            background: form.voucherSubtype === 'order' ? '#1E2A4A' : 'transparent',
+            color: form.voucherSubtype === 'order' ? '#fff' : '#888' }}>
+          {isReceipt ? '📄 Against Invoice / PO' : '📄 Against Purchase Bill / PO'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { set('voucherSubtype', 'nonorder'); set('linkedDocNo', ''); setLinkError(''); }}
+          style={{ flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            background: form.voucherSubtype === 'nonorder' ? '#1E2A4A' : 'transparent',
+            color: form.voucherSubtype === 'nonorder' ? '#fff' : '#888' }}>
+          {isReceipt ? '💵 Non-order Receipt' : '💵 Non-order Payment'}
+        </button>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Type</label>
@@ -5370,6 +5491,41 @@ function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
           <input list="voucher-party-list" value={form.party} onChange={e => set('party', e.target.value)} style={styles.input} placeholder="Customer / Vendor / Name" />
           <datalist id="voucher-party-list">{parties.map(p => <option key={p} value={p} />)}</datalist>
         </div>
+
+        {/* Order-linked doc number field — only shown for 'order' subtype */}
+        {form.voucherSubtype === 'order' && (
+          <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+            <label style={styles.label}>{isReceipt ? 'Invoice No / PO No' : 'Purchase Bill No / PO No'} <span style={{ color: '#B91C1C' }}>*</span></label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  list="voucher-doc-list"
+                  value={form.linkedDocNo}
+                  onChange={e => set('linkedDocNo', e.target.value)}
+                  onBlur={validateLink}
+                  style={{ ...styles.input, borderColor: linkError ? '#B91C1C' : undefined }}
+                  placeholder={isReceipt ? 'e.g. INV-001' : 'e.g. PB-001 / PO-001'}
+                />
+                <datalist id="voucher-doc-list">{linkableNos.map(n => <option key={n} value={n} />)}</datalist>
+                {linkError && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#B91C1C', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <AlertTriangle size={13} /> {linkError}
+                  </div>
+                )}
+                {!linkError && form.linkedDocNo.trim() && (() => {
+                  const linked = linkableDocs.find(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim());
+                  if (linked?.status === 'approved') return (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#1A7A3E', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <CheckCircle size={13} /> Approved — voucher can proceed
+                    </div>
+                  );
+                  return null;
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={styles.formGroup}>
           <label style={styles.label}>Account Head</label>
           <select value={form.accountHead} onChange={e => set('accountHead', e.target.value)} style={styles.input}>
@@ -6009,6 +6165,7 @@ function BinCard({ items, stockLedger, businessInfo }) {
 
 // ─── GRN Print ─────────────────────────────────────────────────
 function GRNPrint({ grn, businessInfo, onClose }) {
+  const isTrading = businessInfo?.companyType === 'trading';
   const useLH = !!(businessInfo?.letterhead);
   return (
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
@@ -6030,12 +6187,12 @@ function GRNPrint({ grn, businessInfo, onClose }) {
           <div><strong>GRN No:</strong> {grn.number}</div>
           <div><strong>Date:</strong> {grn.date}</div>
           <div><strong>Vendor:</strong> {grn.vendorName || '—'}</div>
-          <div><strong>PO Ref:</strong> {grn.poRef || grn.poId || '—'}</div>
+          <div><strong>PO Ref:</strong> {grn.poNumber || grn.poRef || '—'}</div>
         </div>
         <table style={{width:'100%',borderCollapse:'collapse',marginBottom:16}}>
           <thead>
             <tr style={{background:'#1E2A4A',color:'#fff'}}>
-              {['#','Item','Ordered Qty','Received Qty','QA Status','Remarks'].map(h => (
+              {(isTrading ? ['#','Item','Ordered Qty','Received Qty','Visual Inspection','Remarks'] : ['#','Item','Ordered Qty','Received Qty','QA Status','Remarks']).map(h => (
                 <th key={h} style={{padding:'6px 8px',textAlign:'left',fontSize:11}}>{h}</th>
               ))}
             </tr>
@@ -6047,7 +6204,9 @@ function GRNPrint({ grn, businessInfo, onClose }) {
                 <td style={{padding:'5px 8px'}}>{l.itemName || l.itemId}</td>
                 <td style={{padding:'5px 8px',textAlign:'center'}}>{l.orderedQty || 0}</td>
                 <td style={{padding:'5px 8px',textAlign:'center'}}>{l.receivedQty || 0}</td>
-                <td style={{padding:'5px 8px'}}>{l.qaStatus || '—'}</td>
+                <td style={{padding:'5px 8px'}}>
+                  {l.qaStatus === 'ok' ? '✅ OK' : l.qaStatus === 'notok' ? '❌ Not OK' : l.qaStatus || '—'}
+                </td>
                 <td style={{padding:'5px 8px'}}>{l.remarks || ''}</td>
               </tr>
             ))}
@@ -6127,7 +6286,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
   );
 }
 
-function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [] }) {
+function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [], setNotifications, user }) {
   const [editing, setEditing] = useState(null);
   const [printSiv, setPrintSiv] = useState(null);
   const canEdit = ['admin','manager','inventory','purchase'].includes(userRole);
@@ -6163,7 +6322,36 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
   }
 
   function updateApproval(id, patch) {
-    setStoreIssues(prev=>prev.map(s=>s.id===id?{...s,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:s));
+    setStoreIssues(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      // Push notification when status changes
+      if (setNotifications && patch.status !== s.approvalStatus) {
+        const label = `SIV ${s.sivNumber}`;
+        if (patch.status === 'submitted') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'approval_request', forRole: 'admin',
+            title: `Approval needed: ${label}`,
+            message: `Stores Issue Voucher forwarded by ${user?.email || 'staff'} — awaiting approval.`,
+          }, ...p]);
+        } else if (patch.status === 'approved') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'approved', forRole: 'all',
+            title: `Approved: ${label}`,
+            message: `${label} — Issued to ${s.issuedTo || '—'} has been approved.`,
+          }, ...p]);
+        } else if (patch.status === 'rejected') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'rejected', forRole: 'all',
+            title: `Rejected: ${label}`,
+            message: patch.rejectionNote || 'SIV was rejected.',
+          }, ...p]);
+        }
+      }
+      return { ...s, approvalStatus: patch.status, approvalNote: patch.rejectionNote || '' };
+    }));
   }
 
   // ── FORM ────────────────────────────────────────────────────────
@@ -6327,14 +6515,14 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
     if (isNew) {
       const newGrn = { ...grn, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
       updated = [newGrn, ...(grns || [])];
-      // Only create stock IN entries for QA-accepted lines
+      // Only create stock IN entries for QA-accepted / visually OK lines
       if (setStockLedger) {
         const entries = (grn.lines || [])
-          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected')
+          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok')
           .map(l => {
             const it = items.find(i => i.id === l.itemId);
-            const acceptedQty = l.qaStatus === 'inprocess'
-              ? parseFloat(l.receivedQty) || 0   // inprocess → take full receivedQty tentatively
+            const acceptedQty = (l.qaStatus === 'inprocess' || l.qaStatus === 'ok')
+              ? parseFloat(l.receivedQty) || 0   // ok/inprocess → take full receivedQty
               : parseFloat(l.acceptedQty) || 0;   // accepted → take acceptedQty
             return {
               id: crypto.randomUUID(), date: grn.date, itemId: l.itemId,
@@ -6378,9 +6566,11 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
               const po = poList.find(p => p.id === g.poId);
               const vendor = vendors.find(v => v.id === (po ? po.customerId : ''));
               const lines = g.lines || [];
-              const accepted = lines.filter(l => l.qaStatus === 'accepted').length;
-              const rejected = lines.filter(l => l.qaStatus === 'rejected').length;
-              const inprocess = lines.filter(l => !l.qaStatus || l.qaStatus === 'inprocess').length;
+              const isTrading = businessInfo?.companyType === 'trading';
+              // Trading: ok/notok; Manufacturing: accepted/rejected/inprocess
+              const okCount       = lines.filter(l => l.qaStatus === 'ok' || l.qaStatus === 'accepted').length;
+              const notOkCount    = lines.filter(l => l.qaStatus === 'notok' || l.qaStatus === 'rejected').length;
+              const inprocess     = lines.filter(l => !l.qaStatus || l.qaStatus === 'inprocess').length;
               const qaChip = (label, count, color) => count > 0 ? (
                 <span key={label} style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: color + '22', color }}>{count} {label}</span>
               ) : null;
@@ -6392,9 +6582,10 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
                   <td style={{ ...styles.td, fontWeight: 500 }}>{g.vendorName || (vendor ? vendor.name : '—')}</td>
                   <td style={styles.td}>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {qaChip('Accepted', accepted, '#1A7A3E')}
-                      {qaChip('Rejected', rejected, '#B91C1C')}
-                      {qaChip('In-process', inprocess, '#C9A24B')}
+                      {qaChip(isTrading ? 'OK' : 'Accepted', okCount, '#1A7A3E')}
+                      {qaChip(isTrading ? 'Not OK' : 'Rejected', notOkCount, '#B91C1C')}
+                      {!isTrading && qaChip('In-process', inprocess, '#C9A24B')}
+                      {isTrading && inprocess > 0 && qaChip('Pending', inprocess, '#C9A24B')}
                       {lines.length === 0 && <span style={{ color: '#888', fontSize: 12 }}>0 lines</span>}
                     </div>
                   </td>
@@ -6417,16 +6608,17 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
       </div>
 
       {showForm && (
-        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printGrn && <GRNPrint grn={printGrn} businessInfo={businessInfo} onClose={() => setPrintGrn(null)} />}
     </div>
   );
 }
 
-function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
+function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose }) {
   const [form, setForm] = useState({ lines: [], ...grn });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const isTrading = businessInfo?.companyType === 'trading';
 
   function selectPO(poId) {
     const po = poList.find(p => p.id === poId);
@@ -6439,7 +6631,7 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
       receivedQty: parseFloat(it.qty) || 0,
       rate: parseFloat(it.rate) || 0,
     }));
-    setForm(p => ({ ...p, poId, vendorName: vendor ? vendor.name : '', lines }));
+    setForm(p => ({ ...p, poId, poNumber: po.number, vendorName: vendor ? vendor.name : '', lines }));
   }
 
   function updateLine(idx, key, val) {
@@ -6447,11 +6639,15 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
   }
 
   function addLine() {
-    setForm(p => ({ ...p, lines: [...p.lines, { itemId: '', itemName: '', orderedQty: 0, receivedQty: 0, acceptedQty: 0, rejectedQty: 0, rate: 0, qaStatus: 'inprocess', qaComments: '' }] }));
+    const defaultQa = isTrading ? 'ok' : 'inprocess';
+    setForm(p => ({ ...p, lines: [...p.lines, { itemId: '', itemName: '', orderedQty: 0, receivedQty: 0, acceptedQty: 0, rejectedQty: 0, rate: 0, qaStatus: defaultQa, qaComments: '' }] }));
   }
 
+  // Manufacturing QA
   const qaColor = { accepted: '#1A7A3E', rejected: '#B91C1C', inprocess: '#C9A24B' };
   const qaLabel = { accepted: 'Accepted', rejected: 'Rejected', inprocess: 'In-process' };
+  // Trading inspection
+  const inspColor = { ok: '#1A7A3E', notok: '#B91C1C' };
 
   return (
     <Modal title={grn && grn.id ? 'Edit GRN' : 'New Goods Receipt Note'} onClose={onClose} wide>
@@ -6477,18 +6673,25 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
         <input value={form.vendorName} onChange={e => set('vendorName', e.target.value)} style={styles.input} />
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }}>Items Received — QA Inspection</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }}>
+        {isTrading ? 'Items Received — Visual Inspection' : 'Items Received — QA Inspection'}
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
           <thead><tr style={{ background: '#F5F3EE' }}>
-            {['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'QA Status', 'Accepted Qty', 'Rejected Qty', 'QA Comments', ''].map(h => (
+            {(isTrading
+              ? ['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'Visual Inspection', 'Remarks', '']
+              : ['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'QA Status', 'Accepted Qty', 'Rejected Qty', 'QA Comments', '']
+            ).map(h => (
               <th key={h} style={{ ...styles.th, fontSize: 10, whiteSpace: 'nowrap' }}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {form.lines.map((l, i) => {
-              const qa = l.qaStatus || 'inprocess';
-              const rowBg = qa === 'accepted' ? '#F0FFF4' : qa === 'rejected' ? '#FFF5F5' : '#FFFDF0';
+              const qa = l.qaStatus || (isTrading ? 'ok' : 'inprocess');
+              const rowBg = isTrading
+                ? (qa === 'ok' ? '#F0FFF4' : '#FFF5F5')
+                : (qa === 'accepted' ? '#F0FFF4' : qa === 'rejected' ? '#FFF5F5' : '#FFFDF0');
               return (
                 <tr key={i} style={{ background: rowBg }}>
                   <td style={styles.td}>
@@ -6498,23 +6701,37 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
                     </select>
                   </td>
                   <td style={styles.td}><input type="number" value={l.orderedQty} onChange={e => updateLine(i, 'orderedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12 }} /></td>
-                  <td style={styles.td}><input type="number" value={l.receivedQty} onChange={e => { updateLine(i, 'receivedQty', e.target.value); if (qa === 'inprocess') updateLine(i, 'acceptedQty', e.target.value); }} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE' }} /></td>
+                  <td style={styles.td}><input type="number" value={l.receivedQty} onChange={e => { updateLine(i, 'receivedQty', e.target.value); if (!isTrading && qa === 'inprocess') updateLine(i, 'acceptedQty', e.target.value); }} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE' }} /></td>
                   <td style={styles.td}><input type="number" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} style={{ ...styles.input, width: 75, textAlign: 'right', fontSize: 12 }} /></td>
                   <td style={styles.td}>
-                    <select value={qa} onChange={e => {
-                      const s = e.target.value;
-                      updateLine(i, 'qaStatus', s);
-                      if (s === 'accepted') { updateLine(i, 'acceptedQty', l.receivedQty); updateLine(i, 'rejectedQty', 0); }
-                      if (s === 'rejected') { updateLine(i, 'acceptedQty', 0); updateLine(i, 'rejectedQty', l.receivedQty); }
-                    }} style={{ ...styles.input, fontSize: 11, color: qaColor[qa], fontWeight: 600, minWidth: 100 }}>
-                      <option value="inprocess">⏳ In-process</option>
-                      <option value="accepted">✅ Accepted</option>
-                      <option value="rejected">❌ Rejected</option>
-                    </select>
+                    {isTrading ? (
+                      <select value={qa} onChange={e => updateLine(i, 'qaStatus', e.target.value)}
+                        style={{ ...styles.input, fontSize: 11, color: inspColor[qa] || '#555', fontWeight: 600, minWidth: 100 }}>
+                        <option value="ok">✅ OK</option>
+                        <option value="notok">❌ Not OK</option>
+                      </select>
+                    ) : (
+                      <select value={qa} onChange={e => {
+                        const s = e.target.value;
+                        updateLine(i, 'qaStatus', s);
+                        if (s === 'accepted') { updateLine(i, 'acceptedQty', l.receivedQty); updateLine(i, 'rejectedQty', 0); }
+                        if (s === 'rejected') { updateLine(i, 'acceptedQty', 0); updateLine(i, 'rejectedQty', l.receivedQty); }
+                      }} style={{ ...styles.input, fontSize: 11, color: qaColor[qa], fontWeight: 600, minWidth: 100 }}>
+                        <option value="inprocess">⏳ In-process</option>
+                        <option value="accepted">✅ Accepted</option>
+                        <option value="rejected">❌ Rejected</option>
+                      </select>
+                    )}
                   </td>
-                  <td style={styles.td}><input type="number" value={l.acceptedQty ?? 0} onChange={e => updateLine(i, 'acceptedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE', color: '#1A7A3E', fontWeight: 600 }} /></td>
-                  <td style={styles.td}><input type="number" value={l.rejectedQty ?? 0} onChange={e => updateLine(i, 'rejectedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#FFEAEA', color: '#B91C1C', fontWeight: 600 }} /></td>
-                  <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Notes…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                  {isTrading ? (
+                    <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Remarks…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                  ) : (
+                    <>
+                      <td style={styles.td}><input type="number" value={l.acceptedQty ?? 0} onChange={e => updateLine(i, 'acceptedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE', color: '#1A7A3E', fontWeight: 600 }} /></td>
+                      <td style={styles.td}><input type="number" value={l.rejectedQty ?? 0} onChange={e => updateLine(i, 'rejectedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#FFEAEA', color: '#B91C1C', fontWeight: 600 }} /></td>
+                      <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Notes…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                    </>
+                  )}
                   <td style={styles.td}><button onClick={() => setForm(p => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))} style={styles.iconBtn}><Trash2 size={13} color="#B5453A" /></button></td>
                 </tr>
               );
@@ -16935,14 +17152,18 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
-    const totalRevenue   = documents.filter(d => d.type === 'invoice').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const totalPurchases = documents.filter(d => d.type === 'purchasebill').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    // Only approved invoices count toward receivables
+    const totalRevenue   = documents.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = documents.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    // All receipts/payments for the cash flow stats
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
-    // Outstanding = invoiced minus receipts collected; payable = purchases minus payments made
-    const outstanding    = Math.max(0, totalRevenue - totalReceived);
-    const payable        = Math.max(0, totalPurchases - totalPaid);
+    // Outstanding = approved invoices minus order-linked receipts only (non-order receipts don't offset invoice outstanding)
+    const orderReceived  = voucherList.filter(v => v.type === 'receipt' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const orderPaid      = voucherList.filter(v => v.type === 'payment' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const outstanding    = Math.max(0, totalRevenue - orderReceived);
+    const payable        = Math.max(0, totalPurchases - orderPaid);
     const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
     const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
@@ -17104,6 +17325,7 @@ export default function App() {
             setVouchers={setVouchers}
             customers={customers}
             vendors={vendors}
+            documents={documents}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -17131,6 +17353,8 @@ export default function App() {
             productionOrders={productionOrders}
             userRole={userRole}
             businessInfo={businessInfo}
+            setNotifications={setNotifications}
+            user={user}
           />
         );
       case 'stock':
