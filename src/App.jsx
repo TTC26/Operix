@@ -18394,35 +18394,6 @@ export default function App() {
         />
       )}
 
-      {showDeleteModal && (
-        <DeleteAccountModal
-          user={user}
-          ownerUid={ownerUid}
-          isSubscribed={isSubscribed}
-          onExportData={exportAllData}
-          onClose={() => setShowDeleteModal(false)}
-          onDeleted={() => {
-            setShowDeleteModal(false);
-            logOut();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-&& (
-        <VendorModal
-          vendor={editingVendor}
-          onSave={(v) => {
-            const isNew = !vendors.find(x => x.id === v.id);
-            const saved = isNew ? { ...v, id: crypto.randomUUID() } : v;
-            setVendors(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingVendor(null);
-          }}
-          onClose={() => setEditingVendor(null)}
-          businessInfo={businessInfo}
-        />
-      )}
       {editingItem && (
         <ItemModal
           item={editingItem}
