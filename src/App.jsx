@@ -3259,7 +3259,7 @@ const BIZ_SECTION_VIEWS = {
   admin:         ['staff','contracts','termslibrary'],
 };
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications }) {
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -3358,10 +3358,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       admin:         { label: 'Admin',         color: '#374151', bg: 'rgba(55,65,81,0.10)'   },
     };
     const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
-    const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view);
+    // hasActive: this section's module is the current view, OR a doc from this division is open
+    const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view) ||
+      (view === 'doceditor' && (activeDocBizType || activeTypes[0]) === bizType);
     const [open, setOpen] = React.useState(defaultOpen ?? true);
-    // When a view inside this section becomes active, latch open=true so the
-    // section stays expanded even when view changes to 'doceditor' (no section owns it).
+    // Latch open=true whenever this section becomes active, so it stays expanded
+    // even after view changes (e.g. navigating between modules in same section).
     React.useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
     const isOpen = hasActive || open;
     return (
@@ -17399,20 +17401,26 @@ export default function App() {
     return `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
   }
 
-  function nextDocNumber(type, dateStr) {
+  function nextDocNumber(type, bizType, dateStr) {
     const fy = getFY(dateStr);
     const prefix = DOC_TYPES[type]?.prefix || type.toUpperCase();
-    const same = documents.filter((d) => d.type === type && getFY(d.date) === fy);
+    // Each division has its own independent counter — same format, separate sequence
+    const same = documents.filter((d) =>
+      d.type === type &&
+      getFY(d.date) === fy &&
+      (!isMultiBiz || (d.bizType || 'trading') === bizType)
+    );
     return `${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`;
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
   function startNewDoc(type, bizType) {
     const today = new Date().toISOString().slice(0, 10);
+    const bType = bizType || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(type, businessInfo),
-      number: nextDocNumber(type, today),
-      bizType: bizType || activeTypes[0] || 'trading',
+      number: nextDocNumber(type, bType, today),
+      bizType: bType,
     });
     setView('doceditor');
   }
@@ -17425,10 +17433,11 @@ export default function App() {
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
+    const bType = srcDoc.bizType || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(newType, businessInfo),
-      bizType: srcDoc.bizType || activeTypes[0] || 'trading',
-      number: nextDocNumber(newType, today),
+      bizType: bType,
+      number: nextDocNumber(newType, bType, today),
       customerId: srcDoc.customerId,
       customerSnapshot: srcDoc.customerSnapshot,
       items: (srcDoc.items || []).map((it) => ({ ...it, id: crypto.randomUUID() })),
@@ -18386,6 +18395,7 @@ export default function App() {
         country={country}
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
+        activeDocBizType={activeDoc?.bizType || null}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
