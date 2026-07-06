@@ -3251,15 +3251,15 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue'],
-  manufacturing: ['serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport'],
-  service:       ['siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport'],
-  fmamc:         ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','audit'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  service:       ['customers','enquiries','vendors','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  fmamc:         ['customers','enquiries','vendors','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers','audit'],
   hr:            ['employees','payroll'],
   admin:         ['staff','contracts','termslibrary'],
 };
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null }) {
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -3358,16 +3358,24 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       admin:         { label: 'Admin',         color: '#374151', bg: 'rgba(55,65,81,0.10)'   },
     };
     const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
-    // hasActive: this section's module is the current view, OR a doc from this division is open
-    const hasActive = (BIZ_SECTION_VIEWS[bizType] || []).includes(view) ||
-      (view === 'doceditor' && (activeDocBizType || activeTypes[0]) === bizType);
+    // Shared views appear in multiple sections — use activeBizContext to pick which one is active
+    const sectionsWithView = Object.keys(BIZ_SECTION_VIEWS).filter(bt =>
+      (BIZ_SECTION_VIEWS[bt] || []).includes(view)
+    );
+    const isSharedView = sectionsWithView.length > 1;
+    const viewInThisSection = sectionsWithView.includes(bizType);
+    // Type-guard: activeDocBizType might be an object due to legacy calls — treat non-strings as null
+    const docBizType = typeof activeDocBizType === 'string' ? activeDocBizType : null;
+    const hasActive =
+      (viewInThisSection && (!isMultiBiz || !isSharedView || activeBizContext === bizType)) ||
+      (view === 'doceditor' && (docBizType || activeTypes[0]) === bizType);
     const [open, setOpen] = React.useState(defaultOpen ?? true);
     // Latch open=true whenever this section becomes active, so it stays expanded
     // even after view changes (e.g. navigating between modules in same section).
     React.useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
     const isOpen = hasActive || open;
     return (
-      <div style={{ marginBottom: 2 }}>
+      <div style={{ marginBottom: 2 }} onClick={() => onBizContextChange?.(bizType)}>
         <button
           onClick={() => { if (!hasActive) setOpen(o => !o); }}
           style={{
@@ -3491,12 +3499,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
               </>}
 
               {/* ── MANUFACTURING ───────────────────────────────────── */}
               {bt === 'manufacturing' && <>
                 <SubLabel label="Sales" />
                 <NavBtn id="customers"     label="Customers" icon={Users} />
+                <NavBtn id="enquiries"     label="Enquiries" icon={FileSignature} />
                 <NavBtn id="serviceorders" label="SAS"       icon={Briefcase} />
                 <CreateBtn docKey="quotation"  bizType="manufacturing" />
                 <CreateBtn docKey="invoice"    bizType="manufacturing" />
@@ -3541,6 +3551,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
               </>}
 
               {/* ── MEP / SERVICE ────────────────────────────────────── */}
@@ -3591,6 +3602,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
               </>}
 
             </BizSection>
@@ -3622,6 +3634,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
             {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
             {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+            <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
           </Section>
 
           {/* Purchase */}
@@ -5190,7 +5203,7 @@ const PETTY_CATEGORIES = [
   'Printing & Stationery', 'Miscellaneous',
 ];
 
-function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
+function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printVoucher, setPrintVoucher] = useState(null);
@@ -5202,10 +5215,17 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
   const fmt = makeFmt(businessInfo);
   const sym = cc.currency;
 
-  const entries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
+  // Full entries array — used for save/delete operations
+  const allEntries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
+  // Display: filter by current division in multi-biz mode
+  const entries = isMultiBiz ? allEntries.filter(e => (e.bizType || 'trading') === currentBizType) : allEntries;
+  // Opening balance: per-division in multi-biz, shared in single-biz
+  const openingBalance = isMultiBiz
+    ? (pettyCash?.openingBalances?.[currentBizType] ?? 0)
+    : (pettyCash?.openingBalance ?? 0);
 
   const rows = entries.slice().sort((a, b) => (a.date > b.date ? 1 : -1)).map((entry, i, arr) => {
-    const prevBal = i === 0 ? (pettyCash.openingBalance ?? 0) : arr[i - 1].__balance;
+    const prevBal = i === 0 ? openingBalance : arr[i - 1].__balance;
     entry.__balance = prevBal + (entry.credit || 0) - (entry.debit || 0);
     return entry;
   });
@@ -5217,31 +5237,38 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
   }
 
   function saveEntry(entry) {
-    const existing = entries.find(e => e.id === entry.id);
+    const existing = allEntries.find(e => e.id === entry.id);
     let updated;
-    if (existing) { updated = entries.map(e => e.id === entry.id ? entry : e); }
-    else { updated = [...entries, { ...entry, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
-    setPettyCash({ openingBalance: pettyCash.openingBalance ?? 0, entries: updated });
+    if (existing) {
+      updated = allEntries.map(e => e.id === entry.id ? { ...entry, bizType: e.bizType || currentBizType } : e);
+    } else {
+      updated = [...allEntries, { ...entry, bizType: currentBizType, id: Date.now().toString(), status: 'draft', rejectionNote: '' }];
+    }
+    setPettyCash({ ...pettyCash, entries: updated });
     setShowForm(false); setEditing(null);
   }
 
   function updateEntryStatus(id, patch) {
-    const updated = entries.map(e => e.id === id ? { ...e, ...patch } : e);
+    const updated = allEntries.map(e => e.id === id ? { ...e, ...patch } : e);
     setPettyCash({ ...pettyCash, entries: updated });
   }
 
   function deleteEntry(id) {
     if (!window.confirm('Delete this entry?')) return;
-    setPettyCash({ ...pettyCash, entries: entries.filter(e => e.id !== id) });
+    setPettyCash({ ...pettyCash, entries: allEntries.filter(e => e.id !== id) });
   }
 
   function saveOB() {
     const val = parseFloat(obInput) || 0;
-    setPettyCash({ ...pettyCash, openingBalance: val });
+    if (isMultiBiz) {
+      setPettyCash({ ...pettyCash, openingBalances: { ...(pettyCash.openingBalances || {}), [currentBizType]: val } });
+    } else {
+      setPettyCash({ ...pettyCash, openingBalance: val });
+    }
     setEditingOB(false);
   }
 
-  const balance = rows.length > 0 ? rows[rows.length - 1].__balance : (pettyCash.openingBalance ?? 0);
+  const balance = rows.length > 0 ? rows[rows.length - 1].__balance : openingBalance;
 
   return (
     <div style={styles.page}>
@@ -5275,8 +5302,8 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
           </>
         ) : (
           <>
-            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>{fmt(pettyCash.openingBalance ?? 0)}</span>
-            {canEdit && <button style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }} onClick={() => { setObInput(pettyCash.openingBalance ?? 0); setEditingOB(true); }}>Edit</button>}
+            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>{fmt(openingBalance)}</span>
+            {canEdit && <button style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }} onClick={() => { setObInput(openingBalance); setEditingOB(true); }}>Edit</button>}
           </>
         )}
       </div>
@@ -5328,7 +5355,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
         <PettyCashVoucherPrint entry={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
       )}
       {showStatement && (
-        <StatementPanel rows={rows} openingBalance={pettyCash.openingBalance ?? 0} businessInfo={businessInfo} onClose={() => setShowStatement(false)} />
+        <StatementPanel rows={rows} openingBalance={openingBalance} businessInfo={businessInfo} onClose={() => setShowStatement(false)} />
       )}
     </div>
   );
@@ -5564,7 +5591,7 @@ const VOUCHER_ACCOUNT_HEADS = [
   'Professional Fees', 'Loan', 'Capital', 'Other',
 ];
 
-function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, documents = [], userRole }) {
+function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, documents = [], userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [tab, setTab] = useState('payment');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -5573,16 +5600,19 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   const [statementParty, setStatementParty] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'accounts';
 
+  // Full list — used for save/delete so all division data is preserved
   const list = Array.isArray(vouchers) ? vouchers : [];
-  const allParties = [...new Set(list.map(v => v.party).filter(Boolean))].sort();
-  const filtered = list
+  // Display list — filtered by current division in multi-biz mode
+  const displayList = isMultiBiz ? list.filter(v => (v.bizType || 'trading') === currentBizType) : list;
+  const allParties = [...new Set(displayList.map(v => v.party).filter(Boolean))].sort();
+  const filtered = displayList
     .filter(v => v.type === tab)
     .filter(v => !partyFilter || v.party === partyFilter)
     .sort((a, b) => (a.date > b.date ? -1 : 1));
 
   function genVoucherNo(type) {
     const prefix = type === 'payment' ? 'PV' : 'RV';
-    const nums = list.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = displayList.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
     return prefix + '-' + String(next).padStart(3, '0');
   }
@@ -5591,7 +5621,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
     const existing = list.find(x => x.id === v.id);
     let updated;
     if (existing) { updated = list.map(x => x.id === v.id ? v : x); }
-    else { updated = [...list, { ...v, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
+    else { updated = [...list, { ...v, bizType: currentBizType, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
     setVouchers(updated);
     setShowForm(false); setEditing(null);
   }
@@ -6155,7 +6185,7 @@ function computeStock(stockLedger, items) {
   return map;
 }
 
-function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo }) {
+function StockView({ items, stockLedger: allSL, setStockLedger, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [search, setSearch] = useState('');
   const [showAdj, setShowAdj] = useState(false);
   const [adjItem, setAdjItem] = useState('');
@@ -6165,6 +6195,8 @@ function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo 
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
+  // Filter stock ledger by current division in multi-biz mode
+  const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
   const stockMap = computeStock(stockLedger, items);
 
   const rows = Object.values(stockMap)
@@ -6190,6 +6222,7 @@ function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo 
       sourceNumber: 'Manual Adj.',
       notes: adjNote,
       createdAt: Date.now(),
+      bizType: currentBizType,
     };
     setStockLedger(prev => [...prev, entry]);
     setShowAdj(false); setAdjItem(''); setAdjQty(''); setAdjNote('');
@@ -6379,9 +6412,12 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 // ─────────────────────────────────────────────
 // HR / PAYROLL MODULE
 // ─────────────────────────────────────────────
-function BinCard({ items, stockLedger, businessInfo, storeIssues = [] }) {
+function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
   const [useLHBin, setUseLHBin] = React.useState(!!businessInfo?.letterhead);
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
+  // Filter by current division in multi-biz mode
+  const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
+  const storeIssues = isMultiBiz ? (allSIV || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allSIV || []);
   const item = items.find(i => i.id === selectedItemId);
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
@@ -6687,10 +6723,13 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
   );
 }
 
-function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [], setNotifications, user }) {
+function StoreIssueList({ storeIssues: allIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [], setNotifications, user, currentBizType = 'trading', isMultiBiz = false }) {
   const [editing, setEditing] = useState(null);
   const [printSiv, setPrintSiv] = useState(null);
   const canEdit = ['admin','manager','inventory','purchase'].includes(userRole);
+
+  // Display: filter by current division; save operations use functional updater on full array
+  const storeIssues = isMultiBiz ? (allIssues || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allIssues || []);
 
   function nextNumber() {
     const nums = storeIssues.map(s=>parseInt((s.sivNumber||'').replace(/\D/g,''))||0);
@@ -6703,13 +6742,14 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
 
   function saveSIV(siv) {
     const isNew = !storeIssues.find(s=>s.id===siv.id);
-    const rec = { ...siv, id:siv.id||crypto.randomUUID(), approvalStatus:siv.approvalStatus||'draft', approvalNote:siv.approvalNote||'', updatedAt:Date.now() };
+    const rec = { ...siv, bizType: currentBizType, id:siv.id||crypto.randomUUID(), approvalStatus:siv.approvalStatus||'draft', approvalNote:siv.approvalNote||'', updatedAt:Date.now() };
     // Create OUT stock ledger entries
     const now = new Date().toISOString();
     const newEntries = (rec.lines||[]).filter(l=>l.itemId&&l.qty>0).map(l=>({
       id: crypto.randomUUID(), date: rec.date, itemId: l.itemId, itemName: l.itemName,
       type: 'out', qty: parseFloat(l.qty)||0, rate: parseFloat(l.rate)||0,
       sourceType: 'siv', sourceId: rec.id, sourceNumber: rec.sivNumber, createdAt: now,
+      bizType: currentBizType,
     }));
     setStockLedger(prev => [...prev.filter(e=>e.sourceId!==rec.id), ...newEntries]);
     setStoreIssues(prev => isNew ? [rec,...prev] : prev.map(s=>s.id===rec.id?rec:s));
@@ -6893,29 +6933,31 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
 
 // ─── GRN ───────────────────────────────────────────────────────
 
-function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, userRole, businessInfo }) {
+function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLedger, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printGrn, setPrintGrn] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory' || userRole === 'purchase';
 
+  // Display: filter by current division in multi-biz mode; save operations use allGrns
+  const grns = isMultiBiz ? (allGrns || []).filter(g => (g.bizType || 'trading') === currentBizType) : (allGrns || []);
   const poList = (documents || []).filter(d => d.type === 'purchase');
 
   function nextGRN() {
-    const nums = (grns || []).map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
+    const nums = grns.map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
     return 'GRN-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
   }
 
   function updateGRNStatus(id, patch) {
-    setGrns((grns || []).map(g => g.id === id ? { ...g, ...patch } : g));
+    setGrns((allGrns || []).map(g => g.id === id ? { ...g, ...patch } : g));
   }
 
   function saveGRN(grn) {
-    const isNew = !(grns || []).find(g => g.id === grn.id);
+    const isNew = !(allGrns || []).find(g => g.id === grn.id);
     let updated;
     if (isNew) {
-      const newGrn = { ...grn, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
-      updated = [newGrn, ...(grns || [])];
+      const newGrn = { ...grn, bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
+      updated = [newGrn, ...(allGrns || [])];
       // Only create stock IN entries for QA-accepted / visually OK lines
       if (setStockLedger) {
         const entries = (grn.lines || [])
@@ -6931,12 +6973,13 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
               type: 'in', qty: acceptedQty,
               rate: parseFloat(l.rate) || 0,
               sourceType: 'grn', sourceId: newGrn.id, sourceNumber: newGrn.number, createdAt: Date.now(),
+              bizType: currentBizType,
             };
           });
         if (entries.length) setStockLedger(prev => [...prev, ...entries]);
       }
     } else {
-      updated = (grns || []).map(g => g.id === grn.id ? grn : g);
+      updated = (allGrns || []).map(g => g.id === grn.id ? grn : g);
     }
     setGrns(updated);
     setShowForm(false); setEditing(null);
@@ -6944,7 +6987,7 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
 
   function deleteGRN(id) {
     if (!window.confirm('Delete this GRN? Stock entries will be removed.')) return;
-    setGrns((grns || []).filter(g => g.id !== id));
+    setGrns((allGrns || []).filter(g => g.id !== id));
     if (setStockLedger) setStockLedger(prev => prev.filter(e => e.sourceId !== id));
   }
 
@@ -8272,6 +8315,289 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
         <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...styles.input, width: 150 }} />
       </div>
       <div style={{ fontSize: 13, color: '#888780' }}>{count} {label} found</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// P&L AUDIT VIEW
+// ─────────────────────────────────────────────
+function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, auditDocs, setAuditDocs }) {
+  const curYear = new Date().getFullYear();
+  const [year,   setYear]   = useState(curYear);
+  const [period, setPeriod] = useState('FY');
+  const [notes,  setNotes]  = useState('');
+  const [saved,  setSaved]  = useState(false);
+  const [viewDoc, setViewDoc] = useState(null); // saved audit record to view/print
+
+  const PERIODS = [
+    { key: 'Q1', label: 'Q1 (Jan–Mar)' },
+    { key: 'Q2', label: 'Q2 (Apr–Jun)' },
+    { key: 'Q3', label: 'Q3 (Jul–Sep)' },
+    { key: 'Q4', label: 'Q4 (Oct–Dec)' },
+    { key: 'H1', label: 'H1 (Jan–Jun)' },
+    { key: 'H2', label: 'H2 (Jul–Dec)' },
+    { key: 'FY', label: 'Full Year' },
+  ];
+
+  function getRange(p, y) {
+    const ranges = {
+      Q1: [`${y}-01-01`, `${y}-03-31`],
+      Q2: [`${y}-04-01`, `${y}-06-30`],
+      Q3: [`${y}-07-01`, `${y}-09-30`],
+      Q4: [`${y}-10-01`, `${y}-12-31`],
+      H1: [`${y}-01-01`, `${y}-06-30`],
+      H2: [`${y}-07-01`, `${y}-12-31`],
+      FY: [`${y}-01-01`, `${y}-12-31`],
+    };
+    return ranges[p] || ranges.FY;
+  }
+
+  function computePL(p, y) {
+    const [start, end] = getRange(p, y);
+    const inRange = d => d >= start && d <= end;
+    const inDiv   = x => !isMultiBiz || (x.bizType || 'trading') === currentBizType;
+
+    const docs = Array.isArray(documents) ? documents : [];
+    const vlist = Array.isArray(vouchers) ? vouchers : [];
+    const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+
+    // Revenue — approved/finalized invoices
+    const invoices = docs.filter(d => d.type === 'invoice' && inRange(d.date || '') && inDiv(d));
+    const revenue  = invoices.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+
+    // COGS — purchase bills
+    const pbills = docs.filter(d => d.type === 'purchasebill' && inRange(d.date || '') && inDiv(d));
+    const cogs   = pbills.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+
+    // Operating expenses — voucher payments + petty cash debits
+    const voucherExp = vlist
+      .filter(v => inRange(v.date || '') && inDiv(v) && v.status !== 'rejected')
+      .reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const pcExp = pcEntries
+      .filter(e => inRange(e.date || '') && inDiv(e) && e.status !== 'rejected')
+      .reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const opExpenses = voucherExp + pcExp;
+
+    const grossProfit = revenue - cogs;
+    const netProfit   = grossProfit - opExpenses;
+
+    return {
+      revenue, cogs, grossProfit, opExpenses, netProfit,
+      invoiceCount: invoices.length, pbillCount: pbills.length,
+    };
+  }
+
+  const pl = computePL(period, year);
+  const fmt = n => {
+    const sym = businessInfo?.currencySymbol || '₹';
+    const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (n < 0 ? `(${sym}${abs})` : `${sym}${abs}`);
+  };
+  const periodLabel = PERIODS.find(p => p.key === period)?.label || period;
+  const [s, e] = getRange(period, year);
+  const dateRangeStr = `${new Date(s).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })} – ${new Date(e).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}`;
+
+  function handleSave() {
+    const rec = {
+      id: Date.now().toString(),
+      period, year,
+      periodLabel,
+      dateRange: dateRangeStr,
+      bizType: currentBizType,
+      createdAt: new Date().toISOString(),
+      notes,
+      ...pl,
+    };
+    setAuditDocs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    setSaved(true);
+    setNotes('');
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  // Filter saved records for current division
+  const myAudits = (Array.isArray(auditDocs) ? auditDocs : [])
+    .filter(a => !isMultiBiz || (a.bizType || 'trading') === currentBizType)
+    .sort((a, b) => b.createdAt?.localeCompare(a.createdAt));
+
+  function handlePrint(doc) {
+    const sym = businessInfo?.currencySymbol || '₹';
+    const fmtN = n => {
+      const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return n < 0 ? `(${sym}${abs})` : `${sym}${abs}`;
+    };
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 40px; }
+      h2 { text-align: center; font-size: 16px; margin: 0 0 2px; }
+      .sub { text-align: center; color: #555; font-size: 12px; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      td { padding: 7px 10px; }
+      .section-head { background: #1E2A4A; color: #fff; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; }
+      .subtotal { background: #f5f5f5; font-weight: 700; border-top: 1.5px solid #ccc; }
+      .total { background: #1E2A4A; color: #fff; font-weight: 700; font-size: 14px; }
+      .loss  { background: #FEF2F2; color: #B91C1C; font-weight: 700; font-size: 14px; }
+      .right { text-align: right; }
+      .indent { padding-left: 24px; color: #444; }
+      hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
+      .footer { margin-top: 32px; font-size: 11px; color: #888; text-align: center; }
+      @media print { body { padding: 10mm; } }
+    </style></head><body>
+    <h2>${businessInfo?.name || 'Company'}</h2>
+    <div class="sub">PROFIT &amp; LOSS STATEMENT — ${doc.periodLabel} ${doc.year} (${doc.dateRange})</div>
+    ${isMultiBiz ? `<div class="sub">Division: ${doc.bizType?.toUpperCase()}</div>` : ''}
+    <table>
+      <tr><td class="section-head">INCOME</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Sales Revenue (${doc.invoiceCount} invoices)</td><td class="right">${fmtN(doc.revenue)}</td></tr>
+      <tr><td class="subtotal">GROSS INCOME</td><td class="subtotal right">${fmtN(doc.revenue)}</td></tr>
+
+      <tr><td style="padding-top:12px" class="section-head">COST OF GOODS SOLD</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Purchases / Direct Costs (${doc.pbillCount} bills)</td><td class="right">${fmtN(doc.cogs)}</td></tr>
+      <tr><td class="subtotal">TOTAL COGS</td><td class="subtotal right">(${fmtN(doc.cogs)})</td></tr>
+
+      <tr><td class="subtotal" style="font-size:14px">GROSS PROFIT</td><td class="subtotal right" style="font-size:14px">${fmtN(doc.grossProfit)}</td></tr>
+
+      <tr><td style="padding-top:12px" class="section-head">OPERATING EXPENSES</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Vouchers &amp; Petty Cash</td><td class="right">${fmtN(doc.opExpenses)}</td></tr>
+      <tr><td class="subtotal">TOTAL OPEX</td><td class="subtotal right">(${fmtN(doc.opExpenses)})</td></tr>
+
+      <tr><td colspan="2" style="padding:4px"></td></tr>
+      <tr class="${doc.netProfit >= 0 ? 'total' : 'loss'}">
+        <td>NET ${doc.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</td>
+        <td class="right">${fmtN(doc.netProfit)}</td>
+      </tr>
+    </table>
+    ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
+    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Operix</div>
+    </body></html>`);
+    w.document.close();
+    setTimeout(() => { w.print(); }, 400);
+  }
+
+  const cardStyle = { background: '#fff', borderRadius: 10, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' };
+  const rowStyle  = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f0f0f0' };
+  const labelStyle = { fontSize: 13, color: '#555' };
+  const valueStyle = (n) => ({ fontSize: 13, fontWeight: 600, color: n < 0 ? '#B91C1C' : '#1E2A4A' });
+
+  if (viewDoc) {
+    const vpl = viewDoc;
+    return (
+      <div style={{ padding: '24px 28px', maxWidth: 680, margin: '0 auto' }}>
+        <button onClick={() => setViewDoc(null)} style={{ marginBottom: 16, background: 'none', border: 'none', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>← Back to Audit List</button>
+        <div style={{ ...cardStyle, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, color: '#1E2A4A' }}>{vpl.periodLabel} {vpl.year}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{vpl.dateRange}</div>
+            </div>
+            <button onClick={() => handlePrint(vpl)} style={{ padding: '7px 16px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print / Export</button>
+          </div>
+          <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({vpl.invoiceCount} invoices)</span><span style={valueStyle(vpl.revenue)}>{fmt(vpl.revenue)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({vpl.pbillCount} bills)</span><span style={valueStyle(-vpl.cogs)}>{fmt(-vpl.cogs)}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}><span style={{ fontSize: 13 }}>GROSS PROFIT</span><span style={valueStyle(vpl.grossProfit)}>{fmt(vpl.grossProfit)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, fontSize: 15, background: vpl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', borderRadius: 7, padding: '10px 12px', marginTop: 8, border: `1.5px solid ${vpl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
+            <span>NET {vpl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
+            <span style={{ color: vpl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(vpl.netProfit)}</span>
+          </div>
+          {vpl.notes && <p style={{ fontSize: 12, color: '#666', marginTop: 12 }}><strong>Notes:</strong> {vpl.notes}</p>}
+          <p style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Saved on {new Date(vpl.createdAt).toLocaleString('en-IN')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '24px 28px', maxWidth: 720, margin: '0 auto' }}>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>P&L Audit</h2>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#888' }}>Auto-computed from your invoices, purchase bills, vouchers and petty cash</p>
+      </div>
+
+      {/* Period selector */}
+      <div style={{ ...cardStyle, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Year</label>
+            <select value={year} onChange={e => setYear(+e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', fontSize: 13 }}>
+              {[curYear+1, curYear, curYear-1, curYear-2, curYear-3].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Period</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {PERIODS.map(p => (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: period === p.key ? '2px solid #1E2A4A' : '1px solid #ddd', background: period === p.key ? '#1E2A4A' : '#fff', color: period === p.key ? '#fff' : '#444' }}>
+                  {p.key}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: '#aaa', marginBottom: 12 }}>{periodLabel} · {dateRangeStr}</div>
+
+        {/* P&L Summary */}
+        <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({pl.invoiceCount} invoices)</span><span style={valueStyle(pl.revenue)}>{fmt(pl.revenue)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({pl.pbillCount} bills)</span><span style={valueStyle(-pl.cogs)}>{fmt(-pl.cogs)}</span></div>
+        <div style={{ ...rowStyle, fontWeight: 700, borderTop: '2px solid #1E2A4A', marginTop: 4, paddingTop: 10 }}>
+          <span style={{ fontSize: 13 }}>GROSS PROFIT</span>
+          <span style={valueStyle(pl.grossProfit)}>{fmt(pl.grossProfit)}</span>
+        </div>
+        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderRadius: 8, marginTop: 8, background: pl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', border: `1.5px solid ${pl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>NET {pl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: pl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(pl.netProfit)}</span>
+        </div>
+
+        {/* Notes + Save */}
+        {userRole === 'admin' && (
+          <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 14 }}>
+            <textarea
+              placeholder="Optional notes for this audit record…"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={2}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid #ddd', fontSize: 13, resize: 'vertical', marginBottom: 10 }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={handleSave} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {saved ? '✓ Saved!' : 'Save as Audit Record'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Saved audit records */}
+      <div style={{ marginBottom: 8, fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>Saved Audit Records</div>
+      {myAudits.length === 0 ? (
+        <div style={{ ...cardStyle, color: '#aaa', fontSize: 13, textAlign: 'center', padding: 32 }}>No saved records yet. Generate a P&L above and click "Save as Audit Record".</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {myAudits.map(a => (
+            <div key={a.id} style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{a.periodLabel} {a.year}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{a.dateRange}{isMultiBiz ? ` · ${a.bizType}` : ''}</div>
+                {a.notes && <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>{a.notes}</div>}
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 120 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: a.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>
+                  {a.netProfit >= 0 ? 'Profit ' : 'Loss '}{fmt(Math.abs(a.netProfit))}
+                </div>
+                <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{new Date(a.createdAt).toLocaleDateString('en-IN')}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setViewDoc(a)} style={{ padding: '5px 12px', fontSize: 12, borderRadius: 6, border: '1px solid #1E2A4A', background: '#fff', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600 }}>View</button>
+                <button onClick={() => handlePrint(a)} style={{ padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none', background: '#1E2A4A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Print</button>
+                {userRole === 'admin' && <button onClick={() => setAuditDocs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== a.id))} style={{ padding: '5px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #fca5a5', background: '#FEF2F2', color: '#B91C1C', cursor: 'pointer' }}>✕</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -10254,16 +10580,21 @@ function EnquiryForm({ enq, customers, onSave, onClose }) {
   );
 }
 
-function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertToQuotation }) {
+function EnquiryList({ enquiries, setEnquiries, customers, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToQuotation }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
 
-  // Auto-generate ENQ number
+  // In multi-biz mode, show only this division's enquiries
+  const bizEnquiries = isMultiBiz
+    ? enquiries.filter(e => (e.bizType || 'trading') === currentBizType)
+    : enquiries;
+
+  // Auto-generate ENQ number (per-division counter in multi-biz)
   function nextEnqNumber() {
-    if (!enquiries.length) return 'ENQ-001';
-    const nums = enquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
+    if (!bizEnquiries.length) return 'ENQ-001';
+    const nums = bizEnquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
     return 'ENQ-' + String(Math.max(...nums) + 1).padStart(3, '0');
   }
 
@@ -10279,10 +10610,12 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
 
   function handleSave(form) {
     if (!form.number) form.number = nextEnqNumber();
+    // Always stamp the current division's bizType on save
+    const saved = { ...form, bizType: currentBizType };
     if (editing) {
-      setEnquiries(prev => prev.map(e => e.id === form.id ? form : e));
+      setEnquiries(prev => prev.map(e => e.id === saved.id ? saved : e));
     } else {
-      setEnquiries(prev => [...prev, form]);
+      setEnquiries(prev => [...prev, saved]);
     }
     setModalOpen(false);
   }
@@ -10292,7 +10625,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
     setEnquiries(prev => prev.filter(e => e.id !== id));
   }
 
-  const filtered = enquiries.filter(e => {
+  const filtered = bizEnquiries.filter(e => {
     const cust = customers.find(c => c.id === e.customerId);
     const name = cust ? cust.name : (e.customerName || '');
     const text = `${e.number} ${name} ${e.interest} ${e.assignedTo}`.toLowerCase();
@@ -10303,7 +10636,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
 
   // Summary counts
   const counts = {};
-  ENQ_STATUSES.forEach(s => { counts[s] = enquiries.filter(e => e.status === s).length; });
+  ENQ_STATUSES.forEach(s => { counts[s] = bizEnquiries.filter(e => e.status === s).length; });
 
   return (
     <div style={{ padding: 28 }}>
@@ -10311,7 +10644,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Enquiry List</h2>
-          <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{enquiries.length} total enquiries</p>
+          <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{bizEnquiries.length} total enquiries</p>
         </div>
         {(userRole === 'admin' || userRole === 'manager' || userRole === 'sales') && (
           <button onClick={openNew} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
@@ -17219,8 +17552,11 @@ export default function App() {
   const [raBillings,       _setRAB]    = useState([]);
   const [tcChecklists,     _setTC]     = useState([]);
   const [handoverDocs,     _setHDocs]  = useState([]);
+  const [auditDocs,        _setAuditDocs]  = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
+  // Tracks which BizSection the user last interacted with (for shared views like enquiries)
+  const [activeBizContext, setActiveBizContext] = useState(null);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -17317,6 +17653,7 @@ export default function App() {
       _setRAB(data.raBillings || []);
       _setTC(data.tcChecklists || []);
       _setHDocs(data.handoverDocs || []);
+      _setAuditDocs(data.auditDocs || []);
     });
     return unsub;
   }, [ownerUid]);
@@ -17386,6 +17723,7 @@ export default function App() {
   const setRaBillings       = mkSet(_setRAB,   'raBillings');
   const setTcChecklists     = mkSet(_setTC,    'tcChecklists');
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
+  const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -17414,11 +17752,14 @@ export default function App() {
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
-  function startNewDoc(type, bizType) {
+  // prefill: optional extra fields to spread onto the new doc (e.g. from enquiry conversion)
+  // bizType MUST be a string — passing an object is a bug; we type-guard defensively
+  function startNewDoc(type, bizType, prefill = {}) {
     const today = new Date().toISOString().slice(0, 10);
-    const bType = bizType || activeTypes[0] || 'trading';
+    const bType = (typeof bizType === 'string' ? bizType : null) || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(type, businessInfo),
+      ...prefill,
       number: nextDocNumber(type, bType, today),
       bizType: bType,
     });
@@ -17465,6 +17806,7 @@ export default function App() {
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
         docNumber: saved.number, itemId: it.itemId, itemName: it.name,
         qty: -(it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
@@ -17473,6 +17815,7 @@ export default function App() {
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
         docNumber: saved.number, itemId: it.itemId, itemName: it.name,
         qty: (it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
@@ -17558,6 +17901,10 @@ export default function App() {
     return [ct];
   })();
   const isMultiBiz = activeTypes.length > 1;
+  // Resolves which division the user is currently working in (falls back to first type)
+  const effectiveBizContext = (activeBizContext && activeTypes.includes(activeBizContext))
+    ? activeBizContext
+    : activeTypes[0] || 'trading';
   const companyType = activeTypes.length === 1 ? activeTypes[0]
     : activeTypes.includes('service') && activeTypes.includes('manufacturing') ? 'both'
     : activeTypes.includes('manufacturing') ? 'both'
@@ -17734,6 +18081,8 @@ export default function App() {
             setPettyCash={setPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'vouchers':
@@ -17746,6 +18095,8 @@ export default function App() {
             documents={documents}
             userRole={userRole}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'grn':
@@ -17759,6 +18110,8 @@ export default function App() {
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'storeissue':
@@ -17773,6 +18126,8 @@ export default function App() {
             businessInfo={businessInfo}
             setNotifications={setNotifications}
             user={user}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'stock':
@@ -17781,7 +18136,11 @@ export default function App() {
           <StockView
             items={items}
             stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
             businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'bincard':
@@ -17791,6 +18150,8 @@ export default function App() {
             stockLedger={stockLedger}
             businessInfo={businessInfo}
             storeIssues={storeIssues}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'hr':
@@ -17940,6 +18301,16 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'tcommissioning':
+        return (
+          <TCView
+            tcChecklists={tcChecklists}
+            setTcChecklists={setTcChecklists}
+            siteProjects={siteProjects}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       case 'handover':
         return (
           <HandoverView
@@ -17951,105 +18322,33 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
-      case 'tc':
+      case 'evaluation':
         return (
-          <TCView
-            tcChecklists={tcChecklists}
-            setTcChecklists={setTcChecklists}
+          <QuarterlyEvalView
+            evaluations={evaluations}
+            setEvaluations={setEvaluations}
+            employees={employees}
+            siteAttendance={siteAttendance}
+            progressUpdates={progressUpdates}
             siteProjects={siteProjects}
             userRole={userRole}
+          />
+        );
+      case 'mepreports':
+        return (
+          <MEPReportsView
+            siteProjects={siteProjects}
+            siteActivities={siteActivities}
+            progressUpdates={progressUpdates}
+            employees={employees}
             businessInfo={businessInfo}
           />
         );
-      case 'rawmaterials':
+      case 'scopeofwork':
         return (
-          <RawMaterialsList
-            rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'bom':
-        return (
-          <BOMList
-            boms={boms}
-            setBoms={setBoms}
-            rawMaterials={rawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            parts={parts}
-          />
-        );
-      case 'production':
-      case 'productionorders':
-        return (
-          <ProductionOrdersList
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            boms={boms}
-            rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            setStockLedger={setStockLedger}
-            items={items}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'qualitycheck':
-        return (
-          <QualityCheckList
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            userRole={userRole}
-            boms={boms}
-            parts={parts}
-          />
-        );
-      case 'qatesting':
-        return (
-          <QATestingView
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            pdvs={pdvs}
-            setPdvs={setPdvs}
-            setStockLedger={setStockLedger}
-            boms={boms}
-            items={items}
-            userRole={userRole}
-            businessInfo={businessInfo}
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-          />
-        );
-      case 'capa':
-        return (
-          <CAPAView
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-            vendors={vendors}
-            customers={customers}
-            userRole={userRole}
-          />
-        );
-      case 'internalaudit':
-        return (
-          <InternalAuditView
-            internalAudits={internalAudits}
-            setInternalAudits={setInternalAudits}
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-            userRole={userRole}
-          />
-        );
-      case 'vendoreval':
-        return (
-          <VendorEvalView
-            vendorEvals={vendorEvals}
-            setVendorEvals={setVendorEvals}
-            vendors={vendors}
+          <ScopeOfWorkView
+            scopeOfWork={scopeOfWork}
+            setScopeOfWork={setScopeOfWork}
             userRole={userRole}
           />
         );
@@ -18130,105 +18429,6 @@ export default function App() {
             userRole={userRole}
           />
         );
-      case 'parts':
-      case 'partsmaster':
-        return (
-          <PartsMasterList
-            parts={parts}
-            setParts={setParts}
-            vendors={vendors}
-            ownerUid={ownerUid}
-            userRole={userRole}
-          />
-        );
-      case 'engdocs':
-        return (
-          <EngineeringDocsList
-            engDocs={engDocs}
-            setEngDocs={setEngDocs}
-            parts={parts}
-            ownerUid={ownerUid}
-            userRole={userRole}
-          />
-        );
-      case 'enquiries':
-        return (
-          <EnquiryList
-            enquiries={enquiries}
-            setEnquiries={setEnquiries}
-            customers={customers}
-            userRole={userRole}
-            onConvertToQuotation={(enq) => {
-              const cust = customers.find(c => c.id === enq.customerId);
-              startNewDoc('quotation', { customerId: enq.customerId, customerSnapshot: cust || null, notes: enq.notes || '' });
-            }}
-          />
-        );
-      case 'contracts':
-        return (
-          <ContractList
-            contracts={contracts}
-            setContracts={setContracts}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
-            termsLibrary={termsLibrary}
-            businessInfo={businessInfo}
-            userRole={userRole}
-          />
-        );
-      case 'channelpartners':
-        return (
-          <ChannelPartnerList
-            channelPartners={channelPartners}
-            setChannelPartners={setChannelPartners}
-            documents={documents}
-            termsLibrary={termsLibrary}
-            businessInfo={businessInfo}
-            userRole={userRole}
-          />
-        );
-      case 'termslibrary':
-        return (
-          <TermsLibraryView
-            termsLibrary={termsLibrary}
-            setTermsLibrary={setTermsLibrary}
-            userRole={userRole}
-          />
-        );
-      case 'scopeofwork':
-        return (
-          <ScopeOfWorkView
-            scopeOfWork={scopeOfWork}
-            setScopeOfWork={setScopeOfWork}
-            userRole={userRole}
-          />
-        );
-      case 'isoprinciples':
-        return (
-          <ISOPrinciplesView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            userRole={userRole}
-          />
-        );
-      case 'deptprocedures':
-        return (
-          <DeptProceduresView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            userRole={userRole}
-          />
-        );
-      case 'inprocessqa':
-        return (
-          <InprocessQAView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            productionOrders={productionOrders}
-            userRole={userRole}
-          />
-        );
       case 'gstr1':
         return (
           <GSTR1Report
@@ -18262,46 +18462,18 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
-      case 'mepprojects':
+      case 'audit':
         return (
-          <MEPProjectsView
-            siteProjects={siteProjects}
-            setSiteProjects={setSiteProjects}
-            employees={employees}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
-            userRole={userRole}
-          />
-        );
-      case 'tcommissioning':
-        return (
-          <TCView
-            tcChecklists={tcChecklists}
-            setTcChecklists={setTcChecklists}
-            siteProjects={siteProjects}
-            userRole={userRole}
-          />
-        );
-      case 'mepreports':
-        return (
-          <MEPReportsView
-            siteProjects={siteProjects}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
-            employees={employees}
+          <AuditView
+            documents={documents}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             businessInfo={businessInfo}
-          />
-        );
-      case 'evaluations':
-        return (
-          <QuarterlyEvalView
-            evaluations={evaluations}
-            setEvaluations={setEvaluations}
-            employees={employees}
-            siteAttendance={siteAttendance}
-            progressUpdates={progressUpdates}
-            siteProjects={siteProjects}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            auditDocs={auditDocs}
+            setAuditDocs={setAuditDocs}
           />
         );
       case 'notifications':
@@ -18312,6 +18484,41 @@ export default function App() {
             documents={documents}
             openDoc={openDoc}
             userRole={userRole}
+          />
+        );
+      case 'settings':
+        return (
+          <SettingsView
+            businessInfo={businessInfo}
+            setBusinessInfo={setBusinessInfo}
+            onExportData={null}
+            onSaved={() => {}}
+            userRole={userRole}
+            isOwner={userRole === 'admin'}
+            userEmail={user?.email || ''}
+            onRequestDelete={() => setShowDeleteModal(true)}
+          />
+        );
+      case 'staff':
+        return (
+          <StaffPage
+            ownerUid={ownerUid}
+            employees={employees}
+            companyName={businessInfo?.name || ''}
+          />
+        );
+      case 'documents':
+        return (
+          <DocumentsList
+            docs={documents}
+            customers={customers}
+            vendors={vendors}
+            search={''}
+            setSearch={() => {}}
+            openDoc={openDoc}
+            deleteDoc={(id) => setDocuments(prev => prev.filter(d => d.id !== id))}
+            startNewDoc={startNewDoc}
+            activeTypes={activeTypes}
           />
         );
       default:
@@ -18396,6 +18603,8 @@ export default function App() {
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
         activeDocBizType={activeDoc?.bizType || null}
+        activeBizContext={effectiveBizContext}
+        onBizContextChange={setActiveBizContext}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
@@ -18454,84 +18663,29 @@ export default function App() {
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '5px 16px',
+          padding: '5px 16px', gap: 6,
           background: 'rgba(30,42,74,0.92)',
-          backdropFilter: 'blur(4px)',
-          borderTop: '1px solid rgba(201,162,75,0.3)',
+          color: '#fff', fontSize: 11, letterSpacing: 0.3,
           pointerEvents: 'none',
         }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5 }}>
-            Powered by{' '}
-            <span style={{ color: '#C9A24B', fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: 1 }}>Operix</span>
-            {trialDaysLeft > 0 && (
-              <span style={{ marginLeft: 10, color: 'rgba(255,255,255,0.45)', fontSize: 10 }}>
-                · {trialDaysLeft} day{trialDaysLeft === 1 ? '' : 's'} free trial remaining
-              </span>
-            )}
-          </span>
+          <span style={{ opacity: 0.55 }}>Powered by</span>
+          <strong style={{ marginLeft: 3 }}>Operix</strong>
         </div>
       )}
 
-      {editingCustomer && (
-        <CustomerModal
-          customer={editingCustomer}
-          onSave={(c) => {
-            const isNew = !customers.find(x => x.id === c.id);
-            const saved = isNew ? { ...c, id: crypto.randomUUID() } : c;
-            setCustomers(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingCustomer(null);
-          }}
-          onClose={() => setEditingCustomer(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-      {editingVendor && (
-        <VendorModal
-          vendor={editingVendor}
-          onSave={(v) => {
-            const isNew = !vendors.find(x => x.id === v.id);
-            const saved = isNew ? { ...v, id: crypto.randomUUID() } : v;
-            setVendors(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingVendor(null);
-          }}
-          onClose={() => setEditingVendor(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-
-      {editingItem && (
-        <ItemModal
-          item={editingItem}
-          onSave={(it) => {
-            const isNew = !items.find(x => x.id === it.id);
-            const saved = isNew ? { ...it, id: crypto.randomUUID() } : it;
-            setItems(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingItem(null);
-          }}
-          onClose={() => setEditingItem(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-
-      {/* Delete Account Modal */}
+      {/* Delete-account modal */}
       {showDeleteModal && (
         <DeleteAccountModal
           user={user}
           ownerUid={ownerUid}
           isSubscribed={isSubscribed}
-          onExportData={exportAllData}
+          onExportData={null}
           onClose={() => setShowDeleteModal(false)}
-          onDeleted={(result) => {
-            setShowDeleteModal(false);
-            if (result === 'deleted') {
-              handleLogout();
-            }
-            // 'scheduled' — grace period set; modal already closed above
-          }}
+          onDeleted={handleLogout}
         />
       )}
     </div>
   );
 }
 
-
+export default App;
