@@ -938,6 +938,98 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
   );
 }
 
+// ─── Activity Home Screen (shown every login to pick active workspace) ─────────
+function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
+  const BIZ_META = {
+    trading:       { icon: '🛒', label: 'Trading',       sub: 'Distribution & Sales',    color: '#1A7A3E', desc: 'Invoices · Stock · Customers · Channel Partners' },
+    manufacturing: { icon: '🏭', label: 'Manufacturing', sub: 'Production & Quality',     color: '#C9752A', desc: 'BOM · Production Orders · QA · MIS' },
+    service:       { icon: '🔧', label: 'MEP / Service', sub: 'Projects & Site Works',    color: '#1E7A9A', desc: 'Site Projects · RA Billing · HSE · Handover' },
+    fmamc:         { icon: '🏢', label: 'FM / AMC',      sub: 'Facility & Maintenance',   color: '#0E9DB5', desc: 'Asset Register · Work Orders · AMC Contracts' },
+  };
+
+  const types = (activeTypes || []).filter(t => BIZ_META[t]);
+  const single = types.length === 1;
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(140deg, #1E2A4A 0%, #243358 60%, #1a2540 100%)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: '40px 20px', fontFamily: "'Inter', -apple-system, sans-serif",
+    }}>
+      {/* Header */}
+      <div style={{ textAlign: 'center', marginBottom: 44 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 13, background: '#C9A24B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#1E2A4A' }}>O</div>
+          <div style={{ fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#fff' }}>Operix</div>
+        </div>
+        {businessInfo?.name && (
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 10 }}>{businessInfo.name}</div>
+        )}
+        <div style={{ fontFamily: 'Georgia,serif', fontSize: 26, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+          {single ? 'Welcome back' : 'Which workspace today?'}
+        </div>
+        {!single && (
+          <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>
+            Choose a business activity to enter its workspace.
+          </div>
+        )}
+      </div>
+
+      {/* Cards */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: single ? '1fr' : types.length === 2 ? 'repeat(2,1fr)' : 'repeat(2,1fr)',
+        gap: 16,
+        width: '100%',
+        maxWidth: single ? 420 : 760,
+      }}>
+        {types.map(t => {
+          const m = BIZ_META[t];
+          return (
+            <div
+              key={t}
+              onClick={() => onEnter(t)}
+              style={{
+                background: 'rgba(255,255,255,0.07)',
+                border: '2px solid rgba(255,255,255,0.13)',
+                borderRadius: 20,
+                padding: single ? '32px 36px' : '24px 26px',
+                cursor: 'pointer',
+                transition: 'background 0.15s, border 0.15s, transform 0.12s',
+                position: 'relative', overflow: 'hidden',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.13)';
+                e.currentTarget.style.border = `2px solid ${m.color}`;
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+                e.currentTarget.style.border = '2px solid rgba(255,255,255,0.13)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              {/* Glow accent */}
+              <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: m.color, opacity: 0.08, pointerEvents: 'none' }} />
+
+              <div style={{ fontSize: single ? 44 : 34, marginBottom: 14, lineHeight: 1 }}>{m.icon}</div>
+              <div style={{ fontFamily: 'Georgia,serif', fontSize: single ? 22 : 18, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{m.label}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: m.color, marginBottom: 10 }}>{m.sub}</div>
+              <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.42)', lineHeight: 1.6 }}>{m.desc}</div>
+
+              <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: m.color + '22', border: `1px solid ${m.color}55`, borderRadius: 8, padding: '7px 16px' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: m.color }}>Enter workspace →</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
 // ─── Trial Banner ─────────────────────────────────────────────────────────────
 function TrialBanner({ daysLeft, onUpgrade }) {
   const urgent = daysLeft <= 3;
@@ -3343,7 +3435,7 @@ const BIZ_SECTION_VIEWS = {
   admin:         ['staff','contracts','termslibrary'],
 };
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null }) {
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -3533,6 +3625,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   if (userRole === 'admin' || userRole === 'manager') return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button — shown when user entered from home screen */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
 
       {/* Dashboard — always at top */}
       <div style={{ ...styles.navGroup, marginBottom: 4 }}>
@@ -3850,6 +3956,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   if (userRole === 'sales') return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
       </div>
@@ -3872,6 +3992,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   if (userRole === 'purchase') return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
       </div>
@@ -3891,6 +4025,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   if (userRole === 'inventory') return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
@@ -3923,6 +4071,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   if (userRole === 'accounts') return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard"     icon={LayoutDashboard} />
         <NavBtn id="documents" label="All Documents" icon={FileText} />
@@ -3943,6 +4105,20 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   return (
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
+
+      {/* Switch Activity button */}
+      {onSwitchActivity && (
+        <button
+          onClick={onSwitchActivity}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, width: 'calc(100% - 16px)',
+            margin: '0 8px 8px', padding: '7px 12px',
+            background: 'rgba(201,162,75,0.13)', border: '1px solid rgba(201,162,75,0.3)',
+            borderRadius: 8, color: '#C9A24B', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+          <span style={{ fontSize: 15 }}>⇄</span> Switch Activity
+        </button>
+      )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
@@ -17641,6 +17817,7 @@ export default function App() {
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
   const [activeBizContext, setActiveBizContext] = useState(null);
+  const [sessionContext,   setSessionContext]   = useState(null); // null = show home screen
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -18039,6 +18216,17 @@ export default function App() {
 
   if (biReady && ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType) {
     return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} />;
+  }
+
+  // After setup: show home screen every login until user picks a workspace for this session
+  if (biReady && businessInfo.companyType && sessionContext === null) {
+    return (
+      <ActivityHomeScreen
+        activeTypes={activeTypes}
+        businessInfo={businessInfo}
+        onEnter={(type) => { setSessionContext(type); setActiveBizContext(type); }}
+      />
+    );
   }
 
   if (biReady && trialExpired && !isSubscribed && !isTestAccount) {
@@ -18811,14 +18999,15 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         userRole={userRole}
-        companyType={companyType}
-        activeTypes={activeTypes}
+        companyType={sessionContext || companyType}
+        activeTypes={sessionContext ? [sessionContext] : activeTypes}
         country={country}
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
         activeDocBizType={activeDoc?.bizType || null}
         activeBizContext={effectiveBizContext}
         onBizContextChange={setActiveBizContext}
+        onSwitchActivity={activeTypes.length > 1 ? () => setSessionContext(null) : null}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
