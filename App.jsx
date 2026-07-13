@@ -18803,6 +18803,44 @@ export default function App() {
         </div>
       )}
 
+      {/* Customer / Vendor / Item modals */}
+      {editingCustomer && (
+        <CustomerModal
+          customer={editingCustomer}
+          onSave={(c) => {
+            const saved = c.id ? c : { ...c, id: Date.now().toString() };
+            setCustomers(prev => c.id ? prev.map(x => x.id === c.id ? saved : x) : [...prev, saved]);
+            setEditingCustomer(null);
+          }}
+          onClose={() => setEditingCustomer(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+      {editingVendor && (
+        <VendorModal
+          vendor={editingVendor}
+          onSave={(v) => {
+            const saved = v.id ? v : { ...v, id: Date.now().toString() };
+            setVendors(prev => v.id ? prev.map(x => x.id === v.id ? saved : x) : [...prev, saved]);
+            setEditingVendor(null);
+          }}
+          onClose={() => setEditingVendor(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+      {editingItem && (
+        <ItemModal
+          item={editingItem}
+          onSave={(it) => {
+            const saved = it.id ? it : { ...it, id: Date.now().toString() };
+            setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]);
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+
       {/* Delete-account modal */}
       {showDeleteModal && (
         <DeleteAccountModal
