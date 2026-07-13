@@ -720,154 +720,223 @@ function ScanBillModal({ onApply, onClose }) {
   );
 }
 
-// ─── Onboarding Setup ──────────────────────────────────────────────────────────
-function OnboardingSetup({ setBusinessInfo }) {
-  const [step, setStep] = React.useState(1);
+// ─── Activity Select Screen (shown after sign-in if no business type chosen) ───
+function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
+  const canMulti = isSubscribed || isTestAccount;
+  const [selected, setSelected] = React.useState([]);
+  const [companyName, setCompanyName] = React.useState('');
   const [country, setCountry] = React.useState('india');
-  const [countrySearch, setCountrySearch] = React.useState('');
-  const [activeTypes, setActiveTypes] = React.useState(['trading']);
+  const [error, setError] = React.useState('');
 
-  function finish() {
+  const BIZ_TYPES = [
+    {
+      id: 'trading',
+      icon: '🛒',
+      label: 'Trading',
+      sub: 'Distribution & Sales',
+      desc: 'Quotations · Invoices · Purchase Orders · Stock Management · Delivery Notes',
+      color: '#1A7A3E',
+    },
+    {
+      id: 'manufacturing',
+      icon: '🏭',
+      label: 'Manufacturing',
+      sub: 'Production & Quality',
+      desc: 'BOM · Raw Materials · Production Orders · QA Testing · Internal Audit',
+      color: '#C9752A',
+    },
+    {
+      id: 'service',
+      icon: '🔧',
+      label: 'MEP / Service',
+      sub: 'Projects & Site Works',
+      desc: 'Site Projects · Tendering · RA Billing · Subcontractors · HSE · Handover',
+      color: '#1E7A9A',
+    },
+    {
+      id: 'fmamc',
+      icon: '🏢',
+      label: 'FM / AMC',
+      sub: 'Facility & Maintenance',
+      desc: 'Asset Register · PM Schedules · Work Orders · AMC Contracts · Spare Parts',
+      color: '#0E9DB5',
+    },
+  ];
+
+  function toggle(id) {
+    if (canMulti) {
+      setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    } else {
+      setSelected([id]);
+    }
+    setError('');
+  }
+
+  function handleStart() {
+    if (!selected.length) { setError('Please select at least one activity to continue.'); return; }
+    if (!companyName.trim()) { setError('Please enter your company name.'); return; }
     const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
     setBusinessInfo(p => ({
       ...p,
+      name: companyName.trim(),
       country,
       taxRate: (p && p.taxRate != null) ? p.taxRate : cc.defaultTaxRate,
-      activeTypes,
-      companyType: activeTypes[0],
+      activeTypes: selected,
+      companyType: selected[0],
       trialStartDate: (p && p.trialStartDate) ? p.trialStartDate : new Date().toISOString(),
     }));
   }
 
-  const BIZ_TYPES = [
-    { id: 'trading',       icon: '🛒', label: 'Trading / Distribution', desc: 'Buy & sell goods — quotations, invoices, purchase orders, delivery notes, stock management' },
-    { id: 'manufacturing', icon: '🏭', label: 'Manufacturing',          desc: 'Produce goods — BOM, raw materials, production orders, quality assurance' },
-    { id: 'service',       icon: '🔧', label: 'Services / MEP',         desc: 'Project-based work — site projects, activity planning, manpower, attendance, MEP reports' },
-    { id: 'fmamc',         icon: '🏢', label: 'FM / AMC',               desc: 'Facility management & AMC — asset register, preventive maintenance, work orders, SLA contracts' },
-  ];
-
-  const filteredCountries = Object.entries(COUNTRY_CONFIG).filter(([id, cfg]) =>
-    !countrySearch ||
-    (cfg.label || '').toLowerCase().includes(countrySearch.toLowerCase()) ||
-    id.toLowerCase().includes(countrySearch.toLowerCase())
-  );
-
-  const cardStyle = {
-    minHeight: '100vh', background: 'linear-gradient(135deg, #1E2A4A 0%, #2D3E6A 100%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-    fontFamily: "'Inter', sans-serif",
-  };
-  const panelStyle = {
-    width: '100%', maxWidth: 540, background: '#FAF8F4', borderRadius: 20,
-    padding: '40px 44px', boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
-  };
-  const btnPrimary = {
-    width: '100%', padding: '13px', background: '#1E2A4A', color: '#fff',
-    border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer',
-  };
-  const btnGhost = {
-    flex: 1, padding: '13px', background: '#fff', color: '#1E2A4A',
-    border: '1px solid #DDD8CE', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer',
-  };
-
   return (
-    <div style={cardStyle}>
-      <div style={panelStyle}>
-        {/* Logo row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Georgia, serif', fontSize: 20 }}>O</div>
-          <div>
-            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 18, color: '#1E2A4A' }}>Welcome to Operix</div>
-            <div style={{ fontSize: 12, color: '#888' }}>Set up your business profile to get started</div>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #1E2A4A 0%, #2D3E6A 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '32px 16px', fontFamily: "'Inter', -apple-system, sans-serif",
+    }}>
+      <div style={{ width: '100%', maxWidth: 880 }}>
+
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: 40 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+            <div style={{
+              width: 46, height: 46, borderRadius: 13, background: '#C9A24B',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontFamily: 'Georgia, serif', fontSize: 24, color: '#1E2A4A',
+            }}>O</div>
+            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 24, color: '#fff', letterSpacing: '-0.3px' }}>Operix</div>
+          </div>
+          <div style={{ fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 10, lineHeight: 1.2 }}>
+            What does your business do?
+          </div>
+          <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.55)', maxWidth: 480, margin: '0 auto' }}>
+            {canMulti
+              ? 'Select all activities that apply — each gets its own dedicated workspace and modules.'
+              : 'Choose your primary business activity. This sets up your modules and workflow.'}
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 32 }}>
-          {[1, 2].map(s => (
-            <div key={s} style={{ flex: 1, height: 4, borderRadius: 2, background: s <= step ? '#1E2A4A' : '#EAE6DB' }} />
-          ))}
+        {/* 2×2 Activity Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
+          {BIZ_TYPES.map(t => {
+            const on = selected.includes(t.id);
+            return (
+              <div
+                key={t.id}
+                onClick={() => toggle(t.id)}
+                style={{
+                  background: on ? '#fff' : 'rgba(255,255,255,0.07)',
+                  border: on ? `2.5px solid ${t.color}` : '2px solid rgba(255,255,255,0.13)',
+                  borderRadius: 18, padding: '24px 26px',
+                  cursor: 'pointer', position: 'relative',
+                  transition: 'background 0.15s, border 0.15s',
+                  boxShadow: on ? `0 4px 24px ${t.color}33` : 'none',
+                }}
+              >
+                {on && (
+                  <div style={{
+                    position: 'absolute', top: 14, right: 14,
+                    width: 24, height: 24, borderRadius: '50%',
+                    background: t.color, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 900, color: '#fff',
+                  }}>✓</div>
+                )}
+                <div style={{ fontSize: 34, marginBottom: 12, lineHeight: 1 }}>{t.icon}</div>
+                <div style={{
+                  fontFamily: 'Georgia, serif', fontSize: 18, fontWeight: 700,
+                  color: on ? '#1E2A4A' : '#fff', marginBottom: 3,
+                }}>{t.label}</div>
+                <div style={{
+                  fontSize: 12, fontWeight: 600, letterSpacing: '0.03em',
+                  color: on ? t.color : 'rgba(255,255,255,0.45)', marginBottom: 10,
+                  textTransform: 'uppercase',
+                }}>{t.sub}</div>
+                <div style={{
+                  fontSize: 12.5, lineHeight: 1.65,
+                  color: on ? '#555' : 'rgba(255,255,255,0.4)',
+                }}>{t.desc}</div>
+              </div>
+            );
+          })}
         </div>
 
-        {step === 1 && (
-          <>
-            <div style={{ fontFamily: 'Georgia, serif', fontSize: 20, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>Where is your business based?</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Sets your currency, tax system, and document format.</div>
-
+        {/* Company name + country row */}
+        <div style={{
+          background: 'rgba(255,255,255,0.07)', borderRadius: 14,
+          padding: '20px 24px', marginBottom: 18,
+          display: 'flex', gap: 16, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: '2 1 200px' }}>
+            <label style={{
+              display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
+              textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 7,
+            }}>Company Name</label>
             <input
-              value={countrySearch}
-              onChange={e => setCountrySearch(e.target.value)}
-              placeholder="Search country..."
-              style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 8, padding: '9px 14px', fontSize: 13, marginBottom: 10, outline: 'none', boxSizing: 'border-box' }}
+              value={companyName}
+              onChange={e => { setCompanyName(e.target.value); setError(''); }}
+              placeholder="Your company name"
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 9,
+                border: '1.5px solid rgba(255,255,255,0.18)',
+                background: 'rgba(255,255,255,0.1)', color: '#fff',
+                fontSize: 14, outline: 'none', boxSizing: 'border-box',
+              }}
             />
-            <div style={{ border: '1px solid #EAE6DB', borderRadius: 10, maxHeight: 280, overflowY: 'auto', background: '#fff' }}>
-              {filteredCountries.map(([id, cfg]) => (
-                <div key={id} onClick={() => setCountry(id)} style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                  cursor: 'pointer', borderBottom: '1px solid #F5F3EE',
-                  background: country === id ? '#EFF4FF' : 'transparent',
-                }}>
-                  <span style={{ fontSize: 20 }}>{cfg.flag}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: country === id ? 700 : 500, fontSize: 13, color: '#1E2A4A' }}>{cfg.label}</div>
-                    <div style={{ fontSize: 11, color: '#888' }}>{(cfg.currency || '').trim()}{cfg.hasTax ? ` · ${cfg.taxLabel} ${cfg.defaultTaxRate}%` : ' · No tax'}</div>
-                  </div>
-                  {country === id && <span style={{ color: '#1E2A4A', fontWeight: 800 }}>✓</span>}
-                </div>
+          </div>
+          <div style={{ flex: '1 1 150px' }}>
+            <label style={{
+              display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em',
+              textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 7,
+            }}>Country</label>
+            <select
+              value={country}
+              onChange={e => setCountry(e.target.value)}
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 9,
+                border: '1.5px solid rgba(255,255,255,0.18)',
+                background: '#1E2A4A', color: '#fff', fontSize: 14, outline: 'none',
+              }}
+            >
+              {Object.entries(COUNTRY_CONFIG).map(([id, cfg]) => (
+                <option key={id} value={id}>{cfg.flag} {cfg.label}</option>
               ))}
-            </div>
+            </select>
+          </div>
+        </div>
 
-            <button onClick={() => setStep(2)} style={{ ...btnPrimary, marginTop: 24 }}>
-              Continue →
-            </button>
-          </>
+        {/* Error */}
+        {error && (
+          <div style={{ color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginBottom: 10 }}>
+            {error}
+          </div>
         )}
 
-        {step === 2 && (
-          <>
-            <div style={{ fontFamily: 'Georgia, serif', fontSize: 20, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>What type of business are you?</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Choose one — this sets up your modules and <strong>cannot be changed</strong> after setup.</div>
-            <div style={{ fontSize: 11, color: '#C9A24B', fontWeight: 600, marginBottom: 18 }}>⚠ Choose carefully. Contact support to switch plans later.</div>
+        {/* CTA */}
+        <button
+          onClick={handleStart}
+          style={{
+            width: '100%', padding: '15px', borderRadius: 12,
+            background: selected.length && companyName.trim() ? '#C9A24B' : 'rgba(255,255,255,0.12)',
+            color: selected.length && companyName.trim() ? '#1E2A4A' : 'rgba(255,255,255,0.35)',
+            border: 'none', fontSize: 16, fontWeight: 700,
+            cursor: selected.length && companyName.trim() ? 'pointer' : 'default',
+            fontFamily: "'Inter', sans-serif", letterSpacing: '0.01em',
+          }}
+        >
+          {selected.length && companyName.trim()
+            ? `Enter Operix →`
+            : selected.length ? 'Enter your company name to continue' : 'Select an activity to continue'}
+        </button>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {BIZ_TYPES.map(t => {
-                const on = activeTypes[0] === t.id;
-                return (
-                  <div key={t.id} onClick={() => setActiveTypes([t.id])} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 16px',
-                    border: on ? '2px solid #1E2A4A' : '2px solid #EAE6DB',
-                    borderRadius: 12, cursor: 'pointer', background: on ? '#F0EFE9' : '#fff',
-                    transition: 'all 0.15s',
-                  }}>
-                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: on ? '2px solid #1E2A4A' : '2px solid #BDB9B0', background: on ? '#1E2A4A' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
-                      {on && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A', marginBottom: 3 }}>{t.icon} {t.label}</div>
-                      <div style={{ fontSize: 12, color: '#888780', lineHeight: 1.5 }}>{t.desc}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
-              <button onClick={() => setStep(1)} style={btnGhost}>← Back</button>
-              <button
-                onClick={finish}
-                disabled={!activeTypes.length}
-                style={{ flex: 2, padding: '13px', background: activeTypes.length ? '#1E2A4A' : '#9AA5C0', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: activeTypes.length ? 'pointer' : 'not-allowed' }}
-              >
-                Launch Operix 🚀
-              </button>
-            </div>
-          </>
+        {canMulti && selected.length === 0 && (
+          <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+            You can run multiple business activities in parallel — each with its own data and modules.
+          </div>
         )}
       </div>
     </div>
   );
 }
-
 
 // ─── Trial Banner ─────────────────────────────────────────────────────────────
 function TrialBanner({ daysLeft, onUpgrade }) {
@@ -17945,10 +18014,6 @@ export default function App() {
   );
   if (!user) return <AuthScreen />;
   if (user && !user.emailVerified) return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
-  if (biReady && ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.country) {
-    return <OnboardingSetup setBusinessInfo={setBusinessInfo} />;
-  }
-
   const TRIAL_DAYS = 7;
   const _trialStart    = businessInfo.trialStartDate ? new Date(businessInfo.trialStartDate) : null;
   const _trialDaysUsed = _trialStart ? Math.floor((Date.now() - _trialStart.getTime()) / 86400000) : null;
@@ -17956,6 +18021,10 @@ export default function App() {
   const trialExpired   = _trialDaysUsed !== null && _trialDaysUsed >= TRIAL_DAYS;
   const isSubscribed   = !!businessInfo.subscriptionActive;
   const isTestAccount  = TEST_EMAILS.includes(user?.email);
+
+  if (biReady && ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType) {
+    return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} />;
+  }
 
   if (biReady && trialExpired && !isSubscribed && !isTestAccount) {
     return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
