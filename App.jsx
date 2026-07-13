@@ -17853,6 +17853,15 @@ export default function App() {
     });
   }, []);
 
+  // ── Reset session state on user change (logout/re-login) ────────────────────
+  useEffect(() => {
+    // When user changes (login, logout, switch account), reset session so
+    // ActivityHomeScreen is shown fresh and stale biReady doesn't leak through.
+    setSessionContext(null);
+    setActiveBizContext(null);
+    setBiReady(false);
+  }, [user?.uid]);
+
   // ── Grace period expiry check — auto-open delete modal if 30-day window passed ──
   useEffect(() => {
     if (!biReady) return;
@@ -18245,7 +18254,7 @@ export default function App() {
   const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
   // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
   const sessionDocs = sessionContext
-    ? documents.filter(d => !d.bizType || d.bizType === sessionContext)
+    ? documents.filter(d => (d.bizType || 'trading') === sessionContext)
     : documents;
 
   function renderContent() {
@@ -18297,8 +18306,8 @@ export default function App() {
           <Dashboard
             stats={stats}
             documents={sessionDocs}
-            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
-            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
             businessInfo={businessInfo}
             startNewDoc={startNewDoc}
             openDoc={openDoc}
@@ -18510,7 +18519,7 @@ export default function App() {
       case 'customers':
         return (
           <CustomersList
-            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
             setEditing={setEditingCustomer}
             setCustomers={setCustomers}
             documents={documents}
@@ -18519,7 +18528,7 @@ export default function App() {
       case 'vendors':
         return (
           <VendorsList
-            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
             setEditing={setEditingVendor}
             setVendors={setVendors}
             documents={documents}
@@ -18528,7 +18537,7 @@ export default function App() {
       case 'items':
         return (
           <ItemsList
-            items={sessionContext ? items.filter(it => !it.bizType || it.bizType === sessionContext) : items}
+            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
             businessInfo={businessInfo}
@@ -18554,8 +18563,8 @@ export default function App() {
           <VoucherList
             vouchers={vouchers}
             setVouchers={setVouchers}
-            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
-            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
             documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
@@ -18569,8 +18578,8 @@ export default function App() {
             grns={grns}
             setGrns={setGrns}
             documents={sessionDocs}
-            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
-            items={sessionContext ? items.filter(it => !it.bizType || it.bizType === sessionContext) : items}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
