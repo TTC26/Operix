@@ -18239,6 +18239,15 @@ export default function App() {
     return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
   }
 
+  // Session-scoped: when a workspace is chosen, scope all views to that activity
+  const sessionActiveTypes = sessionContext ? [sessionContext] : activeTypes;
+  const sessionCompanyType = sessionContext || companyType;
+  const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
+  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
+  const sessionDocs = sessionContext
+    ? documents.filter(d => !d.bizType || d.bizType === sessionContext)
+    : documents;
+
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
       return (
@@ -18287,9 +18296,9 @@ export default function App() {
         return (
           <Dashboard
             stats={stats}
-            documents={documents}
-            customers={customers}
-            vendors={vendors}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
             businessInfo={businessInfo}
             startNewDoc={startNewDoc}
             openDoc={openDoc}
@@ -18299,9 +18308,9 @@ export default function App() {
             productionOrders={productionOrders}
             rawMaterials={rawMaterials}
             items={items}
-            companyType={companyType}
-            activeTypes={activeTypes}
-            isMultiBiz={isMultiBiz}
+            companyType={sessionCompanyType}
+            activeTypes={sessionActiveTypes}
+            isMultiBiz={sessionIsMultiBiz}
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
@@ -18487,7 +18496,7 @@ export default function App() {
       case 'documents':
         return (
           <DocumentsList
-            docs={documents.filter(d => !docSearch || (d.number || '').toLowerCase().includes(docSearch.toLowerCase()) || (d.customerSnapshot?.name || '').toLowerCase().includes(docSearch.toLowerCase()))}
+            docs={sessionDocs.filter(d => !docSearch || (d.number || '').toLowerCase().includes(docSearch.toLowerCase()) || (d.customerSnapshot?.name || '').toLowerCase().includes(docSearch.toLowerCase()))}
             customers={customers}
             vendors={vendors}
             search={docSearch}
@@ -18495,13 +18504,13 @@ export default function App() {
             openDoc={openDoc}
             deleteDoc={deleteDoc}
             startNewDoc={startNewDoc}
-            activeTypes={activeTypes}
+            activeTypes={sessionActiveTypes}
           />
         );
       case 'customers':
         return (
           <CustomersList
-            customers={customers}
+            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
             setEditing={setEditingCustomer}
             setCustomers={setCustomers}
             documents={documents}
@@ -18510,7 +18519,7 @@ export default function App() {
       case 'vendors':
         return (
           <VendorsList
-            vendors={vendors}
+            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
             setEditing={setEditingVendor}
             setVendors={setVendors}
             documents={documents}
@@ -18519,7 +18528,7 @@ export default function App() {
       case 'items':
         return (
           <ItemsList
-            items={items}
+            items={sessionContext ? items.filter(it => !it.bizType || it.bizType === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
             businessInfo={businessInfo}
@@ -18545,9 +18554,9 @@ export default function App() {
           <VoucherList
             vouchers={vouchers}
             setVouchers={setVouchers}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
+            customers={sessionContext ? customers.filter(c => !c.bizType || c.bizType === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
+            documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
             currentBizType={effectiveBizContext}
@@ -18559,9 +18568,9 @@ export default function App() {
           <GRNList
             grns={grns}
             setGrns={setGrns}
-            documents={documents}
-            vendors={vendors}
-            items={items}
+            documents={sessionDocs}
+            vendors={sessionContext ? vendors.filter(v => !v.bizType || v.bizType === sessionContext) : vendors}
+            items={sessionContext ? items.filter(it => !it.bizType || it.bizType === sessionContext) : items}
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
@@ -19005,8 +19014,8 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         userRole={userRole}
-        companyType={sessionContext || companyType}
-        activeTypes={sessionContext ? [sessionContext] : activeTypes}
+        companyType={sessionCompanyType}
+        activeTypes={sessionActiveTypes}
         country={country}
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
@@ -19087,7 +19096,7 @@ export default function App() {
         <CustomerModal
           customer={editingCustomer}
           onSave={(c) => {
-            const saved = c.id ? c : { ...c, id: Date.now().toString() };
+            const saved = c.id ? c : { ...c, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setCustomers(prev => c.id ? prev.map(x => x.id === c.id ? saved : x) : [...prev, saved]);
             setEditingCustomer(null);
           }}
@@ -19099,7 +19108,7 @@ export default function App() {
         <VendorModal
           vendor={editingVendor}
           onSave={(v) => {
-            const saved = v.id ? v : { ...v, id: Date.now().toString() };
+            const saved = v.id ? v : { ...v, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setVendors(prev => v.id ? prev.map(x => x.id === v.id ? saved : x) : [...prev, saved]);
             setEditingVendor(null);
           }}
@@ -19111,7 +19120,7 @@ export default function App() {
         <ItemModal
           item={editingItem}
           onSave={(it) => {
-            const saved = it.id ? it : { ...it, id: Date.now().toString() };
+            const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]);
             setEditingItem(null);
           }}
