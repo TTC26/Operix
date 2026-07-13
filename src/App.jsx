@@ -2289,6 +2289,21 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
             {userRole === 'admin' && isOwner && (
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #FECACA' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>⚠ Danger Zone</div>
+                <div style={{ background: '#FFF8EC', border: '1px solid #F5D48A', borderRadius: 10, padding: '16px 20px', marginBottom: 12 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#92600A', marginBottom: 4 }}>Change Business Activity</div>
+                  <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
+                    Reset to the activity selection screen to change your business type or add new activities. Your existing data will not be lost.
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (window.confirm('This will take you back to the activity selection screen. Your data stays intact. Continue?')) {
+                        setBusinessInfo(p => ({ ...p, companyType: null, activeTypes: null }));
+                      }
+                    }}
+                    style={{ padding: '8px 20px', background: '#FFF8EC', color: '#92600A', border: '1px solid #F5D48A', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    Change business activity
+                  </button>
+                </div>
                 <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '16px 20px' }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: '#B91C1C', marginBottom: 4 }}>Delete Account</div>
                   <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
