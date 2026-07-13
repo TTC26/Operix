@@ -17827,7 +17827,11 @@ export default function App() {
         setAuthReady(true);
         try {
           // Check membership FIRST — staff accounts don't go through email verification
-          const membership = await getMembership(firebaseUser.uid);
+          // 3-second timeout: admin accounts have no membership doc, avoid 30s+ network wait
+          const membership = await Promise.race([
+            getMembership(firebaseUser.uid),
+            new Promise(resolve => setTimeout(() => resolve(null), 3000)),
+          ]);
           if (membership) {
             // Staff member — use owner's company data, no email verification needed
             setOwnerUid(membership.ownerUid);
@@ -17852,6 +17856,15 @@ export default function App() {
       }
     });
   }, []);
+
+  // ── Reset session state on user change (logout/re-login) ────────────────────
+  useEffect(() => {
+    // When user changes (login, logout, switch account), reset session so
+    // ActivityHomeScreen is shown fresh and stale biReady doesn't leak through.
+    setSessionContext(null);
+    setActiveBizContext(null);
+    setBiReady(false);
+  }, [user?.uid]);
 
   // ── Grace period expiry check — auto-open delete modal if 30-day window passed ──
   useEffect(() => {
@@ -18206,6 +18219,10 @@ export default function App() {
   );
   if (!user) return <AuthScreen />;
   if (user && !user.emailVerified) return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
+  // Block main app from rendering until Firestore data is ready
+  if (!biReady) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
+  );
   const TRIAL_DAYS = 7;
   const _trialStart    = businessInfo.trialStartDate ? new Date(businessInfo.trialStartDate) : null;
   const _trialDaysUsed = _trialStart ? Math.floor((Date.now() - _trialStart.getTime()) / 86400000) : null;
@@ -18214,12 +18231,14 @@ export default function App() {
   const isSubscribed   = !!businessInfo.subscriptionActive;
   const isTestAccount  = TEST_EMAILS.includes(user?.email);
 
-  if (biReady && ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType) {
-    return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} />;
-  }
-
-  // After setup: show home screen every login until user picks a workspace for this session
-  if (biReady && businessInfo.companyType && sessionContext === null) {
+  // Once data is loaded and user hasn't chosen a session workspace yet,
+  // always route to setup or home screen — never fall through to main app.
+  if (biReady && sessionContext === null) {
+    // First-time setup: admin owner with no companyType set
+    if (ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType) {
+      return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} />;
+    }
+    // Every login: pick a workspace for this session
     return (
       <ActivityHomeScreen
         activeTypes={activeTypes}
@@ -18232,6 +18251,15 @@ export default function App() {
   if (biReady && trialExpired && !isSubscribed && !isTestAccount) {
     return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
   }
+
+  // Session-scoped: when a workspace is chosen, scope all views to that activity
+  const sessionActiveTypes = sessionContext ? [sessionContext] : activeTypes;
+  const sessionCompanyType = sessionContext || companyType;
+  const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
+  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
+  const sessionDocs = sessionContext
+    ? documents.filter(d => (d.bizType || 'trading') === sessionContext)
+    : documents;
 
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
@@ -18281,9 +18309,9 @@ export default function App() {
         return (
           <Dashboard
             stats={stats}
-            documents={documents}
-            customers={customers}
-            vendors={vendors}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
             businessInfo={businessInfo}
             startNewDoc={startNewDoc}
             openDoc={openDoc}
@@ -18293,9 +18321,9 @@ export default function App() {
             productionOrders={productionOrders}
             rawMaterials={rawMaterials}
             items={items}
-            companyType={companyType}
-            activeTypes={activeTypes}
-            isMultiBiz={isMultiBiz}
+            companyType={sessionCompanyType}
+            activeTypes={sessionActiveTypes}
+            isMultiBiz={sessionIsMultiBiz}
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
@@ -18481,7 +18509,7 @@ export default function App() {
       case 'documents':
         return (
           <DocumentsList
-            docs={documents.filter(d => !docSearch || (d.number || '').toLowerCase().includes(docSearch.toLowerCase()) || (d.customerSnapshot?.name || '').toLowerCase().includes(docSearch.toLowerCase()))}
+            docs={sessionDocs.filter(d => !docSearch || (d.number || '').toLowerCase().includes(docSearch.toLowerCase()) || (d.customerSnapshot?.name || '').toLowerCase().includes(docSearch.toLowerCase()))}
             customers={customers}
             vendors={vendors}
             search={docSearch}
@@ -18489,13 +18517,13 @@ export default function App() {
             openDoc={openDoc}
             deleteDoc={deleteDoc}
             startNewDoc={startNewDoc}
-            activeTypes={activeTypes}
+            activeTypes={sessionActiveTypes}
           />
         );
       case 'customers':
         return (
           <CustomersList
-            customers={customers}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
             setEditing={setEditingCustomer}
             setCustomers={setCustomers}
             documents={documents}
@@ -18504,7 +18532,7 @@ export default function App() {
       case 'vendors':
         return (
           <VendorsList
-            vendors={vendors}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
             setEditing={setEditingVendor}
             setVendors={setVendors}
             documents={documents}
@@ -18513,7 +18541,7 @@ export default function App() {
       case 'items':
         return (
           <ItemsList
-            items={items}
+            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
             businessInfo={businessInfo}
@@ -18539,9 +18567,9 @@ export default function App() {
           <VoucherList
             vouchers={vouchers}
             setVouchers={setVouchers}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
+            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
             currentBizType={effectiveBizContext}
@@ -18553,9 +18581,9 @@ export default function App() {
           <GRNList
             grns={grns}
             setGrns={setGrns}
-            documents={documents}
-            vendors={vendors}
-            items={items}
+            documents={sessionDocs}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
@@ -18999,8 +19027,8 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         userRole={userRole}
-        companyType={sessionContext || companyType}
-        activeTypes={sessionContext ? [sessionContext] : activeTypes}
+        companyType={sessionCompanyType}
+        activeTypes={sessionActiveTypes}
         country={country}
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
@@ -19081,7 +19109,7 @@ export default function App() {
         <CustomerModal
           customer={editingCustomer}
           onSave={(c) => {
-            const saved = c.id ? c : { ...c, id: Date.now().toString() };
+            const saved = c.id ? c : { ...c, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setCustomers(prev => c.id ? prev.map(x => x.id === c.id ? saved : x) : [...prev, saved]);
             setEditingCustomer(null);
           }}
@@ -19093,7 +19121,7 @@ export default function App() {
         <VendorModal
           vendor={editingVendor}
           onSave={(v) => {
-            const saved = v.id ? v : { ...v, id: Date.now().toString() };
+            const saved = v.id ? v : { ...v, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setVendors(prev => v.id ? prev.map(x => x.id === v.id ? saved : x) : [...prev, saved]);
             setEditingVendor(null);
           }}
@@ -19105,7 +19133,7 @@ export default function App() {
         <ItemModal
           item={editingItem}
           onSave={(it) => {
-            const saved = it.id ? it : { ...it, id: Date.now().toString() };
+            const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext };
             setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]);
             setEditingItem(null);
           }}
