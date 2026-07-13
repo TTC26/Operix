@@ -18608,7 +18608,6 @@ export default function App() {
           />
         );
       case 'stock':
-      case 'stockledger':
         return (
           <StockView
             items={items}
@@ -18618,6 +18617,15 @@ export default function App() {
             userRole={userRole}
             currentBizType={effectiveBizContext}
             isMultiBiz={isMultiBiz}
+          />
+        );
+      case 'stockledger':
+        return (
+          <StockLedgerView
+            items={items}
+            stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
+            businessInfo={businessInfo}
           />
         );
       case 'bincard':
