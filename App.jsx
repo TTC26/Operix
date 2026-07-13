@@ -18206,6 +18206,10 @@ export default function App() {
   );
   if (!user) return <AuthScreen />;
   if (user && !user.emailVerified) return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
+  // Block main app from rendering until Firestore data is ready
+  if (!biReady) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
+  );
   const TRIAL_DAYS = 7;
   const _trialStart    = businessInfo.trialStartDate ? new Date(businessInfo.trialStartDate) : null;
   const _trialDaysUsed = _trialStart ? Math.floor((Date.now() - _trialStart.getTime()) / 86400000) : null;
