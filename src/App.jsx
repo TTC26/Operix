@@ -18029,6 +18029,183 @@ export default function App() {
             serviceOrders={serviceOrders}
           />
         );
+      case 'enquiries':
+        return (
+          <EnquiryList
+            enquiries={enquiries}
+            setEnquiries={setEnquiries}
+            customers={customers}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            onConvertToQuotation={(enq) => {
+              const cust = customers.find(c => c.id === enq.customerId);
+              startNewDoc('quotation', enq.bizType || effectiveBizContext, {
+                customerId: enq.customerId,
+                customerSnapshot: cust || null,
+                notes: enq.notes || '',
+              });
+            }}
+          />
+        );
+      case 'rawmaterials':
+        return (
+          <RawMaterialsList
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'bom':
+        return (
+          <BOMList
+            boms={boms}
+            setBoms={setBoms}
+            rawMaterials={rawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            parts={parts}
+          />
+        );
+      case 'productionorders':
+        return (
+          <ProductionOrdersList
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            boms={boms}
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            setStockLedger={setStockLedger}
+            items={items}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'partsmaster':
+        return (
+          <PartsMasterList
+            parts={parts}
+            setParts={setParts}
+            vendors={vendors}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'engdocs':
+        return (
+          <EngineeringDocsList
+            engDocs={engDocs}
+            setEngDocs={setEngDocs}
+            parts={parts}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'isoprinciples':
+        return (
+          <ISOPrinciplesView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            userRole={userRole}
+          />
+        );
+      case 'deptprocedures':
+        return (
+          <DeptProceduresView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            userRole={userRole}
+          />
+        );
+      case 'inprocessqa':
+        return (
+          <InprocessQAView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            productionOrders={productionOrders}
+            userRole={userRole}
+          />
+        );
+      case 'qatesting':
+        return (
+          <QATestingView
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            pdvs={pdvs}
+            setPdvs={setPdvs}
+            setStockLedger={setStockLedger}
+            boms={boms}
+            items={items}
+            userRole={userRole}
+            businessInfo={businessInfo}
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+          />
+        );
+      case 'capa':
+        return (
+          <CAPAView
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+            vendors={vendors}
+            customers={customers}
+            userRole={userRole}
+          />
+        );
+      case 'internalaudit':
+        return (
+          <InternalAuditView
+            internalAudits={internalAudits}
+            setInternalAudits={setInternalAudits}
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+            userRole={userRole}
+          />
+        );
+      case 'vendoreval':
+        return (
+          <VendorEvalView
+            vendorEvals={vendorEvals}
+            setVendorEvals={setVendorEvals}
+            vendors={vendors}
+            userRole={userRole}
+          />
+        );
+      case 'channelpartners':
+        return (
+          <ChannelPartnerList
+            channelPartners={channelPartners}
+            setChannelPartners={setChannelPartners}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'contracts':
+        return (
+          <ContractList
+            contracts={contracts}
+            setContracts={setContracts}
+            customers={customers}
+            vendors={vendors}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'termslibrary':
+        return (
+          <TermsLibraryView
+            termsLibrary={termsLibrary}
+            setTermsLibrary={setTermsLibrary}
+            userRole={userRole}
+          />
+        );
       case 'documents':
         return (
           <DocumentsList
@@ -18322,18 +18499,6 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
-      case 'evaluation':
-        return (
-          <QuarterlyEvalView
-            evaluations={evaluations}
-            setEvaluations={setEvaluations}
-            employees={employees}
-            siteAttendance={siteAttendance}
-            progressUpdates={progressUpdates}
-            siteProjects={siteProjects}
-            userRole={userRole}
-          />
-        );
       case 'mepreports':
         return (
           <MEPReportsView
@@ -18486,41 +18651,6 @@ export default function App() {
             userRole={userRole}
           />
         );
-      case 'settings':
-        return (
-          <SettingsView
-            businessInfo={businessInfo}
-            setBusinessInfo={setBusinessInfo}
-            onExportData={null}
-            onSaved={() => {}}
-            userRole={userRole}
-            isOwner={userRole === 'admin'}
-            userEmail={user?.email || ''}
-            onRequestDelete={() => setShowDeleteModal(true)}
-          />
-        );
-      case 'staff':
-        return (
-          <StaffPage
-            ownerUid={ownerUid}
-            employees={employees}
-            companyName={businessInfo?.name || ''}
-          />
-        );
-      case 'documents':
-        return (
-          <DocumentsList
-            docs={documents}
-            customers={customers}
-            vendors={vendors}
-            search={''}
-            setSearch={() => {}}
-            openDoc={openDoc}
-            deleteDoc={(id) => setDocuments(prev => prev.filter(d => d.id !== id))}
-            startNewDoc={startNewDoc}
-            activeTypes={activeTypes}
-          />
-        );
       default:
         return (
           <Dashboard
@@ -18671,6 +18801,44 @@ export default function App() {
           <span style={{ opacity: 0.55 }}>Powered by</span>
           <strong style={{ marginLeft: 3 }}>Operix</strong>
         </div>
+      )}
+
+      {/* Customer / Vendor / Item modals */}
+      {editingCustomer && (
+        <CustomerModal
+          customer={editingCustomer}
+          onSave={(c) => {
+            const saved = c.id ? c : { ...c, id: Date.now().toString() };
+            setCustomers(prev => c.id ? prev.map(x => x.id === c.id ? saved : x) : [...prev, saved]);
+            setEditingCustomer(null);
+          }}
+          onClose={() => setEditingCustomer(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+      {editingVendor && (
+        <VendorModal
+          vendor={editingVendor}
+          onSave={(v) => {
+            const saved = v.id ? v : { ...v, id: Date.now().toString() };
+            setVendors(prev => v.id ? prev.map(x => x.id === v.id ? saved : x) : [...prev, saved]);
+            setEditingVendor(null);
+          }}
+          onClose={() => setEditingVendor(null)}
+          businessInfo={businessInfo}
+        />
+      )}
+      {editingItem && (
+        <ItemModal
+          item={editingItem}
+          onSave={(it) => {
+            const saved = it.id ? it : { ...it, id: Date.now().toString() };
+            setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]);
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+          businessInfo={businessInfo}
+        />
       )}
 
       {/* Delete-account modal */}
