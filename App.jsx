@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser } from './firebase';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -37,11 +37,21 @@ const ROLE_MODULES = {
     docTypes: ['invoice', 'delivery', 'quotation', 'purchase', 'purchasebill', 'creditnote'],
     canEdit: false,
   },
+  hr: {
+    nav: ['dashboard', 'hr', 'payroll'],
+    docTypes: [],
+    canEdit: true,
+  },
+  viewer: {
+    nav: ['dashboard', 'documents', 'customers', 'vendors', 'items'],
+    docTypes: ['invoice', 'delivery', 'quotation', 'purchase', 'purchasebill', 'creditnote'],
+    canEdit: false,
+  },
 };
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
 // Emails that bypass all plan gates (dev / owner accounts)
-const TEST_EMAILS = ['srm10988@gmail.com'];
+const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com'];
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
 const PLAN_MODULES = {
@@ -49,9 +59,11 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn','storeissue',
+    'stock','bincard','grn','storeissue','stockledger',
   ],
-  trading:       [],
+  trading: [
+    'hr','payroll','employees',
+  ],
   manufacturing: [
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
@@ -967,13 +979,38 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
 
 function AuthScreen() {
   const [mode, setMode] = useState('signup'); // signup | login | forgot
+  // login has two steps: 'email' (enter email + check company) → 'password'
+  const [loginStep, setLoginStep]     = useState('email');
+  const [staffCompany, setStaffCompany] = useState(null); // { companyName } if staff email
   const [companyName, setCompanyName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
+  const [email, setEmail]             = useState('');
+  const [password, setPassword]       = useState('');
+  const [error, setError]             = useState('');
+  const [busy, setBusy]               = useState(false);
+  const [resetSent, setResetSent]     = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+
+  // Step 1 of login: look up email, then advance to password step.
+  // The Firestore lookup is best-effort with a 2s cap — if it hangs or fails
+  // (e.g. unauthenticated Firestore rules), we still advance immediately.
+  async function handleEmailContinue(e) {
+    e.preventDefault();
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const lookup = await Promise.race([
+        lookupStaffEmail(email.trim()),
+        new Promise(resolve => setTimeout(() => resolve(null), 2000)),
+      ]);
+      setStaffCompany(lookup);
+    } catch (_) {
+      setStaffCompany(null);
+    } finally {
+      setBusy(false);
+      setLoginStep('password');
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -1021,7 +1058,7 @@ function AuthScreen() {
     }
   }
 
-  function switchMode(m) { setMode(m); setError(''); setResetSent(false); }
+  function switchMode(m) { setMode(m); setError(''); setResetSent(false); setLoginStep('email'); setStaffCompany(null); }
 
   return (
     <div style={styles.loginScreen}>
@@ -1068,14 +1105,64 @@ function AuthScreen() {
               ← Back to log in
             </button>
           </div>
-        ) : (
+        ) : mode === 'login' && loginStep === 'email' ? (
+          /* ── Login step 1: enter email ── */
+          <form onSubmit={handleEmailContinue} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@business.com" style={styles.input} autoFocus />
+            </div>
+            {error && <div style={styles.authError}>{error}</div>}
+            <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Checking…' : 'Continue →'}
+            </button>
+          </form>
+        ) : mode === 'login' && loginStep === 'password' ? (
+          /* ── Login step 2: show company name (if staff) + enter password ── */
           <form onSubmit={handleSubmit} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {mode === 'signup' && (
-              <div style={{ textAlign: 'left' }}>
-                <label style={styles.label}>Company name</label>
-                <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Enter your company name" style={styles.input} />
+            {staffCompany?.companyName && (
+              <div style={{ background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#1E2A4A', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                  {staffCompany.companyName.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Signing in to</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#1E2A4A' }}>{staffCompany.companyName}</div>
+                </div>
               </div>
             )}
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Email</label>
+              <div style={{ ...styles.input, background: '#F5F5F5', color: '#666', display: 'flex', alignItems: 'center' }}>{email}</div>
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" style={styles.input} autoFocus />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: -4 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#555', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={keepLoggedIn} onChange={(e) => setKeepLoggedIn(e.target.checked)} style={{ accentColor: '#1E2A4A', width: 15, height: 15 }} />
+                Keep me logged in
+              </label>
+              <button type="button" onClick={() => switchMode('forgot')} style={{ background: 'none', border: 'none', color: '#1E2A4A', fontSize: 12, padding: 0, textDecoration: 'underline', cursor: 'pointer' }}>
+                Forgot password?
+              </button>
+            </div>
+            {error && <div style={styles.authError}>{error}</div>}
+            <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Signing in…' : 'Log in'}
+            </button>
+            <button type="button" onClick={() => { setLoginStep('email'); setStaffCompany(null); setError(''); }} style={{ background: 'none', border: 'none', color: '#888', fontSize: 13, padding: 0, cursor: 'pointer' }}>
+              ← Use a different email
+            </button>
+          </form>
+        ) : (
+          /* ── Sign up ── */
+          <form onSubmit={handleSubmit} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ textAlign: 'left' }}>
+              <label style={styles.label}>Company name</label>
+              <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Enter your company name" style={styles.input} />
+            </div>
             <div style={{ textAlign: 'left' }}>
               <label style={styles.label}>Email</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@business.com" style={styles.input} />
@@ -1084,20 +1171,9 @@ function AuthScreen() {
               <label style={styles.label}>Password</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={styles.input} />
             </div>
-            {mode === 'login' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: -4 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#555', cursor: 'pointer', userSelect: 'none' }}>
-                  <input type="checkbox" checked={keepLoggedIn} onChange={(e) => setKeepLoggedIn(e.target.checked)} style={{ accentColor: '#1E2A4A', width: 15, height: 15 }} />
-                  Keep me logged in
-                </label>
-                <button type="button" onClick={() => switchMode('forgot')} style={{ background: 'none', border: 'none', color: '#1E2A4A', fontSize: 12, padding: 0, textDecoration: 'underline', cursor: 'pointer' }}>
-                  Forgot password?
-                </button>
-              </div>
-            )}
             {error && <div style={styles.authError}>{error}</div>}
             <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginTop: 6, opacity: busy ? 0.6 : 1 }}>
-              {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
+              {busy ? 'Please wait…' : 'Create account'}
             </button>
           </form>
         )}
@@ -1339,23 +1415,46 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 
 // ─── Items ─────────────────────────────────────────────────────
 
+const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+
 function ItemsList({ items, setEditing, setItems, businessInfo }) {
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
+  const [catFilter, setCatFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const filtered = items.filter(it => {
+    const matchCat = !catFilter || it.category === catFilter;
+    const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+  const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Items & services</h1>
         <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
       </div>
-      <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
-      <div style={{ ...styles.list, marginTop: 16 }}>
+      <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
+        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
+        <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
+          <option value=''>All categories</option>
+          {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <span style={{ fontSize:12, color:'#888' }}>{filtered.length} item{filtered.length!==1?'s':''}</span>
+      </div>
+      <div style={{ ...styles.list, marginTop: 0 }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
-        {items.map((it) => (
+        {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
+        {filtered.map((it) => (
           <div key={it.id} style={styles.recordRow}>
             <div style={{ flex: 1 }}>
-              <div style={styles.docRowTitle}>{it.name}</div>
-              <div style={styles.docRowSub}>{cc.splitTax && <>HSN {it.hsn || '—'} · </>}Tax {it.gst}%</div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
+                <span style={styles.docRowTitle}>{it.name}</span>
+                {it.category && <span style={{ fontSize:11, color:'#888', background:'#F0ECE5', borderRadius:4, padding:'1px 6px' }}>{it.category}</span>}
+              </div>
+              <div style={styles.docRowSub}>{it.unit && <>{it.unit} · </>}{cc.splitTax && <>HSN {it.hsn || '—'} · </>}Tax {it.gst}%</div>
             </div>
             <div style={{ textAlign: 'right', marginRight: 8 }}>
               <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
@@ -1372,10 +1471,24 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
 
 function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
-  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', ...item });
+  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
     <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
+      {/* Item code + category */}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Item Code</label>
+          <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={styles.input} placeholder="e.g. RM-001, ST-002" />
+        </div>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Category</label>
+          <select value={form.category||''} onChange={e=>set('category',e.target.value)} style={styles.input}>
+            <option value=''>— Select —</option>
+            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
         <input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} />
@@ -1540,33 +1653,58 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
   const deletionDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   const deletionDateStr = deletionDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
+  // Auto-redirect after step 4 shown for non-grace-period (immediate delete)
+  useEffect(() => {
+    if (step === 4 && !gracePeriod) {
+      const t = setTimeout(() => onDeleted('deleted'), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [step, gracePeriod]); // eslint-disable-line
+
+  // Wrap a promise with a timeout — if it hangs, resolve silently after ms
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise(resolve => setTimeout(resolve, ms)),
+    ]);
+  }
+
   async function execute() {
+    // Block test accounts from self-deleting
+    if (TEST_EMAILS.includes(user?.email)) {
+      setError('Test accounts cannot be deleted through this flow.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       await reauthenticateUser(user, passwordInput);
-      setStep(4);
       if (gracePeriod) {
-        // Option B — schedule
+        // Option B — schedule (no real deletion, just flag)
         await saveCompanyData(ownerUid, {
           deletionScheduled: true,
           deletionDate: deletionDate.toISOString(),
           deletionRequestedAt: new Date().toISOString(),
         });
+        setStep(4);
         onDeleted('scheduled');
       } else {
-        // Option A — immediate
-        await deleteAllCompanyFirestore(ownerUid);
-        await deleteCompanyStorage(ownerUid);
+        // Option A — best-effort data cleanup, then delete Auth user
+        // Firestore + Storage are non-critical; 10s timeout each to prevent hang
+        await withTimeout(deleteAllCompanyFirestore(ownerUid).catch(e => console.warn('Firestore delete:', e)), 10000);
+        await withTimeout(deleteCompanyStorage(ownerUid).catch(e => console.warn('Storage delete:', e)), 10000);
+        // Auth user deletion is the critical step — if this fails, throw
         await deleteFirebaseUser(user);
-        onDeleted('deleted');
+        setStep(4);
       }
     } catch (e) {
       const msg = e.message || '';
       if (msg.includes('wrong-password') || msg.includes('invalid-credential') || msg.includes('INVALID_LOGIN')) {
         setError('Incorrect password. Please try again.');
+      } else if (msg.includes('requires-recent-login')) {
+        setError('Session expired. Please close and try again.');
       } else {
-        setError('Error: ' + msg);
+        setError('Error: ' + (msg || 'Deletion failed. Please try again.'));
       }
       setStep(3);
     } finally {
@@ -1676,7 +1814,8 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
           ) : (
             <>
               <div style={{ fontSize:18, fontWeight:700, color:'#B91C1C', marginBottom:8 }}>Account Deleted</div>
-              <div style={{ fontSize:13, color:'#666' }}>All your data has been permanently removed.<br/>You have been signed out.</div>
+              <div style={{ fontSize:13, color:'#666', marginBottom:8 }}>All your data has been permanently removed.</div>
+              <div style={{ fontSize:12, color:'#aaa' }}>Redirecting to sign-in…</div>
             </>
           )}
         </div>
@@ -1701,7 +1840,7 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   useEffect(() => setForm(businessInfo), [businessInfo]);
@@ -2077,8 +2216,8 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
               )}
             </div>
 
-            {/* ── Danger Zone ── */}
-            {userRole === 'admin' && (
+            {/* ── Danger Zone — owner only ── */}
+            {userRole === 'admin' && isOwner && (
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #FECACA' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>⚠ Danger Zone</div>
                 <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '16px 20px' }}>
@@ -2103,7 +2242,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
 
 // ─── Staff ─────────────────────────────────────────────────────
 
-function StaffPage({ ownerUid, employees = [] }) {
+function StaffPage({ ownerUid, employees = [], companyName = '' }) {
   const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2127,7 +2266,8 @@ function StaffPage({ ownerUid, employees = [] }) {
   async function handleRemove(staffUid) {
     if (!window.confirm('Remove this staff member? They will lose access immediately.')) return;
     try {
-      await removeStaff(ownerUid, staffUid);
+      const member = staffList.find(x => x.uid === staffUid);
+      await removeStaff(ownerUid, staffUid, member?.email || '');
       setStaffList((s) => s.filter((x) => x.uid !== staffUid));
     } catch {
       setError('Could not remove staff member.');
@@ -2205,6 +2345,7 @@ function StaffPage({ ownerUid, employees = [] }) {
       {addingStaff && (
         <StaffModal
           ownerUid={ownerUid}
+          companyName={companyName}
           employees={employees}
           onSaved={() => { setAddingStaff(false); loadStaff(); }}
           onClose={() => setAddingStaff(false)}
@@ -2214,11 +2355,19 @@ function StaffPage({ ownerUid, employees = [] }) {
   );
 }
 
-function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
+function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = [] }) {
   const [form, setForm] = useState({ empId: '', name: '', email: '', password: '', role: 'sales' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const ROLES = ['manager', 'sales', 'purchase', 'inventory', 'accounts'];
+  const ROLES = [
+    { value: 'manager',   label: 'Manager',          desc: 'Full access except staff & settings. Can approve documents.' },
+    { value: 'sales',     label: 'Sales',             desc: 'Quotations, invoices, delivery notes, customers.' },
+    { value: 'purchase',  label: 'Purchase',          desc: 'Purchase orders, purchase bills, vendors.' },
+    { value: 'inventory', label: 'Inventory / Stores',desc: 'Items, stock, GRN, store issue, bin card.' },
+    { value: 'accounts',  label: 'Accounts',          desc: 'Petty cash, vouchers, tax reports.' },
+    { value: 'hr',        label: 'HR / Payroll',       desc: 'Employees, payroll, attendance.' },
+    { value: 'viewer',    label: 'Viewer (read-only)', desc: 'Can view all documents but cannot create or edit.' },
+  ];
 
   function handleEmpSelect(empId) {
     if (!empId) {
@@ -2247,7 +2396,7 @@ function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
     try {
       const emp = employees.find((e) => e.id === empId);
       const empNo = emp ? (emp.employeeId || emp.empNo || '') : '';
-      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role, empId, empNo);
+      await createStaffAccount(ownerUid, email.trim(), password, name.trim(), role, companyName, empId, empNo);
       onSaved();
     } catch (err) {
       const code = (err && err.code) || '';
@@ -2291,10 +2440,15 @@ function StaffModal({ ownerUid, onSaved, onClose, employees = [] }) {
           <input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} style={styles.input} placeholder="Min 6 characters" />
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.label}>Role</label>
+          <label style={styles.label}>Role & Access</label>
           <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} style={styles.input}>
-            {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+            {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
+          {(() => { const r = ROLES.find(x => x.value === form.role); return r ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: '#555', background: '#F5F3EE', borderRadius: 6, padding: '6px 10px' }}>
+              <strong>Access:</strong> {r.desc}
+            </div>
+          ) : null; })()}
         </div>
         {error && <div style={{ ...styles.authError, marginBottom: 12 }}>{error}</div>}
         <button type="submit" disabled={busy} style={{ ...styles.primaryBtn, justifyContent: 'center', opacity: busy ? 0.6 : 1 }}>
@@ -2322,98 +2476,96 @@ const DASHBOARD_DOC_TYPES = {
 function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, vendors, productionOrders, siteProjects, siteAttendance, startNewDoc, openDoc, setView, cur, items }) {
   const BIZ_DOC_TYPES = {
     trading:       ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
-    manufacturing: ['quotation','invoice','delivery','packing_list','creditnote','purchase','purchasebill'],
-    service:       ['quotation','invoice','creditnote'],
+    manufacturing: ['quotation','invoice','creditnote','purchase','purchasebill'],
+    service:       ['quotation','invoice','creditnote','purchase','purchasebill'],
+    fmamc:         ['quotation','invoice','creditnote','purchase','purchasebill'],
   };
   const allowed = BIZ_DOC_TYPES[bizType] || [];
-  const bizDocs = docs.filter(d => (d.bizType || 'trading') === bizType);
+  const bizDocs  = docs.filter(d => (d.bizType || 'trading') === bizType);
   const invoiced  = bizDocs.filter(d=>d.type==='invoice').reduce((s,d)=>s+(d.total||0),0);
   const outstanding = bizDocs.filter(d=>d.type==='invoice'&&d.status!=='paid').reduce((s,d)=>s+(d.total||0),0);
-  const recent = [...bizDocs].sort((a,b)=>b.createdAt-a.createdAt).slice(0,3);
+  const purchases = bizDocs.filter(d=>d.type==='purchase').reduce((s,d)=>s+(d.total||0),0);
+  const payable   = bizDocs.filter(d=>d.type==='purchasebill'&&d.status!=='paid').reduce((s,d)=>s+(d.total||0),0);
+  const recent    = [...bizDocs].sort((a,b)=>b.createdAt-a.createdAt).slice(0,4);
+
+  const isService = bizType === 'service' || bizType === 'fmamc';
+
+  function MiniStat({ val, label: lbl, bg, textColor }) {
+    return (
+      <div style={{ background: bg, borderRadius: 8, padding: '8px 10px' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: textColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{val}</div>
+        <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{lbl}</div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ background: '#fff', border: `2px solid ${color}22`, borderRadius: 14, padding: '18px 16px', flex: 1, minWidth: 260 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, paddingBottom: 10, borderBottom: `2px solid ${color}22` }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>{icon}</div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{label}</div>
-          <div style={{ fontSize: 11, color: '#aaa' }}>{bizDocs.length} documents</div>
+    <div style={{ background: '#fff', border: `1.5px solid ${color}30`, borderTop: `3px solid ${color}`, borderRadius: 12, padding: '16px 15px', flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 7, background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{icon}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+          <div style={{ fontSize: 10.5, color: '#aaa' }}>{bizDocs.length} docs total</div>
         </div>
-        <button onClick={()=>setView('documents')} style={{ ...{padding:'3px 10px',borderRadius:8,border:'1px solid #EAE6DB',background:'#FAF8F4',cursor:'pointer',fontSize:11,color:'#666',marginLeft:'auto'} }}>View all</button>
+        <button onClick={()=>setView('documents')} style={{ padding:'3px 9px', borderRadius:6, border:'1px solid #EAE6DB', background:'none', cursor:'pointer', fontSize:10.5, color:'#888' }}>All →</button>
       </div>
 
-      {/* Key stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-        <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{cur(invoiced)}</div>
-          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Total invoiced</div>
-        </div>
-        <div style={{ background: '#FEF0E0', borderRadius: 8, padding: '8px 10px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#B5453A' }}>{cur(outstanding)}</div>
-          <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Outstanding</div>
-        </div>
-        {bizType !== 'service' && (
-          <>
-            <div style={{ background: '#F0EAF9', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#6B5BAE' }}>{bizDocs.filter(d=>d.type==='purchase').length}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Purchase orders</div>
-            </div>
-            <div style={{ background: '#E6F5EC', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1A7A3E' }}>{items?.length || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Items in master</div>
-            </div>
-          </>
-        )}
+      {/* Sales KPIs */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: color, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Sales</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
+        <MiniStat val={cur(invoiced)}    label="Total invoiced"   bg="#FAF8F4" textColor="#1E2A4A" />
+        <MiniStat val={cur(outstanding)} label="Receivable"       bg="#FEF0E0" textColor="#B5453A" />
         {bizType === 'manufacturing' && (
-          <>
-            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px', gridColumn: '1/-1' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>
-                {productionOrders?.filter(o=>o.status==='in_progress').length || 0}
-                <span style={{ fontSize: 11, color: '#888', fontWeight: 400, marginLeft: 6 }}>in progress</span>
-              </div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Production orders</div>
-            </div>
-          </>
+          <MiniStat val={productionOrders?.filter(o=>o.status==='in_progress').length || 0} label="Production (WIP)" bg="#FFF7E0" textColor="#C9A24B" />
         )}
-        {bizType === 'service' && (
-          <>
-            <div style={{ background: '#E0F2F9', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E7A9A' }}>{siteProjects?.filter(p=>p.status==='active').length || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Active sites</div>
-            </div>
-            <div style={{ background: '#FAF8F4', borderRadius: 8, padding: '8px 10px' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{siteAttendance?.filter(r=>r.date===new Date().toISOString().slice(0,10)).reduce((s,r)=>(s+(r.records||[]).filter(x=>x.status==='present').length),0) || 0}</div>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 1 }}>Present today</div>
-            </div>
-          </>
+        {isService && (
+          <MiniStat val={siteProjects?.filter(p=>p.status==='active').length || 0} label="Active projects" bg="#E0F2F9" textColor="#1E7A9A" />
         )}
+        {isService && (
+          <MiniStat val={bizDocs.filter(d=>d.type==='invoice'&&d.status==='approved').length} label="RA bills raised" bg="#FAF8F4" textColor="#1E2A4A" />
+        )}
+      </div>
+
+      {/* Purchase KPIs */}
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#6B5BAE', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Purchase</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
+        <MiniStat val={cur(purchases)} label="Total purchased" bg="#F0EAF9" textColor="#6B5BAE" />
+        <MiniStat val={cur(payable)}   label="Payable"         bg="#FFF0F0" textColor="#B91C1C" />
+        <MiniStat val={bizDocs.filter(d=>d.type==='purchase').length} label="POs raised" bg="#FAF8F4" textColor="#1E2A4A" />
+        {!isService && <MiniStat val={items?.length || 0} label="Items in master" bg="#E6F5EC" textColor="#1A7A3E" />}
+        {isService && <MiniStat val={siteAttendance?.filter(r=>r.date===new Date().toISOString().slice(0,10)).reduce((s,r)=>(s+(r.records||[]).filter(x=>x.status==='present').length),0)||0} label="Present today" bg="#E6F5EC" textColor="#1A7A3E" />}
       </div>
 
       {/* Quick create */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Quick create</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Quick create</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 14 }}>
         {Object.entries(DOC_TYPES).filter(([k])=>allowed.includes(k)).map(([k, t]) => (
           <button key={k} onClick={()=>startNewDoc(k, bizType)}
-            style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, border:'1px solid #EAE6DB', background:'#FAF8F4', cursor:'pointer', fontSize:12, color:'#1E2A4A' }}>
-            <t.icon size={13} color={t.color} />
+            style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 9px', borderRadius:7, border:`1px solid ${color}30`, background:`${color}08`, cursor:'pointer', fontSize:11, color:'#1E2A4A' }}>
+            <t.icon size={12} color={color} />
             {t.label}
           </button>
         ))}
       </div>
 
       {/* Recent docs */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Recent</div>
-      {recent.length === 0
-        ? <div style={{ fontSize: 12, color: '#ccc', padding: '8px 0' }}>No documents yet</div>
-        : recent.map(d => (
-            <div key={d.id} onClick={()=>openDoc(d)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderTop:'1px solid #F0EDE6', cursor:'pointer' }}>
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1E2A4A' }}>{d.number}</div>
-                <div style={{ fontSize: 11, color: '#aaa' }}>{DOC_TYPES[d.type]?.label || d.type}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Recent</div>
+      <div style={{ flex: 1 }}>
+        {recent.length === 0
+          ? <div style={{ fontSize: 12, color: '#ccc', padding: '6px 0' }}>No documents yet</div>
+          : recent.map(d => (
+              <div key={d.id} onClick={()=>openDoc(d)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderTop:'1px solid #F4F2EE', cursor:'pointer' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1E2A4A' }}>{d.number}</div>
+                  <div style={{ fontSize: 10.5, color: '#bbb' }}>{DOC_TYPES[d.type]?.label || d.type}</div>
+                </div>
+                <div style={{ fontSize: 12, color: '#555', fontWeight: 600 }}>{cur(d.total || 0)}</div>
               </div>
-              <div style={{ fontSize: 12, color: '#1E2A4A', fontWeight: 600 }}>{cur(d.total || 0)}</div>
-            </div>
-          ))
-      }
+            ))
+        }
+      </div>
     </div>
   );
 }
@@ -2428,10 +2580,21 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const cur = (n) => currency(n, cc.currency);
 
   const BIZ_META = {
-    trading:       { label: 'Trading',              icon: '🛒', color: '#C9A24B' },
-    manufacturing: { label: 'Manufacturing',         icon: '🏭', color: '#1E2A4A' },
-    service:       { label: 'Services / MEP Suite',  icon: '🔧', color: '#1E7A9A' },
+    trading:       { label: 'Trading',       icon: '🛒', color: '#1A7A3E' },
+    manufacturing: { label: 'Manufacturing', icon: '🏭', color: '#C9752A' },
+    service:       { label: 'MEP / Service', icon: '🔧', color: '#1E7A9A' },
+    fmamc:         { label: 'FM / AMC',      icon: '🏢', color: '#0E9DB5' },
   };
+
+  // ── Payment due date alerts ──────────────────────────────────────────────────
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const weekStr  = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const dueDocs  = documents.filter(d =>
+    ['invoice', 'purchasebill'].includes(d.type) && d.status === 'approved' && d.dueDate
+  );
+  const overdueDocs  = dueDocs.filter(d => d.dueDate < todayStr);
+  const dueSoonDocs  = dueDocs.filter(d => d.dueDate >= todayStr && d.dueDate <= weekStr);
+  const allAlerts    = [...overdueDocs, ...dueSoonDocs];
 
   return (
     <div style={styles.page}>
@@ -2440,10 +2603,58 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
         <p style={styles.muted}>{isMultiBiz ? `${activeTypes.length} business activities running` : `Here's what's happening across your business.`}</p>
       </div>
 
+      {/* ── Payment Due Alerts ───────────────────────────────────────────────── */}
+      {allAlerts.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+            <Bell size={15} color="#B5453A" />
+            <span style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>Payment Alerts</span>
+            <span style={{ fontSize: 12, color: '#888' }}>— due this week or overdue</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {overdueDocs.map(d => {
+              const daysOver = Math.floor((new Date(todayStr) - new Date(d.dueDate)) / 86400000);
+              const party = d.type === 'invoice'
+                ? customers.find(c => c.id === d.customerId)?.name
+                : vendors.find(v => v.id === d.customerId)?.name;
+              return (
+                <div key={d.id} onClick={() => openDoc(d)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#FFF5F5', border: '1px solid #FCA5A5', borderRadius: 8, cursor: 'pointer', flexWrap: 'wrap' }}>
+                  <AlertTriangle size={13} color="#B91C1C" />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#B91C1C', minWidth: 80 }}>OVERDUE {daysOver}d</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#C9A24B' }}>{d.number}</span>
+                  <span style={{ fontSize: 12, color: '#555' }}>Due: {d.dueDate}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: d.type === 'invoice' ? '#1A7A3E' : '#B91C1C' }}>{d.type === 'invoice' ? '↑ Receivable' : '↓ Payable'}</span>
+                  <span style={{ fontSize: 12, color: '#444' }}>{party || d.partyName || '—'}</span>
+                  <span style={{ fontSize: 12, color: '#888' }}>{cur(d.items ? d.items.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.rate)||0), 0) : 0)}</span>
+                </div>
+              );
+            })}
+            {dueSoonDocs.map(d => {
+              const daysLeft = Math.ceil((new Date(d.dueDate) - new Date(todayStr)) / 86400000);
+              const party = d.type === 'invoice'
+                ? customers.find(c => c.id === d.customerId)?.name
+                : vendors.find(v => v.id === d.customerId)?.name;
+              return (
+                <div key={d.id} onClick={() => openDoc(d)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 8, cursor: 'pointer', flexWrap: 'wrap' }}>
+                  <Clock size={13} color="#C9A24B" />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', minWidth: 80 }}>{daysLeft === 0 ? 'DUE TODAY' : `${daysLeft}d left`}</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#C9A24B' }}>{d.number}</span>
+                  <span style={{ fontSize: 12, color: '#555' }}>Due: {d.dueDate}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: d.type === 'invoice' ? '#1A7A3E' : '#B91C1C' }}>{d.type === 'invoice' ? '↑ Receivable' : '↓ Payable'}</span>
+                  <span style={{ fontSize: 12, color: '#444' }}>{party || d.partyName || '—'}</span>
+                  <span style={{ fontSize: 12, color: '#888' }}>{cur(d.items ? d.items.reduce((s, it) => s + (parseFloat(it.qty)||0)*(parseFloat(it.rate)||0), 0) : 0)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── MULTI-BUSINESS: column view ─────────────────────────────────────── */}
       {isMultiBiz ? (
         <>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 24 }}>
+          {/* ── Top: one column per business type ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, minmax(220px, 1fr))`, gap: 14, marginBottom: 24, overflowX: 'auto' }}>
             {activeTypes.map(bt => (
               <ActivityColumn
                 key={bt}
@@ -2467,14 +2678,100 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             ))}
           </div>
 
-          {/* Shared accounts summary */}
-          <div style={styles.dashSection}>Accounts (shared)</div>
-          <div style={styles.statGrid}>
-            <StatCard label="Cash received" value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
-            <StatCard label="Cash paid" value={cur(stats.totalPaid)} accent="#B91C1C" sub="payment vouchers" />
-            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)} accent="#C9A24B" />
-            <StatCard label="Customers" value={customers.length} accent="#1E2A4A" sub="registered" />
+          {/* ── Sales dept data by division ── */}
+          <div style={styles.dashSection}>Sales — by Division</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, 1fr)`, gap: 12, marginBottom: 20 }}>
+            {activeTypes.map(bt => {
+              const bm = BIZ_META[bt] || { label: bt, color: '#888', icon: '📁' };
+              const bd = documents.filter(d => (d.bizType || 'trading') === bt);
+              const invoiced    = bd.filter(d => d.type === 'invoice').reduce((s, d) => s + (d.total || 0), 0);
+              const outstanding = bd.filter(d => d.type === 'invoice' && d.status !== 'paid').reduce((s, d) => s + (d.total || 0), 0);
+              const quotes      = bd.filter(d => d.type === 'quotation').length;
+              return (
+                <div key={bt} style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: `3px solid ${bm.color}`, borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: bm.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{bm.icon} {bm.label}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Invoiced</span>
+                      <span style={{ fontWeight: 700, color: '#1E2A4A' }}>{cur(invoiced)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Receivable</span>
+                      <span style={{ fontWeight: 700, color: '#B5453A' }}>{cur(outstanding)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Quotations</span>
+                      <span style={{ fontWeight: 600, color: '#555' }}>{quotes}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
+
+          {/* ── Purchase dept data by division ── */}
+          <div style={styles.dashSection}>Purchase — by Division</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeTypes.length}, 1fr)`, gap: 12, marginBottom: 20 }}>
+            {activeTypes.map(bt => {
+              const bm = BIZ_META[bt] || { label: bt, color: '#888', icon: '📁' };
+              const bd = documents.filter(d => (d.bizType || 'trading') === bt);
+              const purchased = bd.filter(d => d.type === 'purchase').reduce((s, d) => s + (d.total || 0), 0);
+              const payable   = bd.filter(d => d.type === 'purchasebill' && d.status !== 'paid').reduce((s, d) => s + (d.total || 0), 0);
+              const pos       = bd.filter(d => d.type === 'purchase').length;
+              return (
+                <div key={bt} style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: `3px solid ${bm.color}`, borderRadius: 10, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: bm.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{bm.icon} {bm.label}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Purchased</span>
+                      <span style={{ fontWeight: 700, color: '#1E2A4A' }}>{cur(purchased)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>Payable</span>
+                      <span style={{ fontWeight: 700, color: '#B91C1C' }}>{cur(payable)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                      <span style={{ color: '#888' }}>POs raised</span>
+                      <span style={{ fontWeight: 600, color: '#555' }}>{pos}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Accounts summary (combined) ── */}
+          <div style={styles.dashSection}>Accounts</div>
+          <div style={styles.statGrid}>
+            <StatCard label="Cash received"      value={cur(stats.totalReceived)} accent="#1A7A3E" sub="receipt vouchers" />
+            <StatCard label="Cash paid"          value={cur(stats.totalPaid)}     accent="#B91C1C" sub="payment vouchers" />
+            <StatCard label="Petty cash balance" value={cur(stats.pcBalance)}     accent="#C9A24B" />
+            <StatCard label="Customers"          value={customers.length}         accent="#1E2A4A" sub="registered" />
+            <StatCard label="Vendors"            value={vendors.length}           accent="#6B5BAE" sub="registered" />
+          </div>
+
+          {/* ── Department trend chart (reuse same chart, multi-type aware) ── */}
+          <DeptChart
+            documents={documents}
+            productionOrders={productionOrders}
+            serviceOrders={serviceOrders}
+            activeTypes={activeTypes}
+            cur={cur}
+          />
+
+          {/* ── Recent documents (cross-type) ── */}
+          <div style={styles.sectionRow}>
+            <div className="serif" style={styles.h2}>Recent documents</div>
+            <button onClick={() => setView('documents')} style={styles.linkBtn}>View all</button>
+          </div>
+          {(() => {
+            const recentAll = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6);
+            return recentAll.length === 0
+              ? <div style={styles.emptyBox}>No documents yet.</div>
+              : <div style={styles.list}>
+                  {recentAll.map(d => <DocRow key={d.id} doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={businessInfo} showBizBadge={true} />)}
+                </div>;
+          })()}
         </>
       ) : (
         /* ── SINGLE BUSINESS: original layout ──────────────────────────────── */
@@ -2949,9 +3246,20 @@ const SECTION_VIEWS = {
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
+  shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
 };
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications }) {
+// Which views each biz-type accordion "owns" (for auto-open on navigation)
+const BIZ_SECTION_VIEWS = {
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','audit'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  service:       ['customers','enquiries','vendors','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  fmamc:         ['customers','enquiries','vendors','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers','audit'],
+  hr:            ['employees','payroll'],
+  admin:         ['staff','contracts','termslibrary'],
+};
+
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -2997,11 +3305,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   function CreateBtn({ docKey, bizType: btnBizType }) {
     const t = DOC_TYPES[docKey];
     if (!t) return null;
+    const Icon = t.icon;
     return (
       <button
         onClick={() => startNewDoc(docKey, btnBizType || activeTypes[0])}
-        style={{ ...styles.navItem, fontSize: 12.5, color: '#A9B0C9', paddingLeft: 28 }}>
-        <Plus size={13} strokeWidth={2} />{t.label}
+        style={{ ...styles.navItem }}>
+        <Icon size={17} strokeWidth={1.8} />{t.label}
       </button>
     );
   }
@@ -3034,6 +3343,71 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {children}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ── Top-level business-type accordion (multi-biz mode) ───────────────────
+  function BizSection({ bizType, defaultOpen, children }) {
+    const BIZ_CFG = {
+      trading:       { label: 'Trading',       color: '#1A7A3E', bg: 'rgba(26,122,62,0.10)' },
+      manufacturing: { label: 'Manufacturing', color: '#C9752A', bg: 'rgba(201,117,42,0.10)' },
+      service:       { label: 'MEP / Service', color: '#1E7A9A', bg: 'rgba(30,122,154,0.10)' },
+      fmamc:         { label: 'FM / AMC',      color: '#0E9DB5', bg: 'rgba(14,157,181,0.10)' },
+      hr:            { label: 'HR & Payroll',  color: '#7C3AED', bg: 'rgba(124,58,237,0.10)' },
+      admin:         { label: 'Admin',         color: '#374151', bg: 'rgba(55,65,81,0.10)'   },
+    };
+    const cfg = BIZ_CFG[bizType] || { label: bizType, color: '#6B7494', bg: 'rgba(107,116,148,0.10)' };
+    // Shared views appear in multiple sections — use activeBizContext to pick which one is active
+    const sectionsWithView = Object.keys(BIZ_SECTION_VIEWS).filter(bt =>
+      (BIZ_SECTION_VIEWS[bt] || []).includes(view)
+    );
+    const isSharedView = sectionsWithView.length > 1;
+    const viewInThisSection = sectionsWithView.includes(bizType);
+    // Type-guard: activeDocBizType might be an object due to legacy calls — treat non-strings as null
+    const docBizType = typeof activeDocBizType === 'string' ? activeDocBizType : null;
+    const hasActive =
+      (viewInThisSection && (!isMultiBiz || !isSharedView || activeBizContext === bizType)) ||
+      (view === 'doceditor' && (docBizType || activeTypes[0]) === bizType);
+    const [open, setOpen] = React.useState(defaultOpen ?? true);
+    // Latch open=true whenever this section becomes active, so it stays expanded
+    // even after view changes (e.g. navigating between modules in same section).
+    React.useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
+    const isOpen = hasActive || open;
+    return (
+      <div style={{ marginBottom: 2 }} onClick={() => onBizContextChange?.(bizType)}>
+        <button
+          onClick={() => { if (!hasActive) setOpen(o => !o); }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
+            cursor: 'pointer', padding: '8px 12px 8px 10px',
+            borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
+            color: isOpen ? cfg.color : '#6B7494',
+            fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+            transition: 'all 0.15s',
+          }}>
+          <span>{cfg.label}</span>
+          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {isOpen && (
+          <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Sub-section label inside a BizSection (non-collapsible, just a visual divider)
+  function SubLabel({ label }) {
+    return (
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
+        color: '#6B7494', padding: '7px 12px 2px 14px', marginTop: 3,
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        {label}
       </div>
     );
   }
@@ -3076,150 +3450,313 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
       <Brand />
 
-      {/* Top-level always-visible */}
+      {/* Dashboard — always at top */}
       <div style={{ ...styles.navGroup, marginBottom: 4 }}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
-        <NavBtn id="documents" label="All Documents" icon={FileText} />
       </div>
 
-      {/* Sales */}
-      <Section sectionKey="sales" label="Sales">
-        <NavBtn id="customers" label="Customers"    icon={Users} />
-        <NavBtn id="enquiries" label="Enquiries"    icon={FileSignature} />
-        {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
-        {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
-        <CreateBtn docKey="quotation" />
-      </Section>
+      {isMultiBiz ? (
+        /* ── MULTI-BIZ: accordion per business type ──────────────────────── */
+        <>
+          {/* All Documents — cross-type shortcut */}
+          <div style={{ padding: '2px 6px 6px' }}>
+            <NavBtn id="documents" label="All Documents" icon={FileText} />
+          </div>
 
-      {/* Accounts */}
-      <Section sectionKey="accounts" label="Accounts">
-        <CreateBtn docKey="invoice" />
-        <CreateBtn docKey="creditnote" />
-        <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
-        <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
-        {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
-        {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
-        {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
-        {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
-      </Section>
+          {/* One BizSection per active type */}
+          {activeTypes.map((bt, idx) => (
+            <BizSection key={bt} bizType={bt} defaultOpen={idx === 0}>
 
-      {/* Purchase */}
-      <Section sectionKey="purchase" label="Purchase">
-        <NavBtn id="vendors" label="Vendors" icon={Truck} />
-        <CreateBtn docKey="purchase" />
-        <CreateBtn docKey="purchasebill" />
-        <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
-        {showProduction && <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />}
-      </Section>
+              {/* ── TRADING ─────────────────────────────────────────── */}
+              {bt === 'trading' && <>
+                <SubLabel label="Sales" />
+                <NavBtn id="customers"       label="Customers"         icon={Users} />
+                <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
+                <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
+                <CreateBtn docKey="quotation"    bizType="trading" />
+                <CreateBtn docKey="invoice"      bizType="trading" />
+                <CreateBtn docKey="creditnote"   bizType="trading" />
+                <CreateBtn docKey="delivery"     bizType="trading" />
+                <CreateBtn docKey="packing_list" bizType="trading" />
 
-      {/* Stores — hidden for service companies */}
-      {showTrade && (
-        <Section sectionKey="stores" label="Stores">
-          {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
-          <CreateBtn docKey="delivery" />
-          <CreateBtn docKey="packing_list" />
-          <NavBtn id="stock"       label="Stock Position"      icon={ClipboardList} />
-          <NavBtn id="stockledger" label="Stock Ledger"        icon={FileText} />
-          <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
-          <NavBtn id="bincard"     label="Bin Card"            icon={ClipboardList} />
+                <SubLabel label="Purchase" />
+                <NavBtn id="vendors" label="Vendors" icon={Truck} />
+                <CreateBtn docKey="purchase"     bizType="trading" />
+                <CreateBtn docKey="purchasebill" bizType="trading" />
+                <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="items"       label="Items"                icon={Package} />
+                <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+              </>}
+
+              {/* ── MANUFACTURING ───────────────────────────────────── */}
+              {bt === 'manufacturing' && <>
+                <SubLabel label="Sales" />
+                <NavBtn id="customers"     label="Customers" icon={Users} />
+                <NavBtn id="enquiries"     label="Enquiries" icon={FileSignature} />
+                <NavBtn id="serviceorders" label="SAS"       icon={Briefcase} />
+                <CreateBtn docKey="quotation"  bizType="manufacturing" />
+                <CreateBtn docKey="invoice"    bizType="manufacturing" />
+                <CreateBtn docKey="creditnote" bizType="manufacturing" />
+
+                <SubLabel label="Purchase" />
+                <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
+                <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
+                <CreateBtn docKey="purchase"     bizType="manufacturing" />
+                <CreateBtn docKey="purchasebill" bizType="manufacturing" />
+                <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="items"        label="Items"                icon={Package} />
+                <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
+                <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
+
+                <SubLabel label="Engineering" />
+                <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
+                <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+
+                <SubLabel label="Production" />
+                <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+                <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+
+                <SubLabel label="Quality" />
+                <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
+                <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
+                <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
+                <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+                <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
+                <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
+                <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+              </>}
+
+              {/* ── MEP / SERVICE ────────────────────────────────────── */}
+              {(bt === 'service' || bt === 'fmamc') && <>
+                <SubLabel label="Sales" />
+                <NavBtn id="customers"   label="Customers"     icon={Users} />
+                <CreateBtn docKey="quotation"  bizType={bt} />
+                <CreateBtn docKey="invoice"    bizType={bt} />
+                <NavBtn id="rabilling"   label="RA Billing"    icon={FileMinus} />
+                <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+
+                <SubLabel label="Purchase" />
+                <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
+                <CreateBtn docKey="purchase"     bizType={bt} />
+                <CreateBtn docKey="purchasebill" bizType={bt} />
+                <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+
+                <SubLabel label="Site Operations" />
+                <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+                <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+                <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+                <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+                <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+                <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+                <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+
+                {bt === 'fmamc' && <>
+                  <SubLabel label="FM Suite" />
+                  <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
+                  <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
+                  <NavBtn id="pmschedules"   label="PM Schedules"    icon={ClipboardList} />
+                  <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
+                  <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
+                  <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
+                </>}
+
+                <SubLabel label="Compliance" />
+                <NavBtn id="hse"            label="HSE"              icon={Shield} />
+                <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
+                <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
+                <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
+                <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+
+                <SubLabel label="Accounts" />
+                <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+                <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+                {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+                {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+                {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+                {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+                <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+              </>}
+
+            </BizSection>
+          ))}
+        </>
+      ) : (
+        /* ── SINGLE BIZ: existing flat-section layout (unchanged) ──────── */
+        <>
+          <div style={{ ...styles.navGroup, marginBottom: 4 }}>
+            <NavBtn id="documents" label="All Documents" icon={FileText} />
+          </div>
+
+          {/* Sales */}
+          <Section sectionKey="sales" label="Sales">
+            <NavBtn id="customers" label="Customers"    icon={Users} />
+            <NavBtn id="enquiries" label="Enquiries"    icon={FileSignature} />
+            {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
+            {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
+            <CreateBtn docKey="quotation" />
+          </Section>
+
+          {/* Accounts */}
+          <Section sectionKey="accounts" label="Accounts">
+            <CreateBtn docKey="invoice" />
+            <CreateBtn docKey="creditnote" />
+            <NavBtn id="pettycash" label="Petty Cash"  icon={FileMinus} />
+            <NavBtn id="vouchers"  label="Vouchers"    icon={FileSignature} />
+            {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+            {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+            {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+            {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+            <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+          </Section>
+
+          {/* Purchase */}
+          <Section sectionKey="purchase" label="Purchase">
+            <NavBtn id="vendors" label="Vendors" icon={Truck} />
+            <CreateBtn docKey="purchase" />
+            <CreateBtn docKey="purchasebill" />
+            <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+            {showProduction && <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />}
+          </Section>
+
+          {/* Stores — trading/manufacturing only */}
+          {showTrade && (
+            <Section sectionKey="stores" label="Stores">
+              {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
+              <CreateBtn docKey="delivery" />
+              <CreateBtn docKey="packing_list" />
+              <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
+              <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
+              <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+              <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
+            </Section>
+          )}
+
+          {/* Scope of Work — service only */}
+          {showService && (
+            <Section sectionKey="scope" label="Scope of Work">
+              <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+            </Section>
+          )}
+
+          {/* MEP Suite */}
+          {showService && (
+            <Section sectionKey="site" label="MEP Suite">
+              <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+              <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+              <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+              <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
+              <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
+              <NavBtn id="hse"             label="HSE"                icon={Shield} />
+              <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
+              <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+              <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+              <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+              <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+              <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
+              <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
+            </Section>
+          )}
+
+          {/* Engineering */}
+          {showProduction && (
+            <Section sectionKey="engineering" label="Engineering">
+              <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
+              <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+            </Section>
+          )}
+
+          {/* Production */}
+          {showProduction && (
+            <Section sectionKey="production" label="Production">
+              <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+              <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+              <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+            </Section>
+          )}
+
+          {/* Quality */}
+          {showProduction && (
+            <Section sectionKey="quality" label="Quality">
+              <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
+              <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
+              <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
+              <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+              <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
+              <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
+              <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+            </Section>
+          )}
+
+          {/* FM / AMC */}
+          {showFMAMC && (
+            <Section sectionKey="fmamc" label="FM Suite">
+              <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
+              <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
+              <NavBtn id="pmschedules"   label="PM Schedules"    icon={ClipboardList} />
+              <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
+              <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
+              <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
+            </Section>
+          )}
+        </>
+      )}
+
+      {/* HR & Payroll */}
+      {isMultiBiz ? (
+        <BizSection bizType="hr" defaultOpen={false}>
+          <NavBtn id="employees" label="Employees" icon={Users} />
+          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
+        </BizSection>
+      ) : (
+        <Section sectionKey="hr" label="HR & Payroll">
+          <NavBtn id="employees" label="Employees" icon={Users} />
+          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
         </Section>
       )}
-
-      {/* Scope of Work — service companies only (replaces Item Master) */}
-      {showService && (
-        <Section sectionKey="scope" label="Scope of Work">
-          <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
-        </Section>
-      )}
-
-      {/* MEP Suite divider */}
-      {isMultiBiz && showService && (
-        <div style={{ fontSize: 10, fontWeight: 800, color: '#1E7A9A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid #EAE6DB' }}>🔧 Services / MEP Suite</div>
-      )}
-      {/* MEP Suite — service / MEP manpower companies */}
-      {showService && (
-        <Section sectionKey="site" label="MEP Suite">
-          <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-          <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-          <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-          <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
-          <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
-          <NavBtn id="hse"             label="HSE"                icon={Shield} />
-          <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
-          <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
-          <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-          <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-          <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-          <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-          <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
-          <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
-        </Section>
-      )}
-
-      {/* Manufacturing divider */}
-      {showProduction && (
-        <div style={{ fontSize: 10, fontWeight: 800, color: '#E07A3A', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '6px 14px 2px', marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.08)' }}>🏭 Manufacturing</div>
-      )}
-
-      {/* Engineering — manufacturing only (Item Master is in Stores) */}
-      {showProduction && (
-        <Section sectionKey="engineering" label="Engineering">
-          <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
-          <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
-        </Section>
-      )}
-
-      {/* Production — manufacturing only */}
-      {showProduction && (
-        <Section sectionKey="production" label="Production">
-          <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
-          <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
-          <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
-        </Section>
-      )}
-
-      {/* Quality — manufacturing only */}
-      {showProduction && (
-        <Section sectionKey="quality" label="Quality">
-          <NavBtn id="isoprinciples"  label="ISO Principles"  icon={CheckCircle} />
-          <NavBtn id="deptprocedures" label="Dept Procedures" icon={BookOpen} />
-          <NavBtn id="inprocessqa"    label="Inprocess QA"    icon={CheckSquare} />
-          <NavBtn id="qatesting"      label="QA Testing"      icon={CheckCircle} />
-          <NavBtn id="capa"           label="CAPA"            icon={AlertTriangle} />
-          <NavBtn id="internalaudit"  label="Internal Audit"  icon={ClipboardList} />
-          <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
-        </Section>
-      )}
-
-      {/* FM / AMC */}
-      {showFMAMC && (
-        <div style={{ fontSize:10, fontWeight:800, color:'#1AADCE', textTransform:'uppercase', letterSpacing:'0.1em', padding:'6px 14px 2px', marginTop:4, borderTop:'1px solid rgba(255,255,255,0.08)' }}>🏢 FM / AMC</div>
-      )}
-      {showFMAMC && (
-        <Section sectionKey="fmamc" label="FM Suite">
-          <NavBtn id="fmkpi"         label="KPI Dashboard"   icon={BarChart2} />
-          <NavBtn id="assetregister" label="Asset Register"   icon={Package} />
-          <NavBtn id="pmschedules"   label="PM Schedules"     icon={ClipboardList} />
-          <NavBtn id="fmworkorders"  label="Work Orders"      icon={Wrench} />
-          <NavBtn id="amccontracts"  label="AMC Contracts"    icon={FileSignature} />
-          <NavBtn id="fmspareparts"  label="Spare Parts"      icon={Package} />
-        </Section>
-      )}
-
-      {/* HR */}
-      <Section sectionKey="hr" label="HR & Payroll">
-        <NavBtn id="employees" label="Employees" icon={Users} />
-        <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
-      </Section>
 
       {/* Admin */}
-      {userRole === 'admin' && (
+      {userRole === 'admin' && (isMultiBiz ? (
+        <BizSection bizType="admin" defaultOpen={false}>
+          <NavBtn id="staff" label="Staff" icon={Shield} />
+          {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
+          {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+        </BizSection>
+      ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
         </Section>
-      )}
+      ))}
 
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} unreadCount={unreadCount} onShowNotifications={onShowNotifications} />
     </div>
@@ -4666,7 +5203,7 @@ const PETTY_CATEGORIES = [
   'Printing & Stationery', 'Miscellaneous',
 ];
 
-function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
+function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printVoucher, setPrintVoucher] = useState(null);
@@ -4678,10 +5215,17 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
   const fmt = makeFmt(businessInfo);
   const sym = cc.currency;
 
-  const entries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
+  // Full entries array — used for save/delete operations
+  const allEntries = Array.isArray(pettyCash.entries) ? pettyCash.entries : [];
+  // Display: filter by current division in multi-biz mode
+  const entries = isMultiBiz ? allEntries.filter(e => (e.bizType || 'trading') === currentBizType) : allEntries;
+  // Opening balance: per-division in multi-biz, shared in single-biz
+  const openingBalance = isMultiBiz
+    ? (pettyCash?.openingBalances?.[currentBizType] ?? 0)
+    : (pettyCash?.openingBalance ?? 0);
 
   const rows = entries.slice().sort((a, b) => (a.date > b.date ? 1 : -1)).map((entry, i, arr) => {
-    const prevBal = i === 0 ? (pettyCash.openingBalance ?? 0) : arr[i - 1].__balance;
+    const prevBal = i === 0 ? openingBalance : arr[i - 1].__balance;
     entry.__balance = prevBal + (entry.credit || 0) - (entry.debit || 0);
     return entry;
   });
@@ -4693,31 +5237,38 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
   }
 
   function saveEntry(entry) {
-    const existing = entries.find(e => e.id === entry.id);
+    const existing = allEntries.find(e => e.id === entry.id);
     let updated;
-    if (existing) { updated = entries.map(e => e.id === entry.id ? entry : e); }
-    else { updated = [...entries, { ...entry, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
-    setPettyCash({ openingBalance: pettyCash.openingBalance ?? 0, entries: updated });
+    if (existing) {
+      updated = allEntries.map(e => e.id === entry.id ? { ...entry, bizType: e.bizType || currentBizType } : e);
+    } else {
+      updated = [...allEntries, { ...entry, bizType: currentBizType, id: Date.now().toString(), status: 'draft', rejectionNote: '' }];
+    }
+    setPettyCash({ ...pettyCash, entries: updated });
     setShowForm(false); setEditing(null);
   }
 
   function updateEntryStatus(id, patch) {
-    const updated = entries.map(e => e.id === id ? { ...e, ...patch } : e);
+    const updated = allEntries.map(e => e.id === id ? { ...e, ...patch } : e);
     setPettyCash({ ...pettyCash, entries: updated });
   }
 
   function deleteEntry(id) {
     if (!window.confirm('Delete this entry?')) return;
-    setPettyCash({ ...pettyCash, entries: entries.filter(e => e.id !== id) });
+    setPettyCash({ ...pettyCash, entries: allEntries.filter(e => e.id !== id) });
   }
 
   function saveOB() {
     const val = parseFloat(obInput) || 0;
-    setPettyCash({ ...pettyCash, openingBalance: val });
+    if (isMultiBiz) {
+      setPettyCash({ ...pettyCash, openingBalances: { ...(pettyCash.openingBalances || {}), [currentBizType]: val } });
+    } else {
+      setPettyCash({ ...pettyCash, openingBalance: val });
+    }
     setEditingOB(false);
   }
 
-  const balance = rows.length > 0 ? rows[rows.length - 1].__balance : (pettyCash.openingBalance ?? 0);
+  const balance = rows.length > 0 ? rows[rows.length - 1].__balance : openingBalance;
 
   return (
     <div style={styles.page}>
@@ -4751,8 +5302,8 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
           </>
         ) : (
           <>
-            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>{fmt(pettyCash.openingBalance ?? 0)}</span>
-            {canEdit && <button style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }} onClick={() => { setObInput(pettyCash.openingBalance ?? 0); setEditingOB(true); }}>Edit</button>}
+            <span style={{ fontWeight: 600, color: '#1E2A4A' }}>{fmt(openingBalance)}</span>
+            {canEdit && <button style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }} onClick={() => { setObInput(openingBalance); setEditingOB(true); }}>Edit</button>}
           </>
         )}
       </div>
@@ -4804,7 +5355,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole }) {
         <PettyCashVoucherPrint entry={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
       )}
       {showStatement && (
-        <StatementPanel rows={rows} openingBalance={pettyCash.openingBalance ?? 0} businessInfo={businessInfo} onClose={() => setShowStatement(false)} />
+        <StatementPanel rows={rows} openingBalance={openingBalance} businessInfo={businessInfo} onClose={() => setShowStatement(false)} />
       )}
     </div>
   );
@@ -5040,7 +5591,7 @@ const VOUCHER_ACCOUNT_HEADS = [
   'Professional Fees', 'Loan', 'Capital', 'Other',
 ];
 
-function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, userRole }) {
+function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, documents = [], userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [tab, setTab] = useState('payment');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -5049,16 +5600,19 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   const [statementParty, setStatementParty] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'accounts';
 
+  // Full list — used for save/delete so all division data is preserved
   const list = Array.isArray(vouchers) ? vouchers : [];
-  const allParties = [...new Set(list.map(v => v.party).filter(Boolean))].sort();
-  const filtered = list
+  // Display list — filtered by current division in multi-biz mode
+  const displayList = isMultiBiz ? list.filter(v => (v.bizType || 'trading') === currentBizType) : list;
+  const allParties = [...new Set(displayList.map(v => v.party).filter(Boolean))].sort();
+  const filtered = displayList
     .filter(v => v.type === tab)
     .filter(v => !partyFilter || v.party === partyFilter)
     .sort((a, b) => (a.date > b.date ? -1 : 1));
 
   function genVoucherNo(type) {
     const prefix = type === 'payment' ? 'PV' : 'RV';
-    const nums = list.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = displayList.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
     return prefix + '-' + String(next).padStart(3, '0');
   }
@@ -5067,7 +5621,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
     const existing = list.find(x => x.id === v.id);
     let updated;
     if (existing) { updated = list.map(x => x.id === v.id ? v : x); }
-    else { updated = [...list, { ...v, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
+    else { updated = [...list, { ...v, bizType: currentBizType, id: Date.now().toString(), status: 'draft', rejectionNote: '' }]; }
     setVouchers(updated);
     setShowForm(false); setEditing(null);
   }
@@ -5159,7 +5713,15 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
             {filtered.map(v => (
               <tr key={v.id}>
                 <td style={styles.td}>{v.date}</td>
-                <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{v.voucherNo}</span></td>
+                <td style={styles.td}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{v.voucherNo}</span>
+                  {v.voucherSubtype === 'nonorder' && (
+                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: '#888', background: '#F0F0F0', borderRadius: 3, padding: '1px 5px' }}>NON-ORDER</span>
+                  )}
+                  {v.linkedDocNo && (
+                    <div style={{ fontSize: 10.5, color: '#666', marginTop: 2 }}>→ {v.linkedDocNo}</div>
+                  )}
+                </td>
                 <td style={styles.td}>{v.party}</td>
                 <td style={styles.td}>{v.accountHead}</td>
                 <td style={styles.td}><span style={{ background: '#F5F3EE', borderRadius: 4, padding: '2px 7px', fontSize: 11.5 }}>{v.mode}</span></td>
@@ -5183,7 +5745,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
       </div>
 
       {showForm && (
-        <VoucherForm voucher={editing} customers={customers} vendors={vendors} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <VoucherForm voucher={editing} customers={customers} vendors={vendors} documents={documents} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printVoucher && (
         <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
@@ -5195,31 +5757,86 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   );
 }
 
-function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
+function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onClose }) {
   const [form, setForm] = useState({
-    id: voucher && voucher.id ? voucher.id : '',
-    type: voucher && voucher.type ? voucher.type : 'payment',
-    voucherNo: voucher && voucher.voucherNo ? voucher.voucherNo : '',
-    date: voucher && voucher.date ? voucher.date : new Date().toISOString().split('T')[0],
-    party: voucher && voucher.party ? voucher.party : '',
-    accountHead: voucher && voucher.accountHead ? voucher.accountHead : 'Cash',
-    amount: voucher && voucher.amount ? voucher.amount : '',
-    mode: voucher && voucher.mode ? voucher.mode : 'Cash',
-    refNo: voucher && voucher.refNo ? voucher.refNo : '',
-    narration: voucher && voucher.narration ? voucher.narration : '',
+    id:           voucher?.id || '',
+    type:         voucher?.type || 'payment',
+    voucherSubtype: voucher?.voucherSubtype || 'order', // 'order' | 'nonorder'
+    linkedDocNo:  voucher?.linkedDocNo || '',
+    voucherNo:    voucher?.voucherNo || '',
+    date:         voucher?.date || new Date().toISOString().split('T')[0],
+    party:        voucher?.party || '',
+    accountHead:  voucher?.accountHead || 'Cash',
+    amount:       voucher?.amount || '',
+    mode:         voucher?.mode || 'Cash',
+    refNo:        voucher?.refNo || '',
+    narration:    voucher?.narration || '',
   });
+  const [linkError, setLinkError] = useState('');
 
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); if (k === 'linkedDocNo') setLinkError(''); }
 
   const parties = [...customers.map(c => c.name), ...vendors.map(v => v.name)];
 
+  // Invoices / POs available for linking (receipt → invoices; payment → purchase bills)
+  const linkableDocs = documents.filter(d =>
+    form.type === 'receipt'
+      ? d.type === 'invoice'
+      : d.type === 'purchasebill' || d.type === 'purchaseorder'
+  );
+  const linkableNos = [...new Set(linkableDocs.map(d => d.number || d.docNumber || d.id).filter(Boolean))];
+
+  function validateLink() {
+    if (form.voucherSubtype !== 'order' || !form.linkedDocNo.trim()) {
+      setLinkError('');
+      return true;
+    }
+    const linked = linkableDocs.find(d =>
+      (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()
+    );
+    if (!linked) {
+      setLinkError('Document not found. Check the invoice/PO number.');
+      return false;
+    }
+    if (linked.status !== 'approved') {
+      const label = form.type === 'receipt' ? 'Invoice' : 'Purchase bill / PO';
+      setLinkError(`${label} "${form.linkedDocNo}" is not approved yet. Only approved documents can be linked to a voucher.`);
+      return false;
+    }
+    setLinkError('');
+    return true;
+  }
+
   function handleSave() {
     if (!form.date || !form.amount || !form.party) { alert('Date, party and amount are required.'); return; }
+    if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !validateLink()) return;
     onSave({ ...form, amount: parseFloat(form.amount) || 0 });
   }
 
+  const isReceipt = form.type === 'receipt';
+
   return (
-    <Modal title={(form.type === 'payment' ? 'Payment' : 'Receipt') + ' Voucher'} onClose={onClose} wide>
+    <Modal title={(isReceipt ? 'Receipt' : 'Payment') + ' Voucher'} onClose={onClose} wide>
+      {/* Order vs Non-order toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, background: '#F5F3EE', borderRadius: 8, padding: 4 }}>
+        <button
+          type="button"
+          onClick={() => set('voucherSubtype', 'order')}
+          style={{ flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            background: form.voucherSubtype === 'order' ? '#1E2A4A' : 'transparent',
+            color: form.voucherSubtype === 'order' ? '#fff' : '#888' }}>
+          {isReceipt ? '📄 Against Invoice / PO' : '📄 Against Purchase Bill / PO'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { set('voucherSubtype', 'nonorder'); set('linkedDocNo', ''); setLinkError(''); }}
+          style={{ flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            background: form.voucherSubtype === 'nonorder' ? '#1E2A4A' : 'transparent',
+            color: form.voucherSubtype === 'nonorder' ? '#fff' : '#888' }}>
+          {isReceipt ? '💵 Non-order Receipt' : '💵 Non-order Payment'}
+        </button>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Type</label>
@@ -5241,6 +5858,41 @@ function VoucherForm({ voucher, customers, vendors, onSave, onClose }) {
           <input list="voucher-party-list" value={form.party} onChange={e => set('party', e.target.value)} style={styles.input} placeholder="Customer / Vendor / Name" />
           <datalist id="voucher-party-list">{parties.map(p => <option key={p} value={p} />)}</datalist>
         </div>
+
+        {/* Order-linked doc number field — only shown for 'order' subtype */}
+        {form.voucherSubtype === 'order' && (
+          <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+            <label style={styles.label}>{isReceipt ? 'Invoice No / PO No' : 'Purchase Bill No / PO No'} <span style={{ color: '#B91C1C' }}>*</span></label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  list="voucher-doc-list"
+                  value={form.linkedDocNo}
+                  onChange={e => set('linkedDocNo', e.target.value)}
+                  onBlur={validateLink}
+                  style={{ ...styles.input, borderColor: linkError ? '#B91C1C' : undefined }}
+                  placeholder={isReceipt ? 'e.g. INV-001' : 'e.g. PB-001 / PO-001'}
+                />
+                <datalist id="voucher-doc-list">{linkableNos.map(n => <option key={n} value={n} />)}</datalist>
+                {linkError && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#B91C1C', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <AlertTriangle size={13} /> {linkError}
+                  </div>
+                )}
+                {!linkError && form.linkedDocNo.trim() && (() => {
+                  const linked = linkableDocs.find(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim());
+                  if (linked?.status === 'approved') return (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#1A7A3E', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <CheckCircle size={13} /> Approved — voucher can proceed
+                    </div>
+                  );
+                  return null;
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={styles.formGroup}>
           <label style={styles.label}>Account Head</label>
           <select value={form.accountHead} onChange={e => set('accountHead', e.target.value)} style={styles.input}>
@@ -5533,7 +6185,7 @@ function computeStock(stockLedger, items) {
   return map;
 }
 
-function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo }) {
+function StockView({ items, stockLedger: allSL, setStockLedger, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [search, setSearch] = useState('');
   const [showAdj, setShowAdj] = useState(false);
   const [adjItem, setAdjItem] = useState('');
@@ -5543,6 +6195,8 @@ function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo 
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
+  // Filter stock ledger by current division in multi-biz mode
+  const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
   const stockMap = computeStock(stockLedger, items);
 
   const rows = Object.values(stockMap)
@@ -5568,6 +6222,7 @@ function StockView({ items, stockLedger, setStockLedger, userRole, businessInfo 
       sourceNumber: 'Manual Adj.',
       notes: adjNote,
       createdAt: Date.now(),
+      bizType: currentBizType,
     };
     setStockLedger(prev => [...prev, entry]);
     setShowAdj(false); setAdjItem(''); setAdjQty(''); setAdjNote('');
@@ -5757,9 +6412,12 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 // ─────────────────────────────────────────────
 // HR / PAYROLL MODULE
 // ─────────────────────────────────────────────
-function BinCard({ items, stockLedger, businessInfo }) {
+function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
   const [useLHBin, setUseLHBin] = React.useState(!!businessInfo?.letterhead);
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
+  // Filter by current division in multi-biz mode
+  const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
+  const storeIssues = isMultiBiz ? (allSIV || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allSIV || []);
   const item = items.find(i => i.id === selectedItemId);
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
@@ -5776,8 +6434,12 @@ function BinCard({ items, stockLedger, businessInfo }) {
     const qty = parseFloat(e.qty) || 0;
     const isIn = e.type === 'in';
     running = isIn ? running + qty : running - qty;
-    return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running };
+    const siv = e.sourceType === 'siv' ? storeIssues.find(s => s.id === e.sourceId) : null;
+    return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running, siv };
   });
+
+  // SIV rows that appear in this item's card (for print signature blocks)
+  const sivRows = rows.filter(r => r.siv);
 
   const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -5855,19 +6517,79 @@ function BinCard({ items, stockLedger, businessInfo }) {
             <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No stock movements for this item yet.</td></tr>
           )}
           {rows.map((e, i) => (
-            <tr key={e.id || i} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
-              <td style={styles.td}>{e.date}</td>
-              <td style={{ ...styles.td, fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{e.sourceNumber || '—'}</td>
-              <td style={styles.td}><span style={{ fontSize: 11, background: '#F0EDE6', borderRadius: 4, padding: '2px 7px' }}>{SOURCE_LABEL[e.sourceType] || e.sourceType}</span></td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#1A7A3E', fontWeight: e.inQty > 0 ? 700 : 400 }}>{e.inQty > 0 ? e.inQty : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#B91C1C', fontWeight: e.outQty > 0 ? 700 : 400 }}>{e.outQty > 0 ? e.outQty : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: e.balance <= 0 ? '#B91C1C' : '#1E2A4A' }}>{e.balance}</td>
-              <td style={{ ...styles.td, textAlign: 'right', color: '#555' }}>{e.rate ? fmt(e.rate) : '—'}</td>
-              <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{e.rate ? fmt(e.balance * e.rate) : '—'}</td>
-            </tr>
+            <React.Fragment key={e.id || i}>
+              <tr style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
+                <td style={styles.td}>{e.date}</td>
+                <td style={{ ...styles.td, fontFamily: 'monospace', fontSize: 12, color: '#C9A24B' }}>{e.sourceNumber || '—'}</td>
+                <td style={styles.td}><span style={{ fontSize: 11, background: '#F0EDE6', borderRadius: 4, padding: '2px 7px' }}>{SOURCE_LABEL[e.sourceType] || e.sourceType}</span></td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#1A7A3E', fontWeight: e.inQty > 0 ? 700 : 400 }}>{e.inQty > 0 ? e.inQty : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#B91C1C', fontWeight: e.outQty > 0 ? 700 : 400 }}>{e.outQty > 0 ? e.outQty : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', fontWeight: 700, color: e.balance <= 0 ? '#B91C1C' : '#1E2A4A' }}>{e.balance}</td>
+                <td style={{ ...styles.td, textAlign: 'right', color: '#555' }}>{e.rate ? fmt(e.rate) : '—'}</td>
+                <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{e.rate ? fmt(e.balance * e.rate) : '—'}</td>
+              </tr>
+              {/* Screen only: show Issued By / Received By for SIV entries */}
+              {e.siv && (e.siv.issuedBy || e.siv.receivedBy) && (
+                <tr className="no-print" style={{ background: i % 2 === 0 ? '#F9FFF9' : '#F4FBF4' }}>
+                  <td colSpan={8} style={{ ...styles.td, paddingTop: 3, paddingBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 24, fontSize: 11.5, color: '#444' }}>
+                      {e.siv.issuedBy && (
+                        <span>
+                          <span style={{ color: '#888', marginRight: 4 }}>Issued By:</span>
+                          <strong>{e.siv.issuedBy}</strong>
+                          <span style={{ color: '#888', marginLeft: 6 }}>{e.siv.date}</span>
+                        </span>
+                      )}
+                      {e.siv.receivedBy && (
+                        <span>
+                          <span style={{ color: '#888', marginRight: 4 }}>Received By:</span>
+                          <strong>{e.siv.receivedBy}</strong>
+                          <span style={{ color: '#888', marginLeft: 6 }}>{e.siv.date}</span>
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
+      {/* Print: signature blocks — one row per SIV, or generic if no SIVs */}
+      <div className="print-only" style={{ marginTop: 40, borderTop: '1px solid #CCC', paddingTop: 20 }}>
+        {sivRows.length > 0 ? sivRows.map((r, idx) => (
+          <div key={r.id || idx} style={{ marginBottom: 24 }}>
+            {sivRows.length > 1 && (
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 10 }}>
+                {r.sourceNumber} — {r.date}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {[
+                { label: 'Prepared By',  name: '',                     date: r.date },
+                { label: 'Issued By',    name: r.siv?.issuedBy || '',  date: r.siv?.date || r.date },
+                { label: 'Approved By',  name: '',                     date: r.date },
+                { label: 'Received By',  name: r.siv?.receivedBy || '', date: r.siv?.date || r.date },
+              ].map(({ label, name, date }) => (
+                <div key={label} style={{ textAlign: 'center', minWidth: 130 }}>
+                  {name && <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', marginBottom: 2 }}>{name}</div>}
+                  {name && <div style={{ fontSize: 10, color: '#666', marginBottom: 6 }}>{date}</div>}
+                  <div style={{ borderTop: '1px solid #333', paddingTop: 4, fontSize: 11 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {['Prepared By', 'Issued By', 'Approved By', 'Received By'].map(label => (
+              <div key={label} style={{ textAlign: 'center', minWidth: 130 }}>
+                <div style={{ borderTop: '1px solid #333', paddingTop: 4, fontSize: 11 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {useLHBin && businessInfo?.letterheadFooter && (
         <div className="lh-pad-footer print-only" style={{ background: '#fff' }}>
           <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width:'100%', display:'block' }} />
@@ -5880,14 +6602,15 @@ function BinCard({ items, stockLedger, businessInfo }) {
 
 // ─── GRN Print ─────────────────────────────────────────────────
 function GRNPrint({ grn, businessInfo, onClose }) {
+  const isTrading = businessInfo?.companyType === 'trading';
   const useLH = !!(businessInfo?.letterhead);
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
@@ -5901,12 +6624,12 @@ function GRNPrint({ grn, businessInfo, onClose }) {
           <div><strong>GRN No:</strong> {grn.number}</div>
           <div><strong>Date:</strong> {grn.date}</div>
           <div><strong>Vendor:</strong> {grn.vendorName || '—'}</div>
-          <div><strong>PO Ref:</strong> {grn.poRef || grn.poId || '—'}</div>
+          <div><strong>PO Ref:</strong> {grn.poNumber || grn.poRef || '—'}</div>
         </div>
         <table style={{width:'100%',borderCollapse:'collapse',marginBottom:16}}>
           <thead>
             <tr style={{background:'#1E2A4A',color:'#fff'}}>
-              {['#','Item','Ordered Qty','Received Qty','QA Status','Remarks'].map(h => (
+              {(isTrading ? ['#','Item','Ordered Qty','Received Qty','Visual Inspection','Remarks'] : ['#','Item','Ordered Qty','Received Qty','QA Status','Remarks']).map(h => (
                 <th key={h} style={{padding:'6px 8px',textAlign:'left',fontSize:11}}>{h}</th>
               ))}
             </tr>
@@ -5918,7 +6641,9 @@ function GRNPrint({ grn, businessInfo, onClose }) {
                 <td style={{padding:'5px 8px'}}>{l.itemName || l.itemId}</td>
                 <td style={{padding:'5px 8px',textAlign:'center'}}>{l.orderedQty || 0}</td>
                 <td style={{padding:'5px 8px',textAlign:'center'}}>{l.receivedQty || 0}</td>
-                <td style={{padding:'5px 8px'}}>{l.qaStatus || '—'}</td>
+                <td style={{padding:'5px 8px'}}>
+                  {l.qaStatus === 'ok' ? '✅ OK' : l.qaStatus === 'notok' ? '❌ Not OK' : l.qaStatus || '—'}
+                </td>
                 <td style={{padding:'5px 8px'}}>{l.remarks || ''}</td>
               </tr>
             ))}
@@ -5940,12 +6665,12 @@ function GRNPrint({ grn, businessInfo, onClose }) {
 function StoreIssuePrint({ siv, businessInfo, onClose }) {
   const useLH = !!(businessInfo?.letterhead);
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
@@ -5998,10 +6723,13 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
   );
 }
 
-function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [] }) {
+function StoreIssueList({ storeIssues: allIssues, setStoreIssues, items, setStockLedger, userRole, businessInfo, productionOrders = [], setNotifications, user, currentBizType = 'trading', isMultiBiz = false }) {
   const [editing, setEditing] = useState(null);
   const [printSiv, setPrintSiv] = useState(null);
   const canEdit = ['admin','manager','inventory','purchase'].includes(userRole);
+
+  // Display: filter by current division; save operations use functional updater on full array
+  const storeIssues = isMultiBiz ? (allIssues || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allIssues || []);
 
   function nextNumber() {
     const nums = storeIssues.map(s=>parseInt((s.sivNumber||'').replace(/\D/g,''))||0);
@@ -6014,13 +6742,14 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
 
   function saveSIV(siv) {
     const isNew = !storeIssues.find(s=>s.id===siv.id);
-    const rec = { ...siv, id:siv.id||crypto.randomUUID(), approvalStatus:siv.approvalStatus||'draft', approvalNote:siv.approvalNote||'', updatedAt:Date.now() };
+    const rec = { ...siv, bizType: currentBizType, id:siv.id||crypto.randomUUID(), approvalStatus:siv.approvalStatus||'draft', approvalNote:siv.approvalNote||'', updatedAt:Date.now() };
     // Create OUT stock ledger entries
     const now = new Date().toISOString();
     const newEntries = (rec.lines||[]).filter(l=>l.itemId&&l.qty>0).map(l=>({
       id: crypto.randomUUID(), date: rec.date, itemId: l.itemId, itemName: l.itemName,
       type: 'out', qty: parseFloat(l.qty)||0, rate: parseFloat(l.rate)||0,
       sourceType: 'siv', sourceId: rec.id, sourceNumber: rec.sivNumber, createdAt: now,
+      bizType: currentBizType,
     }));
     setStockLedger(prev => [...prev.filter(e=>e.sourceId!==rec.id), ...newEntries]);
     setStoreIssues(prev => isNew ? [rec,...prev] : prev.map(s=>s.id===rec.id?rec:s));
@@ -6034,7 +6763,36 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
   }
 
   function updateApproval(id, patch) {
-    setStoreIssues(prev=>prev.map(s=>s.id===id?{...s,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:s));
+    setStoreIssues(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      // Push notification when status changes
+      if (setNotifications && patch.status !== s.approvalStatus) {
+        const label = `SIV ${s.sivNumber}`;
+        if (patch.status === 'submitted') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'approval_request', forRole: 'admin',
+            title: `Approval needed: ${label}`,
+            message: `Stores Issue Voucher forwarded by ${user?.email || 'staff'} — awaiting approval.`,
+          }, ...p]);
+        } else if (patch.status === 'approved') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'approved', forRole: 'all',
+            title: `Approved: ${label}`,
+            message: `${label} — Issued to ${s.issuedTo || '—'} has been approved.`,
+          }, ...p]);
+        } else if (patch.status === 'rejected') {
+          setNotifications(p => [{
+            id: crypto.randomUUID(), createdAt: Date.now(), read: false,
+            type: 'rejected', forRole: 'all',
+            title: `Rejected: ${label}`,
+            message: patch.rejectionNote || 'SIV was rejected.',
+          }, ...p]);
+        }
+      }
+      return { ...s, approvalStatus: patch.status, approvalNote: patch.rejectionNote || '' };
+    }));
   }
 
   // ── FORM ────────────────────────────────────────────────────────
@@ -6080,11 +6838,16 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
                     <td style={{ padding:'4px 4px' }}>
                       <select value={l.itemId||''} onChange={e=>{
                         const it = items.find(x=>x.id===e.target.value);
-                        setLine(i,'itemId',e.target.value);
-                        if(it){setLine(i,'itemName',it.name);setLine(i,'unit',it.unit||'pcs');setLine(i,'rate',it.purchaseRate||it.saleRate||0);}
+                        set('lines', s.lines.map((ln,j)=>j!==i?ln:{
+                          ...ln,
+                          itemId: e.target.value,
+                          itemName: it ? it.name : '',
+                          unit: it ? (it.unit||'pcs') : ln.unit,
+                          rate: it ? (parseFloat(it.purchaseRate)||parseFloat(it.saleRate)||0) : ln.rate,
+                        }));
                       }} style={{ ...styles.input, margin:0, minWidth:160, fontSize:12 }}>
                         <option value=''>Select item</option>
-                        {items.map(it=><option key={it.id} value={it.id}>{it.name}</option>)}
+                        {items.map(it=><option key={it.id} value={it.id}>{it.itemCode ? `[${it.itemCode}] ` : ''}{it.name}</option>)}
                       </select>
                     </td>
                     <td style={{ padding:'4px 4px', width:70 }}><input value={l.unit||'pcs'} onChange={e=>setLine(i,'unit',e.target.value)} style={{ ...styles.input, margin:0, fontSize:12 }}/></td>
@@ -6170,37 +6933,39 @@ function StoreIssueList({ storeIssues, setStoreIssues, items, setStockLedger, us
 
 // ─── GRN ───────────────────────────────────────────────────────
 
-function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, userRole, businessInfo }) {
+function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLedger, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printGrn, setPrintGrn] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory' || userRole === 'purchase';
 
+  // Display: filter by current division in multi-biz mode; save operations use allGrns
+  const grns = isMultiBiz ? (allGrns || []).filter(g => (g.bizType || 'trading') === currentBizType) : (allGrns || []);
   const poList = (documents || []).filter(d => d.type === 'purchase');
 
   function nextGRN() {
-    const nums = (grns || []).map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
+    const nums = grns.map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
     return 'GRN-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
   }
 
   function updateGRNStatus(id, patch) {
-    setGrns((grns || []).map(g => g.id === id ? { ...g, ...patch } : g));
+    setGrns((allGrns || []).map(g => g.id === id ? { ...g, ...patch } : g));
   }
 
   function saveGRN(grn) {
-    const isNew = !(grns || []).find(g => g.id === grn.id);
+    const isNew = !(allGrns || []).find(g => g.id === grn.id);
     let updated;
     if (isNew) {
-      const newGrn = { ...grn, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
-      updated = [newGrn, ...(grns || [])];
-      // Only create stock IN entries for QA-accepted lines
+      const newGrn = { ...grn, bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
+      updated = [newGrn, ...(allGrns || [])];
+      // Only create stock IN entries for QA-accepted / visually OK lines
       if (setStockLedger) {
         const entries = (grn.lines || [])
-          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected')
+          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok')
           .map(l => {
             const it = items.find(i => i.id === l.itemId);
-            const acceptedQty = l.qaStatus === 'inprocess'
-              ? parseFloat(l.receivedQty) || 0   // inprocess → take full receivedQty tentatively
+            const acceptedQty = (l.qaStatus === 'inprocess' || l.qaStatus === 'ok')
+              ? parseFloat(l.receivedQty) || 0   // ok/inprocess → take full receivedQty
               : parseFloat(l.acceptedQty) || 0;   // accepted → take acceptedQty
             return {
               id: crypto.randomUUID(), date: grn.date, itemId: l.itemId,
@@ -6208,12 +6973,13 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
               type: 'in', qty: acceptedQty,
               rate: parseFloat(l.rate) || 0,
               sourceType: 'grn', sourceId: newGrn.id, sourceNumber: newGrn.number, createdAt: Date.now(),
+              bizType: currentBizType,
             };
           });
         if (entries.length) setStockLedger(prev => [...prev, ...entries]);
       }
     } else {
-      updated = (grns || []).map(g => g.id === grn.id ? grn : g);
+      updated = (allGrns || []).map(g => g.id === grn.id ? grn : g);
     }
     setGrns(updated);
     setShowForm(false); setEditing(null);
@@ -6221,7 +6987,7 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
 
   function deleteGRN(id) {
     if (!window.confirm('Delete this GRN? Stock entries will be removed.')) return;
-    setGrns((grns || []).filter(g => g.id !== id));
+    setGrns((allGrns || []).filter(g => g.id !== id));
     if (setStockLedger) setStockLedger(prev => prev.filter(e => e.sourceId !== id));
   }
 
@@ -6244,9 +7010,11 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
               const po = poList.find(p => p.id === g.poId);
               const vendor = vendors.find(v => v.id === (po ? po.customerId : ''));
               const lines = g.lines || [];
-              const accepted = lines.filter(l => l.qaStatus === 'accepted').length;
-              const rejected = lines.filter(l => l.qaStatus === 'rejected').length;
-              const inprocess = lines.filter(l => !l.qaStatus || l.qaStatus === 'inprocess').length;
+              const isTrading = businessInfo?.companyType === 'trading';
+              // Trading: ok/notok; Manufacturing: accepted/rejected/inprocess
+              const okCount       = lines.filter(l => l.qaStatus === 'ok' || l.qaStatus === 'accepted').length;
+              const notOkCount    = lines.filter(l => l.qaStatus === 'notok' || l.qaStatus === 'rejected').length;
+              const inprocess     = lines.filter(l => !l.qaStatus || l.qaStatus === 'inprocess').length;
               const qaChip = (label, count, color) => count > 0 ? (
                 <span key={label} style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: color + '22', color }}>{count} {label}</span>
               ) : null;
@@ -6258,9 +7026,10 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
                   <td style={{ ...styles.td, fontWeight: 500 }}>{g.vendorName || (vendor ? vendor.name : '—')}</td>
                   <td style={styles.td}>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {qaChip('Accepted', accepted, '#1A7A3E')}
-                      {qaChip('Rejected', rejected, '#B91C1C')}
-                      {qaChip('In-process', inprocess, '#C9A24B')}
+                      {qaChip(isTrading ? 'OK' : 'Accepted', okCount, '#1A7A3E')}
+                      {qaChip(isTrading ? 'Not OK' : 'Rejected', notOkCount, '#B91C1C')}
+                      {!isTrading && qaChip('In-process', inprocess, '#C9A24B')}
+                      {isTrading && inprocess > 0 && qaChip('Pending', inprocess, '#C9A24B')}
                       {lines.length === 0 && <span style={{ color: '#888', fontSize: 12 }}>0 lines</span>}
                     </div>
                   </td>
@@ -6283,16 +7052,17 @@ function GRNList({ grns, setGrns, documents, vendors, items, setStockLedger, use
       </div>
 
       {showForm && (
-        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printGrn && <GRNPrint grn={printGrn} businessInfo={businessInfo} onClose={() => setPrintGrn(null)} />}
     </div>
   );
 }
 
-function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
+function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose }) {
   const [form, setForm] = useState({ lines: [], ...grn });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const isTrading = businessInfo?.companyType === 'trading';
 
   function selectPO(poId) {
     const po = poList.find(p => p.id === poId);
@@ -6305,7 +7075,7 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
       receivedQty: parseFloat(it.qty) || 0,
       rate: parseFloat(it.rate) || 0,
     }));
-    setForm(p => ({ ...p, poId, vendorName: vendor ? vendor.name : '', lines }));
+    setForm(p => ({ ...p, poId, poNumber: po.number, vendorName: vendor ? vendor.name : '', lines }));
   }
 
   function updateLine(idx, key, val) {
@@ -6313,11 +7083,15 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
   }
 
   function addLine() {
-    setForm(p => ({ ...p, lines: [...p.lines, { itemId: '', itemName: '', orderedQty: 0, receivedQty: 0, acceptedQty: 0, rejectedQty: 0, rate: 0, qaStatus: 'inprocess', qaComments: '' }] }));
+    const defaultQa = isTrading ? 'ok' : 'inprocess';
+    setForm(p => ({ ...p, lines: [...p.lines, { itemId: '', itemName: '', orderedQty: 0, receivedQty: 0, acceptedQty: 0, rejectedQty: 0, rate: 0, qaStatus: defaultQa, qaComments: '' }] }));
   }
 
+  // Manufacturing QA
   const qaColor = { accepted: '#1A7A3E', rejected: '#B91C1C', inprocess: '#C9A24B' };
   const qaLabel = { accepted: 'Accepted', rejected: 'Rejected', inprocess: 'In-process' };
+  // Trading inspection
+  const inspColor = { ok: '#1A7A3E', notok: '#B91C1C' };
 
   return (
     <Modal title={grn && grn.id ? 'Edit GRN' : 'New Goods Receipt Note'} onClose={onClose} wide>
@@ -6343,18 +7117,25 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
         <input value={form.vendorName} onChange={e => set('vendorName', e.target.value)} style={styles.input} />
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }}>Items Received — QA Inspection</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, marginTop: 4 }}>
+        {isTrading ? 'Items Received — Visual Inspection' : 'Items Received — QA Inspection'}
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
           <thead><tr style={{ background: '#F5F3EE' }}>
-            {['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'QA Status', 'Accepted Qty', 'Rejected Qty', 'QA Comments', ''].map(h => (
+            {(isTrading
+              ? ['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'Visual Inspection', 'Remarks', '']
+              : ['Item', 'Ord.Qty', 'Rcvd.Qty', 'Rate', 'QA Status', 'Accepted Qty', 'Rejected Qty', 'QA Comments', '']
+            ).map(h => (
               <th key={h} style={{ ...styles.th, fontSize: 10, whiteSpace: 'nowrap' }}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {form.lines.map((l, i) => {
-              const qa = l.qaStatus || 'inprocess';
-              const rowBg = qa === 'accepted' ? '#F0FFF4' : qa === 'rejected' ? '#FFF5F5' : '#FFFDF0';
+              const qa = l.qaStatus || (isTrading ? 'ok' : 'inprocess');
+              const rowBg = isTrading
+                ? (qa === 'ok' ? '#F0FFF4' : '#FFF5F5')
+                : (qa === 'accepted' ? '#F0FFF4' : qa === 'rejected' ? '#FFF5F5' : '#FFFDF0');
               return (
                 <tr key={i} style={{ background: rowBg }}>
                   <td style={styles.td}>
@@ -6364,23 +7145,37 @@ function GRNForm({ grn, poList, vendors, items, onSave, onClose }) {
                     </select>
                   </td>
                   <td style={styles.td}><input type="number" value={l.orderedQty} onChange={e => updateLine(i, 'orderedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12 }} /></td>
-                  <td style={styles.td}><input type="number" value={l.receivedQty} onChange={e => { updateLine(i, 'receivedQty', e.target.value); if (qa === 'inprocess') updateLine(i, 'acceptedQty', e.target.value); }} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE' }} /></td>
+                  <td style={styles.td}><input type="number" value={l.receivedQty} onChange={e => { updateLine(i, 'receivedQty', e.target.value); if (!isTrading && qa === 'inprocess') updateLine(i, 'acceptedQty', e.target.value); }} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE' }} /></td>
                   <td style={styles.td}><input type="number" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} style={{ ...styles.input, width: 75, textAlign: 'right', fontSize: 12 }} /></td>
                   <td style={styles.td}>
-                    <select value={qa} onChange={e => {
-                      const s = e.target.value;
-                      updateLine(i, 'qaStatus', s);
-                      if (s === 'accepted') { updateLine(i, 'acceptedQty', l.receivedQty); updateLine(i, 'rejectedQty', 0); }
-                      if (s === 'rejected') { updateLine(i, 'acceptedQty', 0); updateLine(i, 'rejectedQty', l.receivedQty); }
-                    }} style={{ ...styles.input, fontSize: 11, color: qaColor[qa], fontWeight: 600, minWidth: 100 }}>
-                      <option value="inprocess">⏳ In-process</option>
-                      <option value="accepted">✅ Accepted</option>
-                      <option value="rejected">❌ Rejected</option>
-                    </select>
+                    {isTrading ? (
+                      <select value={qa} onChange={e => updateLine(i, 'qaStatus', e.target.value)}
+                        style={{ ...styles.input, fontSize: 11, color: inspColor[qa] || '#555', fontWeight: 600, minWidth: 100 }}>
+                        <option value="ok">✅ OK</option>
+                        <option value="notok">❌ Not OK</option>
+                      </select>
+                    ) : (
+                      <select value={qa} onChange={e => {
+                        const s = e.target.value;
+                        updateLine(i, 'qaStatus', s);
+                        if (s === 'accepted') { updateLine(i, 'acceptedQty', l.receivedQty); updateLine(i, 'rejectedQty', 0); }
+                        if (s === 'rejected') { updateLine(i, 'acceptedQty', 0); updateLine(i, 'rejectedQty', l.receivedQty); }
+                      }} style={{ ...styles.input, fontSize: 11, color: qaColor[qa], fontWeight: 600, minWidth: 100 }}>
+                        <option value="inprocess">⏳ In-process</option>
+                        <option value="accepted">✅ Accepted</option>
+                        <option value="rejected">❌ Rejected</option>
+                      </select>
+                    )}
                   </td>
-                  <td style={styles.td}><input type="number" value={l.acceptedQty ?? 0} onChange={e => updateLine(i, 'acceptedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE', color: '#1A7A3E', fontWeight: 600 }} /></td>
-                  <td style={styles.td}><input type="number" value={l.rejectedQty ?? 0} onChange={e => updateLine(i, 'rejectedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#FFEAEA', color: '#B91C1C', fontWeight: 600 }} /></td>
-                  <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Notes…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                  {isTrading ? (
+                    <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Remarks…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                  ) : (
+                    <>
+                      <td style={styles.td}><input type="number" value={l.acceptedQty ?? 0} onChange={e => updateLine(i, 'acceptedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#EAF3DE', color: '#1A7A3E', fontWeight: 600 }} /></td>
+                      <td style={styles.td}><input type="number" value={l.rejectedQty ?? 0} onChange={e => updateLine(i, 'rejectedQty', e.target.value)} style={{ ...styles.input, width: 65, textAlign: 'right', fontSize: 12, background: '#FFEAEA', color: '#B91C1C', fontWeight: 600 }} /></td>
+                      <td style={styles.td}><input value={l.qaComments || ''} onChange={e => updateLine(i, 'qaComments', e.target.value)} placeholder="Notes…" style={{ ...styles.input, fontSize: 11, minWidth: 130 }} /></td>
+                    </>
+                  )}
                   <td style={styles.td}><button onClick={() => setForm(p => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))} style={styles.iconBtn}><Trash2 size={13} color="#B5453A" /></button></td>
                 </tr>
               );
@@ -7520,6 +8315,289 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
         <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...styles.input, width: 150 }} />
       </div>
       <div style={{ fontSize: 13, color: '#888780' }}>{count} {label} found</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// P&L AUDIT VIEW
+// ─────────────────────────────────────────────
+function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, auditDocs, setAuditDocs }) {
+  const curYear = new Date().getFullYear();
+  const [year,   setYear]   = useState(curYear);
+  const [period, setPeriod] = useState('FY');
+  const [notes,  setNotes]  = useState('');
+  const [saved,  setSaved]  = useState(false);
+  const [viewDoc, setViewDoc] = useState(null); // saved audit record to view/print
+
+  const PERIODS = [
+    { key: 'Q1', label: 'Q1 (Jan–Mar)' },
+    { key: 'Q2', label: 'Q2 (Apr–Jun)' },
+    { key: 'Q3', label: 'Q3 (Jul–Sep)' },
+    { key: 'Q4', label: 'Q4 (Oct–Dec)' },
+    { key: 'H1', label: 'H1 (Jan–Jun)' },
+    { key: 'H2', label: 'H2 (Jul–Dec)' },
+    { key: 'FY', label: 'Full Year' },
+  ];
+
+  function getRange(p, y) {
+    const ranges = {
+      Q1: [`${y}-01-01`, `${y}-03-31`],
+      Q2: [`${y}-04-01`, `${y}-06-30`],
+      Q3: [`${y}-07-01`, `${y}-09-30`],
+      Q4: [`${y}-10-01`, `${y}-12-31`],
+      H1: [`${y}-01-01`, `${y}-06-30`],
+      H2: [`${y}-07-01`, `${y}-12-31`],
+      FY: [`${y}-01-01`, `${y}-12-31`],
+    };
+    return ranges[p] || ranges.FY;
+  }
+
+  function computePL(p, y) {
+    const [start, end] = getRange(p, y);
+    const inRange = d => d >= start && d <= end;
+    const inDiv   = x => !isMultiBiz || (x.bizType || 'trading') === currentBizType;
+
+    const docs = Array.isArray(documents) ? documents : [];
+    const vlist = Array.isArray(vouchers) ? vouchers : [];
+    const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+
+    // Revenue — approved/finalized invoices
+    const invoices = docs.filter(d => d.type === 'invoice' && inRange(d.date || '') && inDiv(d));
+    const revenue  = invoices.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+
+    // COGS — purchase bills
+    const pbills = docs.filter(d => d.type === 'purchasebill' && inRange(d.date || '') && inDiv(d));
+    const cogs   = pbills.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+
+    // Operating expenses — voucher payments + petty cash debits
+    const voucherExp = vlist
+      .filter(v => inRange(v.date || '') && inDiv(v) && v.status !== 'rejected')
+      .reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const pcExp = pcEntries
+      .filter(e => inRange(e.date || '') && inDiv(e) && e.status !== 'rejected')
+      .reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const opExpenses = voucherExp + pcExp;
+
+    const grossProfit = revenue - cogs;
+    const netProfit   = grossProfit - opExpenses;
+
+    return {
+      revenue, cogs, grossProfit, opExpenses, netProfit,
+      invoiceCount: invoices.length, pbillCount: pbills.length,
+    };
+  }
+
+  const pl = computePL(period, year);
+  const fmt = n => {
+    const sym = businessInfo?.currencySymbol || '₹';
+    const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (n < 0 ? `(${sym}${abs})` : `${sym}${abs}`);
+  };
+  const periodLabel = PERIODS.find(p => p.key === period)?.label || period;
+  const [s, e] = getRange(period, year);
+  const dateRangeStr = `${new Date(s).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })} – ${new Date(e).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}`;
+
+  function handleSave() {
+    const rec = {
+      id: Date.now().toString(),
+      period, year,
+      periodLabel,
+      dateRange: dateRangeStr,
+      bizType: currentBizType,
+      createdAt: new Date().toISOString(),
+      notes,
+      ...pl,
+    };
+    setAuditDocs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    setSaved(true);
+    setNotes('');
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  // Filter saved records for current division
+  const myAudits = (Array.isArray(auditDocs) ? auditDocs : [])
+    .filter(a => !isMultiBiz || (a.bizType || 'trading') === currentBizType)
+    .sort((a, b) => b.createdAt?.localeCompare(a.createdAt));
+
+  function handlePrint(doc) {
+    const sym = businessInfo?.currencySymbol || '₹';
+    const fmtN = n => {
+      const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return n < 0 ? `(${sym}${abs})` : `${sym}${abs}`;
+    };
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 40px; }
+      h2 { text-align: center; font-size: 16px; margin: 0 0 2px; }
+      .sub { text-align: center; color: #555; font-size: 12px; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      td { padding: 7px 10px; }
+      .section-head { background: #1E2A4A; color: #fff; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; }
+      .subtotal { background: #f5f5f5; font-weight: 700; border-top: 1.5px solid #ccc; }
+      .total { background: #1E2A4A; color: #fff; font-weight: 700; font-size: 14px; }
+      .loss  { background: #FEF2F2; color: #B91C1C; font-weight: 700; font-size: 14px; }
+      .right { text-align: right; }
+      .indent { padding-left: 24px; color: #444; }
+      hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
+      .footer { margin-top: 32px; font-size: 11px; color: #888; text-align: center; }
+      @media print { body { padding: 10mm; } }
+    </style></head><body>
+    <h2>${businessInfo?.name || 'Company'}</h2>
+    <div class="sub">PROFIT &amp; LOSS STATEMENT — ${doc.periodLabel} ${doc.year} (${doc.dateRange})</div>
+    ${isMultiBiz ? `<div class="sub">Division: ${doc.bizType?.toUpperCase()}</div>` : ''}
+    <table>
+      <tr><td class="section-head">INCOME</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Sales Revenue (${doc.invoiceCount} invoices)</td><td class="right">${fmtN(doc.revenue)}</td></tr>
+      <tr><td class="subtotal">GROSS INCOME</td><td class="subtotal right">${fmtN(doc.revenue)}</td></tr>
+
+      <tr><td style="padding-top:12px" class="section-head">COST OF GOODS SOLD</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Purchases / Direct Costs (${doc.pbillCount} bills)</td><td class="right">${fmtN(doc.cogs)}</td></tr>
+      <tr><td class="subtotal">TOTAL COGS</td><td class="subtotal right">(${fmtN(doc.cogs)})</td></tr>
+
+      <tr><td class="subtotal" style="font-size:14px">GROSS PROFIT</td><td class="subtotal right" style="font-size:14px">${fmtN(doc.grossProfit)}</td></tr>
+
+      <tr><td style="padding-top:12px" class="section-head">OPERATING EXPENSES</td><td class="section-head right"></td></tr>
+      <tr><td class="indent">Vouchers &amp; Petty Cash</td><td class="right">${fmtN(doc.opExpenses)}</td></tr>
+      <tr><td class="subtotal">TOTAL OPEX</td><td class="subtotal right">(${fmtN(doc.opExpenses)})</td></tr>
+
+      <tr><td colspan="2" style="padding:4px"></td></tr>
+      <tr class="${doc.netProfit >= 0 ? 'total' : 'loss'}">
+        <td>NET ${doc.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</td>
+        <td class="right">${fmtN(doc.netProfit)}</td>
+      </tr>
+    </table>
+    ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
+    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Operix</div>
+    </body></html>`);
+    w.document.close();
+    setTimeout(() => { w.print(); }, 400);
+  }
+
+  const cardStyle = { background: '#fff', borderRadius: 10, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' };
+  const rowStyle  = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f0f0f0' };
+  const labelStyle = { fontSize: 13, color: '#555' };
+  const valueStyle = (n) => ({ fontSize: 13, fontWeight: 600, color: n < 0 ? '#B91C1C' : '#1E2A4A' });
+
+  if (viewDoc) {
+    const vpl = viewDoc;
+    return (
+      <div style={{ padding: '24px 28px', maxWidth: 680, margin: '0 auto' }}>
+        <button onClick={() => setViewDoc(null)} style={{ marginBottom: 16, background: 'none', border: 'none', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>← Back to Audit List</button>
+        <div style={{ ...cardStyle, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, color: '#1E2A4A' }}>{vpl.periodLabel} {vpl.year}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{vpl.dateRange}</div>
+            </div>
+            <button onClick={() => handlePrint(vpl)} style={{ padding: '7px 16px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print / Export</button>
+          </div>
+          <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({vpl.invoiceCount} invoices)</span><span style={valueStyle(vpl.revenue)}>{fmt(vpl.revenue)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({vpl.pbillCount} bills)</span><span style={valueStyle(-vpl.cogs)}>{fmt(-vpl.cogs)}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}><span style={{ fontSize: 13 }}>GROSS PROFIT</span><span style={valueStyle(vpl.grossProfit)}>{fmt(vpl.grossProfit)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, fontSize: 15, background: vpl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', borderRadius: 7, padding: '10px 12px', marginTop: 8, border: `1.5px solid ${vpl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
+            <span>NET {vpl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
+            <span style={{ color: vpl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(vpl.netProfit)}</span>
+          </div>
+          {vpl.notes && <p style={{ fontSize: 12, color: '#666', marginTop: 12 }}><strong>Notes:</strong> {vpl.notes}</p>}
+          <p style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Saved on {new Date(vpl.createdAt).toLocaleString('en-IN')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '24px 28px', maxWidth: 720, margin: '0 auto' }}>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>P&L Audit</h2>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#888' }}>Auto-computed from your invoices, purchase bills, vouchers and petty cash</p>
+      </div>
+
+      {/* Period selector */}
+      <div style={{ ...cardStyle, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Year</label>
+            <select value={year} onChange={e => setYear(+e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', fontSize: 13 }}>
+              {[curYear+1, curYear, curYear-1, curYear-2, curYear-3].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Period</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {PERIODS.map(p => (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: period === p.key ? '2px solid #1E2A4A' : '1px solid #ddd', background: period === p.key ? '#1E2A4A' : '#fff', color: period === p.key ? '#fff' : '#444' }}>
+                  {p.key}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: '#aaa', marginBottom: 12 }}>{periodLabel} · {dateRangeStr}</div>
+
+        {/* P&L Summary */}
+        <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({pl.invoiceCount} invoices)</span><span style={valueStyle(pl.revenue)}>{fmt(pl.revenue)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({pl.pbillCount} bills)</span><span style={valueStyle(-pl.cogs)}>{fmt(-pl.cogs)}</span></div>
+        <div style={{ ...rowStyle, fontWeight: 700, borderTop: '2px solid #1E2A4A', marginTop: 4, paddingTop: 10 }}>
+          <span style={{ fontSize: 13 }}>GROSS PROFIT</span>
+          <span style={valueStyle(pl.grossProfit)}>{fmt(pl.grossProfit)}</span>
+        </div>
+        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderRadius: 8, marginTop: 8, background: pl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', border: `1.5px solid ${pl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>NET {pl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: pl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(pl.netProfit)}</span>
+        </div>
+
+        {/* Notes + Save */}
+        {userRole === 'admin' && (
+          <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 14 }}>
+            <textarea
+              placeholder="Optional notes for this audit record…"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={2}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid #ddd', fontSize: 13, resize: 'vertical', marginBottom: 10 }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={handleSave} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {saved ? '✓ Saved!' : 'Save as Audit Record'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Saved audit records */}
+      <div style={{ marginBottom: 8, fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>Saved Audit Records</div>
+      {myAudits.length === 0 ? (
+        <div style={{ ...cardStyle, color: '#aaa', fontSize: 13, textAlign: 'center', padding: 32 }}>No saved records yet. Generate a P&L above and click "Save as Audit Record".</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {myAudits.map(a => (
+            <div key={a.id} style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{a.periodLabel} {a.year}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{a.dateRange}{isMultiBiz ? ` · ${a.bizType}` : ''}</div>
+                {a.notes && <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>{a.notes}</div>}
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 120 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: a.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>
+                  {a.netProfit >= 0 ? 'Profit ' : 'Loss '}{fmt(Math.abs(a.netProfit))}
+                </div>
+                <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{new Date(a.createdAt).toLocaleDateString('en-IN')}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setViewDoc(a)} style={{ padding: '5px 12px', fontSize: 12, borderRadius: 6, border: '1px solid #1E2A4A', background: '#fff', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600 }}>View</button>
+                <button onClick={() => handlePrint(a)} style={{ padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none', background: '#1E2A4A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Print</button>
+                {userRole === 'admin' && <button onClick={() => setAuditDocs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== a.id))} style={{ padding: '5px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #fca5a5', background: '#FEF2F2', color: '#B91C1C', cursor: 'pointer' }}>✕</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -9085,12 +10163,12 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
   const useLH = !!(businessInfo?.letterhead);
   const rmLines = bom?.materials || [];
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
@@ -9502,16 +10580,21 @@ function EnquiryForm({ enq, customers, onSave, onClose }) {
   );
 }
 
-function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertToQuotation }) {
+function EnquiryList({ enquiries, setEnquiries, customers, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToQuotation }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
 
-  // Auto-generate ENQ number
+  // In multi-biz mode, show only this division's enquiries
+  const bizEnquiries = isMultiBiz
+    ? enquiries.filter(e => (e.bizType || 'trading') === currentBizType)
+    : enquiries;
+
+  // Auto-generate ENQ number (per-division counter in multi-biz)
   function nextEnqNumber() {
-    if (!enquiries.length) return 'ENQ-001';
-    const nums = enquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
+    if (!bizEnquiries.length) return 'ENQ-001';
+    const nums = bizEnquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
     return 'ENQ-' + String(Math.max(...nums) + 1).padStart(3, '0');
   }
 
@@ -9527,10 +10610,12 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
 
   function handleSave(form) {
     if (!form.number) form.number = nextEnqNumber();
+    // Always stamp the current division's bizType on save
+    const saved = { ...form, bizType: currentBizType };
     if (editing) {
-      setEnquiries(prev => prev.map(e => e.id === form.id ? form : e));
+      setEnquiries(prev => prev.map(e => e.id === saved.id ? saved : e));
     } else {
-      setEnquiries(prev => [...prev, form]);
+      setEnquiries(prev => [...prev, saved]);
     }
     setModalOpen(false);
   }
@@ -9540,7 +10625,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
     setEnquiries(prev => prev.filter(e => e.id !== id));
   }
 
-  const filtered = enquiries.filter(e => {
+  const filtered = bizEnquiries.filter(e => {
     const cust = customers.find(c => c.id === e.customerId);
     const name = cust ? cust.name : (e.customerName || '');
     const text = `${e.number} ${name} ${e.interest} ${e.assignedTo}`.toLowerCase();
@@ -9551,7 +10636,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
 
   // Summary counts
   const counts = {};
-  ENQ_STATUSES.forEach(s => { counts[s] = enquiries.filter(e => e.status === s).length; });
+  ENQ_STATUSES.forEach(s => { counts[s] = bizEnquiries.filter(e => e.status === s).length; });
 
   return (
     <div style={{ padding: 28 }}>
@@ -9559,7 +10644,7 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, onConvertTo
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Enquiry List</h2>
-          <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{enquiries.length} total enquiries</p>
+          <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{bizEnquiries.length} total enquiries</p>
         </div>
         {(userRole === 'admin' || userRole === 'manager' || userRole === 'sales') && (
           <button onClick={openNew} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
@@ -15335,12 +16420,12 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
   const punch = checklist.punchList || [];
   const fails = tests.filter(t => t.result === 'fail').length;
   return (
-    <div style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
+    <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
-      <div className="print-area" style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
+      <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
@@ -16467,8 +17552,11 @@ export default function App() {
   const [raBillings,       _setRAB]    = useState([]);
   const [tcChecklists,     _setTC]     = useState([]);
   const [handoverDocs,     _setHDocs]  = useState([]);
+  const [auditDocs,        _setAuditDocs]  = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
+  // Tracks which BizSection the user last interacted with (for shared views like enquiries)
+  const [activeBizContext, setActiveBizContext] = useState(null);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -16476,17 +17564,23 @@ export default function App() {
       if (firebaseUser) {
         setUser(firebaseUser);
         setAuthReady(true);
-        if (!firebaseUser.emailVerified) return;
         try {
+          // Check membership FIRST — staff accounts don't go through email verification
           const membership = await getMembership(firebaseUser.uid);
           if (membership) {
+            // Staff member — use owner's company data, no email verification needed
             setOwnerUid(membership.ownerUid);
             setUserRole(membership.role);
+          } else if (!firebaseUser.emailVerified) {
+            // Owner account not yet verified — stay on verify screen
+            return;
           } else {
+            // Verified owner
             setOwnerUid(firebaseUser.uid);
             setUserRole('admin');
           }
         } catch {
+          if (!firebaseUser.emailVerified) return;
           setOwnerUid(firebaseUser.uid);
           setUserRole('admin');
         }
@@ -16559,6 +17653,7 @@ export default function App() {
       _setRAB(data.raBillings || []);
       _setTC(data.tcChecklists || []);
       _setHDocs(data.handoverDocs || []);
+      _setAuditDocs(data.auditDocs || []);
     });
     return unsub;
   }, [ownerUid]);
@@ -16628,6 +17723,7 @@ export default function App() {
   const setRaBillings       = mkSet(_setRAB,   'raBillings');
   const setTcChecklists     = mkSet(_setTC,    'tcChecklists');
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
+  const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -16643,20 +17739,29 @@ export default function App() {
     return `${String(fyStart).slice(-2)}-${String(fyStart + 1).slice(-2)}`;
   }
 
-  function nextDocNumber(type, dateStr) {
+  function nextDocNumber(type, bizType, dateStr) {
     const fy = getFY(dateStr);
     const prefix = DOC_TYPES[type]?.prefix || type.toUpperCase();
-    const same = documents.filter((d) => d.type === type && getFY(d.date) === fy);
+    // Each division has its own independent counter — same format, separate sequence
+    const same = documents.filter((d) =>
+      d.type === type &&
+      getFY(d.date) === fy &&
+      (!isMultiBiz || (d.bizType || 'trading') === bizType)
+    );
     return `${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`;
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
-  function startNewDoc(type, bizType) {
+  // prefill: optional extra fields to spread onto the new doc (e.g. from enquiry conversion)
+  // bizType MUST be a string — passing an object is a bug; we type-guard defensively
+  function startNewDoc(type, bizType, prefill = {}) {
     const today = new Date().toISOString().slice(0, 10);
+    const bType = (typeof bizType === 'string' ? bizType : null) || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(type, businessInfo),
-      number: nextDocNumber(type, today),
-      bizType: bizType || activeTypes[0] || 'trading',
+      ...prefill,
+      number: nextDocNumber(type, bType, today),
+      bizType: bType,
     });
     setView('doceditor');
   }
@@ -16669,10 +17774,11 @@ export default function App() {
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
+    const bType = srcDoc.bizType || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(newType, businessInfo),
-      bizType: srcDoc.bizType || activeTypes[0] || 'trading',
-      number: nextDocNumber(newType, today),
+      bizType: bType,
+      number: nextDocNumber(newType, bType, today),
       customerId: srcDoc.customerId,
       customerSnapshot: srcDoc.customerSnapshot,
       items: (srcDoc.items || []).map((it) => ({ ...it, id: crypto.randomUUID() })),
@@ -16700,6 +17806,7 @@ export default function App() {
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
         docNumber: saved.number, itemId: it.itemId, itemName: it.name,
         qty: -(it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
@@ -16708,6 +17815,7 @@ export default function App() {
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
         docNumber: saved.number, itemId: it.itemId, itemName: it.name,
         qty: (it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
@@ -16793,6 +17901,10 @@ export default function App() {
     return [ct];
   })();
   const isMultiBiz = activeTypes.length > 1;
+  // Resolves which division the user is currently working in (falls back to first type)
+  const effectiveBizContext = (activeBizContext && activeTypes.includes(activeBizContext))
+    ? activeBizContext
+    : activeTypes[0] || 'trading';
   const companyType = activeTypes.length === 1 ? activeTypes[0]
     : activeTypes.includes('service') && activeTypes.includes('manufacturing') ? 'both'
     : activeTypes.includes('manufacturing') ? 'both'
@@ -16801,16 +17913,21 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
-    const totalRevenue   = documents.filter(d => d.type === 'invoice').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const totalPurchases = documents.filter(d => d.type === 'purchasebill').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const outstanding    = documents.filter(d => d.type === 'invoice' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const payable        = documents.filter(d => d.type === 'purchasebill' && !d.paid).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    // Only approved invoices count toward receivables
+    const totalRevenue   = documents.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = documents.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    // All receipts/payments for the cash flow stats
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    // Outstanding = approved invoices minus order-linked receipts only (non-order receipts don't offset invoice outstanding)
+    const orderReceived  = voucherList.filter(v => v.type === 'receipt' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const orderPaid      = voucherList.filter(v => v.type === 'payment' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const outstanding    = Math.max(0, totalRevenue - orderReceived);
+    const payable        = Math.max(0, totalPurchases - orderPaid);
     const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
-    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.type === 'income' ? (e.amount || 0) : -(e.amount || 0)), 0);
+    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
     const itemCount = items.length;
     const lowStockCount = items.filter(it => {
       if (!it.minStock) return false;
@@ -16870,8 +17987,9 @@ export default function App() {
     }
 
     // ── Subscription gate ──────────────────────────────────────────────────────
-    // Build the set of sections this account can access
-    if (!isTestAccount) {
+    // Trial users get full access to evaluate — only gate subscribed users on a specific plan
+    const inTrial = !trialExpired && !isSubscribed;
+    if (!isTestAccount && !inTrial) {
       const _allowed = new Set(PLAN_MODULES.common);
       for (const t of activeTypes) (PLAN_MODULES[t] || []).forEach(m => _allowed.add(m));
       // Sections that belong exclusively to paid plans (not in common)
@@ -16905,7 +18023,187 @@ export default function App() {
             items={items}
             companyType={companyType}
             activeTypes={activeTypes}
+            isMultiBiz={isMultiBiz}
+            siteProjects={siteProjects}
+            siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
+          />
+        );
+      case 'enquiries':
+        return (
+          <EnquiryList
+            enquiries={enquiries}
+            setEnquiries={setEnquiries}
+            customers={customers}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            onConvertToQuotation={(enq) => {
+              const cust = customers.find(c => c.id === enq.customerId);
+              startNewDoc('quotation', enq.bizType || effectiveBizContext, {
+                customerId: enq.customerId,
+                customerSnapshot: cust || null,
+                notes: enq.notes || '',
+              });
+            }}
+          />
+        );
+      case 'rawmaterials':
+        return (
+          <RawMaterialsList
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'bom':
+        return (
+          <BOMList
+            boms={boms}
+            setBoms={setBoms}
+            rawMaterials={rawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            parts={parts}
+          />
+        );
+      case 'productionorders':
+        return (
+          <ProductionOrdersList
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            boms={boms}
+            rawMaterials={rawMaterials}
+            setRawMaterials={setRawMaterials}
+            userRole={userRole}
+            ownerUid={ownerUid}
+            setStockLedger={setStockLedger}
+            items={items}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'partsmaster':
+        return (
+          <PartsMasterList
+            parts={parts}
+            setParts={setParts}
+            vendors={vendors}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'engdocs':
+        return (
+          <EngineeringDocsList
+            engDocs={engDocs}
+            setEngDocs={setEngDocs}
+            parts={parts}
+            ownerUid={ownerUid}
+            userRole={userRole}
+          />
+        );
+      case 'isoprinciples':
+        return (
+          <ISOPrinciplesView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            userRole={userRole}
+          />
+        );
+      case 'deptprocedures':
+        return (
+          <DeptProceduresView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            userRole={userRole}
+          />
+        );
+      case 'inprocessqa':
+        return (
+          <InprocessQAView
+            qualityDocs={qualityDocs}
+            setQualityDocs={setQualityDocs}
+            productionOrders={productionOrders}
+            userRole={userRole}
+          />
+        );
+      case 'qatesting':
+        return (
+          <QATestingView
+            productionOrders={productionOrders}
+            setProductionOrders={setProductionOrders}
+            pdvs={pdvs}
+            setPdvs={setPdvs}
+            setStockLedger={setStockLedger}
+            boms={boms}
+            items={items}
+            userRole={userRole}
+            businessInfo={businessInfo}
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+          />
+        );
+      case 'capa':
+        return (
+          <CAPAView
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+            vendors={vendors}
+            customers={customers}
+            userRole={userRole}
+          />
+        );
+      case 'internalaudit':
+        return (
+          <InternalAuditView
+            internalAudits={internalAudits}
+            setInternalAudits={setInternalAudits}
+            capaRecords={capaRecords}
+            setCapaRecords={setCapaRecords}
+            userRole={userRole}
+          />
+        );
+      case 'vendoreval':
+        return (
+          <VendorEvalView
+            vendorEvals={vendorEvals}
+            setVendorEvals={setVendorEvals}
+            vendors={vendors}
+            userRole={userRole}
+          />
+        );
+      case 'channelpartners':
+        return (
+          <ChannelPartnerList
+            channelPartners={channelPartners}
+            setChannelPartners={setChannelPartners}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'contracts':
+        return (
+          <ContractList
+            contracts={contracts}
+            setContracts={setContracts}
+            customers={customers}
+            vendors={vendors}
+            documents={documents}
+            termsLibrary={termsLibrary}
+            businessInfo={businessInfo}
+            userRole={userRole}
+          />
+        );
+      case 'termslibrary':
+        return (
+          <TermsLibraryView
+            termsLibrary={termsLibrary}
+            setTermsLibrary={setTermsLibrary}
+            userRole={userRole}
           />
         );
       case 'documents':
@@ -16950,9 +18248,9 @@ export default function App() {
           />
         );
       case 'staff':
-        return <StaffPage ownerUid={ownerUid} employees={employees} />;
+        return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList
@@ -16960,6 +18258,8 @@ export default function App() {
             setPettyCash={setPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'vouchers':
@@ -16969,8 +18269,11 @@ export default function App() {
             setVouchers={setVouchers}
             customers={customers}
             vendors={vendors}
+            documents={documents}
             userRole={userRole}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'grn':
@@ -16984,6 +18287,8 @@ export default function App() {
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'storeissue':
@@ -16996,6 +18301,10 @@ export default function App() {
             productionOrders={productionOrders}
             userRole={userRole}
             businessInfo={businessInfo}
+            setNotifications={setNotifications}
+            user={user}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'stock':
@@ -17004,7 +18313,11 @@ export default function App() {
           <StockView
             items={items}
             stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
             businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'bincard':
@@ -17013,12 +18326,15 @@ export default function App() {
             items={items}
             stockLedger={stockLedger}
             businessInfo={businessInfo}
+            storeIssues={storeIssues}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'hr':
       case 'employees':
         return (
-          <HRView
+          <EmployeesView
             employees={employees}
             setEmployees={setEmployees}
             userRole={userRole}
@@ -17162,6 +18478,16 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'tcommissioning':
+        return (
+          <TCView
+            tcChecklists={tcChecklists}
+            setTcChecklists={setTcChecklists}
+            siteProjects={siteProjects}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       case 'handover':
         return (
           <HandoverView
@@ -17173,105 +18499,21 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
-      case 'tc':
+      case 'mepreports':
         return (
-          <TCView
-            tcChecklists={tcChecklists}
-            setTcChecklists={setTcChecklists}
+          <MEPReportsView
             siteProjects={siteProjects}
-            userRole={userRole}
+            siteActivities={siteActivities}
+            progressUpdates={progressUpdates}
+            employees={employees}
             businessInfo={businessInfo}
           />
         );
-      case 'rawmaterials':
+      case 'scopeofwork':
         return (
-          <RawMaterialsList
-            rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'bom':
-        return (
-          <BOMList
-            boms={boms}
-            setBoms={setBoms}
-            rawMaterials={rawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            parts={parts}
-          />
-        );
-      case 'production':
-      case 'productionorders':
-        return (
-          <ProductionOrdersList
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            boms={boms}
-            rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            setStockLedger={setStockLedger}
-            items={items}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'qualitycheck':
-        return (
-          <QualityCheckList
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            userRole={userRole}
-            boms={boms}
-            parts={parts}
-          />
-        );
-      case 'qatesting':
-        return (
-          <QATestingView
-            productionOrders={productionOrders}
-            setProductionOrders={setProductionOrders}
-            pdvs={pdvs}
-            setPdvs={setPdvs}
-            setStockLedger={setStockLedger}
-            boms={boms}
-            items={items}
-            userRole={userRole}
-            businessInfo={businessInfo}
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-          />
-        );
-      case 'capa':
-        return (
-          <CAPAView
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-            vendors={vendors}
-            customers={customers}
-            userRole={userRole}
-          />
-        );
-      case 'internalaudit':
-        return (
-          <InternalAuditView
-            internalAudits={internalAudits}
-            setInternalAudits={setInternalAudits}
-            capaRecords={capaRecords}
-            setCapaRecords={setCapaRecords}
-            userRole={userRole}
-          />
-        );
-      case 'vendoreval':
-        return (
-          <VendorEvalView
-            vendorEvals={vendorEvals}
-            setVendorEvals={setVendorEvals}
-            vendors={vendors}
+          <ScopeOfWorkView
+            scopeOfWork={scopeOfWork}
+            setScopeOfWork={setScopeOfWork}
             userRole={userRole}
           />
         );
@@ -17352,105 +18594,6 @@ export default function App() {
             userRole={userRole}
           />
         );
-      case 'parts':
-      case 'partsmaster':
-        return (
-          <PartsMasterList
-            parts={parts}
-            setParts={setParts}
-            vendors={vendors}
-            ownerUid={ownerUid}
-            userRole={userRole}
-          />
-        );
-      case 'engdocs':
-        return (
-          <EngineeringDocsList
-            engDocs={engDocs}
-            setEngDocs={setEngDocs}
-            parts={parts}
-            ownerUid={ownerUid}
-            userRole={userRole}
-          />
-        );
-      case 'enquiries':
-        return (
-          <EnquiryList
-            enquiries={enquiries}
-            setEnquiries={setEnquiries}
-            customers={customers}
-            userRole={userRole}
-            onConvertToQuotation={(enq) => {
-              const cust = customers.find(c => c.id === enq.customerId);
-              startNewDoc('quotation', { customerId: enq.customerId, customerSnapshot: cust || null, notes: enq.notes || '' });
-            }}
-          />
-        );
-      case 'contracts':
-        return (
-          <ContractList
-            contracts={contracts}
-            setContracts={setContracts}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
-            termsLibrary={termsLibrary}
-            businessInfo={businessInfo}
-            userRole={userRole}
-          />
-        );
-      case 'channelpartners':
-        return (
-          <ChannelPartnerList
-            channelPartners={channelPartners}
-            setChannelPartners={setChannelPartners}
-            documents={documents}
-            termsLibrary={termsLibrary}
-            businessInfo={businessInfo}
-            userRole={userRole}
-          />
-        );
-      case 'termslibrary':
-        return (
-          <TermsLibraryView
-            termsLibrary={termsLibrary}
-            setTermsLibrary={setTermsLibrary}
-            userRole={userRole}
-          />
-        );
-      case 'scopeofwork':
-        return (
-          <ScopeOfWorkView
-            scopeOfWork={scopeOfWork}
-            setScopeOfWork={setScopeOfWork}
-            userRole={userRole}
-          />
-        );
-      case 'isoprinciples':
-        return (
-          <ISOPrinciplesView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            userRole={userRole}
-          />
-        );
-      case 'deptprocedures':
-        return (
-          <DeptProceduresView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            userRole={userRole}
-          />
-        );
-      case 'inprocessqa':
-        return (
-          <InprocessQAView
-            qualityDocs={qualityDocs}
-            setQualityDocs={setQualityDocs}
-            productionOrders={productionOrders}
-            userRole={userRole}
-          />
-        );
       case 'gstr1':
         return (
           <GSTR1Report
@@ -17484,151 +18627,18 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
-      case 'mepprojects':
+      case 'audit':
         return (
-          <MEPProjectsView
-            siteProjects={siteProjects}
-            setSiteProjects={setSiteProjects}
-            employees={employees}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
-            userRole={userRole}
-          />
-        );
-      case 'tender':
-        return (
-          <TenderView
-            tenders={tenders}
-            setTenders={setTenders}
-            customers={customers}
-            siteProjects={siteProjects}
-            userRole={userRole}
+          <AuditView
+            documents={documents}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             businessInfo={businessInfo}
-          />
-        );
-      case 'subcontractors':
-        return (
-          <SubcontractorView
-            subcontractors={subcontractors}
-            setSubcontractors={setSubcontractors}
-            siteProjects={siteProjects}
             userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'hse':
-        return (
-          <HSEView
-            hseRecords={hseRecords}
-            setHseRecords={setHseRecords}
-            siteProjects={siteProjects}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'rabilling':
-        return (
-          <RABillingView
-            raBillings={raBillings}
-            setRaBillings={setRaBillings}
-            siteProjects={siteProjects}
-            customers={customers}
-            tenders={tenders}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'tcommissioning':
-        return (
-          <TCView
-            tcChecklists={tcChecklists}
-            setTcChecklists={setTcChecklists}
-            siteProjects={siteProjects}
-            userRole={userRole}
-          />
-        );
-      case 'handover':
-        return (
-          <HandoverView
-            handoverDocs={handoverDocs}
-            setHandoverDocs={setHandoverDocs}
-            siteProjects={siteProjects}
-            customers={customers}
-            userRole={userRole}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'activityplanner':
-        return (
-          <ActivityPlannerView
-            siteActivities={siteActivities}
-            setSiteActivities={setSiteActivities}
-            siteProjects={siteProjects}
-            progressUpdates={progressUpdates}
-            setProgressUpdates={setProgressUpdates}
-            userRole={userRole}
-            employees={employees}
-          />
-        );
-      case 'dailyupdates':
-        return (
-          <DailyUpdateView
-            progressUpdates={progressUpdates}
-            setProgressUpdates={setProgressUpdates}
-            siteActivities={siteActivities}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
-          />
-        );
-      case 'progressboard':
-        return (
-          <ProgressBoardView
-            siteProjects={siteProjects}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
-          />
-        );
-      case 'mepreports':
-        return (
-          <MEPReportsView
-            siteProjects={siteProjects}
-            siteActivities={siteActivities}
-            progressUpdates={progressUpdates}
-            employees={employees}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'clientmaterials':
-        return (
-          <ClientMaterialView
-            clientMaterials={clientMaterials}
-            setClientMaterials={setClientMaterials}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
-          />
-        );
-      case 'siteattendance':
-        return (
-          <SiteAttendanceView
-            siteAttendance={siteAttendance}
-            setSiteAttendance={setSiteAttendance}
-            siteProjects={siteProjects}
-            employees={employees}
-            userRole={userRole}
-          />
-        );
-      case 'evaluations':
-        return (
-          <QuarterlyEvalView
-            evaluations={evaluations}
-            setEvaluations={setEvaluations}
-            employees={employees}
-            siteAttendance={siteAttendance}
-            progressUpdates={progressUpdates}
-            siteProjects={siteProjects}
-            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            auditDocs={auditDocs}
+            setAuditDocs={setAuditDocs}
           />
         );
       case 'notifications':
@@ -17658,6 +18668,11 @@ export default function App() {
             rawMaterials={rawMaterials}
             items={items}
             companyType={companyType}
+            activeTypes={activeTypes}
+            isMultiBiz={isMultiBiz}
+            siteProjects={siteProjects}
+            siteAttendance={siteAttendance}
+            serviceOrders={serviceOrders}
           />
         );
     }
@@ -17676,13 +18691,13 @@ export default function App() {
         @media print {
           .no-print, .no-print * { display: none !important; }
           .no-print-bg { background: transparent !important; }
-          body > * { visibility: hidden !important; }
+          html, body { overflow: visible !important; height: auto !important; background: #fff !important; }
+          body > * { visibility: hidden !important; overflow: visible !important; }
           .print-area { visibility: visible !important; }
-          .print-area * { visibility: visible !important; }
+          .print-area * { visibility: visible !important; overflow: visible !important; }
           .print-area {
-            position: fixed !important;
+            position: absolute !important;
             top: 0 !important; left: 0 !important;
-            right: 0 !important; bottom: auto !important;
             width: 100% !important; height: auto !important;
             overflow: visible !important;
             border: none !important;
@@ -17692,6 +18707,8 @@ export default function App() {
             padding: 12mm !important;
             margin: 0 !important;
             background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .draft-watermark {
             -webkit-print-color-adjust: exact !important;
@@ -17699,7 +18716,7 @@ export default function App() {
             color: rgba(185, 28, 28, 0.13) !important;
           }
         }
-        @page { size: A4; margin: 0; }
+        @page { size: A4; margin: 15mm; }
       `}</style>
       <Sidebar
         view={view}
@@ -17715,6 +18732,9 @@ export default function App() {
         country={country}
         unreadCount={unreadCount}
         onShowNotifications={() => setView('notifications')}
+        activeDocBizType={activeDoc?.bizType || null}
+        activeBizContext={effectiveBizContext}
+        onBizContextChange={setActiveBizContext}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
@@ -17773,84 +18793,28 @@ export default function App() {
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '5px 16px',
+          padding: '5px 16px', gap: 6,
           background: 'rgba(30,42,74,0.92)',
-          backdropFilter: 'blur(4px)',
-          borderTop: '1px solid rgba(201,162,75,0.3)',
+          color: '#fff', fontSize: 11, letterSpacing: 0.3,
           pointerEvents: 'none',
         }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5 }}>
-            Powered by{' '}
-            <span style={{ color: '#C9A24B', fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: 1 }}>Operix</span>
-            {trialDaysLeft > 0 && (
-              <span style={{ marginLeft: 10, color: 'rgba(255,255,255,0.45)', fontSize: 10 }}>
-                · {trialDaysLeft} day{trialDaysLeft === 1 ? '' : 's'} free trial remaining
-              </span>
-            )}
-          </span>
+          <span style={{ opacity: 0.55 }}>Powered by</span>
+          <strong style={{ marginLeft: 3 }}>Operix</strong>
         </div>
       )}
 
-      {editingCustomer && (
-        <CustomerModal
-          customer={editingCustomer}
-          onSave={(c) => {
-            const isNew = !customers.find(x => x.id === c.id);
-            const saved = isNew ? { ...c, id: crypto.randomUUID() } : c;
-            setCustomers(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingCustomer(null);
-          }}
-          onClose={() => setEditingCustomer(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-      {editingVendor && (
-        <VendorModal
-          vendor={editingVendor}
-          onSave={(v) => {
-            const isNew = !vendors.find(x => x.id === v.id);
-            const saved = isNew ? { ...v, id: crypto.randomUUID() } : v;
-            setVendors(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingVendor(null);
-          }}
-          onClose={() => setEditingVendor(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-      {editingItem && (
-        <ItemModal
-          item={editingItem}
-          onSave={(it) => {
-            const isNew = !items.find(x => x.id === it.id);
-            const saved = isNew ? { ...it, id: crypto.randomUUID() } : it;
-            setItems(prev => isNew ? [...prev, saved] : prev.map(x => x.id === saved.id ? saved : x));
-            setEditingItem(null);
-          }}
-          onClose={() => setEditingItem(null)}
-          businessInfo={businessInfo}
-        />
-      )}
-
-      {/* Delete Account Modal */}
+      {/* Delete-account modal */}
       {showDeleteModal && (
         <DeleteAccountModal
           user={user}
           ownerUid={ownerUid}
           isSubscribed={isSubscribed}
-          onExportData={exportAllData}
+          onExportData={null}
           onClose={() => setShowDeleteModal(false)}
-          onDeleted={(result) => {
-            if (result === 'deleted') {
-              handleLogout();
-            } else {
-              // 'scheduled' — grace period set; close modal
-              setShowDeleteModal(false);
-            }
-          }}
+          onDeleted={handleLogout}
         />
       )}
     </div>
   );
 }
-
 
