@@ -12496,7 +12496,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
         </div>
         <div style={{display:'flex',gap:8}}>
           <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
-          {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><Check size={14}/> Save BOM</button>}
+          {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><CheckCircle size={14}/> Save BOM</button>}
         </div>
       </div>
 
