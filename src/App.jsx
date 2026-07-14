@@ -2751,6 +2751,7 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
+  const BizTypeCtx   = React.createContext(null);
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
   const cur = (n) => currency(n, cc.currency);
@@ -3464,10 +3465,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   // ── Shared sub-components ─────────────────────────────────────────────────
 
   function NavBtn({ id, label, icon: Icon, small }) {
+    const ctxBizType = React.useContext(BizTypeCtx);
     const active = view === id;
     return (
       <button
-        onClick={() => { setActiveDoc(null); setView(id); }}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); if (ctxBizType) onBizContextChange?.(ctxBizType); setActiveDoc(null); setView(id); }}
         style={{
           ...styles.navItem,
           ...(active ? styles.navItemActive : {}),
@@ -3551,27 +3554,30 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
     React.useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
     const isOpen = hasActive || open;
     return (
-      <div style={{ marginBottom: 2 }} onClick={() => onBizContextChange?.(bizType)}>
-        <button
-          onClick={() => { if (!hasActive) setOpen(o => !o); }}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
-            cursor: 'pointer', padding: '8px 12px 8px 10px',
-            borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
-            color: isOpen ? cfg.color : '#6B7494',
-            fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
-            transition: 'all 0.15s',
-          }}>
-          <span>{cfg.label}</span>
-          {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {isOpen && (
-          <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
-            {children}
-          </div>
-        )}
-      </div>
+      <BizTypeCtx.Provider value={bizType}>
+        <div style={{ marginBottom: 2 }}>
+          <button
+            type="button"
+            onClick={() => { onBizContextChange?.(bizType); if (!hasActive) setOpen(o => !o); }}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
+              cursor: 'pointer', padding: '8px 12px 8px 10px',
+              borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
+              color: isOpen ? cfg.color : '#6B7494',
+              fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+              transition: 'all 0.15s',
+            }}>
+            <span>{cfg.label}</span>
+            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+          {isOpen && (
+            <div style={{ paddingLeft: 4, paddingBottom: 4 }}>
+              {children}
+            </div>
+          )}
+        </div>
+      </BizTypeCtx.Provider>
     );
   }
 
