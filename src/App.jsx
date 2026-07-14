@@ -7826,7 +7826,7 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
 
 
 /* ── HR Employee Module Helpers ─────────────────────────────────────────── */
-const GULF_COUNTRIES_HR = ['UAE','Saudi Arabia','Kuwait','Qatar','Bahrain','Oman'];
+const GULF_COUNTRIES_HR = ['uae','saudi','kuwait','qatar','bahrain','oman'];
 
 function hrExpiryDays(dateStr) {
   if (!dateStr) return null;
@@ -7845,7 +7845,7 @@ function getEmpDocAlerts(emp, isGulf, country) {
   if (isGulf) {
     docs.push({ field: 'passportExpiry',       label: 'Passport' });
     docs.push({ field: 'visaExpiry',           label: 'Visa' });
-    docs.push({ field: 'emiratesIdExpiry',     label: country === 'UAE' ? 'Emirates ID' : 'Civil ID' });
+    docs.push({ field: 'emiratesIdExpiry',     label: country === 'uae' ? 'Emirates ID' : 'Civil ID' });
     docs.push({ field: 'labourCardExpiry',     label: 'Labour Card' });
     docs.push({ field: 'stampingExpiry',       label: 'Visa Stamping' });
   }
@@ -7928,7 +7928,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
   const [activeEmp, setActiveEmp] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
-  const country = businessInfo?.country || 'India';
+  const country = businessInfo?.country || 'india';
   const isGulf  = GULF_COUNTRIES_HR.includes(country);
 
   const allAlerts = employees.flatMap(emp =>
@@ -8089,7 +8089,7 @@ function EmployeeDetailView({ emp, businessInfo, isGulf, country, canEdit, onEdi
   const deductions = pf + esi + tds;
   const net    = gross - deductions;
   const alerts = getEmpDocAlerts(emp, isGulf, country);
-  const idLabel = country === 'UAE' ? 'Emirates ID' : 'Civil ID';
+  const idLabel = country === 'uae' ? 'Emirates ID' : 'Civil ID';
 
   function SecLabel({ t }) {
     return (
@@ -8279,7 +8279,7 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
   const tdsAmt = parseFloat(form.tds) || 0;
   const deductions = pfAmt + esiAmt + tdsAmt;
   const net    = gross - deductions;
-  const idLabel = country === 'UAE' ? 'Emirates ID' : 'Civil ID';
+  const idLabel = country === 'uae' ? 'Emirates ID' : 'Civil ID';
 
   function addCustomDoc() { set('customDocs', [...(form.customDocs || []), { id: crypto.randomUUID(), name: '', expiry: '', note: '' }]); }
   function updCustomDoc(idx, k, v) { const d = [...(form.customDocs || [])]; d[idx] = { ...d[idx], [k]: v }; set('customDocs', d); }
