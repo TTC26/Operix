@@ -3734,6 +3734,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
                 <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
 
+                <SubLabel label="Assets" />
+                <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+
                 <SubLabel label="Accounts" />
                 <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
                 <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
@@ -3767,6 +3770,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
                 <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
                 <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+
+                {bt === 'service' && <>
+                  <SubLabel label="Assets" />
+                  <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+                </>}
 
                 {bt === 'fmamc' && <>
                   <SubLabel label="FM Suite" />
@@ -3873,6 +3881,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
               <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
               <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
+              <NavBtn id="assetregister"   label="Asset Register"     icon={Package} />
             </Section>
           )}
 
@@ -3939,12 +3948,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </Section>
       ))}
 
@@ -14810,18 +14821,37 @@ function QuarterlyEvalForm({ evaluation, employees, computeStats, onSave, onClos
 
 
 
-// ─── FM: Asset Register ───────────────────────────────────────────────────────
+// ─── Asset Register ───────────────────────────────────────────────────────────
 function AssetRegisterView({ assets, setAssets, userRole }) {
   const [editing, setEditing] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
-  const ASSET_TYPES = ['HVAC','Electrical','Plumbing','Fire System','Elevator','Generator','UPS','Pump','Lighting','BMS','CCTV','Access Control','Other'];
+
+  const ASSET_CATEGORIES = [
+    { label: 'Transport',         abbr: 'TRN', subtypes: ['Bus','Lorry','Car','Van','Bike','Truck','Forklift'] },
+    { label: 'Office Equipment',  abbr: 'OFC', subtypes: ['PC','Laptop','Printer','Photocopier','Table','Chair','AC','UPS','Projector'] },
+    { label: 'Plant & Machinery', abbr: 'PLT', subtypes: ['Compressor','Generator','Pump','Lathe','Drill Press','Welding Machine','Crane','Conveyor'] },
+    { label: 'Electrical',        abbr: 'ELC', subtypes: ['Transformer','Switchgear','Panel Board','Cable Drum','Motor','Inverter','UPS'] },
+    { label: 'Furniture',         abbr: 'FRN', subtypes: ['Workstation','Cabinet','Shelf','Sofa','Conference Table','Reception Desk','Locker'] },
+    { label: 'Other',             abbr: 'OTH', subtypes: [] },
+  ];
+
   const CONDITIONS  = ['good','fair','poor','critical','decommissioned'];
   const COND_COLOR  = { good:'#1a6b30', fair:'#856404', poor:'#E07A3A', critical:'#842029', decommissioned:'#888' };
   const COND_BG     = { good:'#d4edda', fair:'#fff3cd', poor:'#fde8d4', critical:'#f8d7da', decommissioned:'#f0ece5' };
 
-  function blank() {
-    return { id:'', assetId:`AST-${String(assets.length+1).padStart(4,'0')}`, name:'', type:'HVAC', location:'', floor:'', building:'', make:'', model:'', serialNo:'', purchaseDate:'', warrantyExpiry:'', installDate:'', condition:'good', notes:'' };
+  function genAssetId(category) {
+    const cat = ASSET_CATEGORIES.find(c => c.label === category) || ASSET_CATEGORIES[ASSET_CATEGORIES.length - 1];
+    const year = new Date().getFullYear();
+    const prefix = `AV-${cat.abbr}-${year}-`;
+    const existing = assets.filter(a => a.assetId && a.assetId.startsWith(prefix));
+    return `${prefix}${String(existing.length + 1).padStart(3, '0')}`;
   }
+
+  function blank() {
+    const defaultCat = ASSET_CATEGORIES[0].label;
+    return { id:'', assetId:genAssetId(defaultCat), name:'', category:defaultCat, subtype:'', location:'', floor:'', building:'', make:'', model:'', serialNo:'', purchaseDate:'', warrantyExpiry:'', installDate:'', condition:'good', notes:'' };
+  }
+
   function save(a) {
     const rec = { ...a, id:a.id||crypto.randomUUID(), updatedAt:Date.now() };
     setAssets(prev=>prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
@@ -14831,6 +14861,7 @@ function AssetRegisterView({ assets, setAssets, userRole }) {
   if (editing) {
     const a = editing;
     const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
+    const catObj = ASSET_CATEGORIES.find(c=>c.label===a.category) || ASSET_CATEGORIES[0];
     return (
       <div style={{ maxWidth:660, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
@@ -14839,28 +14870,48 @@ function AssetRegisterView({ assets, setAssets, userRole }) {
         </div>
         <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Asset ID</label><input value={a.assetId} onChange={e=>set('assetId',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Type</label>
-              <select value={a.type} onChange={e=>set('type',e.target.value)} style={styles.input}>
-                {ASSET_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+            <div style={styles.formGroup}><label style={styles.label}>Asset ID</label>
+              <input value={a.assetId} onChange={e=>set('assetId',e.target.value)} style={styles.input}/>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Category</label>
+              <select value={a.category||''} onChange={e=>{
+                const newCat = e.target.value;
+                const newId = genAssetId(newCat);
+                setEditing(p=>({...p, category:newCat, subtype:'', assetId:p.id?p.assetId:newId}));
+              }} style={styles.input}>
+                {ASSET_CATEGORIES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}
               </select>
             </div>
+            <div style={styles.formGroup}><label style={styles.label}>Sub-type</label>
+              {catObj.subtypes.length > 0 ? (
+                <select value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input}>
+                  <option value="">— Select —</option>
+                  {catObj.subtypes.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <input value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input} placeholder="Specify type"/>
+              )}
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Asset Name / Description</label><input value={a.name||''} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder='e.g. Main Office Printer'/></div>
             <div style={styles.formGroup}><label style={styles.label}>Condition</label>
               <select value={a.condition} onChange={e=>set('condition',e.target.value)} style={styles.input}>
                 {CONDITIONS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
               </select>
             </div>
           </div>
-          <div style={styles.formGroup}><label style={styles.label}>Asset Name / Description</label><input value={a.name||''} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder='e.g. AHU-01 Air Handling Unit'/></div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
             <div style={styles.formGroup}><label style={styles.label}>Building</label><input value={a.building||''} onChange={e=>set('building',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Floor</label><input value={a.floor||''} onChange={e=>set('floor',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Location / Room</label><input value={a.location||''} onChange={e=>set('location',e.target.value)} style={styles.input}/></div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
             <div style={styles.formGroup}><label style={styles.label}>Make / Brand</label><input value={a.make||''} onChange={e=>set('make',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Model</label><input value={a.model||''} onChange={e=>set('model',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Serial No.</label><input value={a.serialNo||''} onChange={e=>set('serialNo',e.target.value)} style={styles.input}/></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
             <div style={styles.formGroup}><label style={styles.label}>Install Date</label><input type='date' value={a.installDate||''} onChange={e=>set('installDate',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Purchase Date</label><input type='date' value={a.purchaseDate||''} onChange={e=>set('purchaseDate',e.target.value)} style={styles.input}/></div>
             <div style={styles.formGroup}><label style={styles.label}>Warranty Expiry</label><input type='date' value={a.warrantyExpiry||''} onChange={e=>set('warrantyExpiry',e.target.value)} style={styles.input}/></div>
@@ -14896,7 +14947,7 @@ function AssetRegisterView({ assets, setAssets, userRole }) {
         <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead><tr style={{ background:'#F8F7F4' }}>
-              {['Asset ID','Name','Type','Location','Make/Model','Warranty','Condition',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              {['Asset ID','Name','Category','Sub-type','Location','Make/Model','Warranty','Condition',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {assets.map(a=>{
@@ -14905,11 +14956,12 @@ function AssetRegisterView({ assets, setAssets, userRole }) {
                   <tr key={a.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
                     <td style={{ padding:'10px 12px', fontWeight:600, color:'#1E2A4A' }}>{a.assetId}</td>
                     <td style={{ padding:'10px 12px', fontWeight:500 }}>{a.name||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:'#555' }}>{a.type}</td>
+                    <td style={{ padding:'10px 12px', color:'#555' }}>{a.category||a.type||'—'}</td>
+                    <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{a.subtype||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{[a.building,a.floor,a.location].filter(Boolean).join(' · ')||'—'}</td>
                     <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{[a.make,a.model].filter(Boolean).join(' / ')||'—'}</td>
                     <td style={{ padding:'10px 12px', color:warnExpiry?'#B5453A':'#555', fontSize:12 }}>{a.warrantyExpiry||'—'}{warnExpiry?' ⚠':''}</td>
-                    <td style={{ padding:'10px 12px' }}><span style={{ background:COND_BG[a.condition], color:COND_COLOR[a.condition], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{a.condition.toUpperCase()}</span></td>
+                    <td style={{ padding:'10px 12px' }}><span style={{ background:COND_BG[a.condition]||'#f0ece5', color:COND_COLOR[a.condition]||'#888', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(a.condition||'').toUpperCase()}</span></td>
                     <td style={{ padding:'10px 12px' }}>
                       {canEdit && <div style={{ display:'flex', gap:6 }}>
                         <button onClick={()=>setEditing(a)} style={styles.iconBtn}><Pencil size={14}/></button>
