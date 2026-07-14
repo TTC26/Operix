@@ -1233,7 +1233,7 @@ function AuthScreen() {
       <div style={styles.loginCard}>
         <div style={styles.brandMark}>O</div>
         <div className="serif" style={styles.loginTitle}>Operix</div>
-        <div style={styles.muted}>Invoicing, delivery notes & quotations for your business.</div>
+        <div style={styles.muted}>A complete business management platform.</div>
 
         {mode !== 'forgot' && (
           <div style={styles.loginTabs}>
@@ -3418,7 +3418,7 @@ const SECTION_VIEWS = {
   production:  ['rawmaterials', 'bom', 'productionorders'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
   hr:          ['employees', 'payroll'],
-  scope:       ['scopeofwork'],
+  scope:       ['scopeofwork','mepbom'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
@@ -3429,8 +3429,8 @@ const SECTION_VIEWS = {
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','audit'],
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers','audit'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
   hr:            ['employees','payroll'],
   admin:         ['staff','contracts','termslibrary'],
 };
@@ -3760,8 +3760,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="customers"   label="Customers"     icon={Users} />
                 <CreateBtn docKey="quotation"  bizType={bt} />
                 <CreateBtn docKey="invoice"    bizType={bt} />
-                <NavBtn id="rabilling"   label="RA Billing"    icon={FileMinus} />
-                <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+                <NavBtn id="rabilling"   label="RA Billing"         icon={FileMinus} />
+                <NavBtn id="mepbom"      label="Project BOM"        icon={ClipboardList} />
+                <NavBtn id="scopeofwork" label="Service Catalogue"  icon={BookOpen} />
 
                 <SubLabel label="Purchase" />
                 <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
@@ -3872,10 +3873,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
           )}
 
-          {/* Scope of Work — service only */}
-          {showService && (
-            <Section sectionKey="scope" label="Scope of Work">
-              <NavBtn id="scopeofwork" label="Scope of Work" icon={ClipboardList} />
+          {/* Project BOM + Service Catalogue */}
+          {(showService || showFMAMC) && (
+            <Section sectionKey="scope" label="Projects">
+              <NavBtn id="mepbom"      label="Project BOM"       icon={ClipboardList} />
+              <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
             </Section>
           )}
 
@@ -12340,6 +12342,292 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
 
 
 // ─── Scope of Work (Service companies) ───────────────────────────────────────
+function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
+  const [subView, setSubView]   = useState('list');   // 'list' | 'edit'
+  const [editing, setEditing]   = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
+  const LINE_STATUSES   = ['Pending','In Progress','Complete','On Hold'];
+
+  function newBom(projectId) {
+    return {
+      id: crypto.randomUUID(), projectId,
+      ref: '', contractRef: '', date: new Date().toISOString().slice(0,10),
+      items: [], status: 'draft', createdAt: Date.now(),
+    };
+  }
+  function blankItem(seq) {
+    return {
+      id: crypto.randomUUID(), seq, description: '', discipline: MEP_DISCIPLINES[0],
+      unit: 'Nos', qty: '', rate: '', plannedStart: '', plannedEnd: '',
+      status: 'Pending', activityId: '', catalogueRef: '',
+    };
+  }
+
+  function saveBom(bom) {
+    setMepBoms(prev => prev.find(b=>b.id===bom.id) ? prev.map(b=>b.id===bom.id?bom:b) : [...prev, bom]);
+    setSubView('list');
+  }
+
+  function deleteBom(id) {
+    if (!confirm('Delete this BOM?')) return;
+    setMepBoms(prev => prev.filter(b=>b.id!==id));
+  }
+
+  // Push a BOM line item → create/update Activity in activityPlanner
+  function pushToActivity(bom, item) {
+    if (!bom.projectId) return alert('Select a project first.');
+    const existing = siteActivities.find(a=>a.bomItemId===item.id);
+    if (existing) { alert('Activity already linked: ' + (existing.name||existing.id)); return; }
+    const newAct = {
+      id: crypto.randomUUID(),
+      projectId: bom.projectId,
+      bomItemId: item.id,
+      name: item.description,
+      discipline: item.discipline,
+      startDate: item.plannedStart,
+      endDate: item.plannedEnd,
+      status: 'not-started',
+      weight: 5,
+      bom: [], bomLocked: false,
+      createdAt: Date.now(),
+    };
+    setSiteActivities(prev => [...prev, newAct]);
+    // Update item with activityId
+    const updatedItems = editing.items.map(i => i.id===item.id ? {...i, activityId: newAct.id} : i);
+    setEditing(prev => ({...prev, items: updatedItems}));
+    alert('Activity created in Activity Planner!');
+  }
+
+  function importFromCatalogue(catItem) {
+    const seq = (editing.items.length || 0) + 1;
+    const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'Nos', rate: catItem.rate||'', catalogueRef: catItem.id };
+    setEditing(prev => ({...prev, items: [...prev.items, newItem]}));
+  }
+
+  function updateItem(itemId, field, val) {
+    setEditing(prev => ({...prev, items: prev.items.map(i => i.id===itemId ? {...i, [field]: val} : i)}));
+  }
+  function addItem() {
+    const seq = (editing.items.length||0)+1;
+    setEditing(prev=>({...prev, items:[...prev.items, blankItem(seq)]}));
+  }
+  function removeItem(itemId) {
+    setEditing(prev=>({...prev, items: prev.items.filter(i=>i.id!==itemId).map((i,idx)=>({...i,seq:idx+1}))}));
+  }
+
+  const currency = businessInfo?.currency || 'AED';
+  const totalAmt = (editing?.items||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
+
+  const ST_COLOR = { draft:{bg:'#F5F5F5',color:'#888'}, approved:{bg:'#D4EDDA',color:'#1a6b30'} };
+
+  // ── List View ──────────────────────────────────────────────────────────────
+  if (subView === 'list') return (
+    <div style={styles.page}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}}>
+        <div>
+          <h1 className="serif" style={styles.h1}>Project BOM</h1>
+          <p style={styles.muted}>Bill of Materials per project — link scope items to activities.</p>
+        </div>
+        {canEdit && (
+          <div style={{display:'flex',gap:8}}>
+            <select onChange={e=>{ if(e.target.value){ setEditing(newBom(e.target.value)); setSubView('edit'); e.target.value=''; }}}
+              style={{...styles.input, width:200}}>
+              <option value="">+ New BOM for project…</option>
+              {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {mepBoms.length === 0 && <div style={styles.emptyBox}>No project BOMs yet. Select a project above to create one.</div>}
+
+      {siteProjects.map(proj => {
+        const boms = mepBoms.filter(b=>b.projectId===proj.id);
+        if (!boms.length) return null;
+        return (
+          <div key={proj.id} style={{marginBottom:24}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#1E7A9A',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>
+              📁 {proj.name}
+            </div>
+            {boms.map(bom => {
+              const total = bom.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
+              const linked = bom.items.filter(i=>i.activityId).length;
+              const st = ST_COLOR[bom.status]||ST_COLOR.draft;
+              return (
+                <div key={bom.id} style={{...styles.recordRow, marginBottom:8, alignItems:'center'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:14}}>
+                      BOM {bom.ref||bom.id.slice(0,6).toUpperCase()}
+                      {bom.contractRef && <span style={{fontSize:12,color:'#888',marginLeft:8}}>· Contract: {bom.contractRef}</span>}
+                    </div>
+                    <div style={{fontSize:12,color:'#888',marginTop:3}}>
+                      {bom.date} · {bom.items.length} items · {currency} {total.toLocaleString('en',{minimumFractionDigits:2})} · {linked}/{bom.items.length} linked to activities
+                    </div>
+                  </div>
+                  <span style={{...styles.badge, background:st.bg, color:st.color, marginRight:8}}>{bom.status}</span>
+                  {canEdit && <>
+                    <button onClick={()=>{setEditing(bom);setSubView('edit');}} style={styles.iconBtn}><Pencil size={14}/></button>
+                    <button onClick={()=>deleteBom(bom.id)} style={{...styles.iconBtn,color:'#B5453A'}}><Trash2 size={14}/></button>
+                  </>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // ── Edit View ──────────────────────────────────────────────────────────────
+  const project = siteProjects.find(p=>p.id===editing.projectId);
+  const [showCatalogue, setShowCatalogue] = useState(false);
+
+  return (
+    <div style={styles.page}>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={()=>setSubView('list')} style={styles.ghostBtn}>← Back</button>
+          <h2 className="serif" style={{...styles.h2, margin:0}}>
+            Project BOM — {project?.name || 'Unknown Project'}
+          </h2>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
+          {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><Check size={14}/> Save BOM</button>}
+        </div>
+      </div>
+
+      {/* BOM Meta */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:20,background:'#F9F8F5',borderRadius:10,padding:16}}>
+        <div>
+          <div style={styles.fieldLabel}>BOM Reference</div>
+          <input value={editing.ref||''} onChange={e=>setEditing(p=>({...p,ref:e.target.value}))} style={styles.input} placeholder="e.g. BOM-001"/>
+        </div>
+        <div>
+          <div style={styles.fieldLabel}>Contract / PO Ref</div>
+          <input value={editing.contractRef||''} onChange={e=>setEditing(p=>({...p,contractRef:e.target.value}))} style={styles.input} placeholder="Contract number"/>
+        </div>
+        <div>
+          <div style={styles.fieldLabel}>Date</div>
+          <input type="date" value={editing.date||''} onChange={e=>setEditing(p=>({...p,date:e.target.value}))} style={styles.input}/>
+        </div>
+      </div>
+
+      {/* Catalogue Import Panel */}
+      {showCatalogue && (
+        <div style={{background:'#EEF7FA',border:'1px solid #B2D8E8',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#1E7A9A'}}>Service Catalogue — click to add</div>
+          {scopeOfWork.length===0 && <div style={{fontSize:12,color:'#888'}}>No catalogue items. Add items in Service Catalogue first.</div>}
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {scopeOfWork.map(s=>(
+              <button key={s.id} onClick={()=>importFromCatalogue(s)} style={{...styles.ghostBtn,fontSize:12,padding:'4px 10px'}}>
+                + {s.name} ({s.unit||'hrs'})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Line Items Table */}
+      <div style={{overflowX:'auto',marginBottom:16}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead>
+            <tr style={{background:'#F0EDE8'}}>
+              {['#','Description','Discipline','Qty','Unit','Rate','Amount','Plan Start','Plan End','Status','Activity',''].map(h=>(
+                <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:700,fontSize:11,color:'#555',whiteSpace:'nowrap'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {editing.items.map((item,idx)=>{
+              const amt = (parseFloat(item.qty)||0)*(parseFloat(item.rate)||0);
+              const linkedAct = siteActivities.find(a=>a.id===item.activityId);
+              return (
+                <tr key={item.id} style={{borderBottom:'1px solid #EAE6DB'}}>
+                  <td style={{padding:'6px 10px',color:'#888',width:30}}>{item.seq}</td>
+                  <td style={{padding:'4px 6px',minWidth:180}}>
+                    <input value={item.description} onChange={e=>updateItem(item.id,'description',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12}} placeholder="Work description"/>
+                  </td>
+                  <td style={{padding:'4px 6px',minWidth:120}}>
+                    <select value={item.discipline} onChange={e=>updateItem(item.id,'discipline',e.target.value)} style={{...styles.input,padding:'4px 8px',fontSize:12}}>
+                      {MEP_DISCIPLINES.map(d=><option key={d}>{d}</option>)}
+                    </select>
+                  </td>
+                  <td style={{padding:'4px 6px',width:70}}>
+                    <input type="number" value={item.qty} onChange={e=>updateItem(item.id,'qty',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:70}}>
+                    <input value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="Nos"/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:90}}>
+                    <input type="number" value={item.rate} onChange={e=>updateItem(item.id,'rate',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:80}} placeholder="0.00"/>
+                  </td>
+                  <td style={{padding:'6px 10px',fontWeight:600,whiteSpace:'nowrap',color:amt?'#1E2A4A':'#ccc'}}>
+                    {amt ? amt.toLocaleString('en',{minimumFractionDigits:2}) : '—'}
+                  </td>
+                  <td style={{padding:'4px 6px',width:120}}>
+                    <input type="date" value={item.plannedStart} onChange={e=>updateItem(item.id,'plannedStart',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:11,width:115}}/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:120}}>
+                    <input type="date" value={item.plannedEnd} onChange={e=>updateItem(item.id,'plannedEnd',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:11,width:115}}/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:110}}>
+                    <select value={item.status} onChange={e=>updateItem(item.id,'status',e.target.value)} style={{...styles.input,padding:'4px 8px',fontSize:12}}>
+                      {LINE_STATUSES.map(s=><option key={s}>{s}</option>)}
+                    </select>
+                  </td>
+                  <td style={{padding:'6px 10px',width:130}}>
+                    {linkedAct
+                      ? <span style={{fontSize:11,color:'#1a6b30',fontWeight:600}}>✓ {linkedAct.name?.slice(0,18)||'Linked'}</span>
+                      : <button onClick={()=>pushToActivity(editing,item)} style={{...styles.ghostBtn,fontSize:11,padding:'3px 8px',borderColor:'#1E7A9A',color:'#1E7A9A'}}
+                          title="Create activity in Activity Planner">→ Activity</button>
+                    }
+                  </td>
+                  <td style={{padding:'4px 6px'}}>
+                    <button onClick={()=>removeItem(item.id)} style={{...styles.iconBtn,color:'#B5453A'}}><X size={13}/></button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add row + Total */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <button onClick={addItem} style={styles.ghostBtn}><Plus size={14}/> Add Line Item</button>
+        <div style={{fontWeight:700,fontSize:15,color:'#1E2A4A'}}>
+          Total: {currency} {totalAmt.toLocaleString('en',{minimumFractionDigits:2})}
+        </div>
+      </div>
+
+      {/* Status */}
+      <div style={{marginTop:20,display:'flex',gap:10,alignItems:'center'}}>
+        <span style={{fontSize:13,fontWeight:600}}>BOM Status:</span>
+        {['draft','approved'].map(s=>(
+          <button key={s} onClick={()=>setEditing(p=>({...p,status:s}))}
+            style={{...styles.ghostBtn, padding:'5px 14px',
+              background: editing.status===s?(s==='approved'?'#D4EDDA':'#F0EDE8'):'transparent',
+              fontWeight: editing.status===s?700:400,
+              borderColor: s==='approved'?'#1a6b30':'#ccc',
+              color: s==='approved'?'#1a6b30':'#555'}}>
+            {s.charAt(0).toUpperCase()+s.slice(1)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -18487,6 +18775,9 @@ export default function App() {
   const setAmcContracts     = mkSet(_setAMC,   'amcContracts');
   const setFmSpareParts     = mkSet(_setFMSP,  'fmSpareParts');
 
+  const [mepBoms, _setMepBoms] = useState([]);
+  const setMepBoms = mkSet(_setMepBoms, 'mepBoms');
+
   // ── Document number helpers ──────────────────────────────────────────────────
   function getFY(dateStr) {
     const d = dateStr ? new Date(dateStr) : new Date();
@@ -19307,6 +19598,19 @@ export default function App() {
             scopeOfWork={scopeOfWork}
             setScopeOfWork={setScopeOfWork}
             userRole={userRole}
+          />
+        );
+      case 'mepbom':
+        return (
+          <MepBomView
+            mepBoms={mepBoms}
+            setMepBoms={setMepBoms}
+            siteProjects={siteProjects}
+            scopeOfWork={scopeOfWork}
+            siteActivities={siteActivities}
+            setSiteActivities={setSiteActivities}
+            userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'mis':
