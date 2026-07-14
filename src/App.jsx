@@ -12343,8 +12343,9 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
 
 // ─── Scope of Work (Service companies) ───────────────────────────────────────
 function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
-  const [subView, setSubView]   = useState('list');   // 'list' | 'edit'
-  const [editing, setEditing]   = useState(null);
+  const [subView, setSubView]     = useState('list');   // 'list' | 'edit'
+  const [editing, setEditing]     = useState(null);
+  const [showCatalogue, setShowCatalogue] = useState(false);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
@@ -12482,7 +12483,6 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
 
   // ── Edit View ──────────────────────────────────────────────────────────────
   const project = siteProjects.find(p=>p.id===editing.projectId);
-  const [showCatalogue, setShowCatalogue] = useState(false);
 
   return (
     <div style={styles.page}>
