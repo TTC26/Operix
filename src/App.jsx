@@ -3948,14 +3948,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
-          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
           {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
           {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
-          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </Section>
       ))}
 
@@ -18727,8 +18725,9 @@ export default function App() {
   const sessionCompanyType = sessionContext || companyType;
   const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
   // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
+  const bizDefault  = activeTypes.length === 1 ? activeTypes[0] : 'trading';
   const sessionDocs = sessionContext
-    ? documents.filter(d => (d.bizType || 'trading') === sessionContext)
+    ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
 
   function renderContent() {
@@ -18780,8 +18779,8 @@ export default function App() {
           <Dashboard
             stats={stats}
             documents={sessionDocs}
-            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
-            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             businessInfo={businessInfo}
             startNewDoc={startNewDoc}
             openDoc={openDoc}
@@ -18993,7 +18992,7 @@ export default function App() {
       case 'customers':
         return (
           <CustomersList
-            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             setEditing={setEditingCustomer}
             setCustomers={setCustomers}
             documents={documents}
@@ -19002,7 +19001,7 @@ export default function App() {
       case 'vendors':
         return (
           <VendorsList
-            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             setEditing={setEditingVendor}
             setVendors={setVendors}
             documents={documents}
@@ -19011,7 +19010,7 @@ export default function App() {
       case 'items':
         return (
           <ItemsList
-            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
             businessInfo={businessInfo}
@@ -19037,8 +19036,8 @@ export default function App() {
           <VoucherList
             vouchers={vouchers}
             setVouchers={setVouchers}
-            customers={sessionContext ? customers.filter(c => (c.bizType || 'trading') === sessionContext) : customers}
-            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
@@ -19052,8 +19051,8 @@ export default function App() {
             grns={grns}
             setGrns={setGrns}
             documents={sessionDocs}
-            vendors={sessionContext ? vendors.filter(v => (v.bizType || 'trading') === sessionContext) : vendors}
-            items={sessionContext ? items.filter(it => (it.bizType || 'trading') === sessionContext) : items}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
