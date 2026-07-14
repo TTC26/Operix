@@ -14822,7 +14822,7 @@ function QuarterlyEvalForm({ evaluation, employees, computeStats, onSave, onClos
 
 
 // ─── Asset Register ──────────────────────────────────────────────────────────
-function AssetRegisterView({ assets, setAssets, userRole, businessInfo }) {
+function AssetRegisterView({ assets, setAssets, userRole, businessInfo, currentBizType }) {
   const [subView, setSubView]           = useState('list');
   const [selectedId, setSelectedId]     = useState(null);
   const [editing, setEditing]           = useState(null);
@@ -14871,7 +14871,7 @@ function AssetRegisterView({ assets, setAssets, userRole, businessInfo }) {
     setAssets(prev=>prev.map(a=>a.id===id?{...a,...patch,updatedAt:Date.now()}:a));
   }
   function saveAsset(a) {
-    const rec = {...a, id:a.id||crypto.randomUUID(), updatedAt:Date.now()};
+    const rec = {...a, id:a.id||crypto.randomUUID(), bizType:a.bizType||(currentBizType||'fmamc'), updatedAt:Date.now()};
     setAssets(prev=>prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
     setEditing(null); setSelectedId(rec.id); setSubView('detail');
   }
@@ -19325,10 +19325,11 @@ export default function App() {
       case 'assetregister':
         return (
           <AssetRegisterView
-            assets={assets}
+            assets={sessionContext ? assets.filter(a => (a.bizType || 'fmamc') === sessionContext) : assets}
             setAssets={setAssets}
             userRole={userRole}
             businessInfo={businessInfo}
+            currentBizType={sessionContext || effectiveBizContext || 'fmamc'}
           />
         );
       case 'pmschedules':
