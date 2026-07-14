@@ -14821,162 +14821,580 @@ function QuarterlyEvalForm({ evaluation, employees, computeStats, onSave, onClos
 
 
 
-// ─── Asset Register ───────────────────────────────────────────────────────────
-function AssetRegisterView({ assets, setAssets, userRole }) {
-  const [editing, setEditing] = useState(null);
+// ─── Asset Register ──────────────────────────────────────────────────────────
+function AssetRegisterView({ assets, setAssets, userRole, businessInfo }) {
+  const [subView, setSubView]           = useState('list');
+  const [selectedId, setSelectedId]     = useState(null);
+  const [editing, setEditing]           = useState(null);
+  const [activeTab, setActiveTab]       = useState('details');
+  const [editingRecord, setEditingRecord] = useState(null);
+  const [editingFuel, setEditingFuel]   = useState(null);
+  const [filterCat, setFilterCat]       = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const canEdit = ['admin','manager'].includes(userRole);
 
-  const ASSET_CATEGORIES = [
-    { label: 'Transport',         abbr: 'TRN', subtypes: ['Bus','Lorry','Car','Van','Bike','Truck','Forklift'] },
-    { label: 'Office Equipment',  abbr: 'OFC', subtypes: ['PC','Laptop','Printer','Photocopier','Table','Chair','AC','UPS','Projector'] },
-    { label: 'Plant & Machinery', abbr: 'PLT', subtypes: ['Compressor','Generator','Pump','Lathe','Drill Press','Welding Machine','Crane','Conveyor'] },
-    { label: 'Electrical',        abbr: 'ELC', subtypes: ['Transformer','Switchgear','Panel Board','Cable Drum','Motor','Inverter','UPS'] },
-    { label: 'Furniture',         abbr: 'FRN', subtypes: ['Workstation','Cabinet','Shelf','Sofa','Conference Table','Reception Desk','Locker'] },
-    { label: 'Other',             abbr: 'OTH', subtypes: [] },
+  const ASSET_CATS = [
+    { label:'Transport',         abbr:'TRN', sub:['Bus','Lorry','Car','Van','Bike','Truck','Forklift'] },
+    { label:'Office Equipment',  abbr:'OFC', sub:['PC','Laptop','Printer','Photocopier','Table','Chair','AC','UPS','Projector'] },
+    { label:'Plant & Machinery', abbr:'PLT', sub:['Compressor','Generator','Pump','Lathe','Drill Press','Welding Machine','Crane','Conveyor'] },
+    { label:'Electrical',        abbr:'ELC', sub:['Transformer','Switchgear','Panel Board','Cable Drum','Motor','Inverter'] },
+    { label:'Furniture',         abbr:'FRN', sub:['Workstation','Cabinet','Shelf','Sofa','Conference Table','Reception Desk','Locker'] },
+    { label:'Other',             abbr:'OTH', sub:[] },
   ];
-
+  const MAINT_TYPES = ['Maintenance','Calibration','Inspection','Service','Repair','AMC Service'];
   const CONDITIONS  = ['good','fair','poor','critical','decommissioned'];
   const COND_COLOR  = { good:'#1a6b30', fair:'#856404', poor:'#E07A3A', critical:'#842029', decommissioned:'#888' };
   const COND_BG     = { good:'#d4edda', fair:'#fff3cd', poor:'#fde8d4', critical:'#f8d7da', decommissioned:'#f0ece5' };
+  const ST_STYLE    = { draft:{bg:'#F5F5F5',color:'#888',label:'Draft'}, pending:{bg:'#FFF3CD',color:'#856404',label:'Pending Approval'}, approved:{bg:'#D4EDDA',color:'#1a6b30',label:'Approved'} };
 
-  function genAssetId(category) {
-    const cat = ASSET_CATEGORIES.find(c => c.label === category) || ASSET_CATEGORIES[ASSET_CATEGORIES.length - 1];
-    const year = new Date().getFullYear();
-    const prefix = `AV-${cat.abbr}-${year}-`;
-    const existing = assets.filter(a => a.assetId && a.assetId.startsWith(prefix));
-    return `${prefix}${String(existing.length + 1).padStart(3, '0')}`;
+  // ── helpers ──────────────────────────────────────────────────────────────
+  function genId(category) {
+    const cat = ASSET_CATS.find(c=>c.label===category)||ASSET_CATS[ASSET_CATS.length-1];
+    const yr  = new Date().getFullYear();
+    const pfx = `AV-${cat.abbr}-${yr}-`;
+    const n   = assets.filter(a=>a.assetId&&a.assetId.startsWith(pfx)).length+1;
+    return `${pfx}${String(n).padStart(3,'0')}`;
   }
-
-  function blank() {
-    const defaultCat = ASSET_CATEGORIES[0].label;
-    return { id:'', assetId:genAssetId(defaultCat), name:'', category:defaultCat, subtype:'', location:'', floor:'', building:'', make:'', model:'', serialNo:'', purchaseDate:'', warrantyExpiry:'', installDate:'', condition:'good', notes:'' };
+  function blankAsset() {
+    const def = ASSET_CATS[0].label;
+    return { id:'', assetId:genId(def), name:'', category:def, subtype:'', status:'draft', condition:'good', notes:'',
+      location:'', floor:'', building:'', make:'', model:'', serialNo:'', purchaseDate:'', warrantyExpiry:'', installDate:'',
+      numberPlate:'', chassisNo:'', engineNo:'', maintenanceRecords:[], fuelLogs:[] };
   }
-
-  function save(a) {
-    const rec = { ...a, id:a.id||crypto.randomUUID(), updatedAt:Date.now() };
+  function blankRecord() {
+    return { id:'', type:'Maintenance', date:new Date().toISOString().slice(0,10), performedBy:'', vendor:'', description:'', cost:'', nextDue:'', remarks:'' };
+  }
+  function blankFuel() {
+    return { id:'', date:new Date().toISOString().slice(0,10), odometer:'', liters:'', costPerLiter:'', totalCost:'', driver:'', station:'', notes:'' };
+  }
+  function updateAsset(id, patch) {
+    setAssets(prev=>prev.map(a=>a.id===id?{...a,...patch,updatedAt:Date.now()}:a));
+  }
+  function saveAsset(a) {
+    const rec = {...a, id:a.id||crypto.randomUUID(), updatedAt:Date.now()};
     setAssets(prev=>prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
-    setEditing(null);
+    setEditing(null); setSelectedId(rec.id); setSubView('detail');
+  }
+  function saveRecord(assetId, rec) {
+    const r = {...rec, id:rec.id||crypto.randomUUID()};
+    const a = assets.find(x=>x.id===assetId);
+    const recs = a?.maintenanceRecords||[];
+    updateAsset(assetId, {maintenanceRecords: recs.find(x=>x.id===r.id)?recs.map(x=>x.id===r.id?r:x):[...recs,r]});
+    setEditingRecord(null);
+  }
+  function saveFuel(assetId, fuel) {
+    const f = {...fuel, id:fuel.id||crypto.randomUUID()};
+    const a = assets.find(x=>x.id===assetId);
+    const logs = a?.fuelLogs||[];
+    updateAsset(assetId, {fuelLogs: logs.find(x=>x.id===f.id)?logs.map(x=>x.id===f.id?f:x):[...logs,f]});
+    setEditingFuel(null);
   }
 
-  if (editing) {
-    const a = editing;
-    const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
-    const catObj = ASSET_CATEGORIES.find(c=>c.label===a.category) || ASSET_CATEGORIES[0];
+  // ── due-date alerts ───────────────────────────────────────────────────────
+  const today = new Date().toISOString().slice(0,10);
+  const soon  = new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+  function alerts(asset) {
+    const recs = asset.maintenanceRecords||[];
+    return { overdue: recs.filter(r=>r.nextDue&&r.nextDue<today), dueSoon: recs.filter(r=>r.nextDue&&r.nextDue>=today&&r.nextDue<=soon) };
+  }
+  const globalOverdue  = assets.filter(a=>(a.maintenanceRecords||[]).some(r=>r.nextDue&&r.nextDue<today));
+  const globalDueSoon  = assets.filter(a=>(a.maintenanceRecords||[]).some(r=>r.nextDue&&r.nextDue>=today&&r.nextDue<=soon));
+
+  // ── print ─────────────────────────────────────────────────────────────────
+  function printAsset(a) {
+    const co    = businessInfo||{};
+    const isDraft = a.status!=='approved';
+    const st    = ST_STYLE[a.status||'draft'];
+    const isTransport = a.category==='Transport';
+    const currency = co.currency||'';
+    const fmt = v => v?`${currency}${v}`:'—';
+    const html = `<!DOCTYPE html><html><head><title>Asset ${a.assetId}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;font-size:12px;color:#222;padding:28px 32px}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1E2A4A;padding-bottom:12px;margin-bottom:18px}
+.co{font-size:17px;font-weight:700;color:#1E2A4A}.sub{font-size:11px;color:#666;margin-top:2px}
+.badge{display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:700}
+.sec{font-size:11px;font-weight:700;color:#1E2A4A;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #ddd;padding-bottom:4px;margin:16px 0 10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 20px;margin-bottom:10px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:10px}
+.fld label{font-size:9px;color:#888;text-transform:uppercase;font-weight:700;display:block;margin-bottom:2px}
+.fld span{font-size:12px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+th{background:#F8F7F4;padding:6px 8px;text-align:left;font-size:10px;font-weight:700;color:#555;text-transform:uppercase;border-bottom:1px solid #ddd}
+td{padding:6px 8px;border-bottom:1px solid #F0ECE5}
+.sign{display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px;margin-top:48px}
+.sbox{border-top:1px solid #999;padding-top:4px;font-size:10px;color:#888;text-align:center}
+.foot{border-top:1px solid #ddd;margin-top:24px;padding-top:6px;font-size:10px;color:#888;display:flex;justify-content:space-between}
+.wm{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%) rotate(-40deg);font-size:90px;font-weight:900;color:rgba(200,0,0,0.07);white-space:nowrap;pointer-events:none;z-index:0}
+@media print{body{padding:16px 20px}.wm{position:fixed}}
+</style></head><body>
+${isDraft?'<div class="wm">DRAFT</div>':''}
+<div class="hdr">
+  <div><div class="co">${co.companyName||'Company'}</div><div class="sub">${co.address||''}</div></div>
+  <div style="text-align:right">
+    <div style="font-size:15px;font-weight:700;color:#1E2A4A">Asset Register</div>
+    <div style="font-size:13px;font-weight:600;margin-top:2px">${a.assetId}</div>
+    <div style="margin-top:5px"><span class="badge" style="background:${st.bg};color:${st.color}">${st.label}</span></div>
+  </div>
+</div>
+
+<div class="sec">Asset Details</div>
+<div class="g3">
+  <div class="fld"><label>Asset ID</label><span>${a.assetId}</span></div>
+  <div class="fld"><label>Category</label><span>${a.category||'—'}</span></div>
+  <div class="fld"><label>Sub-type</label><span>${a.subtype||'—'}</span></div>
+  <div class="fld"><label>Asset Name</label><span>${a.name||'—'}</span></div>
+  <div class="fld"><label>Condition</label><span>${(a.condition||'').toUpperCase()}</span></div>
+  <div class="fld"><label>Location</label><span>${[a.building,a.floor,a.location].filter(Boolean).join(', ')||'—'}</span></div>
+  <div class="fld"><label>Make / Brand</label><span>${a.make||'—'}</span></div>
+  <div class="fld"><label>Model</label><span>${a.model||'—'}</span></div>
+  <div class="fld"><label>Serial No.</label><span>${a.serialNo||'—'}</span></div>
+  <div class="fld"><label>Install Date</label><span>${a.installDate||'—'}</span></div>
+  <div class="fld"><label>Purchase Date</label><span>${a.purchaseDate||'—'}</span></div>
+  <div class="fld"><label>Warranty Expiry</label><span>${a.warrantyExpiry||'—'}</span></div>
+</div>
+
+${isTransport?`<div class="sec">Vehicle Details</div>
+<div class="g3">
+  <div class="fld"><label>Number Plate</label><span style="font-weight:700">${a.numberPlate||'—'}</span></div>
+  <div class="fld"><label>Chassis No.</label><span>${a.chassisNo||'—'}</span></div>
+  <div class="fld"><label>Engine No.</label><span>${a.engineNo||'—'}</span></div>
+</div>`:''}
+
+${a.notes?`<div class="sec">Notes</div><p style="font-size:12px;color:#444">${a.notes}</p>`:''}
+
+${(a.maintenanceRecords||[]).length>0?`<div class="sec">Maintenance / Calibration History</div>
+<table><thead><tr><th>#</th><th>Type</th><th>Date</th><th>Performed By</th><th>Vendor</th><th>Description</th><th>Cost</th><th>Next Due</th></tr></thead>
+<tbody>${(a.maintenanceRecords||[]).map((r,i)=>`<tr>
+  <td>${i+1}</td><td>${r.type}</td><td>${r.date}</td><td>${r.performedBy||'—'}</td>
+  <td>${r.vendor||'—'}</td><td>${r.description||'—'}</td><td>${fmt(r.cost)}</td>
+  <td style="color:${r.nextDue&&r.nextDue<today?'#B5453A':'inherit'}">${r.nextDue||'—'}${r.nextDue&&r.nextDue<today?' ⚠':''}</td>
+</tr>`).join('')}</tbody></table>`:''}
+
+${isTransport&&(a.fuelLogs||[]).length>0?`<div class="sec">Fuel Consumption Log</div>
+<table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Odometer</th><th>Liters</th><th>Cost/L</th><th>Total</th><th>Station</th></tr></thead>
+<tbody>${(a.fuelLogs||[]).map((f,i)=>`<tr>
+  <td>${i+1}</td><td>${f.date}</td><td>${f.driver||'—'}</td><td>${f.odometer?f.odometer+' km':'—'}</td>
+  <td>${f.liters?f.liters+' L':'—'}</td><td>${fmt(f.costPerLiter)}</td><td>${fmt(f.totalCost)}</td><td>${f.station||'—'}</td>
+</tr>`).join('')}</tbody></table>
+<p style="font-size:11px;color:#555;margin-top:8px">
+  Total fuel: <strong>${(a.fuelLogs||[]).reduce((s,f)=>s+(parseFloat(f.liters)||0),0).toFixed(1)} L</strong> &nbsp;|&nbsp;
+  Total cost: <strong>${fmt((a.fuelLogs||[]).reduce((s,f)=>s+(parseFloat(f.totalCost)||0),0).toFixed(2))}</strong>
+</p>`:''}
+
+<div class="sign">
+  <div class="sbox">Prepared By</div>
+  <div class="sbox">Reviewed By</div>
+  <div class="sbox">Approved By</div>
+</div>
+<div class="foot">
+  <span>Printed: ${new Date().toLocaleDateString()}</span>
+  <span>${co.companyName||''} — Asset Register</span>
+</div>
+</body></html>`;
+    const w = window.open('','_blank'); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),300);
+  }
+
+  const selected = assets.find(a=>a.id===selectedId);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LIST VIEW
+  // ══════════════════════════════════════════════════════════════════════════
+  if (subView==='list') {
+    const filtered = assets.filter(a=>(!filterCat||a.category===filterCat)&&(!filterStatus||a.status===filterStatus));
     return (
-      <div style={{ maxWidth:660, margin:'0 auto', padding:'24px 0' }}>
+      <div style={{ padding:'24px 32px' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+          <h2 className="serif" style={styles.pageTitle}>Asset Register</h2>
+          {canEdit && <button onClick={()=>{setEditing(blankAsset());setSubView('edit');}} style={styles.primaryBtn}><Plus size={15}/> Add Asset</button>}
+        </div>
+
+        {(globalOverdue.length>0||globalDueSoon.length>0) && (
+          <div style={{ background:'#FFF8E1', border:'1px solid #FDEAA7', borderRadius:8, padding:'10px 16px', marginBottom:12, display:'flex', gap:20, flexWrap:'wrap' }}>
+            {globalOverdue.length>0 && <span style={{ color:'#B5453A', fontWeight:600, fontSize:13 }}>⚠ {globalOverdue.length} asset{globalOverdue.length>1?'s':''} overdue for maintenance</span>}
+            {globalDueSoon.length>0 && <span style={{ color:'#856404', fontWeight:600, fontSize:13 }}>🔔 {globalDueSoon.length} due within 30 days</span>}
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:12, marginBottom:14, flexWrap:'wrap' }}>
+          {[['Total',assets.length,''],['Good',assets.filter(a=>a.condition==='good').length,'#1a6b30'],
+            ['Poor/Critical',assets.filter(a=>['critical','poor'].includes(a.condition)).length,'#B5453A'],
+            ['Approved',assets.filter(a=>a.status==='approved').length,'#1E2A4A']].map(([l,v,c])=>(
+            <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px' }}>
+              <div style={{ fontSize:10, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+              <div style={{ fontSize:20, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display:'flex', gap:10, marginBottom:14 }}>
+          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{ ...styles.input, width:'auto', padding:'6px 10px' }}>
+            <option value="">All Categories</option>
+            {ASSET_CATS.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}
+          </select>
+          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{ ...styles.input, width:'auto', padding:'6px 10px' }}>
+            <option value="">All Status</option>
+            <option value="draft">Draft</option>
+            <option value="pending">Pending Approval</option>
+            <option value="approved">Approved</option>
+          </select>
+        </div>
+
+        {filtered.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No assets found.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Asset ID','Name','Category','Sub-type','Condition','Status','Alerts',''].map(h=>(
+                  <th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filtered.map(a=>{
+                  const {overdue,dueSoon}=alerts(a); const st=ST_STYLE[a.status||'draft'];
+                  return (
+                    <tr key={a.id} onClick={()=>{setSelectedId(a.id);setSubView('detail');setActiveTab('details');}} style={{ borderBottom:'1px solid #F0ECE5', cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background=''}>
+                      <td style={{ padding:'10px 12px', fontWeight:600, color:'#1E2A4A' }}>{a.assetId}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:500 }}>{a.name||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#555' }}>{a.category||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#888', fontSize:12 }}>{a.subtype||'—'}</td>
+                      <td style={{ padding:'10px 12px' }}><span style={{ background:COND_BG[a.condition]||'#f0f0f0', color:COND_COLOR[a.condition]||'#888', borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(a.condition||'').toUpperCase()}</span></td>
+                      <td style={{ padding:'10px 12px' }}><span style={{ background:st.bg, color:st.color, borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{st.label}</span></td>
+                      <td style={{ padding:'10px 12px' }}>
+                        {overdue.length>0&&<span style={{ color:'#B5453A', fontSize:12, fontWeight:600 }}>⚠ {overdue.length} overdue</span>}
+                        {dueSoon.length>0&&<span style={{ color:'#856404', fontSize:12, fontWeight:600 }}>{overdue.length?' · ':''}🔔 {dueSoon.length} due soon</span>}
+                      </td>
+                      <td style={{ padding:'10px 12px' }} onClick={e=>e.stopPropagation()}>
+                        {canEdit&&<div style={{ display:'flex', gap:6 }}>
+                          <button onClick={()=>{setEditing({...a});setSubView('edit');}} style={styles.iconBtn}><Pencil size={14}/></button>
+                          <button onClick={()=>{if(window.confirm('Delete asset?'))setAssets(prev=>prev.filter(x=>x.id!==a.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                        </div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // EDIT FORM
+  // ══════════════════════════════════════════════════════════════════════════
+  if (subView==='edit'&&editing) {
+    const a=editing; const set=(k,v)=>setEditing(p=>({...p,[k]:v}));
+    const catObj=ASSET_CATS.find(c=>c.label===a.category)||ASSET_CATS[0];
+    const isTransport=a.category==='Transport';
+    const row=(label,key,type='text',ph='')=>(
+      <div style={styles.formGroup}><label style={styles.label}>{label}</label>
+        <input type={type} value={a[key]||''} onChange={e=>set(key,e.target.value)} style={styles.input} placeholder={ph}/>
+      </div>
+    );
+    return (
+      <div style={{ maxWidth:720, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
-          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <button onClick={()=>{setEditing(null);setSubView(selectedId?'detail':'list');}} style={styles.ghostBtn}><X size={14}/> Back</button>
           <h2 className="serif" style={styles.pageTitle}>{a.id?'Edit':'New'} Asset — {a.assetId}</h2>
         </div>
-        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+
+          <div style={{ fontSize:11, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid #F0ECE5', paddingBottom:4 }}>Identification</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Asset ID</label>
-              <input value={a.assetId} onChange={e=>set('assetId',e.target.value)} style={styles.input}/>
-            </div>
+            {row('Asset ID','assetId')}
             <div style={styles.formGroup}><label style={styles.label}>Category</label>
-              <select value={a.category||''} onChange={e=>{
-                const newCat = e.target.value;
-                const newId = genAssetId(newCat);
-                setEditing(p=>({...p, category:newCat, subtype:'', assetId:p.id?p.assetId:newId}));
-              }} style={styles.input}>
-                {ASSET_CATEGORIES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}
+              <select value={a.category||''} onChange={e=>{const nc=e.target.value;setEditing(p=>({...p,category:nc,subtype:'',assetId:p.id?p.assetId:genId(nc)}));}} style={styles.input}>
+                {ASSET_CATS.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}><label style={styles.label}>Sub-type</label>
-              {catObj.subtypes.length > 0 ? (
-                <select value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input}>
-                  <option value="">— Select —</option>
-                  {catObj.subtypes.map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-              ) : (
-                <input value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input} placeholder="Specify type"/>
-              )}
+              {catObj.sub.length>0
+                ?<select value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input}><option value="">— Select —</option>{catObj.sub.map(s=><option key={s} value={s}>{s}</option>)}</select>
+                :<input value={a.subtype||''} onChange={e=>set('subtype',e.target.value)} style={styles.input} placeholder="Specify"/>}
             </div>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Asset Name / Description</label><input value={a.name||''} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder='e.g. Main Office Printer'/></div>
+            {row('Asset Name / Description','name','text','e.g. Main Office AC Unit')}
             <div style={styles.formGroup}><label style={styles.label}>Condition</label>
               <select value={a.condition} onChange={e=>set('condition',e.target.value)} style={styles.input}>
                 {CONDITIONS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
               </select>
             </div>
           </div>
+
+          {isTransport&&<>
+            <div style={{ fontSize:11, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid #F0ECE5', paddingBottom:4 }}>Vehicle Details</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+              {row('Number Plate','numberPlate','text','e.g. TN 01 AB 1234')}
+              {row('Chassis No.','chassisNo')}
+              {row('Engine No.','engineNo')}
+            </div>
+          </>}
+
+          <div style={{ fontSize:11, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid #F0ECE5', paddingBottom:4 }}>Location</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Building</label><input value={a.building||''} onChange={e=>set('building',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Floor</label><input value={a.floor||''} onChange={e=>set('floor',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Location / Room</label><input value={a.location||''} onChange={e=>set('location',e.target.value)} style={styles.input}/></div>
+            {row('Building','building')} {row('Floor','floor')} {row('Location / Room','location')}
           </div>
+
+          <div style={{ fontSize:11, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid #F0ECE5', paddingBottom:4 }}>Specifications & Dates</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Make / Brand</label><input value={a.make||''} onChange={e=>set('make',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Model</label><input value={a.model||''} onChange={e=>set('model',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Serial No.</label><input value={a.serialNo||''} onChange={e=>set('serialNo',e.target.value)} style={styles.input}/></div>
+            {row('Make / Brand','make')} {row('Model','model')} {row('Serial No.','serialNo')}
+            {row('Install Date','installDate','date')} {row('Purchase Date','purchaseDate','date')} {row('Warranty Expiry','warrantyExpiry','date')}
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-            <div style={styles.formGroup}><label style={styles.label}>Install Date</label><input type='date' value={a.installDate||''} onChange={e=>set('installDate',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Purchase Date</label><input type='date' value={a.purchaseDate||''} onChange={e=>set('purchaseDate',e.target.value)} style={styles.input}/></div>
-            <div style={styles.formGroup}><label style={styles.label}>Warranty Expiry</label><input type='date' value={a.warrantyExpiry||''} onChange={e=>set('warrantyExpiry',e.target.value)} style={styles.input}/></div>
+
+          <div style={styles.formGroup}><label style={styles.label}>Notes</label>
+            <textarea value={a.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/>
           </div>
-          <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={a.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
-            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
-            <button onClick={()=>save(a)} style={styles.primaryBtn}>Save Asset</button>
+            <button onClick={()=>{setEditing(null);setSubView(selectedId?'detail':'list');}} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>saveAsset(a)} style={styles.primaryBtn}>Save Asset</button>
           </div>
         </div>
       </div>
     );
   }
 
-  const today = new Date().toISOString().slice(0,10);
-  const warrantyExpiring = assets.filter(a=>a.warrantyExpiry && a.warrantyExpiry > today && a.warrantyExpiry <= new Date(Date.now()+90*86400000).toISOString().slice(0,10));
-  const critical = assets.filter(a=>a.condition==='critical'||a.condition==='poor');
-  return (
-    <div style={{ padding:'24px 32px' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <h2 className="serif" style={styles.pageTitle}>Asset Register</h2>
-        {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> Add Asset</button>}
-      </div>
-      <div style={{ display:'flex', gap:12, marginBottom:20, flexWrap:'wrap' }}>
-        {[['Total Assets',assets.length,''],['Good Condition',assets.filter(a=>a.condition==='good').length,'#1a6b30'],['Poor / Critical',critical.length,'#B5453A'],['Warranty Expiring',warrantyExpiring.length,'#856404']].map(([l,v,c])=>(
-          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'12px 18px' }}>
-            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
-            <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+  // ══════════════════════════════════════════════════════════════════════════
+  // DETAIL VIEW
+  // ══════════════════════════════════════════════════════════════════════════
+  if (subView==='detail'&&selected) {
+    const a=selected; const {overdue,dueSoon}=alerts(a); const st=ST_STYLE[a.status||'draft'];
+    const isTransport=a.category==='Transport';
+
+    // Maintenance record form
+    if (editingRecord) {
+      const r=editingRecord; const setR=(k,v)=>setEditingRecord(p=>({...p,[k]:v}));
+      return (
+        <div style={{ maxWidth:620, margin:'0 auto', padding:'24px 0' }}>
+          <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+            <button onClick={()=>setEditingRecord(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+            <h2 className="serif" style={styles.pageTitle}>{r.id?'Edit':'New'} Record</h2>
           </div>
-        ))}
-      </div>
-      {assets.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No assets registered yet.</div> : (
-        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-            <thead><tr style={{ background:'#F8F7F4' }}>
-              {['Asset ID','Name','Category','Sub-type','Location','Make/Model','Warranty','Condition',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {assets.map(a=>{
-                const warnExpiry = a.warrantyExpiry && a.warrantyExpiry < today;
-                return (
-                  <tr key={a.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
-                    <td style={{ padding:'10px 12px', fontWeight:600, color:'#1E2A4A' }}>{a.assetId}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:500 }}>{a.name||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:'#555' }}>{a.category||a.type||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{a.subtype||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{[a.building,a.floor,a.location].filter(Boolean).join(' · ')||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{[a.make,a.model].filter(Boolean).join(' / ')||'—'}</td>
-                    <td style={{ padding:'10px 12px', color:warnExpiry?'#B5453A':'#555', fontSize:12 }}>{a.warrantyExpiry||'—'}{warnExpiry?' ⚠':''}</td>
-                    <td style={{ padding:'10px 12px' }}><span style={{ background:COND_BG[a.condition]||'#f0ece5', color:COND_COLOR[a.condition]||'#888', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(a.condition||'').toUpperCase()}</span></td>
-                    <td style={{ padding:'10px 12px' }}>
-                      {canEdit && <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={()=>setEditing(a)} style={styles.iconBtn}><Pencil size={14}/></button>
-                        <button onClick={()=>{if(window.confirm('Delete?'))setAssets(prev=>prev.filter(x=>x.id!==a.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
-                      </div>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Record Type</label>
+                <select value={r.type} onChange={e=>setR('type',e.target.value)} style={styles.input}>
+                  {MAINT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={r.date||''} onChange={e=>setR('date',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Performed By</label><input value={r.performedBy||''} onChange={e=>setR('performedBy',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Vendor / Service Provider</label><input value={r.vendor||''} onChange={e=>setR('vendor',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Cost</label><input type='number' value={r.cost||''} onChange={e=>setR('cost',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Next Due Date</label><input type='date' value={r.nextDue||''} onChange={e=>setR('nextDue',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Work Done / Description</label>
+              <textarea value={r.description||''} onChange={e=>setR('description',e.target.value)} style={{ ...styles.input, height:70 }}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Remarks</label><input value={r.remarks||''} onChange={e=>setR('remarks',e.target.value)} style={styles.input}/></div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+              <button onClick={()=>setEditingRecord(null)} style={styles.ghostBtn}>Cancel</button>
+              <button onClick={()=>saveRecord(a.id,r)} style={styles.primaryBtn}>Save Record</button>
+            </div>
+          </div>
         </div>
-      )}
-    </div>
-  );
+      );
+    }
+
+    // Fuel log form
+    if (editingFuel) {
+      const f=editingFuel; const setF=(k,v)=>setEditingFuel(p=>({...p,[k]:v}));
+      return (
+        <div style={{ maxWidth:580, margin:'0 auto', padding:'24px 0' }}>
+          <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+            <button onClick={()=>setEditingFuel(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+            <h2 className="serif" style={styles.pageTitle}>{f.id?'Edit':'New'} Fuel Entry</h2>
+          </div>
+          <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={f.date||''} onChange={e=>setF('date',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Driver</label><input value={f.driver||''} onChange={e=>setF('driver',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Odometer (km)</label><input type='number' value={f.odometer||''} onChange={e=>setF('odometer',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Fuel Station</label><input value={f.station||''} onChange={e=>setF('station',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Liters</label>
+                <input type='number' value={f.liters||''} onChange={e=>{
+                  const l=parseFloat(e.target.value)||0,cpl=parseFloat(f.costPerLiter)||0;
+                  setEditingFuel(p=>({...p,liters:e.target.value,totalCost:l&&cpl?(l*cpl).toFixed(2):p.totalCost}));
+                }} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Cost per Liter</label>
+                <input type='number' value={f.costPerLiter||''} onChange={e=>{
+                  const cpl=parseFloat(e.target.value)||0,l=parseFloat(f.liters)||0;
+                  setEditingFuel(p=>({...p,costPerLiter:e.target.value,totalCost:l&&cpl?(l*cpl).toFixed(2):p.totalCost}));
+                }} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Total Cost</label><input type='number' value={f.totalCost||''} onChange={e=>setF('totalCost',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Notes</label><input value={f.notes||''} onChange={e=>setF('notes',e.target.value)} style={styles.input}/></div>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+              <button onClick={()=>setEditingFuel(null)} style={styles.ghostBtn}>Cancel</button>
+              <button onClick={()=>saveFuel(a.id,f)} style={styles.primaryBtn}>Save Entry</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Main detail
+    const tabs = [['details','Details'],['maintenance',`Maintenance${(a.maintenanceRecords||[]).length?` (${(a.maintenanceRecords||[]).length})`:''}`],...(isTransport?[['fuel',`Fuel Log${(a.fuelLogs||[]).length?` (${(a.fuelLogs||[]).length})`:''}` ]]:[])];
+    return (
+      <div style={{ padding:'24px 32px' }}>
+        {/* Header */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16, flexWrap:'wrap', gap:10 }}>
+          <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+            <button onClick={()=>{setSubView('list');setSelectedId(null);setEditingRecord(null);setEditingFuel(null);}} style={styles.ghostBtn}><X size={14}/> Back</button>
+            <div>
+              <h2 className="serif" style={{ ...styles.pageTitle, marginBottom:2 }}>{a.assetId}{a.name?` — ${a.name}`:''}</h2>
+              <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap', marginTop:4 }}>
+                <span style={{ background:st.bg, color:st.color, borderRadius:5, padding:'2px 9px', fontSize:11, fontWeight:700 }}>{st.label}</span>
+                <span style={{ background:COND_BG[a.condition]||'#f0f0f0', color:COND_COLOR[a.condition]||'#888', borderRadius:5, padding:'2px 9px', fontSize:11, fontWeight:700 }}>{(a.condition||'').toUpperCase()}</span>
+                {overdue.length>0&&<span style={{ color:'#B5453A', fontSize:12, fontWeight:600 }}>⚠ {overdue.length} overdue</span>}
+                {dueSoon.length>0&&<span style={{ color:'#856404', fontSize:12, fontWeight:600 }}>🔔 {dueSoon.length} due soon</span>}
+              </div>
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            {canEdit&&a.status==='draft'&&<button onClick={()=>updateAsset(a.id,{status:'pending'})} style={{ ...styles.ghostBtn, borderColor:'#856404', color:'#856404' }}>Submit for Approval</button>}
+            {userRole==='admin'&&a.status==='pending'&&<>
+              <button onClick={()=>updateAsset(a.id,{status:'draft'})} style={{ ...styles.ghostBtn, color:'#B5453A' }}>Return to Draft</button>
+              <button onClick={()=>updateAsset(a.id,{status:'approved'})} style={{ ...styles.primaryBtn, background:'#1a6b30' }}><CheckCircle size={14}/> Approve</button>
+            </>}
+            {canEdit&&<button onClick={()=>{setEditing({...a});setSubView('edit');}} style={styles.ghostBtn}><Pencil size={14}/> Edit</button>}
+            <button onClick={()=>printAsset(a)} style={styles.ghostBtn}><Printer size={14}/> Print</button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display:'flex', borderBottom:'2px solid #EAE6DB', marginBottom:20 }}>
+          {tabs.map(([k,label])=>(
+            <button key={k} onClick={()=>setActiveTab(k)} style={{ padding:'8px 20px', border:'none', borderBottom:activeTab===k?'2px solid #1E2A4A':'2px solid transparent', background:'none', cursor:'pointer', fontWeight:activeTab===k?700:400, color:activeTab===k?'#1E2A4A':'#888', fontSize:13, marginBottom:'-2px' }}>{label}</button>
+          ))}
+        </div>
+
+        {/* DETAILS TAB */}
+        {activeTab==='details'&&(
+          <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+              {[['Asset ID',a.assetId],['Category',a.category||'—'],['Sub-type',a.subtype||'—'],
+                ['Make / Brand',a.make||'—'],['Model',a.model||'—'],['Serial No.',a.serialNo||'—'],
+                ['Install Date',a.installDate||'—'],['Purchase Date',a.purchaseDate||'—'],
+                ['Warranty Expiry',a.warrantyExpiry||(a.warrantyExpiry&&a.warrantyExpiry<today?'⚠ '+a.warrantyExpiry:a.warrantyExpiry)||'—'],
+                ['Building',a.building||'—'],['Floor',a.floor||'—'],['Location',a.location||'—']].map(([l,v])=>(
+                <div key={l}>
+                  <div style={{ fontSize:10, color:'#888', fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{l}</div>
+                  <div style={{ fontWeight:l==='Asset ID'?600:400 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {isTransport&&<>
+              <div style={{ fontSize:11, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', borderBottom:'1px solid #F0ECE5', paddingBottom:4, marginBottom:12 }}>Vehicle Details</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+                {[['Number Plate',a.numberPlate||'—'],['Chassis No.',a.chassisNo||'—'],['Engine No.',a.engineNo||'—']].map(([l,v])=>(
+                  <div key={l}>
+                    <div style={{ fontSize:10, color:'#888', fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{l}</div>
+                    <div style={{ fontWeight:l==='Number Plate'?700:400 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </>}
+            {a.notes&&<div style={{ marginTop:16 }}><div style={{ fontSize:10, color:'#888', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>Notes</div><div style={{ color:'#555' }}>{a.notes}</div></div>}
+          </div>
+        )}
+
+        {/* MAINTENANCE TAB */}
+        {activeTab==='maintenance'&&(
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+              <div style={{ fontSize:14, fontWeight:600 }}>Maintenance / Calibration Records</div>
+              {canEdit&&<button onClick={()=>setEditingRecord(blankRecord())} style={styles.primaryBtn}><Plus size={14}/> Add Record</button>}
+            </div>
+            {(a.maintenanceRecords||[]).length===0
+              ?<div style={{ textAlign:'center', padding:48, color:'#888' }}>No records yet. Add the first maintenance or calibration entry.</div>
+              :<div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>
+                    {['Type','Date','Performed By','Vendor','Work Done','Cost','Next Due','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {[...(a.maintenanceRecords||[])].sort((x,y)=>y.date.localeCompare(x.date)).map(r=>{
+                      const od=r.nextDue&&r.nextDue<today, ds=r.nextDue&&r.nextDue>=today&&r.nextDue<=soon;
+                      return (
+                        <tr key={r.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                          <td style={{ padding:'10px 12px', fontWeight:600 }}>{r.type}</td>
+                          <td style={{ padding:'10px 12px' }}>{r.date}</td>
+                          <td style={{ padding:'10px 12px', color:'#555' }}>{r.performedBy||'—'}</td>
+                          <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{r.vendor||'—'}</td>
+                          <td style={{ padding:'10px 12px', color:'#555', fontSize:12, maxWidth:180 }}>{r.description||'—'}</td>
+                          <td style={{ padding:'10px 12px' }}>{r.cost||'—'}</td>
+                          <td style={{ padding:'10px 12px', color:od?'#B5453A':ds?'#856404':'#555', fontWeight:od||ds?600:400 }}>{r.nextDue||'—'}</td>
+                          <td style={{ padding:'10px 12px' }}>
+                            {od&&<span style={{ background:'#f8d7da', color:'#842029', borderRadius:4, padding:'2px 7px', fontSize:11, fontWeight:700 }}>OVERDUE</span>}
+                            {ds&&<span style={{ background:'#fff3cd', color:'#856404', borderRadius:4, padding:'2px 7px', fontSize:11, fontWeight:700 }}>DUE SOON</span>}
+                          </td>
+                          <td style={{ padding:'10px 12px' }}>
+                            {canEdit&&<div style={{ display:'flex', gap:6 }}>
+                              <button onClick={()=>setEditingRecord(r)} style={styles.iconBtn}><Pencil size={14}/></button>
+                              <button onClick={()=>{if(window.confirm('Delete record?'))updateAsset(a.id,{maintenanceRecords:(a.maintenanceRecords||[]).filter(x=>x.id!==r.id)})}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                            </div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            }
+          </div>
+        )}
+
+        {/* FUEL LOG TAB */}
+        {activeTab==='fuel'&&isTransport&&(
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+              <div>
+                <div style={{ fontSize:14, fontWeight:600 }}>Fuel Consumption Log</div>
+                {(a.fuelLogs||[]).length>0&&<div style={{ fontSize:12, color:'#888', marginTop:2 }}>
+                  Total: <strong>{(a.fuelLogs||[]).reduce((s,f)=>s+(parseFloat(f.liters)||0),0).toFixed(1)} L</strong> &nbsp;|&nbsp; Cost: <strong>{(a.fuelLogs||[]).reduce((s,f)=>s+(parseFloat(f.totalCost)||0),0).toFixed(2)}</strong>
+                </div>}
+              </div>
+              {canEdit&&<button onClick={()=>setEditingFuel(blankFuel())} style={styles.primaryBtn}><Plus size={14}/> Add Entry</button>}
+            </div>
+            {(a.fuelLogs||[]).length===0
+              ?<div style={{ textAlign:'center', padding:48, color:'#888' }}>No fuel entries yet.</div>
+              :<div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>
+                    {['Date','Driver','Odometer','Liters','Cost/L','Total','Station','Notes',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {[...(a.fuelLogs||[])].sort((x,y)=>y.date.localeCompare(x.date)).map(f=>(
+                      <tr key={f.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                        <td style={{ padding:'10px 12px' }}>{f.date}</td>
+                        <td style={{ padding:'10px 12px' }}>{f.driver||'—'}</td>
+                        <td style={{ padding:'10px 12px', color:'#555' }}>{f.odometer?f.odometer+' km':'—'}</td>
+                        <td style={{ padding:'10px 12px', fontWeight:500 }}>{f.liters?f.liters+' L':'—'}</td>
+                        <td style={{ padding:'10px 12px', color:'#555' }}>{f.costPerLiter||'—'}</td>
+                        <td style={{ padding:'10px 12px', fontWeight:500 }}>{f.totalCost||'—'}</td>
+                        <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{f.station||'—'}</td>
+                        <td style={{ padding:'10px 12px', color:'#555', fontSize:12 }}>{f.notes||'—'}</td>
+                        <td style={{ padding:'10px 12px' }}>
+                          {canEdit&&<div style={{ display:'flex', gap:6 }}>
+                            <button onClick={()=>setEditingFuel(f)} style={styles.iconBtn}><Pencil size={14}/></button>
+                            <button onClick={()=>{if(window.confirm('Delete entry?'))updateAsset(a.id,{fuelLogs:(a.fuelLogs||[]).filter(x=>x.id!==f.id)})}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                          </div>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            }
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return <div style={{ padding:40, color:'#888' }}>Loading…</div>;
 }
 
 // ─── FM: Preventive Maintenance Schedules ─────────────────────────────────────
@@ -18910,6 +19328,7 @@ export default function App() {
             assets={assets}
             setAssets={setAssets}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'pmschedules':
