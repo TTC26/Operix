@@ -7487,10 +7487,115 @@ const MONTHS = [
 ];
 
 // ─── Employees ────────────────────────────────────────────────────────────────
+/* ── HR Employee Module Helpers ─────────────────────────────────────────── */
+const GULF_COUNTRIES_HR = ['UAE','Saudi Arabia','Kuwait','Qatar','Bahrain','Oman'];
+
+function hrExpiryDays(dateStr) {
+  if (!dateStr) return null;
+  return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+}
+function hrExpiryStatus(dateStr) {
+  const d = hrExpiryDays(dateStr);
+  if (d === null) return null;
+  if (d <= 0)  return 'expired';
+  if (d <= 30) return 'critical';
+  if (d <= 90) return 'warning';
+  return 'ok';
+}
+function getEmpDocAlerts(emp, isGulf, country) {
+  const docs = [];
+  if (isGulf) {
+    docs.push({ field: 'passportExpiry',       label: 'Passport' });
+    docs.push({ field: 'visaExpiry',           label: 'Visa' });
+    docs.push({ field: 'emiratesIdExpiry',     label: country === 'UAE' ? 'Emirates ID' : 'Civil ID' });
+    docs.push({ field: 'labourCardExpiry',     label: 'Labour Card' });
+    docs.push({ field: 'stampingExpiry',       label: 'Visa Stamping' });
+  }
+  docs.push({ field: 'medicalInsuranceExpiry', label: 'Medical Ins.' });
+  (emp.customDocs || []).forEach(d => docs.push({ field: '__c', label: d.name, customExpiry: d.expiry }));
+
+  return docs.map(doc => {
+    const dateStr = doc.customExpiry !== undefined ? doc.customExpiry : emp[doc.field];
+    const status  = hrExpiryStatus(dateStr);
+    return (status && status !== 'ok') ? { ...doc, dateStr, status, days: hrExpiryDays(dateStr) } : null;
+  }).filter(Boolean);
+}
+
+function printOfferLetter(emp, businessInfo) {
+  const biz   = businessInfo || {};
+  const fmt   = makeFmt(businessInfo);
+  const basic = parseFloat(emp.basicSalary) || 0;
+  const hra   = parseFloat(emp.hra) || 0;
+  const da    = parseFloat(emp.da) || 0;
+  const other = parseFloat(emp.otherAllowances) || 0;
+  const gross = basic + hra + da + other;
+  const date  = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Offer Letter — ${emp.name}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
+  .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; }
+  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  h2 { text-align: center; color: #1E2A4A; margin: 0 0 24px; font-size: 16px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .ref { text-align: right; font-size: 12px; color: #555; margin-bottom: 20px; }
+  p { line-height: 1.7; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 12px; }
+  th { background: #1E2A4A; color: #fff; padding: 7px 10px; text-align: left; }
+  td { border: 1px solid #ddd; padding: 6px 10px; }
+  tr:nth-child(even) td { background: #F8F8F8; }
+  .total td { font-weight: 700; background: #EEF2FF !important; }
+  .sig { margin-top: 60px; display: flex; justify-content: space-between; }
+  .sig-box { text-align: center; width: 180px; }
+  .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; }
+  @media print { body { -webkit-print-color-adjust: exact; } }
+</style></head><body><div class="page">
+<div class="letterhead">
+  <div><div class="biz-name">${biz.name || 'Company Name'}</div>
+    <div style="font-size:11px;color:#555;margin-top:4px">${biz.address || ''}</div></div>
+  <div class="biz-info">${biz.phone ? 'Tel: ' + biz.phone + '<br/>' : ''}${biz.email ? biz.email + '<br/>' : ''}${biz.website || ''}</div>
+</div>
+<div class="ref">Date: ${date} &nbsp;|&nbsp; Ref: ${emp.empId || 'HR/OL/-'}</div>
+<h2>Offer Letter</h2>
+<p>Dear <strong>${emp.name}</strong>,</p>
+<p>We are pleased to offer you the position of <strong>${emp.designation || '___________'}</strong> in the <strong>${emp.department || '___________'}</strong> department at <strong>${biz.name || 'our company'}</strong>, subject to the terms and conditions set forth below.</p>
+<p><strong>Date of Joining:</strong> ${emp.joiningDate || '___________'}</p>
+<h3 style="color:#1E2A4A;font-size:13px;margin:16px 0 8px">Compensation Structure</h3>
+<table>
+  <tr><th>Component</th><th style="text-align:right">Amount (Per Month)</th></tr>
+  <tr><td>Basic Salary</td><td style="text-align:right">${fmt(basic)}</td></tr>
+  ${hra ? `<tr><td>HRA</td><td style="text-align:right">${fmt(hra)}</td></tr>` : ''}
+  ${da ? `<tr><td>DA</td><td style="text-align:right">${fmt(da)}</td></tr>` : ''}
+  ${other ? `<tr><td>Other Allowances</td><td style="text-align:right">${fmt(other)}</td></tr>` : ''}
+  <tr class="total"><td>Gross Monthly Salary</td><td style="text-align:right">${fmt(gross)}</td></tr>
+</table>
+<p>This offer is contingent upon the successful completion of background verification and submission of all required documents. By accepting this offer, you agree to abide by the company's policies and code of conduct.</p>
+<p>Please sign and return a copy of this letter by <strong>${emp.joiningDate || '___________'}</strong> to confirm your acceptance.</p>
+<p>We look forward to welcoming you to the team.</p>
+<p>Warm regards,</p>
+<div class="sig">
+  <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Authorised Signatory<br/>${biz.name || ''}</div></div>
+  <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
+</div>
+</div></body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
 function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
-  const [showModal, setShowModal] = useState(false);
-  const [active, setActive] = useState(null);
-  const canEdit = userRole === 'admin';
+  const [subView,   setSubView]   = useState('list');
+  const [activeEmp, setActiveEmp] = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  const country = businessInfo?.country || 'India';
+  const isGulf  = GULF_COUNTRIES_HR.includes(country);
+
+  const allAlerts = employees.flatMap(emp =>
+    getEmpDocAlerts(emp, isGulf, country).map(a => ({ ...a, emp }))
+  );
 
   function saveEmployee(emp) {
     setEmployees(prev => {
@@ -7498,24 +7603,80 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
       if (idx >= 0) { const a = [...prev]; a[idx] = emp; return a; }
       return [...prev, emp];
     });
-    setShowModal(false);
+    setActiveEmp(emp);
+    setSubView('detail');
   }
 
   function deleteEmployee(id) {
     if (!window.confirm('Delete this employee?')) return;
     setEmployees(prev => prev.filter(e => e.id !== id));
+    setSubView('list');
+    setActiveEmp(null);
   }
 
-  const DEPT_COLORS = ['#E8F4FD','#D1FAE5','#FFF3CD','#EDE9FE','#FEE2E2','#F3F2EF'];
+  if (subView === 'edit') {
+    return (
+      <EmployeeHRForm
+        employee={activeEmp}
+        count={employees.length}
+        businessInfo={businessInfo}
+        isGulf={isGulf}
+        country={country}
+        onSave={saveEmployee}
+        onClose={() => setSubView(activeEmp ? 'detail' : 'list')}
+      />
+    );
+  }
+
+  if (subView === 'detail' && activeEmp) {
+    const fresh = employees.find(e => e.id === activeEmp.id) || activeEmp;
+    return (
+      <EmployeeDetailView
+        emp={fresh}
+        businessInfo={businessInfo}
+        isGulf={isGulf}
+        country={country}
+        canEdit={canEdit}
+        onEdit={() => { setActiveEmp(fresh); setSubView('edit'); }}
+        onDelete={() => deleteEmployee(fresh.id)}
+        onBack={() => setSubView('list')}
+      />
+    );
+  }
 
   return (
     <div style={styles.page}>
+      {allAlerts.length > 0 && (
+        <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <Bell size={16} style={{ color: '#D97706', marginTop: 1, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 600, color: '#92400E', fontSize: 13, marginBottom: 5 }}>
+              Document Expiry Alerts ({allAlerts.length})
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {allAlerts.slice(0, 10).map((a, i) => (
+                <span key={i}
+                  style={{ fontSize: 11.5, background: a.status === 'expired' ? '#FEE2E2' : '#FEF9C3', color: a.status === 'expired' ? '#B91C1C' : '#92400E', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+                  onClick={() => { setActiveEmp(a.emp); setSubView('detail'); }}>
+                  <AlertTriangle size={10} />{a.emp.name} — {a.label} {a.days <= 0 ? 'EXPIRED' : `in ${a.days}d`}
+                </span>
+              ))}
+              {allAlerts.length > 10 && <span style={{ fontSize: 11.5, color: '#92400E' }}>+{allAlerts.length - 10} more</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 className="serif" style={styles.h1}>Employees</h2>
           <div style={styles.muted}>{employees.length} employee{employees.length !== 1 ? 's' : ''}</div>
         </div>
-        {canEdit && <button style={styles.primaryBtn} onClick={() => { setActive(null); setShowModal(true); }}><Plus size={15}/> Add Employee</button>}
+        {canEdit && (
+          <button style={styles.primaryBtn} onClick={() => { setActiveEmp(null); setSubView('edit'); }}>
+            <Plus size={15} /> Add Employee
+          </button>
+        )}
       </div>
 
       {employees.length === 0 ? (
@@ -7524,157 +7685,458 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
         <div style={{ overflowX: 'auto' }}>
           <table style={styles.table}>
             <thead>
-              <tr>{['Emp ID','Name','Designation','Department','Phone','Basic Salary','Status',''].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>
+                {['Emp ID', 'Name', 'Designation', 'Department', 'Phone', 'Status', 'Alerts', ''].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
-              {[...employees].sort((a,b)=>a.name>b.name?1:-1).map((e,i) => (
-                <tr key={e.id}>
-                  <td style={{ ...styles.td, fontFamily: 'monospace', fontWeight: 600 }}>{e.empId}</td>
-                  <td style={{ ...styles.td, fontWeight: 600 }}>{e.name}</td>
-                  <td style={styles.td}>{e.designation}</td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, background: DEPT_COLORS[i % DEPT_COLORS.length], color: '#333' }}>{e.department || '—'}</span>
-                  </td>
-                  <td style={styles.td}>{e.phone}</td>
-                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{makeFmt(businessInfo)(parseFloat(e.basicSalary)||0)}</td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, ...(e.status === 'active' ? { background: '#D1FAE5', color: '#065F46' } : { background: '#F3F2EF', color: '#6B7494' }) }}>{e.status || 'active'}</span>
-                  </td>
-                  <td style={styles.td}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {canEdit && <button style={styles.iconBtn} onClick={() => { setActive(e); setShowModal(true); }}><Pencil size={14}/></button>}
-                      {canEdit && <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteEmployee(e.id)}><Trash2 size={14}/></button>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {[...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1).map(emp => {
+                const alerts = getEmpDocAlerts(emp, isGulf, country);
+                return (
+                  <tr key={emp.id} style={{ cursor: 'pointer', background: alerts.length > 0 ? '#FFFBEB' : undefined }}
+                    onClick={() => { setActiveEmp(emp); setSubView('detail'); }}>
+                    <td style={{ ...styles.td, fontFamily: 'monospace', fontWeight: 600 }}>{emp.empId}</td>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{emp.name}</td>
+                    <td style={styles.td}>{emp.designation}</td>
+                    <td style={styles.td}>{emp.department || '—'}</td>
+                    <td style={styles.td}>{emp.phone}</td>
+                    <td style={styles.td}>
+                      <span style={{ ...styles.badge, ...(emp.status === 'active' ? { background: '#D1FAE5', color: '#065F46' } : { background: '#F3F2EF', color: '#6B7494' }) }}>
+                        {emp.status || 'active'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      {alerts.length === 0 ? (
+                        <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+                      ) : (
+                        alerts.slice(0, 2).map((a, i) => (
+                          <span key={i} style={{ ...styles.badge, background: a.status === 'expired' ? '#FEE2E2' : '#FEF3C7', color: a.status === 'expired' ? '#B91C1C' : '#92400E', marginRight: 3, fontSize: 10.5 }}>
+                            <AlertTriangle size={9} style={{ marginRight: 2 }} />{a.label} {a.days <= 0 ? 'exp.' : `${a.days}d`}
+                          </span>
+                        ))
+                      )}
+                      {alerts.length > 2 && <span style={{ fontSize: 11, color: '#92400E' }}>+{alerts.length - 2}</span>}
+                    </td>
+                    <td style={styles.td} onClick={e => e.stopPropagation()}>
+                      {canEdit && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button style={styles.iconBtn} onClick={() => { setActiveEmp(emp); setSubView('edit'); }}><Pencil size={14} /></button>
+                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteEmployee(emp.id)}><Trash2 size={14} /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-      {showModal && (
-        <Modal title={active ? 'Edit Employee' : 'New Employee'} onClose={() => setShowModal(false)} wide>
-          <EmployeeForm employee={active} count={employees.length} businessInfo={businessInfo} onSave={saveEmployee} onClose={() => setShowModal(false)} />
-        </Modal>
-      )}
     </div>
   );
 }
 
-function EmpField({ label, name, type = 'text', placeholder, form, errors, set, setErrors }) {
+function EmployeeDetailView({ emp, businessInfo, isGulf, country, canEdit, onEdit, onDelete, onBack }) {
+  const fmtEmp = makeFmt(businessInfo);
+  const basic  = parseFloat(emp.basicSalary) || 0;
+  const hra    = parseFloat(emp.hra) || 0;
+  const da     = parseFloat(emp.da) || 0;
+  const other  = parseFloat(emp.otherAllowances) || 0;
+  const gross  = basic + hra + da + other;
+  const pf     = basic * (parseFloat(emp.pf) || 0) / 100;
+  const esi    = gross * (parseFloat(emp.esi) || 0) / 100;
+  const tds    = parseFloat(emp.tds) || 0;
+  const deductions = pf + esi + tds;
+  const net    = gross - deductions;
+  const alerts = getEmpDocAlerts(emp, isGulf, country);
+  const idLabel = country === 'UAE' ? 'Emirates ID' : 'Civil ID';
+
+  function SecLabel({ t }) {
+    return (
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 5, marginBottom: 10, marginTop: 18 }}>{t}</div>
+    );
+  }
+  function Row({ label, value, dateAlert }) {
+    const alertSt  = dateAlert ? hrExpiryStatus(dateAlert) : null;
+    const alertDays = dateAlert ? hrExpiryDays(dateAlert) : null;
+    const alertColors = { expired: { bg: '#FEE2E2', color: '#B91C1C' }, critical: { bg: '#FEF3C7', color: '#92400E' }, warning: { bg: '#FFF9E6', color: '#B45309' } };
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 8, marginBottom: 7, alignItems: 'start' }}>
+        <div style={{ color: '#6B7494', fontSize: 12.5 }}>{label}</div>
+        <div style={{ fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span>{value || <span style={{ color: '#C9C9C9' }}>—</span>}</span>
+          {alertSt && alertSt !== 'ok' && (
+            <span style={{ fontSize: 10.5, background: alertColors[alertSt].bg, color: alertColors[alertSt].color, borderRadius: 4, padding: '1px 6px', display: 'flex', alignItems: 'center', gap: 2 }}>
+              <AlertTriangle size={9} />{alertDays <= 0 ? `Expired ${Math.abs(alertDays)}d ago` : `${alertDays}d left`}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={styles.formGroup}>
-      <label style={styles.label}>
-        {label}
-        {errors[name] ? <span style={{ color: '#B5453A', marginLeft: 4 }}>{errors[name]}</span> : null}
-      </label>
-      <input
-        type={type}
-        style={{ ...styles.input, ...(errors[name] ? { borderColor: '#B5453A' } : {}) }}
-        value={form[name] ?? ''}
-        placeholder={placeholder}
-        onChange={e => { set(name, e.target.value); setErrors(p => ({ ...p, [name]: null })); }}
-      />
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 13 }} onClick={onBack}>← Back</button>
+          <div>
+            <h2 className="serif" style={{ ...styles.h1, marginBottom: 2 }}>{emp.name}</h2>
+            <div style={{ color: '#6B7494', fontSize: 13 }}>{emp.empId}{emp.designation ? ' · ' + emp.designation : ''}{emp.department ? ' · ' + emp.department : ''}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => printOfferLetter(emp, businessInfo)}><Printer size={14} /> Offer Letter</button>
+          {canEdit && <button style={styles.ghostBtn} onClick={onEdit}><Pencil size={14} /> Edit</button>}
+          {canEdit && <button style={{ ...styles.ghostBtn, color: '#B5453A' }} onClick={onDelete}><Trash2 size={14} /> Delete</button>}
+        </div>
+      </div>
+
+      {alerts.length > 0 && (
+        <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, padding: '10px 14px', marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, color: '#92400E', fontSize: 13, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <AlertTriangle size={14} /> Document Alerts
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {alerts.map((a, i) => (
+              <span key={i} style={{ fontSize: 12, background: a.status === 'expired' ? '#FEE2E2' : '#FEF9C3', color: a.status === 'expired' ? '#B91C1C' : '#92400E', borderRadius: 4, padding: '2px 9px' }}>
+                {a.label}: {a.days <= 0 ? `Expired ${Math.abs(a.days)} days ago` : `Expires in ${a.days} days (${a.dateStr})`}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
+        <div>
+          <SecLabel t="Personal Information" />
+          <Row label="Full Name"        value={emp.name} />
+          <Row label="Date of Birth"    value={emp.dob} />
+          <Row label="Nationality"      value={emp.nationality} />
+          <Row label="Phone"            value={emp.phone} />
+          <Row label="Email"            value={emp.email} />
+          <Row label="Address"          value={emp.address} />
+          <Row label="Emergency Contact" value={emp.emergencyContact} />
+          <Row label="Emergency Phone"  value={emp.emergencyPhone} />
+
+          {!isGulf && (
+            <>
+              <SecLabel t="Identity Documents" />
+              <Row label="Aadhar Number" value={emp.aadharNo} />
+              <Row label="PAN Number"    value={emp.panNo} />
+            </>
+          )}
+
+          {isGulf && (
+            <>
+              <SecLabel t="Passport" />
+              <Row label="Passport No."    value={emp.passportNo} />
+              <Row label="Passport Expiry" value={emp.passportExpiry} dateAlert={emp.passportExpiry} />
+
+              <SecLabel t="Visa" />
+              <Row label="Visa No."        value={emp.visaNo} />
+              <Row label="Visa Expiry"     value={emp.visaExpiry}     dateAlert={emp.visaExpiry} />
+              <Row label="Stamping Date"   value={emp.stampingDate} />
+              <Row label="Stamping Expiry" value={emp.stampingExpiry} dateAlert={emp.stampingExpiry} />
+
+              <SecLabel t={idLabel} />
+              <Row label={`${idLabel} No.`}    value={emp.emiratesId} />
+              <Row label={`${idLabel} Expiry`} value={emp.emiratesIdExpiry} dateAlert={emp.emiratesIdExpiry} />
+
+              <SecLabel t="Labour Card" />
+              <Row label="Labour Card No."    value={emp.labourCardNo} />
+              <Row label="Labour Card Expiry" value={emp.labourCardExpiry} dateAlert={emp.labourCardExpiry} />
+            </>
+          )}
+
+          <SecLabel t="Insurance" />
+          <Row label="Medical Insurance Exp." value={emp.medicalInsuranceExpiry} dateAlert={emp.medicalInsuranceExpiry} />
+
+          {(emp.customDocs || []).length > 0 && (
+            <>
+              <SecLabel t="Other Documents" />
+              {emp.customDocs.map((doc, i) => (
+                <Row key={i} label={doc.name} value={doc.expiry || doc.note || '—'} dateAlert={doc.expiry} />
+              ))}
+            </>
+          )}
+        </div>
+
+        <div>
+          <SecLabel t="Employment" />
+          <Row label="Employee ID"  value={emp.empId} />
+          <Row label="Designation"  value={emp.designation} />
+          <Row label="Department"   value={emp.department} />
+          <Row label="Joining Date" value={emp.joiningDate} />
+          <Row label="Status" value={
+            <span style={{ ...styles.badge, ...(emp.status === 'active' ? { background: '#D1FAE5', color: '#065F46' } : { background: '#F3F2EF', color: '#6B7494' }) }}>
+              {emp.status || 'active'}
+            </span>
+          } />
+
+          <SecLabel t="Salary Structure" />
+          <Row label="Basic Salary"      value={fmtEmp(basic)} />
+          {hra   > 0 && <Row label="HRA"              value={fmtEmp(hra)} />}
+          {da    > 0 && <Row label="DA"               value={fmtEmp(da)} />}
+          {other > 0 && <Row label="Other Allowances" value={fmtEmp(other)} />}
+          <div style={{ background: '#1E2A4A', color: '#fff', borderRadius: 8, padding: '10px 14px', margin: '8px 0 4px', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, fontSize: 12.5 }}>
+            <div>Gross<br /><strong>{fmtEmp(gross)}</strong></div>
+            <div>Deductions<br /><strong>{fmtEmp(deductions)}</strong></div>
+            <div>Net Pay<br /><strong style={{ color: '#7FBF96' }}>{fmtEmp(net)}</strong></div>
+          </div>
+
+          <SecLabel t="Bank Details" />
+          <Row label="Account No."    value={emp.bankAccount} />
+          <Row label="IFSC / SWIFT"   value={emp.ifsc} />
+          <Row label="Bank Name"      value={emp.bankName} />
+
+          {emp.notes && (
+            <>
+              <SecLabel t="Notes" />
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.65 }}>{emp.notes}</div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function EmployeeForm({ employee, count, businessInfo, onSave, onClose }) {
+function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave, onClose }) {
   const blank = {
     id: crypto.randomUUID(),
     empId: 'EMP-' + String(count + 1).padStart(4, '0'),
     name: '', designation: '', department: '', phone: '', email: '',
+    dob: '', address: '', emergencyContact: '', emergencyPhone: '', nationality: '',
     joiningDate: new Date().toISOString().slice(0, 10),
+    aadharNo: '', panNo: '',
+    passportNo: '', passportExpiry: '',
+    visaNo: '', visaExpiry: '',
+    emiratesId: '', emiratesIdExpiry: '',
+    labourCardNo: '', labourCardExpiry: '',
+    stampingDate: '', stampingExpiry: '',
+    medicalInsuranceExpiry: '',
+    customDocs: [],
     basicSalary: '', hra: '', da: '', otherAllowances: '',
     pf: 12, esi: 0.75, tds: '',
     bankAccount: '', ifsc: '', bankName: '',
     status: 'active', notes: '',
   };
-  const [form, setForm] = useState(employee || blank);
+
+  const [form, setForm]   = useState(employee ? { ...blank, ...employee } : blank);
   const [errors, setErrors] = useState({});
+  const [tab, setTab]     = useState('personal');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  const basic = parseFloat(form.basicSalary) || 0;
-  const hra   = parseFloat(form.hra) || 0;
-  const da    = parseFloat(form.da) || 0;
-  const other = parseFloat(form.otherAllowances) || 0;
-  const gross = basic + hra + da + other;
-  const pf    = basic * (parseFloat(form.pf) || 0) / 100;
-  const esi   = gross * (parseFloat(form.esi) || 0) / 100;
-  const tds   = parseFloat(form.tds) || 0;
-  const deductions = pf + esi + tds;
-  const net   = gross - deductions;
   const fmtEmp = makeFmt(businessInfo);
+  const basic  = parseFloat(form.basicSalary) || 0;
+  const hra    = parseFloat(form.hra) || 0;
+  const da     = parseFloat(form.da) || 0;
+  const other  = parseFloat(form.otherAllowances) || 0;
+  const gross  = basic + hra + da + other;
+  const pfAmt  = basic * (parseFloat(form.pf) || 0) / 100;
+  const esiAmt = gross * (parseFloat(form.esi) || 0) / 100;
+  const tdsAmt = parseFloat(form.tds) || 0;
+  const deductions = pfAmt + esiAmt + tdsAmt;
+  const net    = gross - deductions;
+  const idLabel = country === 'UAE' ? 'Emirates ID' : 'Civil ID';
+
+  function addCustomDoc() { set('customDocs', [...(form.customDocs || []), { id: crypto.randomUUID(), name: '', expiry: '', note: '' }]); }
+  function updCustomDoc(idx, k, v) { const d = [...(form.customDocs || [])]; d[idx] = { ...d[idx], [k]: v }; set('customDocs', d); }
+  function delCustomDoc(idx) { set('customDocs', (form.customDocs || []).filter((_, i) => i !== idx)); }
 
   function validate() {
     const e = {};
-    if (!form.name.trim())    e.name = 'Name is required';
-    if (!form.empId.trim())   e.empId = 'Employee ID is required';
-    if (!basic)               e.basicSalary = 'Basic salary is required';
+    if (!form.name.trim())  e.name  = 'Required';
+    if (!form.empId.trim()) e.empId = 'Required';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
-  function handleSave() {
-    if (!validate()) return;
-    onSave(form);
+  function SecTitle({ t }) {
+    return <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 5, marginBottom: 12, marginTop: 18 }}>{t}</div>;
+  }
+  function Field({ label, name, type = 'text', required = false }) {
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}{required ? ' *' : ''}</label>
+        <input style={{ ...styles.input, ...(errors[name] ? { borderColor: '#EF4444' } : {}) }}
+          type={type} value={form[name] != null ? form[name] : ''}
+          onChange={e => { set(name, e.target.value); if (errors[name]) setErrors(p => ({ ...p, [name]: undefined })); }} />
+        {errors[name] && <div style={{ color: '#EF4444', fontSize: 11, marginTop: 2 }}>{errors[name]}</div>}
+      </div>
+    );
   }
 
+  const TABS = [
+    { id: 'personal',   label: 'Personal Info' },
+    { id: 'documents',  label: 'Documents' },
+    { id: 'salary',     label: 'Salary' },
+    { id: 'bank',       label: 'Bank & Other' },
+  ];
+
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <EmpField label="Employee ID *" name="empId" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Full Name *" name="name" placeholder="Employee name" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Designation" name="designation" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Department" name="department" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Phone" name="phone" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Email" name="email" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Joining Date" name="joiningDate" type="date" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Status</label>
-          <select style={styles.input} value={form.status || 'active'} onChange={e => set('status', e.target.value)}>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="on-leave">On Leave</option>
-          </select>
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>{employee ? 'Edit Employee' : 'New Employee'}</h2>
+          {employee && <div style={styles.muted}>{employee.empId}</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => { if (validate()) onSave(form); }}>Save Employee</button>
         </div>
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 6, marginBottom: 12, marginTop: 4 }}>Salary Structure</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
-        <EmpField label="Basic Salary *" name="basicSalary" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="HRA" name="hra" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="DA" name="da" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Other Allowances" name="otherAllowances" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-        <EmpField label="PF % (of Basic)" name="pf" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="ESI % (of Gross)" name="esi" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="TDS Fixed" name="tds" type="number" form={form} errors={errors} set={set} setErrors={setErrors} />
-      </div>
-      <div style={{ background: '#1E2A4A', color: '#fff', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, fontSize: 13 }}>
-        <div>Gross: <strong>{fmtEmp(gross)}</strong></div>
-        <div>Deductions: <strong>{fmtEmp(deductions)}</strong></div>
-        <div>Net Pay: <strong style={{ color: '#7FBF96' }}>{fmtEmp(net)}</strong></div>
+      <div style={{ display: 'flex', borderBottom: '1px solid #EAE6DB', marginBottom: 20, gap: 2 }}>
+        {TABS.map(t => (
+          <button key={t.id} type="button"
+            style={{ padding: '7px 16px', fontSize: 13, fontWeight: tab === t.id ? 600 : 400, color: tab === t.id ? '#1E2A4A' : '#6B7494', background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid #1E2A4A' : '2px solid transparent', cursor: 'pointer' }}
+            onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 6, marginBottom: 12 }}>Bank Details</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-        <EmpField label="Account No" name="bankAccount" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="IFSC" name="ifsc" form={form} errors={errors} set={set} setErrors={setErrors} />
-        <EmpField label="Bank Name" name="bankName" form={form} errors={errors} set={set} setErrors={setErrors} />
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.label}>Notes</label>
-        <textarea style={{ ...styles.input, height: 52, resize: 'vertical' }} value={form.notes || ''} onChange={e => set('notes', e.target.value)} />
-      </div>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
-        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
-        <button style={styles.primaryBtn} onClick={handleSave}>Save Employee</button>
-      </div>
+      {tab === 'personal' && (
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Employee ID" name="empId" required />
+            <Field label="Full Name"   name="name"  required />
+            <Field label="Date of Birth" name="dob" type="date" />
+            <Field label="Nationality" name="nationality" />
+            <Field label="Phone"       name="phone" />
+            <Field label="Email"       name="email" />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Address</label>
+            <textarea style={{ ...styles.input, height: 58, resize: 'vertical' }} value={form.address || ''} onChange={e => set('address', e.target.value)} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Emergency Contact Name" name="emergencyContact" />
+            <Field label="Emergency Phone"        name="emergencyPhone" />
+            <Field label="Designation"            name="designation" />
+            <Field label="Department"             name="department" />
+            <Field label="Joining Date"           name="joiningDate" type="date" />
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Status</label>
+              <select style={styles.input} value={form.status || 'active'} onChange={e => set('status', e.target.value)}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="on-leave">On Leave</option>
+                <option value="terminated">Terminated</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'documents' && (
+        <div>
+          {!isGulf && (
+            <>
+              <SecTitle t="Identity Documents (India)" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Aadhar Number" name="aadharNo" />
+                <Field label="PAN Number"    name="panNo" />
+              </div>
+            </>
+          )}
+          {isGulf && (
+            <>
+              <SecTitle t="Passport" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Passport Number" name="passportNo" />
+                <Field label="Passport Expiry" name="passportExpiry" type="date" />
+              </div>
+              <SecTitle t="Visa" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Visa Number"     name="visaNo" />
+                <Field label="Visa Expiry"     name="visaExpiry"    type="date" />
+                <Field label="Stamping Date"   name="stampingDate"  type="date" />
+                <Field label="Stamping Expiry" name="stampingExpiry" type="date" />
+              </div>
+              <SecTitle t={idLabel} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label={`${idLabel} Number`} name="emiratesId" />
+                <Field label={`${idLabel} Expiry`} name="emiratesIdExpiry" type="date" />
+              </div>
+              <SecTitle t="Labour Card" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Labour Card Number" name="labourCardNo" />
+                <Field label="Labour Card Expiry" name="labourCardExpiry" type="date" />
+              </div>
+            </>
+          )}
+          <SecTitle t="Medical Insurance" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Medical Insurance Expiry" name="medicalInsuranceExpiry" type="date" />
+          </div>
+          <SecTitle t="Other Documents" />
+          {(form.customDocs || []).map((doc, idx) => (
+            <div key={doc.id || idx} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto', gap: 10, marginBottom: 8, alignItems: 'end' }}>
+              <div style={styles.formGroup}>
+                {idx === 0 && <label style={styles.label}>Document Name</label>}
+                <input style={styles.input} value={doc.name} onChange={e => updCustomDoc(idx, 'name', e.target.value)} placeholder="e.g. Insurance Card" />
+              </div>
+              <div style={styles.formGroup}>
+                {idx === 0 && <label style={styles.label}>Expiry Date</label>}
+                <input style={styles.input} type="date" value={doc.expiry || ''} onChange={e => updCustomDoc(idx, 'expiry', e.target.value)} />
+              </div>
+              <div style={styles.formGroup}>
+                {idx === 0 && <label style={styles.label}>Note</label>}
+                <input style={styles.input} value={doc.note || ''} onChange={e => updCustomDoc(idx, 'note', e.target.value)} placeholder="Optional" />
+              </div>
+              <button style={{ ...styles.iconBtn, color: '#B5453A', marginBottom: 1 }} onClick={() => delCustomDoc(idx)}><X size={14} /></button>
+            </div>
+          ))}
+          <button style={styles.ghostBtn} onClick={addCustomDoc}><Plus size={14} /> Add Document</button>
+        </div>
+      )}
+
+      {tab === 'salary' && (
+        <div>
+          <SecTitle t="Salary Components" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+            <Field label="Basic Salary"      name="basicSalary"      type="number" />
+            <Field label="HRA"               name="hra"              type="number" />
+            <Field label="DA"                name="da"               type="number" />
+            <Field label="Other Allowances"  name="otherAllowances"  type="number" />
+          </div>
+          <SecTitle t="Deductions" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+            <Field label="PF % (of Basic)"   name="pf"   type="number" />
+            <Field label="ESI % (of Gross)"  name="esi"  type="number" />
+            <Field label="TDS Fixed Amount"  name="tds"  type="number" />
+          </div>
+          <div style={{ background: '#1E2A4A', color: '#fff', borderRadius: 8, padding: '10px 16px', marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, fontSize: 13 }}>
+            <div>Gross Monthly<br /><strong>{fmtEmp(gross)}</strong></div>
+            <div>Total Deductions<br /><strong>{fmtEmp(deductions)}</strong></div>
+            <div>Net Pay<br /><strong style={{ color: '#7FBF96' }}>{fmtEmp(net)}</strong></div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'bank' && (
+        <div>
+          <SecTitle t="Bank Details" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+            <Field label="Account Number"    name="bankAccount" />
+            <Field label="IFSC / SWIFT Code" name="ifsc" />
+            <Field label="Bank Name"         name="bankName" />
+          </div>
+          <SecTitle t="Notes" />
+          <div style={styles.formGroup}>
+            <textarea style={{ ...styles.input, height: 80, resize: 'vertical' }} value={form.notes || ''} onChange={e => set('notes', e.target.value)} placeholder="Any additional notes about this employee" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 // ─── Payroll ──────────────────────────────────────────────────────────────────
 function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole }) {
@@ -19422,6 +19884,7 @@ export default function App() {
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
+            businessInfo={businessInfo}
           />
         );
       case 'payroll':
