@@ -3429,8 +3429,8 @@ const SECTION_VIEWS = {
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','audit'],
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  service:       ['customers','enquiries','vendors','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  fmamc:         ['customers','enquiries','vendors','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers','audit'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','pettycash','vouchers','audit'],
   hr:            ['employees','payroll'],
   admin:         ['staff','contracts','termslibrary'],
 };
@@ -3768,6 +3768,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="purchase"     bizType={bt} />
                 <CreateBtn docKey="purchasebill" bizType={bt} />
                 <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+                <NavBtn id="grn"            label="Goods Receipt (GRN)" icon={Truck} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="items"       label="Item Master"          icon={Package} />
+                <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
                 <SubLabel label="Site Operations" />
                 <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
@@ -3851,10 +3859,10 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {showProduction && <NavBtn id="vendoreval" label="Vendor Evaluation" icon={CheckSquare} />}
           </Section>
 
-          {/* Stores — trading/manufacturing only */}
-          {showTrade && (
+          {/* Stores — all biz types */}
+          {(showTrade || showService || showFMAMC) && (
             <Section sectionKey="stores" label="Stores">
-              {!showService && <NavBtn id="items" label="Item Master" icon={Package} />}
+              <NavBtn id="items" label="Item Master" icon={Package} />
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
