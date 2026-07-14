@@ -2751,7 +2751,6 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
-  const BizTypeCtx   = React.createContext(null);
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
   const cur = (n) => currency(n, cc.currency);
@@ -3435,6 +3434,8 @@ const BIZ_SECTION_VIEWS = {
   hr:            ['employees','payroll'],
   admin:         ['staff','contracts','termslibrary'],
 };
+
+const BizTypeCtx = React.createContext(null);
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
