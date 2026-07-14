@@ -3417,7 +3417,7 @@ const SECTION_VIEWS = {
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
-  hr:          ['employees', 'payroll'],
+  hr:          ['employees', 'payroll', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary'],
@@ -3431,7 +3431,7 @@ const BIZ_SECTION_VIEWS = {
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
-  hr:            ['employees','payroll'],
+  hr:            ['employees','payroll','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary'],
 };
 
@@ -3949,13 +3949,17 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {/* HR & Payroll */}
       {isMultiBiz ? (
         <BizSection bizType="hr" defaultOpen={false}>
-          <NavBtn id="employees" label="Employees" icon={Users} />
-          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
+          <NavBtn id="employees"  label="Employees"          icon={Users} />
+          <NavBtn id="payroll"    label="Payroll"            icon={FileText} />
+          <NavBtn id="warnletter" label="Warning Letters"    icon={AlertTriangle} />
+          <NavBtn id="termletter" label="Termination Letters" icon={FileSignature} />
         </BizSection>
       ) : (
         <Section sectionKey="hr" label="HR & Payroll">
-          <NavBtn id="employees" label="Employees" icon={Users} />
-          <NavBtn id="payroll"   label="Payroll"   icon={FileText} />
+          <NavBtn id="employees"  label="Employees"           icon={Users} />
+          <NavBtn id="payroll"    label="Payroll"             icon={FileText} />
+          <NavBtn id="warnletter" label="Warning Letters"     icon={AlertTriangle} />
+          <NavBtn id="termletter" label="Termination Letters" icon={FileSignature} />
         </Section>
       )}
 
@@ -7487,6 +7491,340 @@ const MONTHS = [
 ];
 
 // ─── Employees ────────────────────────────────────────────────────────────────
+/* ── HR Letters — Warning & Termination ─────────────────────────────────── */
+function printHRLetter(letter, emp, businessInfo) {
+  const biz   = businessInfo || {};
+  const date  = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+  const isWarn = letter.type === 'warning';
+  const isDraft = letter.status === 'draft';
+
+  const warnTypeLabel = { verbal: 'Verbal Warning', written: 'Written Warning', final: 'Final Warning' };
+  const termReasonLabel = {
+    misconduct: 'Misconduct', performance: 'Poor Performance',
+    redundancy: 'Redundancy / Restructuring', resignation: 'Voluntary Resignation',
+    'contract-end': 'End of Contract', other: 'Other',
+  };
+
+  const title  = isWarn ? `${warnTypeLabel[letter.warnType] || 'Warning'} Letter` : 'Termination Letter';
+  const refNo  = letter.refNo || `HR/${isWarn ? 'WL' : 'TL'}/-`;
+
+  const bodyHtml = isWarn ? `
+    <p>Dear <strong>${emp?.name || '___________'}</strong> (${emp?.designation || ''}),</p>
+    <p>This letter serves as a formal <strong>${warnTypeLabel[letter.warnType] || 'Warning'}</strong> regarding the following matter:</p>
+    <div style="background:#FFF8DC;border-left:4px solid #D97706;padding:12px 16px;margin:16px 0;border-radius:0 6px 6px 0">
+      <strong>Incident Date:</strong> ${letter.incidentDate || '___________'}<br/>
+      <strong>Description:</strong><br/>${(letter.reason || '').replace(/\n/g, '<br/>')}
+    </div>
+    ${letter.previousWarnings && parseInt(letter.previousWarnings) > 0 ? `<p><strong>Previous Warnings on Record:</strong> ${letter.previousWarnings}</p>` : ''}
+    <p><strong>Corrective Action Required:</strong><br/>${(letter.correctiveAction || '').replace(/\n/g, '<br/>')||'Please review and correct the behaviour mentioned above.'}</p>
+    <p><strong>Consequence of Non-Compliance:</strong><br/>${(letter.consequence || 'Failure to improve may result in further disciplinary action including termination of employment.').replace(/\n/g, '<br/>')}</p>
+    <p>You are advised to acknowledge receipt of this letter by signing below. This letter will be placed in your personnel file.</p>
+  ` : `
+    <p>Dear <strong>${emp?.name || '___________'}</strong> (${emp?.designation || ''}),</p>
+    <p>We regret to inform you that your employment with <strong>${biz.name || 'the company'}</strong> is hereby terminated effective <strong>${letter.terminationDate || '___________'}</strong>.</p>
+    <div style="background:#FEF2F2;border-left:4px solid #EF4444;padding:12px 16px;margin:16px 0;border-radius:0 6px 6px 0">
+      <strong>Reason:</strong> ${termReasonLabel[letter.termReason] || letter.termReason || '___________'}<br/>
+      ${letter.termDetails ? `<strong>Details:</strong><br/>${letter.termDetails.replace(/\n/g,'<br/>')}` : ''}
+    </div>
+    <p><strong>Last Working Day:</strong> ${letter.lastWorkingDay || letter.terminationDate || '___________'}</p>
+    ${letter.noticePeriodServed === 'yes' ? '<p>Notice period has been duly served as per your contract.</p>' :
+      letter.noticePeriodServed === 'payment' ? '<p>Notice period will be compensated via payment in lieu of notice.</p>' :
+      '<p>Notice period waiver has been granted by mutual agreement.</p>'}
+    ${letter.settlementDetails ? `<p><strong>Settlement / Final Pay:</strong><br/>${letter.settlementDetails.replace(/\n/g,'<br/>')}</p>` : ''}
+    ${letter.returnItems ? `<p><strong>Company Property to be Returned:</strong><br/>${letter.returnItems.replace(/\n/g,'<br/>')}</p>` : ''}
+    <p>Please ensure a smooth handover of all responsibilities, documentation, and company property before your last working day.</p>
+    <p>We wish you well in your future endeavours.</p>
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>${title} — ${emp?.name || ''}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
+  .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; position: relative; }
+  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  h2 { text-align: center; color: #1E2A4A; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 24px; }
+  .ref { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 20px; }
+  p { line-height: 1.75; margin: 0 0 12px; }
+  .sig { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .sig-box { text-align: center; }
+  .sig-line { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color: #444; }
+  .draft-watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-35deg); font-size: 90px; color: rgba(200,0,0,0.08); font-weight: 900; pointer-events: none; z-index: 0; letter-spacing: 10px; }
+  @media print { body { -webkit-print-color-adjust: exact; } }
+</style></head><body>
+${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
+<div class="page">
+  <div class="letterhead">
+    <div><div class="biz-name">${biz.name || 'Company Name'}</div>
+      <div style="font-size:11px;color:#555;margin-top:4px">${biz.address || ''}</div></div>
+    <div class="biz-info">${biz.phone ? 'Tel: ' + biz.phone + '<br/>' : ''}${biz.email ? biz.email + '<br/>' : ''}${biz.website || ''}</div>
+  </div>
+  <div class="ref"><span>Ref: ${refNo}</span><span>Date: ${letter.issueDate || date}</span></div>
+  <h2>${title}</h2>
+  ${bodyHtml}
+  <div class="sig">
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Authorised Signatory<br/>${biz.name || ''}</div></div>
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Employee Acknowledgement<br/>${emp?.name || ''}</div></div>
+  </div>
+  ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
+</div></body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
+function HRLettersView({ letterType, hrLetters, setHrLetters, employees, userRole, businessInfo }) {
+  const [subView,    setSubView]    = useState('list');
+  const [activeLetter, setActiveLetter] = useState(null);
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+
+  const isWarn = letterType === 'warning';
+  const filtered = hrLetters.filter(l => l.type === letterType);
+  const title = isWarn ? 'Warning Letters' : 'Termination Letters';
+
+  function saveLetter(letter) {
+    setHrLetters(prev => {
+      const idx = prev.findIndex(l => l.id === letter.id);
+      if (idx >= 0) { const a = [...prev]; a[idx] = letter; return a; }
+      return [...prev, letter];
+    });
+    setSubView('list');
+    setActiveLetter(null);
+  }
+
+  function deleteLetter(id) {
+    if (!window.confirm('Delete this letter?')) return;
+    setHrLetters(prev => prev.filter(l => l.id !== id));
+    setSubView('list');
+  }
+
+  if (subView === 'form') {
+    return (
+      <HRLetterForm
+        letterType={letterType}
+        letter={activeLetter}
+        employees={employees}
+        businessInfo={businessInfo}
+        onSave={saveLetter}
+        onClose={() => setSubView('list')}
+      />
+    );
+  }
+
+  const STATUS_STYLE = {
+    draft:        { background: '#F3F2EF', color: '#6B7494' },
+    issued:       { background: '#DBEAFE', color: '#1D4ED8' },
+    acknowledged: { background: '#D1FAE5', color: '#065F46' },
+    withdrawn:    { background: '#FEE2E2', color: '#B91C1C' },
+  };
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>{title}</h2>
+          <div style={styles.muted}>{filtered.length} letter{filtered.length !== 1 ? 's' : ''}</div>
+        </div>
+        {canEdit && (
+          <button style={styles.primaryBtn} onClick={() => { setActiveLetter(null); setSubView('form'); }}>
+            <Plus size={15} /> New Letter
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={styles.emptyBox}>No {title.toLowerCase()} yet.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Ref No.', 'Employee', isWarn ? 'Warning Type' : 'Reason', 'Issue Date', isWarn ? 'Incident Date' : 'Last Working Day', 'Status', ''].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].sort((a, b) => (b.issueDate || '') > (a.issueDate || '') ? 1 : -1).map(letter => {
+                const emp = employees.find(e => e.id === letter.employeeId);
+                const WARN_TYPE = { verbal: 'Verbal', written: 'Written', final: 'Final Warning' };
+                const TERM_REASON = { misconduct: 'Misconduct', performance: 'Performance', redundancy: 'Redundancy', resignation: 'Resignation', 'contract-end': 'Contract End', other: 'Other' };
+                return (
+                  <tr key={letter.id}>
+                    <td style={{ ...styles.td, fontFamily: 'monospace', fontWeight: 600 }}>{letter.refNo}</td>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{emp?.name || '—'}</td>
+                    <td style={styles.td}>{isWarn ? (WARN_TYPE[letter.warnType] || '—') : (TERM_REASON[letter.termReason] || letter.termReason || '—')}</td>
+                    <td style={styles.td}>{letter.issueDate || '—'}</td>
+                    <td style={styles.td}>{isWarn ? (letter.incidentDate || '—') : (letter.lastWorkingDay || '—')}</td>
+                    <td style={styles.td}>
+                      <span style={{ ...styles.badge, ...(STATUS_STYLE[letter.status] || STATUS_STYLE.draft) }}>
+                        {letter.status || 'draft'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button style={styles.iconBtn} onClick={() => printHRLetter(letter, emp, businessInfo)} title="Print"><Printer size={14} /></button>
+                        {canEdit && <button style={styles.iconBtn} onClick={() => { setActiveLetter(letter); setSubView('form'); }}><Pencil size={14} /></button>}
+                        {canEdit && <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteLetter(letter.id)}><Trash2 size={14} /></button>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onClose }) {
+  const isWarn = letterType === 'warning';
+  const count  = Date.now();
+  const prefix = isWarn ? 'HR/WL/' : 'HR/TL/';
+
+  const blank = isWarn ? {
+    id: crypto.randomUUID(),
+    type: 'warning',
+    refNo: prefix + String(count).slice(-4),
+    employeeId: '',
+    issueDate: new Date().toISOString().slice(0, 10),
+    warnType: 'written',
+    incidentDate: '',
+    reason: '',
+    previousWarnings: '0',
+    correctiveAction: '',
+    consequence: 'Failure to improve may result in further disciplinary action including termination of employment.',
+    status: 'draft',
+  } : {
+    id: crypto.randomUUID(),
+    type: 'termination',
+    refNo: prefix + String(count).slice(-4),
+    employeeId: '',
+    issueDate: new Date().toISOString().slice(0, 10),
+    terminationDate: '',
+    lastWorkingDay: '',
+    termReason: 'misconduct',
+    termDetails: '',
+    noticePeriodServed: 'yes',
+    settlementDetails: '',
+    returnItems: '',
+    status: 'draft',
+  };
+
+  const [form, setForm] = useState(letter ? { ...blank, ...letter } : blank);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const selEmp = employees.find(e => e.id === form.employeeId);
+
+  function Field({ label, name, type = 'text', textarea = false, options }) {
+    if (options) {
+      return (
+        <div style={styles.formGroup}>
+          <label style={styles.label}>{label}</label>
+          <select style={styles.input} value={form[name] || ''} onChange={e => set(name, e.target.value)}>
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+    if (textarea) {
+      return (
+        <div style={styles.formGroup}>
+          <label style={styles.label}>{label}</label>
+          <textarea style={{ ...styles.input, height: 76, resize: 'vertical' }} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+        </div>
+      );
+    }
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}</label>
+        <input style={styles.input} type={type} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h2 className="serif" style={styles.h1}>{letter ? 'Edit' : 'New'} {isWarn ? 'Warning Letter' : 'Termination Letter'}</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => printHRLetter(form, selEmp, businessInfo)}><Printer size={14} /> Preview</button>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => onSave(form)}>Save Letter</button>
+        </div>
+      </div>
+
+      <div style={{ background: '#F8F9FC', borderRadius: 8, padding: '14px 18px', marginBottom: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <Field label="Reference No." name="refNo" />
+          <Field label="Issue Date" name="issueDate" type="date" />
+          <Field label="Status" name="status" options={[
+            { value: 'draft',        label: 'Draft' },
+            { value: 'issued',       label: 'Issued' },
+            { value: 'acknowledged', label: 'Acknowledged' },
+            { value: 'withdrawn',    label: 'Withdrawn' },
+          ]} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Employee *</label>
+          <select style={styles.input} value={form.employeeId || ''} onChange={e => set('employeeId', e.target.value)}>
+            <option value="">— Select Employee —</option>
+            {[...employees].sort((a,b) => (a.name||'') > (b.name||'') ? 1 : -1).map(e => (
+              <option key={e.id} value={e.id}>{e.name} ({e.empId}) — {e.designation}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {isWarn ? (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <Field label="Warning Type" name="warnType" options={[
+              { value: 'verbal',  label: 'Verbal Warning' },
+              { value: 'written', label: 'Written Warning' },
+              { value: 'final',   label: 'Final Warning' },
+            ]} />
+            <Field label="Incident Date" name="incidentDate" type="date" />
+            <Field label="Previous Warnings on Record" name="previousWarnings" type="number" />
+          </div>
+          <Field label="Reason / Incident Description *" name="reason" textarea />
+          <Field label="Corrective Action Required" name="correctiveAction" textarea />
+          <Field label="Consequence if Not Corrected" name="consequence" textarea />
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Termination Date" name="terminationDate" type="date" />
+            <Field label="Last Working Day" name="lastWorkingDay" type="date" />
+            <Field label="Reason for Termination" name="termReason" options={[
+              { value: 'misconduct',    label: 'Misconduct' },
+              { value: 'performance',   label: 'Poor Performance' },
+              { value: 'redundancy',    label: 'Redundancy / Restructuring' },
+              { value: 'resignation',   label: 'Voluntary Resignation' },
+              { value: 'contract-end',  label: 'End of Contract' },
+              { value: 'other',         label: 'Other' },
+            ]} />
+            <Field label="Notice Period" name="noticePeriodServed" options={[
+              { value: 'yes',     label: 'Served in full' },
+              { value: 'payment', label: 'Payment in lieu of notice' },
+              { value: 'waived',  label: 'Waived by mutual agreement' },
+            ]} />
+          </div>
+          <Field label="Additional Details" name="termDetails" textarea />
+          <Field label="Settlement / Final Pay Details (gratuity, leave encashment, etc.)" name="settlementDetails" textarea />
+          <Field label="Company Property to be Returned" name="returnItems" textarea />
+        </>
+      )}
+    </div>
+  );
+}
+
+
 /* ── HR Employee Module Helpers ─────────────────────────────────────────── */
 const GULF_COUNTRIES_HR = ['UAE','Saudi Arabia','Kuwait','Qatar','Bahrain','Oman'];
 
@@ -19005,6 +19343,7 @@ export default function App() {
   const [items,            _setItems]  = useState([]);
   const [employees,        _setEmps]   = useState([]);
   const [payrollRuns,      _setPR]     = useState([]);
+  const [hrLetters,        _setHRL]    = useState([]);
   const [pettyCash,        _setPC]     = useState({ openingBalance: 0, entries: [] });
   const [vouchers,         _setVouch]  = useState([]);
   const [storeIssues,      _setSIV]    = useState([]);
@@ -19122,6 +19461,7 @@ export default function App() {
       _setItems(data.items || []);
       _setEmps(data.employees || []);
       _setPR(data.payrollRuns || []);
+      _setHRL(data.hrLetters || []);
       _setPC(data.pettyCash || { openingBalance: 0, entries: [] });
       _setVouch(data.vouchers || []);
       _setSIV(data.storeIssues || []);
@@ -19197,6 +19537,7 @@ export default function App() {
   const setItems            = mkSet(_setItems, 'items');
   const setEmployees        = mkSet(_setEmps,  'employees');
   const setPayrollRuns      = mkSet(_setPR,    'payrollRuns');
+  const setHrLetters        = mkSet(_setHRL,  'hrLetters');
   const setPettyCash        = mkSet(_setPC,    'pettyCash');
   const setVouchers         = mkSet(_setVouch, 'vouchers');
   const setStoreIssues      = mkSet(_setSIV,   'storeIssues');
@@ -19884,6 +20225,28 @@ export default function App() {
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
+            businessInfo={businessInfo}
+          />
+        );
+            case 'warnletter':
+        return (
+          <HRLettersView
+            letterType="warning"
+            hrLetters={hrLetters}
+            setHrLetters={setHrLetters}
+            employees={employees}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'termletter':
+        return (
+          <HRLettersView
+            letterType="termination"
+            hrLetters={hrLetters}
+            setHrLetters={setHrLetters}
+            employees={employees}
+            userRole={userRole}
             businessInfo={businessInfo}
           />
         );
