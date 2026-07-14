@@ -3953,14 +3953,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {userRole === 'admin' && (isMultiBiz ? (
         <BizSection bizType="admin" defaultOpen={false}>
           <NavBtn id="staff" label="Staff" icon={Shield} />
-          {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
-          {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+          <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
+          <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
-          {!showService && <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />}
-          {!showService && <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />}
+          <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
+          <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
         </Section>
       ))}
 
