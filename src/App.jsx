@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail } from './firebase';
 
 
@@ -59,7 +59,7 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn','storeissue','stockledger',
+    'stock','bincard','grn','storeissue','stockledger','verticalrack',
   ],
   trading: [
     'hr','payroll','employees',
@@ -3551,7 +3551,7 @@ const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn'],
-  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
@@ -3565,7 +3565,7 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','audit'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit'],
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
@@ -3809,6 +3809,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
                 <SubLabel label="Accounts" />
@@ -3844,6 +3845,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="verticalrack"  label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
 
                 <SubLabel label="Engineering" />
@@ -3898,6 +3900,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+                <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
                 <SubLabel label="Site Operations" />
@@ -3991,6 +3994,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
               <NavBtn id="stockledger" label="Stock Ledger"         icon={FileText} />
               <NavBtn id="storeissue"  label="Stores Issue Voucher" icon={FileMinus} />
+              <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
               <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
             </Section>
           )}
@@ -5768,7 +5772,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, curren
       </div>
 
       {showForm && (
-        <PettyCashForm entry={editing} onSave={saveEntry} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <PettyCashForm entry={editing} onSave={saveEntry} onClose={() => { setShowForm(false); setEditing(null); }} currentUserName={currentUserName} />
       )}
       {printVoucher && (
         <PettyCashVoucherPrint entry={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
@@ -5780,7 +5784,7 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, curren
   );
 }
 
-function PettyCashForm({ entry, onSave, onClose }) {
+function PettyCashForm({ entry, onSave, onClose, currentUserName = '' }) {
   const [form, setForm] = useState({
     id: entry && entry.id ? entry.id : '',
     voucherNo: entry && entry.voucherNo ? entry.voucherNo : '',
@@ -5793,7 +5797,7 @@ function PettyCashForm({ entry, onSave, onClose }) {
     credit: entry && entry.credit ? entry.credit : '',
     mode: entry && entry.mode ? entry.mode : 'Cash',
     remarks: entry && entry.remarks ? entry.remarks : '',
-    receivedBy: entry && entry.receivedBy ? entry.receivedBy : '',
+    receivedBy: entry && entry.receivedBy ? entry.receivedBy : (!entry ? currentUserName : ''),
   });
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
@@ -5955,9 +5959,9 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1E2A4A' }} className="no-print">
         <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Petty Cash Voucher</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
-          <button onClick={() => downloadDocPDF('.petty-voucher-print', `petty-voucher-${entry.voucherNo || ''}.pdf`)} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Download size={14}/> PDF</button>
-          <button onClick={onClose} style={{ ...styles.ghostBtn, color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14}/></button>
+          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
+          <button onClick={() => downloadDocPDF('.petty-voucher-print', `petty-voucher-${entry.voucherNo || ''}.pdf`)} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Download size={14}/> PDF</button>
+          <button onClick={onClose} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14}/></button>
         </div>
       </div>
       {/* Voucher content — shown in print mode */}
@@ -6772,7 +6776,7 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
-  const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note', manual: 'Manual Adj.', production: 'Production' };
+  const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note', manual: 'Manual Adj.', production: 'Production', 'rack-siv': 'Rack SIV', 'rack-mdr': 'Rack MDR' };
 
   const rows = (stockLedger || [])
     .filter(e => !itemFilter || e.itemId === itemFilter)
@@ -6845,6 +6849,536 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 // ─────────────────────────────────────────────
 // HR / PAYROLL MODULE
 // ─────────────────────────────────────────────
+
+// ─── Vertical Rack ──────────────────────────────────────────────────────────
+
+function VerticalRackModule({ rackStore, setRackStore, items, setStockLedger, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
+  const [tab, setTab] = React.useState('siv');
+  const [showSIVCart, setShowSIVCart] = React.useState(false);
+  const [showMDRCart, setShowMDRCart] = React.useState(false);
+  const [showRackForm, setShowRackForm] = React.useState(false);
+  const [editRack, setEditRack] = React.useState(null);
+  const [printDoc, setPrintDoc] = React.useState(null);
+
+  const rs = rackStore || { racks: [], sivs: [], mdrs: [] };
+  const racks = rs.racks || [];
+  const allSivs = rs.sivs || [];
+  const allMdrs = rs.mdrs || [];
+  const sivs = isMultiBiz ? allSivs.filter(s => (s.bizType || 'trading') === currentBizType) : allSivs;
+  const mdrs = isMultiBiz ? allMdrs.filter(m => (m.bizType || 'trading') === currentBizType) : allMdrs;
+
+  function nextSivNo() {
+    const nums = sivs.map(s => parseInt((s.sivNo || '').replace(/\D/g, '')) || 0);
+    return 'SIV-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+  }
+  function nextMdrNo() {
+    const nums = mdrs.map(m => parseInt((m.mdrNo || '').replace(/\D/g, '')) || 0);
+    return 'MDR-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+  }
+
+  function saveSIV(siv) {
+    const rec = { ...siv, id: siv.id || Date.now().toString(), bizType: currentBizType, createdBy: currentUserName, createdAt: new Date().toISOString() };
+    setRackStore(prev => {
+      const p = prev || { racks: [], sivs: [], mdrs: [] };
+      const existing = (p.sivs || []).find(s => s.id === rec.id);
+      return { ...p, sivs: existing ? (p.sivs || []).map(s => s.id === rec.id ? rec : s) : [...(p.sivs || []), rec] };
+    });
+    const now = Date.now();
+    const entries = (siv.items || []).filter(i => i.itemId && parseFloat(i.qty) > 0).map(i => ({
+      id: crypto.randomUUID(), date: siv.date, itemId: i.itemId, itemName: i.itemName,
+      type: 'in', qty: parseFloat(i.qty) || 0, sourceType: 'rack-siv',
+      sourceId: rec.id, sourceNumber: rec.sivNo, createdAt: now, bizType: currentBizType,
+    }));
+    if (entries.length) setStockLedger(prev => [...(prev || []).filter(e => e.sourceId !== rec.id), ...entries]);
+    setShowSIVCart(false);
+  }
+
+  function saveMDR(mdr) {
+    const rec = { ...mdr, id: mdr.id || Date.now().toString(), bizType: currentBizType, createdBy: currentUserName, createdAt: new Date().toISOString() };
+    setRackStore(prev => {
+      const p = prev || { racks: [], sivs: [], mdrs: [] };
+      const existing = (p.mdrs || []).find(m => m.id === rec.id);
+      return { ...p, mdrs: existing ? (p.mdrs || []).map(m => m.id === rec.id ? rec : m) : [...(p.mdrs || []), rec] };
+    });
+    const now = Date.now();
+    const entries = (mdr.items || []).filter(i => i.itemId && parseFloat(i.qty) > 0).map(i => ({
+      id: crypto.randomUUID(), date: mdr.date, itemId: i.itemId, itemName: i.itemName,
+      type: 'out', qty: parseFloat(i.qty) || 0, sourceType: 'rack-mdr',
+      sourceId: rec.id, sourceNumber: rec.mdrNo, createdAt: now, bizType: currentBizType,
+    }));
+    if (entries.length) setStockLedger(prev => [...(prev || []).filter(e => e.sourceId !== rec.id), ...entries]);
+    setShowMDRCart(false);
+  }
+
+  function deleteDoc(type, id) {
+    if (!window.confirm('Delete this ' + type.toUpperCase() + '?')) return;
+    if (type === 'siv') {
+      setRackStore(prev => ({ ...(prev || {}), sivs: ((prev || {}).sivs || []).filter(s => s.id !== id) }));
+    } else {
+      setRackStore(prev => ({ ...(prev || {}), mdrs: ((prev || {}).mdrs || []).filter(m => m.id !== id) }));
+    }
+    setStockLedger(prev => (prev || []).filter(e => e.sourceId !== id));
+  }
+
+  function saveRack(rack) {
+    const rec = { ...rack, id: rack.id || Date.now().toString() };
+    setRackStore(prev => {
+      const p = prev || { racks: [], sivs: [], mdrs: [] };
+      const existing = (p.racks || []).find(r => r.id === rec.id);
+      return { ...p, racks: existing ? (p.racks || []).map(r => r.id === rec.id ? rec : r) : [...(p.racks || []), rec] };
+    });
+    setShowRackForm(false); setEditRack(null);
+  }
+
+  function deleteRack(id) {
+    if (!window.confirm('Delete this rack?')) return;
+    setRackStore(prev => ({ ...(prev || {}), racks: ((prev || {}).racks || []).filter(r => r.id !== id) }));
+  }
+
+  const tabSt = (t) => ({
+    padding: '7px 18px', fontSize: 13, fontWeight: tab === t ? 600 : 400,
+    borderBottom: tab === t ? '2px solid #2C3E6B' : '2px solid transparent',
+    color: tab === t ? '#2C3E6B' : '#888', cursor: 'pointer', background: 'none', border: 'none',
+  });
+
+  return (
+    <div style={{ padding: '24px 32px', maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div>
+          <h1 className="serif" style={styles.h1}>Vertical Rack</h1>
+          <p style={styles.muted}>Manage rack locations with SIV (inward) and MDR (delivery) transactions. All movements auto-update the bin card.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {tab === 'siv' && <button style={styles.primaryBtn} onClick={() => setShowSIVCart(true)}>+ New SIV</button>}
+          {tab === 'mdr' && <button style={styles.primaryBtn} onClick={() => setShowMDRCart(true)}>+ New MDR</button>}
+          {tab === 'racks' && <button style={styles.primaryBtn} onClick={() => { setEditRack(null); setShowRackForm(true); }}>+ Add Rack</button>}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', borderBottom: '1px solid #E8E4DC', marginBottom: 24 }}>
+        {[['siv', 'SIV — Inward'], ['mdr', 'MDR — Delivery'], ['racks', 'Racks'], ['history', 'History']].map(([t, l]) => (
+          <button key={t} style={tabSt(t)} onClick={() => setTab(t)}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── SIV List ── */}
+      {tab === 'siv' && (
+        sivs.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#aaa' }}>
+            <Package size={36} style={{ marginBottom: 10, opacity: 0.35 }} />
+            <div style={{ fontSize: 14 }}>No SIVs yet. Click <strong>+ New SIV</strong> to receive items into the rack.</div>
+          </div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr style={styles.thead}>{['SIV No', 'Date', 'Items', 'Received From', 'Created By', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {[...sivs].sort((a, b) => b.date > a.date ? 1 : -1).map(s => (
+                <tr key={s.id} style={styles.tr}>
+                  <td style={styles.td}><strong style={{ color: '#2C3E6B' }}>{s.sivNo}</strong></td>
+                  <td style={styles.td}>{s.date}</td>
+                  <td style={styles.td}>{(s.items || []).length} item{(s.items || []).length !== 1 ? 's' : ''}</td>
+                  <td style={styles.td}>{s.receivedFrom || '—'}</td>
+                  <td style={styles.td}>{s.createdBy || '—'}</td>
+                  <td style={styles.td}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button style={styles.iconBtn} onClick={() => setPrintDoc({ type: 'siv', doc: s })} title="Print"><Printer size={14} /></button>
+                      <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteDoc('siv', s.id)}><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      )}
+
+      {/* ── MDR List ── */}
+      {tab === 'mdr' && (
+        mdrs.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#aaa' }}>
+            <Truck size={36} style={{ marginBottom: 10, opacity: 0.35 }} />
+            <div style={{ fontSize: 14 }}>No MDRs yet. Click <strong>+ New MDR</strong> to deliver items from the rack.</div>
+          </div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr style={styles.thead}>{['MDR No', 'Date', 'Items', 'Issued To', 'Purpose', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {[...mdrs].sort((a, b) => b.date > a.date ? 1 : -1).map(m => (
+                <tr key={m.id} style={styles.tr}>
+                  <td style={styles.td}><strong style={{ color: '#6B2C2C' }}>{m.mdrNo}</strong></td>
+                  <td style={styles.td}>{m.date}</td>
+                  <td style={styles.td}>{(m.items || []).length} item{(m.items || []).length !== 1 ? 's' : ''}</td>
+                  <td style={styles.td}>{m.issuedTo || '—'}</td>
+                  <td style={styles.td}>{m.purpose || '—'}</td>
+                  <td style={styles.td}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button style={styles.iconBtn} onClick={() => setPrintDoc({ type: 'mdr', doc: m })} title="Print"><Printer size={14} /></button>
+                      <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => deleteDoc('mdr', m.id)}><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      )}
+
+      {/* ── Racks tab ── */}
+      {tab === 'racks' && (
+        racks.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: '#aaa' }}>
+            <Layers size={36} style={{ marginBottom: 10, opacity: 0.35 }} />
+            <div style={{ fontSize: 14 }}>No racks defined yet. Click <strong>+ Add Rack</strong> to create your first rack.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+            {racks.map(rack => (
+              <RackCard key={rack.id} rack={rack}
+                onEdit={() => { setEditRack(rack); setShowRackForm(true); }}
+                onDelete={() => deleteRack(rack.id)} />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── History tab ── */}
+      {tab === 'history' && (
+        <table style={styles.table}>
+          <thead><tr style={styles.thead}>{['Doc No', 'Type', 'Date', 'Items', 'Party', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {[
+              ...sivs.map(s => ({ ...s, _type: 'SIV', _no: s.sivNo, _party: s.receivedFrom })),
+              ...mdrs.map(m => ({ ...m, _type: 'MDR', _no: m.mdrNo, _party: m.issuedTo })),
+            ].sort((a, b) => b.date > a.date ? 1 : -1).map(d => (
+              <tr key={d.id + d._type} style={styles.tr}>
+                <td style={styles.td}><strong style={{ color: d._type === 'SIV' ? '#2C6B3A' : '#6B2C2C' }}>{d._no}</strong></td>
+                <td style={styles.td}>
+                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: d._type === 'SIV' ? '#EAF3DE' : '#FBEAE7', color: d._type === 'SIV' ? '#2C6B3A' : '#B5453A' }}>{d._type}</span>
+                </td>
+                <td style={styles.td}>{d.date}</td>
+                <td style={styles.td}>{(d.items || []).length} items</td>
+                <td style={styles.td}>{d._party || '—'}</td>
+                <td style={styles.td}><button style={styles.iconBtn} onClick={() => setPrintDoc({ type: d._type.toLowerCase(), doc: d })}><Printer size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {showSIVCart && <RackCartModal type="siv" nextNo={nextSivNo()} racks={racks} items={items || []} onSave={saveSIV} onClose={() => setShowSIVCart(false)} />}
+      {showMDRCart && <RackCartModal type="mdr" nextNo={nextMdrNo()} racks={racks} items={items || []} onSave={saveMDR} onClose={() => setShowMDRCart(false)} />}
+      {showRackForm && <RackFormModal rack={editRack} onSave={saveRack} onClose={() => { setShowRackForm(false); setEditRack(null); }} />}
+      {printDoc && <RackDocPrint doc={printDoc.doc} type={printDoc.type} businessInfo={businessInfo} onClose={() => setPrintDoc(null)} />}
+    </div>
+  );
+}
+
+function RackCard({ rack, onEdit, onDelete }) {
+  const rows = parseInt(rack.rows) || 4;
+  const cols = parseInt(rack.cols) || 5;
+  const slots = [];
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      slots.push(String.fromCharCode(65 + r) + (c + 1));
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E8E4DC', borderRadius: 10, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{rack.name}</div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{rows} rows × {cols} cols · {rows * cols} slots</div>
+          {rack.description && <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{rack.description}</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button style={styles.iconBtn} onClick={onEdit}><Pencil size={13} /></button>
+          <button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={onDelete}><Trash2 size={13} /></button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 3 }}>
+        {slots.map(slot => (
+          <div key={slot} style={{ background: '#F5F3EE', borderRadius: 4, padding: '4px 2px', textAlign: 'center', fontSize: 10, color: '#777', border: '1px solid #E8E4DC' }}>{slot}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RackFormModal({ rack, onSave, onClose }) {
+  const [form, setForm] = React.useState({
+    id: rack?.id || '', name: rack?.name || '',
+    rows: rack?.rows || 4, cols: rack?.cols || 5,
+    description: rack?.description || '',
+  });
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  const r = parseInt(form.rows) || 0, c = parseInt(form.cols) || 0;
+  return (
+    <Modal title={rack ? 'Edit Rack' : 'New Rack'} onClose={onClose}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ ...styles.formGroup, gridColumn: '1/-1' }}>
+          <label style={styles.label}>Rack Name / ID</label>
+          <input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} placeholder="e.g. Rack-A, Zone-1" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Rows</label>
+          <input type="number" min={1} max={26} value={form.rows} onChange={e => set('rows', e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Columns</label>
+          <input type="number" min={1} max={20} value={form.cols} onChange={e => set('cols', e.target.value)} style={styles.input} />
+        </div>
+        <div style={{ ...styles.formGroup, gridColumn: '1/-1' }}>
+          <label style={styles.label}>Description (optional)</label>
+          <input value={form.description} onChange={e => set('description', e.target.value)} style={styles.input} placeholder="Location, purpose, etc." />
+        </div>
+      </div>
+      <div style={{ marginTop: 14, padding: 12, background: '#F5F3EE', borderRadius: 8, fontSize: 12, color: '#666' }}>
+        Preview: {r} rows × {c} cols = <strong>{r * c} slots</strong>
+        {r > 0 && c > 0 && <span style={{ color: '#888', marginLeft: 6 }}>(A1 … {String.fromCharCode(64 + r)}{c})</span>}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={() => { if (!form.name.trim()) { alert('Rack name required'); return; } onSave(form); }}>Save Rack</button>
+      </div>
+    </Modal>
+  );
+}
+
+function RackCartModal({ type, nextNo, racks, items, onSave, onClose }) {
+  const isSIV = type === 'siv';
+  const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [docNo, setDocNo] = React.useState(nextNo);
+  const [party, setParty] = React.useState('');
+  const [purpose, setPurpose] = React.useState('');
+  const [remarks, setRemarks] = React.useState('');
+  const [cart, setCart] = React.useState([]);
+  const [search, setSearch] = React.useState('');
+  const [selRack, setSelRack] = React.useState(racks[0]?.id || '');
+  const [selSlot, setSelSlot] = React.useState('');
+  const [selItem, setSelItem] = React.useState(null);
+  const [selQty, setSelQty] = React.useState('');
+  const [selUnit, setSelUnit] = React.useState('');
+
+  const filtered = (items || []).filter(it =>
+    !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.code || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const rackObj = racks.find(r => r.id === selRack);
+  const slots = React.useMemo(() => {
+    if (!rackObj) return [];
+    const rows = parseInt(rackObj.rows) || 4, cols = parseInt(rackObj.cols) || 5;
+    const arr = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) arr.push(String.fromCharCode(65 + r) + (c + 1));
+    return arr;
+  }, [selRack, rackObj]);
+
+  function pickItem(it) { setSelItem(it); setSelUnit(it.unit || 'nos'); setSearch(it.name); }
+
+  function addToCart() {
+    if (!selItem || !selQty || !selRack) { alert('Select item, rack and qty'); return; }
+    setCart(c => [...c, {
+      itemId: selItem.id, itemName: selItem.name,
+      qty: parseFloat(selQty), unit: selUnit || selItem.unit || 'nos',
+      rackId: selRack, rackName: rackObj?.name || selRack, slot: selSlot,
+    }]);
+    setSelItem(null); setSelQty(''); setSearch(''); setSelSlot('');
+  }
+
+  function removeFromCart(i) { setCart(c => c.filter((_, idx) => idx !== i)); }
+
+  function handleSave() {
+    if (!date || cart.length === 0) { alert('Add at least one item to the cart'); return; }
+    onSave(isSIV
+      ? { sivNo: docNo, date, receivedFrom: party, remarks, items: cart }
+      : { mdrNo: docNo, date, issuedTo: party, purpose, remarks, items: cart }
+    );
+  }
+
+  return (
+    <Modal title={isSIV ? `New SIV — Store Inward Voucher (${docNo})` : `New MDR — Material Delivery Record (${docNo})`} onClose={onClose} wide>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>{isSIV ? 'SIV No' : 'MDR No'}</label>
+          <input value={docNo} onChange={e => setDocNo(e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Date</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={styles.input} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>{isSIV ? 'Received From' : 'Issued To'}</label>
+          <input value={party} onChange={e => setParty(e.target.value)} style={styles.input} placeholder={isSIV ? 'Supplier / Source' : 'Department / Person'} />
+        </div>
+        {!isSIV && (
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Purpose / Project Ref</label>
+            <input value={purpose} onChange={e => setPurpose(e.target.value)} style={styles.input} placeholder="Purpose or project" />
+          </div>
+        )}
+        <div style={{ ...styles.formGroup, gridColumn: isSIV ? '2 / -1' : '2 / -1' }}>
+          <label style={styles.label}>Remarks</label>
+          <input value={remarks} onChange={e => setRemarks(e.target.value)} style={styles.input} placeholder="Optional" />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* Item search + add */}
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#1E2A4A', marginBottom: 8 }}>Add Items to Cart</div>
+          <input value={search} onChange={e => { setSearch(e.target.value); if (!selItem) {} }} style={{ ...styles.input, marginBottom: 6 }} placeholder="Search item name or code…" />
+          {search && !selItem && (
+            <div style={{ border: '1px solid #E8E4DC', borderRadius: 8, maxHeight: 160, overflowY: 'auto', marginBottom: 8, background: '#fff' }}>
+              {filtered.length === 0
+                ? <div style={{ padding: 12, color: '#aaa', fontSize: 13 }}>No items found</div>
+                : filtered.slice(0, 20).map(it => (
+                  <div key={it.id} onClick={() => pickItem(it)}
+                    style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #F5F3EE', display: 'flex', justifyContent: 'space-between' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#F5F3EE'}
+                    onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <span><strong>{it.name}</strong>{it.code ? <span style={{ color: '#aaa', marginLeft: 6, fontSize: 11 }}>{it.code}</span> : null}</span>
+                    <span style={{ fontSize: 11, color: '#aaa' }}>{it.unit}</span>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+          {selItem && (
+            <div style={{ background: '#EAF3DE', borderRadius: 6, padding: '6px 10px', marginBottom: 8, fontSize: 12, color: '#2C6B3A', display: 'flex', justifyContent: 'space-between' }}>
+              <span>✓ <strong>{selItem.name}</strong></span>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888' }} onClick={() => { setSelItem(null); setSearch(''); }}><X size={12} /></button>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Rack</label>
+              <select value={selRack} onChange={e => { setSelRack(e.target.value); setSelSlot(''); }} style={styles.input}>
+                {racks.length === 0 ? <option value="">— no racks defined —</option> : racks.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Slot</label>
+              <select value={selSlot} onChange={e => setSelSlot(e.target.value)} style={styles.input}>
+                <option value="">— select slot —</option>
+                {slots.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Qty</label>
+              <input type="number" value={selQty} onChange={e => setSelQty(e.target.value)} style={styles.input} placeholder="0" min={0} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Unit</label>
+              <input value={selUnit} onChange={e => setSelUnit(e.target.value)} style={styles.input} placeholder="nos" />
+            </div>
+          </div>
+          <button style={{ ...styles.primaryBtn, width: '100%', marginTop: 6 }} onClick={addToCart}>+ Add to Cart</button>
+        </div>
+
+        {/* Cart */}
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#1E2A4A', marginBottom: 8 }}>
+            Cart {cart.length > 0 && <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>({cart.length} item{cart.length !== 1 ? 's' : ''})</span>}
+          </div>
+          {cart.length === 0 ? (
+            <div style={{ border: '2px dashed #E8E4DC', borderRadius: 8, padding: 36, textAlign: 'center', color: '#bbb', fontSize: 13 }}>
+              <ShoppingCart size={24} style={{ marginBottom: 6, opacity: 0.4 }} /><br />Cart is empty
+            </div>
+          ) : (
+            <div style={{ border: '1px solid #E8E4DC', borderRadius: 8, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: '#F5F3EE' }}>
+                    {['Item', 'Rack', 'Slot', 'Qty', 'Unit', ''].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#555' }}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cart.map((c, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid #F5F3EE' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 500 }}>{c.itemName}</td>
+                      <td style={{ padding: '6px 8px', color: '#777' }}>{c.rackName}</td>
+                      <td style={{ padding: '6px 8px', color: '#777' }}>{c.slot || '—'}</td>
+                      <td style={{ padding: '6px 8px', fontWeight: 700 }}>{c.qty}</td>
+                      <td style={{ padding: '6px 8px', color: '#777' }}>{c.unit}</td>
+                      <td style={{ padding: '6px 8px' }}><button style={{ ...styles.iconBtn, color: '#E08A7D' }} onClick={() => removeFromCart(i)}><X size={12} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={handleSave}>{isSIV ? '✓ Save SIV' : '✓ Save MDR'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function RackDocPrint({ doc, type, businessInfo, onClose }) {
+  const isSIV = type === 'siv';
+  const biz = businessInfo || {};
+  const docNo = isSIV ? doc.sivNo : doc.mdrNo;
+  const title = isSIV ? 'STORE INWARD VOUCHER (SIV)' : 'MATERIAL DELIVERY RECORD (MDR)';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: '#2C3E6B', padding: '10px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} className="no-print">
+        <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{title} — {docNo}</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14} /> Print</button>
+          <button onClick={onClose} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14} /></button>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', background: '#E8E4DC', display: 'flex', justifyContent: 'center', padding: '30px 20px' }}>
+        <div style={{ background: '#fff', width: 794, minHeight: 1000, padding: '40px 48px', fontFamily: 'Georgia, serif', fontSize: 13, color: '#1E2A4A' }}>
+          <div style={{ textAlign: 'center', marginBottom: 24, borderBottom: '2px solid #1E2A4A', paddingBottom: 16 }}>
+            {biz.name && <div style={{ fontSize: 20, fontWeight: 700 }}>{biz.name}</div>}
+            {biz.address && <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{biz.address}</div>}
+            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 12, letterSpacing: 1.5 }}>{title}</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20, fontSize: 12 }}>
+            <div><span style={{ color: '#888' }}>{isSIV ? 'SIV No' : 'MDR No'}:</span> <strong>{docNo}</strong></div>
+            <div><span style={{ color: '#888' }}>Date:</span> <strong>{doc.date}</strong></div>
+            <div><span style={{ color: '#888' }}>{isSIV ? 'Received From' : 'Issued To'}:</span> <strong>{(isSIV ? doc.receivedFrom : doc.issuedTo) || '—'}</strong></div>
+            {!isSIV && doc.purpose && <div><span style={{ color: '#888' }}>Purpose:</span> <strong>{doc.purpose}</strong></div>}
+            {doc.remarks && <div style={{ gridColumn: '1/-1' }}><span style={{ color: '#888' }}>Remarks:</span> {doc.remarks}</div>}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 32 }}>
+            <thead>
+              <tr style={{ background: '#F5F3EE', borderBottom: '2px solid #E8E4DC' }}>
+                {['#', 'Item Name', 'Rack', 'Slot', 'Qty', 'Unit'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, fontFamily: 'Arial, sans-serif' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(doc.items || []).map((it, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #F5F3EE' }}>
+                  <td style={{ padding: '7px 10px', fontSize: 12 }}>{i + 1}</td>
+                  <td style={{ padding: '7px 10px', fontSize: 12 }}>{it.itemName}</td>
+                  <td style={{ padding: '7px 10px', fontSize: 12 }}>{it.rackName || it.rackId || '—'}</td>
+                  <td style={{ padding: '7px 10px', fontSize: 12 }}>{it.slot || '—'}</td>
+                  <td style={{ padding: '7px 10px', fontSize: 12, fontWeight: 700 }}>{it.qty}</td>
+                  <td style={{ padding: '7px 10px', fontSize: 12 }}>{it.unit}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24, marginTop: 48, borderTop: '1px solid #E8E4DC', paddingTop: 20 }}>
+            {[isSIV ? 'Received By' : 'Issued By', 'Checked By', 'Approved By'].map(label => (
+              <div key={label} style={{ textAlign: 'center' }}>
+                <div style={{ height: 40 }} />
+                <div style={{ borderTop: '1px solid #555', paddingTop: 6, fontSize: 11, color: '#888780' }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
   const [useLHBin, setUseLHBin] = React.useState(!!businessInfo?.letterhead);
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
@@ -6854,7 +7388,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
   const item = items.find(i => i.id === selectedItemId);
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
-    packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN', siv: 'Issue Voucher' };
+    packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN', siv: 'Issue Voucher', 'rack-siv': 'Rack SIV', 'rack-mdr': 'Rack MDR' };
 
   const entries = (stockLedger || [])
     .filter(e => e.itemId === selectedItemId)
@@ -19927,6 +20461,7 @@ export default function App() {
   const [tcChecklists,     _setTC]     = useState([]);
   const [handoverDocs,     _setHDocs]  = useState([]);
   const [auditDocs,        _setAuditDocs]  = useState([]);
+  const [rackStore,        _setRS]         = useState({ racks: [], sivs: [], mdrs: [] });
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
@@ -20043,6 +20578,7 @@ export default function App() {
       _setTC(data.tcChecklists || []);
       _setHDocs(data.handoverDocs || []);
       _setAuditDocs(data.auditDocs || []);
+      _setRS(data.rackStore || { racks: [], sivs: [], mdrs: [] });
     });
     return unsub;
   }, [ownerUid]);
@@ -20114,6 +20650,7 @@ export default function App() {
   const setTcChecklists     = mkSet(_setTC,    'tcChecklists');
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
   const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
+  const setRackStore        = mkSet(_setRS,        'rackStore');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -20759,6 +21296,20 @@ export default function App() {
             storeIssues={storeIssues}
             currentBizType={effectiveBizContext}
             isMultiBiz={isMultiBiz}
+          />
+        );
+      case 'verticalrack':
+        return (
+          <VerticalRackModule
+            rackStore={rackStore}
+            setRackStore={setRackStore}
+            items={items}
+            setStockLedger={setStockLedger}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            currentUserName={user?.displayName || user?.email || ''}
           />
         );
       case 'hr':
