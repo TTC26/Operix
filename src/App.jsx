@@ -277,7 +277,7 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 // ─── Shared Print Overlay (used by Tender, RA Bill, AMC, Sub WO, PTW, Handover)
 function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
-  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead));
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const cur = (cc) => (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency || '';
   return (
     <>
@@ -296,9 +296,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={styles.primaryBtn} onClick={()=>window.print()}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
-        {useLH && businessInfo?.letterhead && (
-          <img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }}/>
-        )}
+        {useLH && <LetterheadHeader bi={businessInfo} />}
         <div style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
           {!useLH && businessInfo && (
             <div style={{ marginBottom:24, borderBottom:'2px solid #1E2A4A', paddingBottom:16 }}>
@@ -2159,6 +2157,12 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
     reader.readAsDataURL(file);
   }
 
+  function handleLetterheadHtmlUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setForm(p => ({ ...p, letterheadHtml: reader.result }));
+    reader.readAsText(file);
+  }
   function handleLetterheadFooterUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -2240,6 +2244,18 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
           <input type="file" accept="image/*" onChange={handleLetterheadUpload} style={styles.input} />
           {form.letterhead && <button onClick={()=>setForm(p=>({...p,letterhead:''}))} style={{ ...styles.ghostBtn, marginTop:6, fontSize:12 }}>Remove Header</button>}
           <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>PNG or JPG · Max 1.5 MB · Recommended 2480 × 350 px. Auto-applied to all document prints (invoices, PO, contracts, etc).</div>
+        </div>
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>HTML Letterhead <span style={{ fontWeight:400, color:'#888', fontSize:11 }}>(upload .html file — overrides image header on all prints)</span></label>
+          {form.letterheadHtml ? (
+            <div style={{ padding:'8px 12px', background:'#EAF3DE', border:'1px solid #A8D5B5', borderRadius:8, marginBottom:8, fontSize:12, color:'#2C6B3A' }}>
+              ✓ HTML letterhead loaded ({Math.round(form.letterheadHtml.length/1024)} KB)
+              <button onClick={()=>setForm(p=>({...p,letterheadHtml:''}))} style={{ ...styles.ghostBtn, fontSize:11, marginLeft:10, padding:'2px 8px', color:'#E08A7D' }}>Remove</button>
+            </div>
+          ) : null}
+          <input type="file" accept=".html,text/html" onChange={handleLetterheadHtmlUpload} style={styles.input} />
+          <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>Upload a .html file. It will render as-is at the top of every printed document (takes priority over image header). Use inline CSS for styling.</div>
         </div>
 
         <div style={styles.formGroup}>
@@ -4513,7 +4529,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [rejectionNote, setRejectionNote] = useState('');
   const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
   const [mepPickerOpen, setMepPickerOpen] = useState(false);
-  const [useLH, setUseLH] = useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const bizBadge = BIZ_BADGE[doc.bizType];
@@ -5015,12 +5031,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         </div>
 
         <div style={styles.preview} className="print-area">
-          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-          {useLH && businessInfo?.letterhead && (
-            <div className="lh-pad-header" style={{ background: '#fff' }}>
-              <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} />
-            </div>
-          )}
+          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+          {useLH && <LetterheadHeader bi={businessInfo} />}
           {/* ── DRAFT watermark — visible on screen + print when not approved ── */}
           {doc.status === 'draft' && (
             <div style={{
@@ -5086,7 +5098,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <div style={styles.previewHeader}>
                     <div style={{ ...styles.previewBrandRow, flex: 1, minWidth: 0 }}>
                       {logoDark}
-                      {!(useLH && businessInfo?.letterhead) && <div>
+                      {!(useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) && <div>
                         <div className="serif" style={{ ...styles.previewBrand, color: '#fff' }}>{businessInfo.name}</div>
                         <div style={{ ...styles.previewSmall, color: 'rgba(255,255,255,0.8)' }}>{businessInfo.address}</div>
                         <div style={{ ...styles.previewSmall, color: 'rgba(255,255,255,0.8)' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>
@@ -5129,7 +5141,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={styles.previewBrandRow}>
                       {logoDark}
-                      {!(useLH && businessInfo?.letterhead) && <div>
+                      {!(useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) && <div>
                         <div className="serif" style={{ ...styles.previewBrand, color: '#fff', fontSize: 21 }}>{businessInfo.name}</div>
                         <div style={{ ...styles.previewSmall, color: '#A9B8D4' }}>{businessInfo.address}</div>
                         <div style={{ ...styles.previewSmall, color: '#A9B8D4' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>
@@ -5177,7 +5189,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <div style={styles.previewHeader}>
                     <div style={styles.previewBrandRow}>
                       {logo}
-                      {!(useLH && businessInfo?.letterhead) && <div>
+                      {!(useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) && <div>
                         <div className="serif" style={{ ...styles.previewBrand, color: '#1A4A33' }}>{businessInfo.name}</div>
                         <div style={{ ...styles.previewSmall, color: '#3A7A5A' }}>{businessInfo.address}</div>
                         <div style={{ ...styles.previewSmall, color: '#3A7A5A' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>
@@ -5210,7 +5222,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   </div>
                   {/* Seller + Logo */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 18px', borderBottom: bdr }}>
-                    {!(useLH && businessInfo?.letterhead) && <div>
+                    {!(useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) && <div>
                       <div style={{ fontWeight: 700, fontSize: 15 }}>{businessInfo.name}</div>
                       <div style={{ color: '#333' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>
                       <div style={{ color: '#333' }}>{businessInfo.address}</div>
@@ -5218,7 +5230,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       {businessInfo.email && <div style={{ color: '#1A56DB', textDecoration: 'underline' }}>{businessInfo.email}</div>}
                       {businessInfo.website && <div style={{ color: '#1A56DB' }}>{businessInfo.website}</div>}
                     </div>}
-                    {!(useLH && businessInfo?.letterhead) && businessInfo.logo && (
+                    {!(useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) && businessInfo.logo && (
                       <div style={{ textAlign: 'center', flexShrink: 0, marginLeft: 20 }}>
                         <img src={businessInfo.logo} alt="logo" style={{ width: 84, height: 84, objectFit: 'contain', display: 'block' }} />
                         <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, maxWidth: 100 }}>{businessInfo.name}</div>
@@ -5872,7 +5884,7 @@ function PettyCashForm({ entry, onSave, onClose, currentUserName = '' }) {
 }
 
 function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   // Build running balance
   let balance = parseFloat(openingBalance) || 0;
   const ledger = (rows || []).map(e => {
@@ -5889,13 +5901,13 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
         style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
-        {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','petty-cash-statement.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLH && <LetterheadHeader bi={businessInfo} />}
         {/* Header */}
         <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: useLH ? 'center' : 'space-between', alignItems: 'flex-start' }}>
           {!useLH && <div>
@@ -6403,15 +6415,26 @@ function LetterpadPrintStyle() {
   );
 }
 
+function LetterheadHeader({ bi, style = {} }) {
+  if (!bi) return null;
+  if (bi.letterheadHtml) return (
+    <div style={{ width:'100%', background:'#fff', ...style }} dangerouslySetInnerHTML={{ __html: bi.letterheadHtml }} />
+  );
+  if (bi.letterhead) return (
+    <div className="lh-pad-header" style={{ background:'#fff', ...style }}>
+      <img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} />
+    </div>
+  );
+  return null;
+}
+
 function VoucherPrintHeader({ businessInfo, useLH }) {
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
-  if (useLH && businessInfo?.letterhead) {
+  if (useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) {
     return (
       <>
         <LetterpadPrintStyle />
-        <div className="lh-pad-header" style={{ background: '#fff' }}>
-          <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} />
-        </div>
+        <LetterheadHeader bi={businessInfo} />
         <div style={{ paddingTop: 0 }} />
       </>
     );
@@ -6451,7 +6474,7 @@ function VoucherSignatory({ businessInfo, leftLabel }) {
 }
 
 function VoucherPrintModal({ voucher, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const isPayment = voucher.type === 'payment';
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
@@ -6470,7 +6493,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose }) {
       {/* Controls */}
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
-        {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','voucher.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print / PDF</button>
       </div>
@@ -6521,7 +6544,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose }) {
 }
 
 function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
   const partyVouchers = vouchers.filter(v => v.party === party).sort((a, b) => a.date > b.date ? 1 : -1);
@@ -6534,7 +6557,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
-        {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','statement.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
       </div>
@@ -7437,7 +7460,7 @@ function RackFormModal({ rack, onSave, onClose }) {
 }
 
 function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
-  const [useLHBin, setUseLHBin] = React.useState(!!businessInfo?.letterhead);
+  const [useLHBin, setUseLHBin] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
   // Filter by current division in multi-biz mode
   const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
@@ -7474,7 +7497,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
           <h1 className="serif" style={styles.h1}>Bin Card</h1>
           <div style={{ fontSize: 13, color: '#888780' }}>Stock movement card per item</div>
         </div>
-        {businessInfo?.letterhead && <button onClick={() => setUseLHBin(v => !v)} style={{ ...styles.ghostBtn, ...(useLHBin ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHBin ? 'Letterhead ON' : 'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHBin(v => !v)} style={{ ...styles.ghostBtn, ...(useLHBin ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHBin ? 'Letterhead ON' : 'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','bin-card.pdf')} style={styles.ghostBtn}><Download size={15}/> PDF</button>
         <button onClick={() => window.print()} style={styles.primaryBtn}>🖨 Print</button>
       </div>
@@ -7489,8 +7512,8 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 
       {/* Print header */}
       <div className="print-only" style={{ marginBottom: 16 }}>
-        {useLHBin && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLHBin && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLHBin && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLHBin && <LetterheadHeader bi={businessInfo} />}
         <div style={{ display: 'flex', justifyContent: useLHBin ? 'center' : 'space-between', alignItems: 'flex-start' }}>
           {!useLHBin && <div>
             <div style={{ fontWeight: 700, fontSize: 18 }}>{businessInfo.name}</div>
@@ -7627,7 +7650,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 // ─── GRN Print ─────────────────────────────────────────────────
 function GRNPrint({ grn, businessInfo, onClose }) {
   const isTrading = businessInfo?.companyType === 'trading';
-  const useLH = !!(businessInfo?.letterhead);
+  const useLH = !!(businessInfo?.letterhead||businessInfo?.letterheadHtml);
   return (
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
@@ -7635,8 +7658,8 @@ function GRNPrint({ grn, businessInfo, onClose }) {
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
-        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
+        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:16}}>
             <div style={{fontSize:16,fontWeight:700}}>{businessInfo?.name}</div>
@@ -7687,7 +7710,7 @@ function GRNPrint({ grn, businessInfo, onClose }) {
 
 // ─── Stores Issue Voucher ──────────────────────────────────────
 function StoreIssuePrint({ siv, businessInfo, onClose }) {
-  const useLH = !!(businessInfo?.letterhead);
+  const useLH = !!(businessInfo?.letterhead||businessInfo?.letterheadHtml);
   return (
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
@@ -7695,7 +7718,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
-        {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
+        {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
             <div style={{fontSize:16,fontWeight:700}}>{businessInfo?.name}</div>
@@ -9922,7 +9945,7 @@ function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose })
 // ─── Pay Slip Print ───────────────────────────────────────────────────────────
 // Summary payroll sheet — all employees in one table
 function PaySlipPrint({ run, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
   const lines = run?.lines || [];
@@ -9932,13 +9955,13 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
       <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
-        {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payroll-summary.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
-        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLH && <LetterheadHeader bi={businessInfo} />}
         <div style={{ display: 'flex', justifyContent: useLH ? 'center' : 'space-between', marginBottom: 20, borderBottom: '2px solid #1E2A4A', paddingBottom: 12 }}>
           {!useLH && <div>
             <div className="serif" style={{ fontWeight: 700, fontSize: 20, color: '#1E2A4A' }}>{businessInfo.name}</div>
@@ -10010,7 +10033,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
 
 // Individual payslips — one per employee, page-break between each
 function IndividualPaySlips({ run, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
   const lines = run?.lines || [];
@@ -10021,15 +10044,15 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
       <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
-        {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payslips.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print All ({lines.length})</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
         {lines.map((l, i) => (
           <div key={i} style={{ padding: '36px 48px', pageBreakAfter: i < lines.length - 1 ? 'always' : 'auto', borderBottom: i < lines.length - 1 ? '3px dashed #EAE6DB' : 'none' }}>
-            {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-            {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+            {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+            {useLH && <LetterheadHeader bi={businessInfo} />}
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: useLH ? 'center' : 'space-between', marginBottom: 16, paddingBottom: 10 }}>
               {!useLH && <div>
@@ -10348,7 +10371,7 @@ function ServiceOrderForm({ order, customers, businessInfo, onSave, onCancel }) 
 }
 
 function ServiceOrderPrint({ order, businessInfo, onClose }) {
-  const [useLH, setUseLH] = React.useState(!!businessInfo?.letterhead);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
   const subtotal = (order.services||[]).reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.rate)||0),0);
@@ -10361,15 +10384,15 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>Service Order — {order.number}</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {businessInfo?.letterhead && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
+            {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area',`service-order-${order.number||'so'}.pdf`)}><Download size={14}/> PDF</button>
             <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={14}/> Print</button>
             <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
           </div>
         </div>
         <div className="print-area" style={{ background: '#fff', padding: 32, fontFamily: 'Georgia, serif' }}>
-          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLH && <LetterheadHeader bi={businessInfo} />}
           <div style={{ display: 'flex', justifyContent: useLH ? 'center' : 'space-between', marginBottom: 28 }}>
             {!useLH && <div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{businessInfo.name || 'Company Name'}</div>
@@ -11464,7 +11487,7 @@ function VATReport({ documents, customers, businessInfo }) {
 // GENERIC TAX REPORT (Other countries)
 // ─────────────────────────────────────────────
 function TaxReport({ documents, customers, businessInfo }) {
-  const [useLHTax, setUseLHTax] = React.useState(!!businessInfo?.letterhead);
+  const [useLHTax, setUseLHTax] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const now = new Date();
   const [from, setFrom] = useState(now.toISOString().slice(0, 7) + '-01');
   const [to, setTo] = useState(now.toISOString().slice(0, 10));
@@ -11497,13 +11520,13 @@ function TaxReport({ documents, customers, businessInfo }) {
           <h2 className="serif" style={styles.pageTitle}>Tax Report</h2>
           <div style={{ fontSize: 13, color: '#888780' }}>Sales & purchase tax summary</div>
         </div>
-        {businessInfo?.letterhead && <button onClick={() => setUseLHTax(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHTax?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHTax?'Letterhead ON':'Use Letterhead'}</button>}
+        {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHTax(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHTax?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHTax?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('#tax-report-page','tax-report.pdf')}><Download size={15}/> PDF</button>
         <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
       </div>
 
-      {useLHTax && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-      {useLHTax && businessInfo?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={businessInfo.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+      {useLHTax && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+      {useLHTax && <LetterheadHeader bi={businessInfo} />}
       <DateRangePicker from={from} setFrom={setFrom} to={to} setTo={setTo} count={invRows.length} label="invoice(s)" />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 24 }}>
@@ -12379,7 +12402,7 @@ const PO_STATUS = {
 };
 
 function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
-  const useLH = !!(businessInfo?.letterhead);
+  const useLH = !!(businessInfo?.letterhead||businessInfo?.letterheadHtml);
   const rmLines = bom?.materials || [];
   return (
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
@@ -12388,8 +12411,8 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
-        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
+        {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:16}}>
             <div style={{fontSize:16,fontWeight:700}}>{businessInfo?.name}</div>
@@ -14187,7 +14210,7 @@ function ChannelPartnerForm({ partner, termsLibrary, businessInfo, documents, on
 }
 
 function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, documents, onBack }) {
-  const [useLHPartner, setUseLHPartner] = React.useState(!!bi?.letterhead);
+  const [useLHPartner, setUseLHPartner] = React.useState(!!(bi?.letterhead||bi?.letterheadHtml));
   const clauses   = termsLibrary?.clauses   || [];
   const templates = termsLibrary?.templates || [];
   const linkedDocs = documents.filter(d => d.channelPartnerId === p.id);
@@ -14209,14 +14232,14 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
     <div>
       <div className="no-print" style={{ padding: '14px 28px', borderBottom: '1px solid #EAE6DB', display: 'flex', gap: 12, alignItems: 'center' }}>
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
-        {bi?.letterhead && <button onClick={() => setUseLHPartner(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHPartner?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHPartner?'Letterhead ON':'Use Letterhead'}</button>}
+        {(bi?.letterhead||bi?.letterheadHtml) && <button onClick={() => setUseLHPartner(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHPartner?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHPartner?'Letterhead ON':'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','partner-agreement.pdf')} style={styles.ghostBtn}><Download size={13} style={{ marginRight: 4 }}/> PDF</button>
         <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
         {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
-        {useLHPartner && (bi?.letterhead || bi?.letterheadFooter) && <LetterpadPrintStyle />}
-        {useLHPartner && bi?.letterhead && <div className="lh-pad-header" style={{ background:'#fff' }}><img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} /></div>}
+        {useLHPartner && (bi?.letterhead || bi?.letterheadHtml || bi?.letterheadFooter) && <LetterpadPrintStyle />}
+        {useLHPartner && <LetterheadHeader bi={bi} />}
         <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
           {!useLHPartner && (bi.name || bi.companyName) && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>Dealership / Channel Partner Agreement</div>
@@ -15739,7 +15762,7 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
   const [toDate, setToDate] = useState(new Date().toISOString().slice(0,10));
   const [selEmp, setSelEmp] = useState(employees[0]?.id || '');
   const [orientation, setOrientation] = useState('landscape'); // landscape | portrait
-  const [useLHMep, setUseLHMep] = useState(!!businessInfo?.letterhead);
+  const [useLHMep, setUseLHMep] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
 
   const acts = siteActivities.filter(a => a.projectId === selProject);
   const project = siteProjects.find(p => p.id === selProject);
@@ -15848,7 +15871,7 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
         </table>`).join('');
     }
 
-    const lhHtml = useLHMep && businessInfo?.letterhead
+    const lhHtml = useLHMep && (businessInfo?.letterhead || businessInfo?.letterheadHtml)
       ? `<div style="position:fixed;top:0;left:0;right:0;background:#fff;z-index:9999;padding-bottom:10px;border-bottom:2px solid #1E2A4A;"><img src="${businessInfo.letterhead}" style="width:100%;max-height:200px;object-fit:contain;object-position:top;display:block;" /></div>`
       : `<div style="font-size:15px;font-weight:700;color:#1E2A4A;margin-bottom:2px;">${businessInfo?.name||''}</div>`;
     const lhFooterHtml = useLHMep && businessInfo?.letterheadFooter
@@ -15893,7 +15916,7 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
           <p style={styles.muted}>Manhour, manpower & material reports for selected period</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {businessInfo?.letterhead && <button onClick={() => setUseLHMep(v => !v)} style={{ ...styles.ghostBtn, ...(useLHMep ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHMep ? 'Letterhead ON' : 'Use Letterhead'}</button>}
+          {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHMep(v => !v)} style={{ ...styles.ghostBtn, ...(useLHMep ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHMep ? 'Letterhead ON' : 'Use Letterhead'}</button>}
           <div style={{ display:'flex', border:'1px solid #DDD8CC', borderRadius:8, overflow:'hidden', fontSize:12 }}>
             {[['landscape','⬜ Landscape'],['portrait','📄 Portrait']].map(([val,lbl])=>(
               <button key={val} onClick={()=>setOrientation(val)}
@@ -19379,7 +19402,7 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
 
 // ─── Testing & Commissioning ──────────────────────────────────────────────────
 function TCPrint({ checklist, project, businessInfo, onClose }) {
-  const useLH = !!(businessInfo?.letterhead);
+  const useLH = !!(businessInfo?.letterhead||businessInfo?.letterheadHtml);
   const tests = checklist.tests || [];
   const punch = checklist.punchList || [];
   const fails = tests.filter(t => t.result === 'fail').length;
@@ -19390,7 +19413,7 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
         <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
-        {useLH && businessInfo?.letterhead && <img src={businessInfo.letterhead} alt="letterhead" style={{width:'100%',display:'block',marginBottom:8}} />}
+        {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
         {!useLH && (
           <div style={{textAlign:'center',marginBottom:12}}>
             <div style={{fontSize:16,fontWeight:700}}>{businessInfo?.name}</div>
