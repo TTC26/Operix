@@ -1808,7 +1808,7 @@ export function RackDetailModal({ rack, inward, outward, returns, items, grns, s
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'stretch', justifyContent:'flex-end' }}>
-      <div style={{ width:'min(780px,96vw)', background:'#fff', display:'flex', flexDirection:'column', overflowY:'auto', boxShadow:'-4px 0 24px rgba(0,0,0,0.15)' }}>
+      <div style={{ width:'min(780px,96vw)', background:'#fff', display:'flex', flexDirection:'column', height:'100vh', boxShadow:'-4px 0 24px rgba(0,0,0,0.15)' }}>
         {/* Header */}
         <div style={{ padding:'16px 24px', borderBottom:'1px solid #E8E4DC', display:'flex', justifyContent:'space-between', alignItems:'center', background:'#2C3E6B' }}>
           <div>
