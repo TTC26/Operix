@@ -781,7 +781,11 @@ export function ActivityPlannerView({ siteActivities, setSiteActivities, sitePro
                         </div>
                       )}
                       {!hasDates && (
-                        <div style={{ position:'absolute', left:8, fontSize:10, color:'#bbb', fontStyle:'italic' }}>No dates — click to set</div>
+                        <div onClick={e=>{ e.stopPropagation(); setEditing(act); }}
+                          style={{ position:'absolute', left:8, fontSize:10, color:'#3D6B9A', fontStyle:'italic', cursor:'pointer',
+                            background:'rgba(61,107,154,0.08)', borderRadius:4, padding:'2px 8px', border:'1px dashed #3D6B9A' }}>
+                          📅 No dates — click to set
+                        </div>
                       )}
                     </div>
                   );
