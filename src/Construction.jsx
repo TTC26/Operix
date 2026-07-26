@@ -9,8 +9,7 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
   const [showCatalogue, setShowCatalogue] = useState(false);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
-  const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
-  const LINE_STATUSES   = ['Pending','In Progress','Complete','On Hold'];
+  // MEP_DISCIPLINES, MEP_UNITS, MEP_LINE_STATUSES — use exported constants
 
   function newBom(projectId) {
     return {
@@ -22,7 +21,7 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
   function blankItem(seq) {
     return {
       id: crypto.randomUUID(), seq, description: '', discipline: MEP_DISCIPLINES[0],
-      unit: 'Nos', qty: '', rate: '', plannedStart: '', plannedEnd: '',
+      unit: 'nos', qty: '', rate: '', plannedStart: '', plannedEnd: '',
       status: 'Pending', activityId: '', catalogueRef: '',
     };
   }
@@ -64,7 +63,7 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
 
   function importFromCatalogue(catItem) {
     const seq = (editing.items.length || 0) + 1;
-    const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'Nos', rate: catItem.rate||'', catalogueRef: catItem.id };
+    const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'nos', rate: catItem.rate||'', catalogueRef: catItem.id };
     setEditing(prev => ({...prev, items: [...prev.items, newItem]}));
   }
 
@@ -222,9 +221,11 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
                     <input type="number" value={item.qty} onChange={e=>updateItem(item.id,'qty',e.target.value)}
                       style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
                   </td>
-                  <td style={{padding:'4px 6px',width:70}}>
-                    <input value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)}
-                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="Nos"/>
+                  <td style={{padding:'4px 6px',width:80}}>
+                    <select value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)}
+                      style={{...styles.input,padding:'4px 6px',fontSize:12,width:75}}>
+                      {MEP_UNITS.map(u=><option key={u}>{u}</option>)}
+                    </select>
                   </td>
                   <td style={{padding:'4px 6px',width:90}}>
                     <input type="number" value={item.rate} onChange={e=>updateItem(item.id,'rate',e.target.value)}
@@ -243,7 +244,7 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
                   </td>
                   <td style={{padding:'4px 6px',width:110}}>
                     <select value={item.status} onChange={e=>updateItem(item.id,'status',e.target.value)} style={{...styles.input,padding:'4px 8px',fontSize:12}}>
-                      {LINE_STATUSES.map(s=><option key={s}>{s}</option>)}
+                      {MEP_LINE_STATUSES.map(s=><option key={s}>{s}</option>)}
                     </select>
                   </td>
                   <td style={{padding:'6px 10px',width:130}}>
@@ -290,11 +291,24 @@ export function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, sit
 }
 
 
-export const MEP_DISCIPLINES = ['Electrical','Plumbing','HVAC','Firefighting','Civil','IT/Networking','Other'];
+export const MEP_DISCIPLINES = [
+  'Electrical','Plumbing & Drainage','HVAC','Firefighting',
+  'Civil','ELV','BMS','Gas','Landscaping','IT/ICT','Elevator','Other',
+];
 
-export const MEP_PHASES = ['Mobilisation','Rough-in / First Fix','Second Fix','Testing & Commissioning','Snagging','Handover'];
+export const MEP_PHASES = [
+  'Mobilisation','Shop Drawing Approval','Material Submittal',
+  'Procurement / Fabrication','Rough-in / First Fix',
+  'Above Ceiling / Second Fix','Testing & Commissioning',
+  'Inspection & Snagging','Handover','Defects Liability Period',
+];
 
-export const MEP_UNITS = ['%','m','m²','m³','kg','nos','sets','points','circuits','floors','rooms'];
+export const MEP_UNITS = [
+  '%','m','m²','m³','kg','nos','set','lot','point',
+  'circuit','roll','pair','box','length','bag','trip',
+];
+
+export const MEP_LINE_STATUSES = ['Pending','In Progress','Complete','On Hold','Cancelled'];
 
 // ── Helper: compute activity progress (latest cumulative %) ────────────────────
 
@@ -1378,7 +1392,7 @@ export function BOMInlineEditor({ activity, onUpdate, canEdit }) {
 
 export function ActivityForm({ activity, project, onSave, onClose }) {
   const [form, setForm] = useState({
-    name:'', villaId:'', discipline:'Electrical', phase: MEP_PHASES[0],
+    name:'', villaId:'', discipline:MEP_DISCIPLINES[0], phase: MEP_PHASES[0],
     plannedStart:'', plannedEnd:'', duration:'', weight:5, sequence:0,
     plannedQty:'', unit:'%', bom:[], bomLocked:false,
     ...activity,
