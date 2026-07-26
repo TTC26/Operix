@@ -2159,8 +2159,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
 
   function handleLetterheadHtmlUpload(e) {
     const file = e.target.files[0]; if (!file) return;
+    if (file.size > 300 * 1024) { alert('HTML file too large — max 300 KB. Embed images as URLs, not base64.'); return; }
     const reader = new FileReader();
-    reader.onload = () => setForm(p => ({ ...p, letterheadHtml: reader.result }));
+    reader.onload = () => {
+      let html = reader.result;
+      // Extract only body content if full HTML doc
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) html = bodyMatch[1];
+      // Strip script tags for safety
+      html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+      // Strip html/head/body wrapper tags if still present
+      html = html.replace(/<\/?(html|head|body)[^>]*>/gi, '');
+      setForm(p => ({ ...p, letterheadHtml: html.trim() }));
+    };
     reader.readAsText(file);
   }
   function handleLetterheadFooterUpload(e) {
@@ -6415,16 +6426,30 @@ function LetterpadPrintStyle() {
   );
 }
 
+function sanitizeLHtml(html) {
+  if (!html) return '';
+  const b = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  let h = b ? b[1] : html;
+  h = h.replace(/<script[\s\S]*?<\/script>/gi, '');
+  h = h.replace(/<\/?(html|head|body)[^>]*>/gi, '');
+  return h.trim();
+}
+
 function LetterheadHeader({ bi, style = {} }) {
   if (!bi) return null;
-  if (bi.letterheadHtml) return (
-    <div style={{ width:'100%', background:'#fff', ...style }} dangerouslySetInnerHTML={{ __html: bi.letterheadHtml }} />
-  );
-  if (bi.letterhead) return (
-    <div className="lh-pad-header" style={{ background:'#fff', ...style }}>
-      <img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} />
-    </div>
-  );
+  try {
+    if (bi.letterheadHtml) {
+      const safeHtml = sanitizeLHtml(bi.letterheadHtml);
+      return (
+        <div style={{ width:'100%', background:'#fff', ...style }} dangerouslySetInnerHTML={{ __html: safeHtml }} />
+      );
+    }
+    if (bi.letterhead) return (
+      <div className="lh-pad-header" style={{ background:'#fff', ...style }}>
+        <img src={bi.letterhead} alt="letterhead" style={{ width:'100%', display:'block' }} />
+      </div>
+    );
+  } catch(e) { return null; }
   return null;
 }
 
