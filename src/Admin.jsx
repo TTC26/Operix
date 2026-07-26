@@ -2326,9 +2326,9 @@ export const SECTION_VIEWS = {
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
-  hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
+  hr:          ['employees', 'siteattendance', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
-  site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
+  site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'progressboard', 'clientmaterials', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
   shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
@@ -2338,10 +2338,10 @@ export const SECTION_VIEWS = {
 
 
 export const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','assetregister','employees','siteattendance','payroll','offerletter','warnletter','termletter','staff','contracts','termslibrary'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','employees','siteattendance','payroll','offerletter','warnletter','termletter','staff','contracts','termslibrary'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','progressboard','clientmaterials','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','employees','siteattendance','payroll','offerletter','warnletter','termletter','staff','contracts','termslibrary'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','progressboard','clientmaterials','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','employees','siteattendance','payroll','offerletter','warnletter','termletter','staff','contracts','termslibrary'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary'],
 };
@@ -2601,6 +2601,9 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
                 <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
+                <SubLabel label="Assets" />
+                <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+
                 <SubLabel label="Accounts" />
                 <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
                 <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
@@ -2609,6 +2612,18 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+
+                <SubLabel label="HR & Payroll" />
+                <NavBtn id="employees"      label="Employees"           icon={Users} />
+                <NavBtn id="siteattendance" label="Site Attendance"     icon={Users} />
+                <NavBtn id="payroll"        label="Payroll"             icon={FileText} />
+                <NavBtn id="offerletter"    label="Offer Letters"       icon={FileText} />
+                <NavBtn id="warnletter"     label="Warning Letters"     icon={AlertTriangle} />
+                <NavBtn id="termletter"     label="Termination Letters" icon={FileSignature} />
+                <SubLabel label="Admin" />
+                <NavBtn id="staff"        label="Staff"         icon={Shield} />
+                <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
+                <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
               </>}
 
               {/* ── MANUFACTURING ───────────────────────────────────── */}
@@ -2665,6 +2680,18 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+
+                <SubLabel label="HR & Payroll" />
+                <NavBtn id="employees"      label="Employees"           icon={Users} />
+                <NavBtn id="siteattendance" label="Site Attendance"     icon={Users} />
+                <NavBtn id="payroll"        label="Payroll"             icon={FileText} />
+                <NavBtn id="offerletter"    label="Offer Letters"       icon={FileText} />
+                <NavBtn id="warnletter"     label="Warning Letters"     icon={AlertTriangle} />
+                <NavBtn id="termletter"     label="Termination Letters" icon={FileSignature} />
+                <SubLabel label="Admin" />
+                <NavBtn id="staff"        label="Staff"         icon={Shield} />
+                <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
+                <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
               </>}
 
               {/* ── MEP / SERVICE ────────────────────────────────────── */}
@@ -2696,15 +2723,11 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
                 <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
                 <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
                 <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-                <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-                <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+                  <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
                 <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-                <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
 
-                {bt === 'service' && <>
-                  <SubLabel label="Assets" />
-                  <NavBtn id="assetregister" label="Asset Register" icon={Package} />
-                </>}
+                <SubLabel label="Assets" />
+                <NavBtn id="assetregister" label="Asset Register" icon={Package} />
 
                 {bt === 'fmamc' && <>
                   <SubLabel label="FM Suite" />
@@ -2731,6 +2754,18 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+
+                <SubLabel label="HR & Payroll" />
+                <NavBtn id="employees"      label="Employees"           icon={Users} />
+                <NavBtn id="siteattendance" label="Site Attendance"     icon={Users} />
+                <NavBtn id="payroll"        label="Payroll"             icon={FileText} />
+                <NavBtn id="offerletter"    label="Offer Letters"       icon={FileText} />
+                <NavBtn id="warnletter"     label="Warning Letters"     icon={AlertTriangle} />
+                <NavBtn id="termletter"     label="Termination Letters" icon={FileSignature} />
+                <SubLabel label="Admin" />
+                <NavBtn id="staff"        label="Staff"         icon={Shield} />
+                <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
+                <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
               </>}
 
             </BizSection>
@@ -2788,6 +2823,11 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
             </Section>
           )}
 
+          {/* Assets — all biz types */}
+          <Section sectionKey="assets" label="Assets">
+            <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+          </Section>
+
           {/* Project BOM + Service Catalogue */}
           {(showService || showFMAMC) && (
             <Section sectionKey="scope" label="Projects">
@@ -2807,10 +2847,8 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
               <NavBtn id="hse"             label="HSE"                icon={Shield} />
               <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
               <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
-              <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
               <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
               <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-              <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
               <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
               <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
               <NavBtn id="assetregister"   label="Asset Register"     icon={Package} />
@@ -2861,39 +2899,26 @@ export function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, 
         </>
       )}
 
-      {/* HR & Payroll */}
-      {isMultiBiz ? (
-        <BizSection bizType="hr" defaultOpen={false}>
-          <NavBtn id="employees"  label="Employees"          icon={Users} />
-          <NavBtn id="payroll"    label="Payroll"            icon={FileText} />
-          <NavBtn id="offerletter" label="Offer Letters"        icon={FileText} />
-          <NavBtn id="warnletter"  label="Warning Letters"    icon={AlertTriangle} />
-          <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
-        </BizSection>
-      ) : (
+      {/* HR & Payroll — single biz only; multi-biz gets HR inside each BizSection */}
+      {!isMultiBiz && (
         <Section sectionKey="hr" label="HR & Payroll">
-          <NavBtn id="employees"   label="Employees"           icon={Users} />
-          <NavBtn id="payroll"     label="Payroll"             icon={FileText} />
-          <NavBtn id="offerletter" label="Offer Letters"       icon={FileText} />
-          <NavBtn id="warnletter"  label="Warning Letters"     icon={AlertTriangle} />
-          <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
+          <NavBtn id="employees"      label="Employees"           icon={Users} />
+          <NavBtn id="siteattendance" label="Site Attendance"     icon={Users} />
+          <NavBtn id="payroll"        label="Payroll"             icon={FileText} />
+          <NavBtn id="offerletter"    label="Offer Letters"       icon={FileText} />
+          <NavBtn id="warnletter"     label="Warning Letters"     icon={AlertTriangle} />
+          <NavBtn id="termletter"     label="Termination Letters" icon={FileSignature} />
         </Section>
       )}
 
-      {/* Admin */}
-      {userRole === 'admin' && (isMultiBiz ? (
-        <BizSection bizType="admin" defaultOpen={false}>
-          <NavBtn id="staff" label="Staff" icon={Shield} />
-          <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
-          <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
-        </BizSection>
-      ) : (
+      {/* Admin — single biz only; multi-biz gets Admin inside each BizSection */}
+      {!isMultiBiz && userRole === 'admin' && (
         <Section sectionKey="admin" label="Admin">
-          <NavBtn id="staff" label="Staff" icon={Shield} />
+          <NavBtn id="staff"        label="Staff"         icon={Shield} />
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
         </Section>
-      ))}
+      )}
 
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} unreadCount={unreadCount} onShowNotifications={onShowNotifications} />
     </div>
