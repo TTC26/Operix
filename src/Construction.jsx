@@ -653,7 +653,7 @@ export function ActivityPlannerView({ siteActivities, setSiteActivities, sitePro
             {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
-            {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
+            {[['gantt','📊 Gantt'],['table','📋 Table'],['log','📅 Daily Log']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
             ))}
           </div>
@@ -672,7 +672,18 @@ export function ActivityPlannerView({ siteActivities, setSiteActivities, sitePro
             {[30,60,90,120].map(d=>(
               <button key={d} onClick={()=>setGanttDays(d)} style={{ padding:'4px 10px', border:'1px solid #DDD8CE', borderRadius:6, fontSize:12, cursor:'pointer', background: ganttDays===d ? '#1E2A4A' : '#fff', color: ganttDays===d ? '#fff' : '#555' }}>{d}d</button>
             ))}
-            <span style={{ fontSize:11, color:'#aaa', marginLeft:8 }}>Click activity bar to log daily update</span>
+            <span style={{ fontSize:11, color:'#aaa', marginLeft:8 }}>Click bar to log update</span>
+            <div style={{ display:'flex', gap:10, marginLeft:'auto', alignItems:'center' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'#555' }}>
+                <span style={{ width:16, height:10, borderRadius:3, background:'#3D6B9A', display:'inline-block' }} /> Planned
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'#555' }}>
+                <span style={{ width:16, height:10, borderRadius:3, background:'#C9A24B', display:'inline-block' }} /> In Progress
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'#555' }}>
+                <span style={{ width:16, height:10, borderRadius:3, background:'#1A7A3E', display:'inline-block' }} /> Complete
+              </span>
+            </div>
           </div>
 
           {/* Gantt table */}
@@ -733,26 +744,44 @@ export function ActivityPlannerView({ siteActivities, setSiteActivities, sitePro
                 {acts.map(act => {
                   const pct = getProgress(act.id);
                   const startOff = dayOffset(act.plannedStart);
-                  const endOff = dayOffset(act.plannedEnd);
-                  const barLeft = startOff !== null ? Math.max(0, startOff) * DAY_W : null;
-                  const barWidth = (startOff !== null && endOff !== null) ? Math.max(DAY_W, (endOff - startOff + 1) * DAY_W) : null;
+                  const endOff   = dayOffset(act.plannedEnd);
+                  const hasDates = startOff !== null && endOff !== null;
+                  // Clamp to visible gantt window
+                  const clampedStart = hasDates ? Math.max(0, startOff) : null;
+                  const clampedEnd   = hasDates ? Math.min(ganttDays - 1, endOff) : null;
+                  const barLeft  = hasDates ? clampedStart * DAY_W : null;
+                  const barWidth = hasDates ? Math.max(DAY_W, (clampedEnd - clampedStart + 1) * DAY_W) : null;
+                  // Colors: planned bar = steel-blue, progress = amber→green
+                  const planColor = '#3D6B9A';          // dark steel-blue planned bar
+                  const progColor = pct >= 100 ? '#1A7A3E' : pct > 0 ? '#C9A24B' : null;
                   return (
-                    <div key={act.id} style={{ height:36, borderBottom:'1px solid #F0EDE6', position:'relative', background: '#FAFAF8', display:'flex', alignItems:'center', width: ganttDays * DAY_W }}
+                    <div key={act.id} style={{ height:38, borderBottom:'1px solid #F0EDE6', position:'relative', background:'#FAFAF8', display:'flex', alignItems:'center', width: ganttDays * DAY_W }}
                       onClick={() => setUpdateModal(act.id)}>
                       {/* Weekend shading */}
                       {Array.from({length: ganttDays}).map((_,i) => {
                         const d = new Date(gStart); d.setDate(d.getDate()+i);
-                        return d.getDay()===0||d.getDay()===6 ? <div key={i} style={{ position:'absolute', left:i*DAY_W, width:DAY_W, top:0, bottom:0, background:'rgba(201,162,75,0.06)' }} /> : null;
+                        return d.getDay()===0||d.getDay()===6 ? <div key={i} style={{ position:'absolute', left:i*DAY_W, width:DAY_W, top:0, bottom:0, background:'rgba(201,162,75,0.05)' }} /> : null;
                       })}
-                      {/* Gantt bar */}
+                      {/* Gantt bar — two-layer: planned (blue) + progress overlay (amber/green) */}
                       {barLeft !== null && barWidth !== null && (
-                        <div style={{ position:'absolute', left:barLeft, width:barWidth, height:18, borderRadius:4, background:'#DDD8CE', overflow:'hidden', cursor:'pointer' }} title={`${act.name} — click to update`}>
-                          <div style={{ width:`${pct}%`, height:'100%', background: pct===100?'#1A7A3E':'#1E7A9A', borderRadius:4 }} />
-                          <span style={{ position:'absolute', left:6, top:2, fontSize:10, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:barWidth-12 }}>{act.name} {pct>0?`${pct}%`:''}</span>
+                        <div style={{ position:'absolute', left:barLeft, width:barWidth, height:22, borderRadius:5, background: planColor, overflow:'hidden', cursor:'pointer', boxShadow:'0 1px 3px rgba(0,0,0,0.18)' }}
+                          title={`${act.name} · Planned: ${act.plannedStart} → ${act.plannedEnd} · Progress: ${pct}%`}>
+                          {/* Progress fill layer */}
+                          {progColor && (
+                            <div style={{ position:'absolute', left:0, top:0, width:`${pct}%`, height:'100%', background: progColor, borderRadius:5, transition:'width 0.3s', opacity:0.92 }} />
+                          )}
+                          {/* Hatched pattern for 0% (no progress yet) */}
+                          {pct === 0 && (
+                            <div style={{ position:'absolute', inset:0, backgroundImage:'repeating-linear-gradient(45deg, rgba(255,255,255,0.07) 0px, rgba(255,255,255,0.07) 3px, transparent 3px, transparent 8px)' }} />
+                          )}
+                          {/* Label */}
+                          <span style={{ position:'absolute', left:7, top:'50%', transform:'translateY(-50%)', fontSize:10, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:barWidth-14, textShadow:'0 1px 2px rgba(0,0,0,0.4)' }}>
+                            {act.name}{pct > 0 ? ` · ${pct}%` : ''}
+                          </span>
                         </div>
                       )}
-                      {barLeft === null && (
-                        <div style={{ position:'absolute', left:8, fontSize:10, color:'#ccc', fontStyle:'italic' }}>No dates set — click to update</div>
+                      {!hasDates && (
+                        <div style={{ position:'absolute', left:8, fontSize:10, color:'#bbb', fontStyle:'italic' }}>No dates — click to set</div>
                       )}
                     </div>
                   );
@@ -831,6 +860,71 @@ export function ActivityPlannerView({ siteActivities, setSiteActivities, sitePro
         </div>
       )}
 
+      {/* DAILY LOG VIEW */}
+      {viewMode === 'log' && (() => {
+        const [logDate, setLogDate] = React.useState(new Date().toISOString().slice(0,10));
+        const [logModal, setLogModal] = React.useState(null);
+        const dayUpdates = progressUpdates.filter(u=>u.projectId===selProject&&u.date===logDate);
+        return (
+          <div>
+            <div style={{ display:'flex', gap:8, marginBottom:14, alignItems:'center', flexWrap:'wrap' }}>
+              <button style={styles.ghostBtn} onClick={()=>{ const d=new Date(logDate); d.setDate(d.getDate()-1); setLogDate(d.toISOString().slice(0,10)); }}>◀ Prev</button>
+              <input type="date" value={logDate} onChange={e=>setLogDate(e.target.value)} style={{ ...styles.input, width:160 }} />
+              <button style={styles.ghostBtn} onClick={()=>setLogDate(new Date().toISOString().slice(0,10))}>Today</button>
+              <button style={styles.ghostBtn} onClick={()=>{ const d=new Date(logDate); d.setDate(d.getDate()+1); setLogDate(d.toISOString().slice(0,10)); }}>Next ▶</button>
+              {canEdit && <button style={styles.primaryBtn} onClick={()=>setLogModal('__new')}>+ Add Update</button>}
+            </div>
+            {dayUpdates.length===0 && <div style={{ color:'#aaa', padding:20 }}>No updates logged for {logDate}.</div>}
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {dayUpdates.map(u=>{
+                const act = acts.find(a=>a.id===u.activityId);
+                const villa = villas.find(v=>v.id===act?.villaId);
+                const prevPct = progressUpdates.filter(x=>x.activityId===u.activityId&&x.date<u.date).sort((a,b)=>b.date.localeCompare(a.date))[0]?.cumProgress||0;
+                const delta = (u.cumProgress||0) - prevPct;
+                return (
+                  <div key={u.id} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:12, padding:'14px 18px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
+                      <div>
+                        <span style={{ fontWeight:600, fontSize:14, color:'#1E2A4A' }}>{villa?.name||'Project-wide'}</span>
+                        <span style={{ fontSize:12, color:'#888', marginLeft:8 }}>→ {act?.discipline} → {act?.name||'Unknown'}</span>
+                      </div>
+                      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                        <span style={{ fontWeight:700, fontSize:16, color:'#1A7A3E' }}>{u.cumProgress||0}%</span>
+                        {delta>0 && <span style={{ fontSize:11, color:'#1A7A3E', background:'#E6F5EC', borderRadius:6, padding:'2px 7px' }}>+{delta}%</span>}
+                        {canEdit && <button style={{ ...styles.ghostBtn, fontSize:11, color:'#B5453A' }} onClick={()=>{ if(confirm('Delete?')) setProgressUpdates(prev=>prev.filter(x=>x.id!==u.id)); }}>×</button>}
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:12, color:'#555', marginTop:4 }}>
+                      {u.mpCount>0 && <span>👷 {u.mpCount} MP</span>}
+                      {u.stdHours>0 && <span>⏱ Std {u.stdHours}h</span>}
+                      {u.otHours>0 && <span style={{ color:'#C9A24B' }}>⚡ OT {u.otHours}h</span>}
+                      {u.totalManhours>0 && <span style={{ fontWeight:600 }}>= {u.totalManhours} manhours</span>}
+                    </div>
+                    {(u.materialConsumed||[]).length>0 && (
+                      <div style={{ fontSize:12, color:'#666', marginTop:4 }}>
+                        📦 {u.materialConsumed.map(m=>`${m.name} (${m.qty} ${m.unit})`).join(' · ')}
+                      </div>
+                    )}
+                    {u.notes && <div style={{ fontSize:12, color:'#444', marginTop:4, fontStyle:'italic' }}>{u.notes}</div>}
+                  </div>
+                );
+              })}
+            </div>
+            {logModal && (
+              <DailyUpdateModal
+                activityId={logModal==='__new' ? (acts[0]?.id||'') : logModal}
+                activity={logModal==='__new' ? null : acts.find(a=>a.id===logModal)}
+                project={project}
+                progressUpdates={progressUpdates}
+                setProgressUpdates={setProgressUpdates}
+                employees={employees}
+                onClose={()=>setLogModal(null)}
+              />
+            )}
+          </div>
+        );
+      })()}
+
       {editing && <ActivityForm activity={editing} project={project} onSave={save} onClose={()=>setEditing(null)} />}
       {updateModal && (
         <DailyUpdateModal
@@ -858,6 +952,8 @@ export function DailyUpdateModal({ activityId, activity, project, progressUpdate
     date: today,
     cumProgress: lastPct,
     mpCount: '',
+    stdHours: '',
+    otHours: '',
     totalManhours: '',
     empHours: [],
     materialConsumed: [],
@@ -865,6 +961,15 @@ export function DailyUpdateModal({ activityId, activity, project, progressUpdate
   });
   const [saved, setSaved] = useState(false);
   const set = (k,v) => setForm(p=>({...p,[k]:v}));
+  function setMP(mp) {
+    const std = mp ? String(parseFloat(mp) * 8) : '';
+    setForm(p => ({ ...p, mpCount: mp, stdHours: std,
+      totalManhours: std ? String(parseFloat(std) + (parseFloat(p.otHours)||0)) : p.totalManhours }));
+  }
+  function setOT(ot) {
+    setForm(p => ({ ...p, otHours: ot,
+      totalManhours: String((parseFloat(p.stdHours)||0) + (parseFloat(ot)||0)) }));
+  }
 
   function setEmpHour(empId, hours) {
     setForm(p => {
@@ -885,6 +990,8 @@ export function DailyUpdateModal({ activityId, activity, project, progressUpdate
       ...form,
       cumProgress: Number(form.cumProgress) || 0,
       mpCount: Number(form.mpCount) || 0,
+      stdHours: Number(form.stdHours) || 0,
+      otHours: Number(form.otHours) || 0,
       totalManhours: Number(form.totalManhours) || 0,
     };
     setProgressUpdates(prev => [...prev, rec]);
@@ -914,11 +1021,22 @@ export function DailyUpdateModal({ activityId, activity, project, progressUpdate
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Manpower on site (headcount)</label>
-          <input type="number" min={0} value={form.mpCount} onChange={e=>set('mpCount',e.target.value)} style={styles.input} placeholder="e.g. 5" />
+          <input type="number" min={0} value={form.mpCount} onChange={e=>setMP(e.target.value)} style={styles.input} placeholder="e.g. 5" />
         </div>
         <div style={styles.formGroup}>
-          <label style={styles.label}>Total Manhours today</label>
-          <input type="number" min={0} step="0.5" value={form.totalManhours} onChange={e=>set('totalManhours',e.target.value)} style={styles.input} placeholder="e.g. 40" />
+          <label style={styles.label}>Standard Hrs <span style={{ fontWeight:400, color:'#888' }}>auto (MP × 8)</span></label>
+          <input type="number" min={0} step="0.5" value={form.stdHours}
+            onChange={e=>{ const s=e.target.value; setForm(p=>({...p,stdHours:s,totalManhours:String((parseFloat(s)||0)+(parseFloat(p.otHours)||0))})); }}
+            style={{ ...styles.input, background:'#F9F8F5' }} placeholder="0" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>OT Hours</label>
+          <input type="number" min={0} step="0.5" value={form.otHours} onChange={e=>setOT(e.target.value)} style={styles.input} placeholder="0" />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Total Manhours <span style={{ color:'#1A7A3E', fontWeight:600 }}>(Std + OT)</span></label>
+          <input type="number" min={0} step="0.5" value={form.totalManhours} onChange={e=>set('totalManhours',e.target.value)}
+            style={{ ...styles.input, fontWeight:700, color:'#1E2A4A' }} placeholder="0" />
         </div>
       </div>
 
