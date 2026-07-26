@@ -536,6 +536,36 @@ export default function App() {
     ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
 
+  // Session-scoped stats — recompute from sessionDocs so dashboard shows per-workspace figures
+  const sessionStats = (() => {
+    const docs = sessionDocs;
+    const totalRevenue   = docs.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = docs.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    const sessionVouchers = sessionContext ? voucherList.filter(v => (v.bizType || bizDefault) === sessionContext) : voucherList;
+    const totalReceived  = sessionVouchers.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const totalPaid      = sessionVouchers.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const orderReceived  = sessionVouchers.filter(v => v.type === 'receipt' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const orderPaid      = sessionVouchers.filter(v => v.type === 'payment' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    const outstanding    = Math.max(0, totalRevenue - orderReceived);
+    const payable        = Math.max(0, totalPurchases - orderPaid);
+    const counts = docs.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
+    const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
+    const sessionItems = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
+    const itemCount = sessionItems.length;
+    const lowStockCount = sessionItems.filter(it => {
+      if (!it.minStock) return false;
+      const qty = (it.openingStock || 0) + stockLedger.filter(l => l.itemId === it.id).reduce((s, l) => s + (l.qty || 0), 0);
+      return qty < it.minStock;
+    }).length;
+    const sessionPO = sessionContext ? productionOrders.filter(p => (p.bizType || bizDefault) === sessionContext) : productionOrders;
+    const rmCount = rawMaterials.length;
+    const poCount = sessionPO.length;
+    const poOpen  = sessionPO.filter(p => p.status !== 'completed' && p.status !== 'done').length;
+    return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid, counts, pcBalance, itemCount, lowStockCount, rmCount, poCount, poOpen };
+  })();
+
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
       return (
@@ -583,7 +613,7 @@ export default function App() {
       case 'dashboard':
         return (
           <Dashboard
-            stats={stats}
+            stats={sessionStats}
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
@@ -1303,25 +1333,25 @@ export default function App() {
       default:
         return (
           <Dashboard
-            stats={stats}
-            documents={documents}
-            customers={customers}
-            vendors={vendors}
+            stats={sessionStats}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             businessInfo={businessInfo}
             startNewDoc={startNewDoc}
             openDoc={openDoc}
             setView={setView}
             vouchers={vouchers}
             pettyCash={pettyCash}
-            productionOrders={productionOrders}
+            productionOrders={sessionContext ? productionOrders.filter(p => (p.bizType || bizDefault) === sessionContext) : productionOrders}
             rawMaterials={rawMaterials}
-            items={items}
-            companyType={companyType}
-            activeTypes={activeTypes}
-            isMultiBiz={isMultiBiz}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            companyType={sessionCompanyType}
+            activeTypes={sessionActiveTypes}
+            isMultiBiz={sessionIsMultiBiz}
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
-            serviceOrders={serviceOrders}
+            serviceOrders={sessionContext ? serviceOrders.filter(s => (s.bizType || bizDefault) === sessionContext) : serviceOrders}
           />
         );
     }
