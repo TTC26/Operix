@@ -1,6 +1,6 @@
-import { initializeApp } from 'firebase/app';
-import { initializeFirestore, persistentLocalCache, doc, getDoc, getDocFromCache, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -14,6 +14,9 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  deleteUser,
 } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -27,19 +30,13 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache(),  // persistent cache — serves data even when gRPC is blocked
-  experimentalForceLongPolling: true,  // forces HTTP long-polling instead of WebSocket/gRPC (bypasses ISP/firewall blocks)
+  experimentalForceLongPolling: true,
 });
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-// Secondary app instance — used ONLY for staff account creation.
-// This prevents the admin's session from being replaced when creating staff accounts
-// (Firebase's createUserWithEmailAndPassword logs in as the new user by default).
-const secondaryApp = initializeApp(firebaseConfig, 'secondary');
-const secondaryAuth = getAuth(secondaryApp);
-
-// ---------- Auth helpers ----------
+// Secondary app removed — staff accounts are now created via REST API (no SDK,
+// no IndexedDB init, no auth session interference).
 
 export async function signUp(email, password, companyName) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -77,27 +74,16 @@ export function watchAuth(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-// ---------- Company data (multi-tenant) ----------
-// Each company's data lives at /companies/{ownerUid}
-
 const COMPANY_DOC = (uid) => doc(db, 'companies', uid);
 
-// Returns { data, confirmed }:
-//   confirmed=true  → Firestore was reachable (or cache hit) — safe to allow saves
-//   confirmed=false → offline AND no local cache — block saves until confirmed
 export async function loadCompanyData(uid) {
   try {
     const snap = await getDoc(COMPANY_DOC(uid));
-    return snap.exists() ? snap.data() : null;
+    if (snap.exists()) return snap.data();
+    return null;
   } catch (e) {
-    // Offline — try local cache so data still loads when gRPC/WebSocket is blocked
-    if (e.code === 'unavailable') {
-      try {
-        const cached = await getDocFromCache(COMPANY_DOC(uid));
-        if (cached.exists()) return cached.data();
-      } catch (_) {}
-    }
-    throw e; // re-throw so App.jsx retry logic fires
+    if (e.code === 'unavailable') return null;
+    throw e;
   }
 }
 
@@ -105,47 +91,119 @@ export async function saveCompanyData(uid, data) {
   await setDoc(COMPANY_DOC(uid), data, { merge: true });
 }
 
-export function subscribeCompanyData(uid, callback) {
-  return onSnapshot(COMPANY_DOC(uid), (snap) => {
-    if (snap.exists()) callback(snap.data());
-  });
+export function subscribeCompanyData(uid, callback, onError) {
+  return onSnapshot(
+    COMPANY_DOC(uid),
+    (snap) => {
+      // Always call callback — even for new users with no doc yet
+      callback(snap.exists() ? snap.data() : {});
+    },
+    (err) => {
+      // On Firestore error, call onError (not callback) — avoid triggering
+      // the new-user onboarding screen for existing users with network issues
+      console.warn('subscribeCompanyData error:', err);
+      if (onError) onError(err);
+    }
+  );
 }
-
-// ---------- Staff management ----------
-// Staff membership:  /staff_memberships/{staffUid}  →  { ownerUid, role, name, email }
-// Staff list:        /companies/{ownerUid}/staff/{staffUid}
 
 export async function getMembership(uid) {
   const snap = await getDoc(doc(db, 'staff_memberships', uid));
-  if (snap.exists()) return snap.data(); // { ownerUid, role, name, email }
+  if (snap.exists()) return snap.data();
   return null;
 }
 
-export async function createStaffAccount(ownerUid, email, password, name, role) {
-  // Use secondary auth so admin session is never replaced
-  const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-  const staffUid = cred.user.uid;
-  await updateProfile(cred.user, { displayName: name });
-  await signOut(secondaryAuth); // sign out of secondary immediately
+export async function createStaffAccount(ownerUid, email, password, name, role, companyName = '', empId = '', empNo = '') {
+  const withTimeout = (promise, ms = 45000) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
 
-  // Membership doc — used on login to find ownerUid + role
-  await setDoc(doc(db, 'staff_memberships', staffUid), {
-    ownerUid,
-    role,
-    name,
-    email,
-  });
+  const REST = (endpoint, body) =>
+    fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${endpoint}?key=${firebaseConfig.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
 
-  // Staff record under company — used by StaffPage to list members
-  await setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
-    uid: staffUid,
-    name,
-    email,
-    role,
-    createdAt: Date.now(),
-  });
+  // ── Step 1: Create Firebase Auth account via REST ──────────────────────────
+  let staffUid, idToken;
+
+  const signUpRes = await withTimeout(REST('signUp', { email, password, returnSecureToken: true }));
+
+  if (signUpRes.error) {
+    const msg = (signUpRes.error.message || 'UNKNOWN');
+
+    // EMAIL_EXISTS = account was created in a previous timed-out attempt.
+    // Recover by signing in with the same password to obtain the existing UID.
+    if (msg === 'EMAIL_EXISTS') {
+      const signInRes = await withTimeout(
+        REST('signInWithPassword', { email, password, returnSecureToken: true }),
+        15000
+      );
+      if (signInRes.error) {
+        // Wrong password or other error — can't recover automatically
+        const err = new Error('EMAIL_EXISTS');
+        err.code = 'auth/email-already-in-use';
+        throw err;
+      }
+      staffUid = signInRes.localId;
+      idToken  = signInRes.idToken;
+      // Fall through to write/overwrite the Firestore docs
+    } else {
+      const code = msg.toLowerCase().replace(/_/g, '-');
+      const err = new Error(msg);
+      err.code = `auth/${code}`;
+      throw err;
+    }
+  } else {
+    staffUid = signUpRes.localId;
+    idToken  = signUpRes.idToken;
+  }
+
+  // ── Step 2: Set displayName + emailVerified (best-effort, 8s) ─────────────
+  if (idToken) {
+    try {
+      await withTimeout(
+        REST('update', { idToken, displayName: name || '', emailVerified: true }),
+        8000
+      );
+    } catch (_) {}
+  }
+
+  // ── Step 3: Firestore writes ───────────────────────────────────────────────
+  // staff_memberships — best-effort (Firestore rules may block cross-uid writes)
+  try {
+    await withTimeout(setDoc(doc(db, 'staff_memberships', staffUid), {
+      ownerUid, role, name, email, companyName,
+    }), 15000);
+  } catch (_) {}
+
+  // company staff subcollection — owner writing to own company, should always succeed
+  await withTimeout(setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), {
+    uid: staffUid, name, email, role, companyName, createdAt: Date.now(),
+    ...(empId ? { empId, empNo } : {}),
+  }), 15000);
+
+  // email index — best-effort
+  try {
+    await withTimeout(setDoc(doc(db, 'staff_email_index', email.toLowerCase()), {
+      companyName, ownerUid,
+    }), 8000);
+  } catch (_) {}
 
   return staffUid;
+}
+
+// Lookup company name for a given email (used on sign-in page before auth)
+export async function lookupStaffEmail(email) {
+  try {
+    const snap = await getDoc(doc(db, 'staff_email_index', email.toLowerCase()));
+    if (snap.exists()) return snap.data(); // { companyName, ownerUid }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getStaffList(ownerUid) {
@@ -153,21 +211,18 @@ export async function getStaffList(ownerUid) {
   return snap.docs.map((d) => d.data());
 }
 
-export async function removeStaff(ownerUid, staffUid) {
+export async function removeStaff(ownerUid, staffUid, email = '') {
   await deleteDoc(doc(db, 'companies', ownerUid, 'staff', staffUid));
   await deleteDoc(doc(db, 'staff_memberships', staffUid));
-  // Note: the Firebase Auth account for the staff user is not deleted here
-  // (requires Admin SDK / Cloud Function). Without a membership record,
-  // they will be treated as an owner with no data if they try to log in.
+  if (email) {
+    try { await deleteDoc(doc(db, 'staff_email_index', email.toLowerCase())); } catch (_) {}
+  }
 }
 
 export async function updateStaffRole(ownerUid, staffUid, newRole) {
   await setDoc(doc(db, 'companies', ownerUid, 'staff', staffUid), { role: newRole }, { merge: true });
   await setDoc(doc(db, 'staff_memberships', staffUid), { role: newRole }, { merge: true });
 }
-
-// ---------- File / Drawing storage ----------
-// Files stored at: companies/{ownerUid}/{folder}/{timestamp}_{filename}
 
 export async function uploadDrawing(ownerUid, folder, file) {
   const path = `companies/${ownerUid}/${folder}/${Date.now()}_${file.name}`;
@@ -182,7 +237,49 @@ export async function deleteDrawing(filePath) {
     const storageRef = ref(storage, filePath);
     await deleteObject(storageRef);
   } catch (e) {
-    // Ignore if already deleted
     console.warn('deleteDrawing:', e.message);
   }
+}
+
+// ─── Account deletion helpers ─────────────────────────────────────────────────
+
+export async function reauthenticateUser(user, password) {
+  const credential = EmailAuthProvider.credential(user.email, password);
+  await reauthenticateWithCredential(user, credential);
+}
+
+export async function deleteAllCompanyFirestore(ownerUid) {
+  // Delete main company document FIRST — all business data lives here.
+  // Even if staff cleanup below fails or the caller's timeout hits, the primary data is gone.
+  await deleteDoc(doc(db, 'companies', ownerUid));
+  // Best-effort: clean up staff subcollection docs + their memberships.
+  // Failures here are non-fatal; orphaned docs don't affect new sign-ups (new UID).
+  try {
+    const staffSnap = await getDocs(collection(db, 'companies', ownerUid, 'staff'));
+    await Promise.all([
+      ...staffSnap.docs.map(d => deleteDoc(d.ref)),
+      ...staffSnap.docs.map(d => deleteDoc(doc(db, 'staff_memberships', d.id))),
+    ]);
+  } catch (e) {
+    console.warn('Staff subcollection cleanup (non-fatal):', e);
+  }
+}
+
+export async function deleteCompanyStorage(ownerUid) {
+  try {
+    async function deleteFolder(folderRef) {
+      const { items, prefixes } = await listAll(folderRef);
+      await Promise.all([
+        ...items.map(item => deleteObject(item).catch(() => {})),
+        ...prefixes.map(p => deleteFolder(p)),
+      ]);
+    }
+    await deleteFolder(ref(storage, `companies/${ownerUid}`));
+  } catch (e) {
+    console.warn('deleteCompanyStorage:', e.message);
+  }
+}
+
+export async function deleteFirebaseUser(user) {
+  await deleteUser(user);
 }
