@@ -24,6 +24,7 @@ export default function App() {
   const [userRole,         setUserRole]        = useState('admin');
   const [syncStatus,       setSyncStatus]      = useState('synced');
   const [biReady,          setBiReady]         = useState(false);
+  const [dataError,        setDataError]       = useState(false);
   const [editingCustomer,  setEditingCustomer] = useState(null);
   const [editingVendor,    setEditingVendor]   = useState(null);
   const [editingItem,      setEditingItem]     = useState(null);
@@ -147,6 +148,7 @@ export default function App() {
   useEffect(() => {
     if (!ownerUid) return;
     const unsub = subscribeCompanyData(ownerUid, (data) => {
+      setDataError(false);
       setSyncStatus('synced');
       setBiReady(true);
       _setBi(data.businessInfo || {});
@@ -197,6 +199,9 @@ export default function App() {
       _setHDocs(data.handoverDocs || []);
       _setAuditDocs(data.auditDocs || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
+    }, (err) => {
+      console.warn('Firestore load error:', err);
+      setDataError(true);
     });
     return unsub;
   }, [ownerUid]);
@@ -494,6 +499,15 @@ export default function App() {
   if (!user) return <AuthScreen />;
   if (user && !user.emailVerified) return <VerifyEmailScreen user={user} onLogout={handleLogout} />;
   // Block main app from rendering until Firestore data is ready
+  if (dataError && !biReady) return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', gap:16, fontFamily:"'Inter',-apple-system,sans-serif", padding:'0 24px', textAlign:'center' }}>
+      <div style={{ fontSize:36 }}>📡</div>
+      <div style={{ fontSize:16, fontWeight:600, color:'#2C3E6B' }}>Connection error</div>
+      <div style={{ fontSize:13, color:'#888', maxWidth:300 }}>Could not reach the server. Check your internet connection and try again.</div>
+      <button onClick={() => { setDataError(false); setBiReady(false); }} style={{ padding:'10px 28px', borderRadius:8, background:'#2C3E6B', color:'#fff', border:'none', cursor:'pointer', fontSize:14, fontWeight:600 }}>Retry</button>
+      <button onClick={handleLogout} style={{ fontSize:13, color:'#888', background:'none', border:'none', cursor:'pointer', textDecoration:'underline' }}>Sign out</button>
+    </div>
+  );
   if (!biReady) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
   );
@@ -508,15 +522,22 @@ export default function App() {
   // Once data is loaded and user hasn't chosen a session workspace yet,
   // always route to setup or home screen — never fall through to main app.
   if (biReady && sessionContext === null) {
-    // First-time setup: admin owner with no companyType set
-    if (ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType) {
-      return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} />;
+    // First-time setup: only for genuinely new accounts (created < 60 min ago)
+    // This prevents mobile Firestore timing issues from triggering setup for existing users
+    const _acctAge = user?.metadata?.creationTime
+      ? Date.now() - new Date(user.metadata.creationTime).getTime()
+      : Infinity;
+    const _isNewAccount = _acctAge < 60 * 60 * 1000; // < 1 hour old
+    if (ownerUid && user?.uid === ownerUid && userRole === 'admin' && !businessInfo.companyType && _isNewAccount) {
+      return <ActivitySelectScreen setBusinessInfo={setBusinessInfo} isSubscribed={isSubscribed} isTestAccount={isTestAccount} user={user} onLogout={handleLogout} />;
     }
     // Every login: pick a workspace for this session
     return (
       <ActivityHomeScreen
         activeTypes={activeTypes}
         businessInfo={businessInfo}
+        user={user}
+        onLogout={handleLogout}
         onEnter={(type) => { setSessionContext(type); setActiveBizContext(type); }}
       />
     );

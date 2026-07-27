@@ -184,7 +184,7 @@ export function ScanBillModal({ onApply, onClose }) {
 // ─── Activity Select Screen (shown after sign-in if no business type chosen) ───
 
 
-export function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
+export function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount, user, onLogout }) {
   const canMulti = isSubscribed || isTestAccount;
   const [selected, setSelected] = React.useState([]);
   const [companyName, setCompanyName] = React.useState('');
@@ -258,6 +258,13 @@ export function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAcco
       padding: '32px 16px', fontFamily: "'Inter', -apple-system, sans-serif",
     }}>
       <div style={{ width: '100%', maxWidth: 880 }}>
+        {/* Signed-in indicator */}
+        {user && (
+          <div style={{ textAlign:'right', marginBottom:16 }}>
+            <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>Signed in as {user.email}</span>
+            <button onClick={onLogout} style={{ marginLeft:10, fontSize:12, color:'rgba(255,255,255,0.55)', background:'none', border:'1px solid rgba(255,255,255,0.2)', borderRadius:5, padding:'2px 10px', cursor:'pointer' }}>Sign out</button>
+          </div>
+        )}
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
@@ -404,7 +411,7 @@ export function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAcco
 // ─── Activity Home Screen (shown every login to pick active workspace) ─────────
 
 
-export function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
+export function ActivityHomeScreen({ activeTypes, businessInfo, onEnter, user, onLogout }) {
   const BIZ_META = {
     trading:       { icon: '🛒', label: 'Trading',       sub: 'Distribution & Sales',    color: '#1A7A3E', desc: 'Invoices · Stock · Customers · Channel Partners' },
     manufacturing: { icon: '🏭', label: 'Manufacturing', sub: 'Production & Quality',     color: '#C9752A', desc: 'BOM · Production Orders · QA · MIS' },
@@ -415,12 +422,28 @@ export function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
   const types = (activeTypes || []).filter(t => BIZ_META[t]);
   const single = types.length === 1;
 
+  // Firestore data not loaded yet (mobile timing) — show a loading/retry state
+  if (!types.length) {
+    return (
+      <div style={{ minHeight:'100vh', background:'linear-gradient(140deg,#1E2A4A 0%,#243358 60%,#1a2540 100%)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, fontFamily:"'Inter',-apple-system,sans-serif", padding:'0 24px', textAlign:'center' }}>
+        <div style={{ fontFamily:'Georgia,serif', fontWeight:700, fontSize:22, color:'#fff', marginBottom:8 }}>Operix</div>
+        <div style={{ fontSize:14, color:'rgba(255,255,255,0.55)' }}>Loading your workspace…</div>
+        <div style={{ width:32, height:32, border:'3px solid rgba(255,255,255,0.15)', borderTop:'3px solid #C9A24B', borderRadius:'50%', animation:'spin 0.9s linear infinite' }} />
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        {user && (
+          <button onClick={onLogout} style={{ marginTop:24, fontSize:12, color:'rgba(255,255,255,0.4)', background:'none', border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, padding:'4px 14px', cursor:'pointer' }}>Sign out</button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{
       minHeight: '100vh',
       background: 'linear-gradient(140deg, #1E2A4A 0%, #243358 60%, #1a2540 100%)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       padding: '40px 20px', fontFamily: "'Inter', -apple-system, sans-serif",
+      position: 'relative',
     }}>
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 44 }}>
@@ -440,6 +463,14 @@ export function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
           </div>
         )}
       </div>
+
+      {/* Signed-in indicator */}
+      {user && (
+        <div style={{ position:'absolute', top:20, right:24 }}>
+          <span style={{ fontSize:11, color:'rgba(255,255,255,0.4)' }}>{user.email}</span>
+          <button onClick={onLogout} style={{ marginLeft:8, fontSize:11, color:'rgba(255,255,255,0.5)', background:'none', border:'1px solid rgba(255,255,255,0.2)', borderRadius:5, padding:'2px 8px', cursor:'pointer' }}>Sign out</button>
+        </div>
+      )}
 
       {/* Cards */}
       <div style={{
