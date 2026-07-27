@@ -92,19 +92,34 @@ export async function saveCompanyData(uid, data) {
 }
 
 export function subscribeCompanyData(uid, callback, onError) {
-  return onSnapshot(
-    COMPANY_DOC(uid),
-    (snap) => {
-      // Always call callback — even for new users with no doc yet
-      callback(snap.exists() ? snap.data() : {});
-    },
-    (err) => {
-      // On Firestore error, call onError (not callback) — avoid triggering
-      // the new-user onboarding screen for existing users with network issues
-      console.warn('subscribeCompanyData error:', err);
-      if (onError) onError(err);
-    }
-  );
+  // On mobile, auth token may not be ready when onSnapshot first fires,
+  // causing a permission-denied error. Retry up to 3 times with backoff.
+  let unsub = null;
+  let attempts = 0;
+
+  function attach() {
+    unsub = onSnapshot(
+      COMPANY_DOC(uid),
+      (snap) => {
+        attempts = 0; // reset on success
+        callback(snap.exists() ? snap.data() : {});
+      },
+      (err) => {
+        console.warn('subscribeCompanyData error:', err.code, err.message);
+        if (err.code === 'permission-denied' && attempts < 3) {
+          // Auth token not ready yet — retry after short delay
+          attempts++;
+          setTimeout(attach, 800 * attempts);
+        } else {
+          // Persistent error — surface to caller
+          if (onError) onError(err);
+        }
+      }
+    );
+  }
+
+  attach();
+  return () => { if (unsub) unsub(); };
 }
 
 export async function getMembership(uid) {
