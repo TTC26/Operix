@@ -94,9 +94,10 @@ export default function App() {
         setUser(firebaseUser);
         setAuthReady(true);
         try {
-          // Check membership FIRST — staff accounts don't go through email verification
-          // 3-second timeout: admin accounts have no membership doc, avoid 30s+ network wait
-          const membership = await Promise.race([
+          // TEST_EMAILS are always owner accounts — skip membership lookup entirely
+          // to avoid inconsistent ownerUid across devices/browsers
+          const isTestEmail = TEST_EMAILS.includes(firebaseUser.email);
+          const membership = isTestEmail ? null : await Promise.race([
             getMembership(firebaseUser.uid),
             new Promise(resolve => setTimeout(() => resolve(null), 3000)),
           ]);
