@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, getDocFromCache, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, getDoc, getDocFromCache, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
@@ -30,7 +30,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() }),
   experimentalForceLongPolling: true,
 });
 export const auth = getAuth(app);
@@ -99,9 +99,18 @@ export async function saveCompanyData(uid, data) {
 }
 
 export function subscribeCompanyData(uid, callback) {
-  return onSnapshot(COMPANY_DOC(uid), (snap) => {
-    if (snap.exists()) callback(snap.data());
-  });
+  return onSnapshot(
+    COMPANY_DOC(uid),
+    (snap) => {
+      // Always call callback — even for new users with no doc yet
+      callback(snap.exists() ? snap.data() : {});
+    },
+    (err) => {
+      // On Firestore error (rules, network, etc.) unblock the app with empty data
+      console.warn('subscribeCompanyData error:', err);
+      callback({});
+    }
+  );
 }
 
 export async function getMembership(uid) {
