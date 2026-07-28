@@ -152,6 +152,11 @@ export default function App() {
       setDataError(false);
       setSyncStatus('synced');
       setBiReady(true);
+      // SAFETY: only update state when Firestore returned real data.
+      // An empty snapshot (snap.exists()=false, timing/auth race on mobile)
+      // must NOT overwrite state — that would trigger mkSet persist() calls
+      // with empty arrays, wiping all Firestore data.
+      if (Object.keys(data).length === 0) return;
       _setBi(data.businessInfo || {});
       _setDocs(data.documents || []);
       _setCusts(data.customers || []);
