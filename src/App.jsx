@@ -20649,6 +20649,27 @@ export default function App() {
       if (Object.keys(data).length === 0) return;
       clearTimeout(biReadyFallback);
       setBiReady(true);
+      // ── Auto-backup: silently save to localStorage on every real data load ──
+      // If Firestore is ever wiped again, the user can restore from this copy.
+      try {
+        const _bk = { ...data, _savedAt: new Date().toISOString(), _uid: ownerUid };
+        localStorage.setItem('operix_backup_' + ownerUid, JSON.stringify(_bk));
+      } catch(_e) {
+        // localStorage full — save only the critical business data
+        try {
+          localStorage.setItem('operix_backup_' + ownerUid, JSON.stringify({
+            businessInfo: data.businessInfo,
+            documents:    data.documents,
+            customers:    data.customers,
+            vendors:      data.vendors,
+            items:        data.items,
+            employees:    data.employees,
+            _savedAt:     new Date().toISOString(),
+            _partial:     true,
+            _uid:         ownerUid,
+          }));
+        } catch(_e2) { /* storage unavailable — skip silently */ }
+      }
       _setBi(data.businessInfo || {});
       _setDocs(data.documents || []);
       _setCusts(data.customers || []);
@@ -20942,6 +20963,60 @@ export default function App() {
     a.download = `operix-data-${(businessInfo.name || 'export').replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function restoreFromBackup(backup) {
+    if (!backup || !ownerUid) return;
+    // Restore all state from backup and re-persist to Firestore
+    if (backup.businessInfo)    setBusinessInfo(backup.businessInfo);
+    if (backup.documents)       setDocuments(backup.documents);
+    if (backup.customers)       setCustomers(backup.customers);
+    if (backup.vendors)         setVendors(backup.vendors);
+    if (backup.items)           setItems(backup.items);
+    if (backup.employees)       setEmployees(backup.employees);
+    if (backup.payrollRuns)     setPayrollRuns(backup.payrollRuns);
+    if (backup.hrLetters)       setHrLetters(backup.hrLetters);
+    if (backup.pettyCash)       setPettyCash(backup.pettyCash);
+    if (backup.vouchers)        setVouchers(backup.vouchers);
+    if (backup.storeIssues)     setStoreIssues(backup.storeIssues);
+    if (backup.grns)            setGrns(backup.grns);
+    if (backup.serviceOrders)   setServiceOrders(backup.serviceOrders);
+    if (backup.productionOrders) setProductionOrders(backup.productionOrders);
+    if (backup.rawMaterials)    setRawMaterials(backup.rawMaterials);
+    if (backup.boms)            setBoms(backup.boms);
+    if (backup.stockLedger)     setStockLedger(backup.stockLedger);
+    if (backup.parts)           setParts(backup.parts);
+    if (backup.engDocs)         setEngDocs(backup.engDocs);
+    if (backup.enquiries)       setEnquiries(backup.enquiries);
+    if (backup.contracts)       setContracts(backup.contracts);
+    if (backup.channelPartners) setChannelPartners(backup.channelPartners);
+    if (backup.termsLibrary)    setTermsLibrary(backup.termsLibrary);
+    if (backup.scopeOfWork)     setScopeOfWork(backup.scopeOfWork);
+    if (backup.qualityDocs)     setQualityDocs(backup.qualityDocs);
+    if (backup.pdvs)            setPdvs(backup.pdvs);
+    if (backup.siteProjects)    setSiteProjects(backup.siteProjects);
+    if (backup.siteActivities)  setSiteActivities(backup.siteActivities);
+    if (backup.progressUpdates) setProgressUpdates(backup.progressUpdates);
+    if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
+    if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
+    if (backup.evaluations)     setEvaluations(backup.evaluations);
+    if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
+    if (backup.internalAudits)  setInternalAudits(backup.internalAudits);
+    if (backup.vendorEvals)     setVendorEvals(backup.vendorEvals);
+    if (backup.tenders)         setTenders(backup.tenders);
+    if (backup.subcontractors)  setSubcontractors(backup.subcontractors);
+    if (backup.assets)          setAssets(backup.assets);
+    if (backup.pmSchedules)     setPmSchedules(backup.pmSchedules);
+    if (backup.fmWorkOrders)    setFmWorkOrders(backup.fmWorkOrders);
+    if (backup.amcContracts)    setAmcContracts(backup.amcContracts);
+    if (backup.fmSpareParts)    setFmSpareParts(backup.fmSpareParts);
+    if (backup.hseRecords)      setHseRecords(backup.hseRecords);
+    if (backup.raBillings)      setRaBillings(backup.raBillings);
+    if (backup.tcChecklists)    setTcChecklists(backup.tcChecklists);
+    if (backup.handoverDocs)    setHandoverDocs(backup.handoverDocs);
+    if (backup.auditDocs)       setAuditDocs(backup.auditDocs);
+    if (backup.rackStore)       setRackStore(backup.rackStore);
+    alert('✅ Data restored successfully! All your records are back.');
   }
 
   const activeTypes = (() => {
@@ -21346,7 +21421,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList

@@ -1107,7 +1107,7 @@ export function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData,
 
 
 
-export function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+export function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   useEffect(() => setForm(businessInfo), [businessInfo]);
@@ -1468,6 +1468,30 @@ export function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSa
                 All your business data is stored securely on Google Cloud (256-bit encryption, TLS in transit).
                 We never sell, share, or use your data for advertising. You can export or delete everything at any time.
               </div>
+              {(() => {
+                const _bk = (() => { try { const s = localStorage.getItem('operix_backup_' + (businessInfo?.ownerUid || '')); return s ? JSON.parse(s) : null; } catch { return null; } })();
+                const _bkAny = (() => { try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('operix_backup_')) { const s = localStorage.getItem(k); if (s) return JSON.parse(s); } } return null; } catch { return null; } })();
+                const _backup = _bk || _bkAny;
+                if (_backup?._savedAt) {
+                  const _ago = Math.round((Date.now() - new Date(_backup._savedAt).getTime()) / 60000);
+                  const _agoTxt = _ago < 60 ? `${_ago}m ago` : _ago < 1440 ? `${Math.round(_ago/60)}h ago` : `${Math.round(_ago/1440)}d ago`;
+                  return (
+                    <div style={{ background:'#EEF8F3', border:'1px solid #A7D9BC', borderRadius:10, padding:'12px 16px', marginBottom:10, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
+                      <div>
+                        <div style={{ fontWeight:600, fontSize:13, color:'#1A7A3E' }}>✅ Local backup available</div>
+                        <div style={{ fontSize:12, color:'#555', marginTop:2 }}>
+                          Saved {_agoTxt} · {_backup.documents?.length || 0} docs · {_backup.customers?.length || 0} customers · {_backup.vendors?.length || 0} vendors{_backup._partial ? ' (partial)' : ''}
+                        </div>
+                      </div>
+                      <button onClick={() => { if (window.confirm('Restore all data from your local backup? This will overwrite current Firestore data.')) onRestoreBackup(_backup); }}
+                        style={{ padding:'7px 16px', background:'#1A7A3E', color:'#fff', border:'none', borderRadius:7, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                        ↺ Restore from backup
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <button onClick={onExportData} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} /> Export all my data (JSON)
