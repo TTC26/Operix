@@ -1113,7 +1113,16 @@ export function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSa
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
   function handleSave() {
-    setBusinessInfo(form);
+    // Ensure companyType is always set (guards against data-loss recovery
+    // where businessInfo was wiped — without companyType the ActivitySelectScreen
+    // guard fires for existing accounts on next load)
+    const types = form.activeTypes?.length ? form.activeTypes : [form.companyType || 'trading'];
+    const saved = {
+      ...form,
+      activeTypes: types,
+      companyType: form.companyType || types[0] || 'trading',
+    };
+    setBusinessInfo(saved);
     setSaved(true);
     setTimeout(() => { setSaved(false); if (onSaved) onSaved(); }, 1200);
   }
