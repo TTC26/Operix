@@ -3585,7 +3585,7 @@ const SECTION_VIEWS = {
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
-  admin:       ['staff', 'contracts', 'termslibrary'],
+  admin:       ['staff', 'contracts', 'termslibrary', 'mom'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
   shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
 };
@@ -3597,7 +3597,7 @@ const BIZ_SECTION_VIEWS = {
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
-  admin:         ['staff','contracts','termslibrary'],
+  admin:         ['staff','contracts','termslibrary','mom'],
 };
 
 const BizTypeCtx = React.createContext(null);
@@ -4124,12 +4124,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="staff" label="Staff" icon={Shield} />
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
+          <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
           <NavBtn id="staff" label="Staff" icon={Shield} />
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
+          <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
         </Section>
       ))}
 
@@ -10589,6 +10591,202 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
+function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, moms, setMoms }) {
+  const blank = () => ({
+    title: '', date: new Date().toISOString().slice(0, 10), time: '', venue: '',
+    chairperson: '', attendees: '', absentees: '',
+    agenda: [''], decisions: [''],
+    actionItems: [{ task: '', owner: '', due: '', status: 'Open' }],
+    nextDate: '', nextTime: '',
+  });
+  const [editing, setEditing] = React.useState(null);
+  const [viewDoc, setViewDoc] = React.useState(null);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead || businessInfo?.letterheadHtml));
+
+  const list = (Array.isArray(moms) ? moms : [])
+    .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  function nextNumber() {
+    const yr = new Date().getFullYear();
+    const count = (Array.isArray(moms) ? moms : []).filter(m => (m.number || '').includes('MOM/' + yr)).length + 1;
+    return 'MOM/' + yr + '/' + String(count).padStart(3, '0');
+  }
+
+  function startNew() { setEditing({ ...blank(), id: Date.now().toString(), number: nextNumber() }); }
+  function startEdit(m) {
+    setEditing({
+      ...blank(), ...m,
+      agenda: (m.agenda && m.agenda.length) ? m.agenda : [''],
+      decisions: (m.decisions && m.decisions.length) ? m.decisions : [''],
+      actionItems: (m.actionItems && m.actionItems.length) ? m.actionItems : [{ task: '', owner: '', due: '', status: 'Open' }],
+    });
+  }
+
+  function saveForm() {
+    if (!editing.title.trim()) { alert('Please enter a meeting title.'); return; }
+    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setMoms(prev => {
+      const arr = Array.isArray(prev) ? prev : [];
+      return arr.some(x => x.id === rec.id) ? arr.map(x => x.id === rec.id ? rec : x) : [rec, ...arr];
+    });
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this Minutes of Meeting?')) return; setMoms(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const setArr = (key, i, val) => setEditing(e => { const a = [...(e[key] || [])]; a[i] = val; return { ...e, [key]: a }; });
+  const setAI = (i, field, val) => setEditing(e => { const a = [...(e.actionItems || [])]; a[i] = { ...a[i], [field]: val }; return { ...e, actionItems: a }; });
+  const addArr = (key, blankVal) => setEditing(e => ({ ...e, [key]: [...(e[key] || []), blankVal] }));
+  const delArr = (key, i) => setEditing(e => ({ ...e, [key]: (e[key] || []).filter((_, idx) => idx !== i) }));
+
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const inp = { ...styles.input, marginBottom: 0 };
+  const lbl = { fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 4, display: 'block' };
+
+  if (viewDoc) {
+    const m = viewDoc;
+    return (
+      <div>
+        <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
+          {(businessInfo?.letterhead || businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v => !v)} style={{ ...styles.ghostBtn, ...(useLH ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}</button>}
+          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        </div>
+        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+          {useLH && <LetterheadHeader bi={businessInfo} />}
+          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: useLH ? 'center' : 'space-between', alignItems: 'flex-start' }}>
+            {!useLH && <div>
+              <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
+            </div>}
+            <div style={{ textAlign: useLH ? 'center' : 'right' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>MINUTES OF MEETING</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number}</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
+          <table style={{ width: '100%', fontSize: 12.5, marginBottom: 18, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '3px 0', color: '#888', width: 130 }}>Date</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}</td><td style={{ padding: '3px 0', color: '#888', width: 130 }}>Venue</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.venue || '—'}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888' }}>Chairperson</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.chairperson || '—'}</td><td style={{ padding: '3px 0', color: '#888' }}>Next Meeting</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.nextDate ? fmtDate(m.nextDate) + (m.nextTime ? ' · ' + m.nextTime : '') : '—'}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>ATTENDEES</div><div style={{ fontSize: 12.5, color: '#333' }}>{m.attendees || '—'}</div></div>
+          {m.absentees && m.absentees.trim() && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>ABSENT WITH APOLOGY</div><div style={{ fontSize: 12.5, color: '#333' }}>{m.absentees}</div></div>}
+          {(m.agenda || []).filter(a => a && a.trim()).length > 0 && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>AGENDA</div><ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: '#333' }}>{(m.agenda || []).filter(a => a && a.trim()).map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a}</li>)}</ol></div>}
+          {(m.decisions || []).filter(a => a && a.trim()).length > 0 && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>DISCUSSION &amp; DECISIONS</div><ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: '#333' }}>{(m.decisions || []).filter(a => a && a.trim()).map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a}</li>)}</ol></div>}
+          {(m.actionItems || []).filter(a => a.task && a.task.trim()).length > 0 && <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 6 }}>ACTION ITEMS</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ background: '#F8F5EE' }}>{['#', 'Action', 'Owner', 'Due', 'Status'].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11 }}>{h}</th>)}</tr></thead>
+              <tbody>{(m.actionItems || []).filter(a => a.task && a.task.trim()).map((a, i) => <tr key={i}><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{i + 1}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#1E2A4A' }}>{a.task}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.owner || '—'}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.due ? fmtDate(a.due) : '—'}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.status || 'Open'}</td></tr>)}</tbody>
+            </table>
+          </div>}
+          <div style={{ marginTop: 40, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Prepared by</div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Chairperson</div>
+          </div>
+          {useLH && businessInfo?.letterheadFooter && <div className="lh-pad-footer" style={{ background: '#fff' }}><img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} /></div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (editing) {
+    const e = editing;
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>{list.some(m => m.id === e.id) ? 'Edit' : 'New'} Minutes of Meeting <span style={{ fontSize: 13, color: '#888', fontWeight: 500 }}>{e.number}</span></h2>
+          <button style={styles.ghostBtn} onClick={() => setEditing(null)}>← Cancel</button>
+        </div>
+        <div style={{ maxWidth: 720 }}>
+          <div style={card}>
+            <div style={{ marginBottom: 12 }}><label style={lbl}>Meeting Title *</label><input style={inp} value={e.title} onChange={ev => setEditing(p => ({ ...p, title: ev.target.value }))} placeholder="e.g. Monthly Review Meeting" /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
+              <div><label style={lbl}>Time</label><input type="time" style={inp} value={e.time} onChange={ev => setEditing(p => ({ ...p, time: ev.target.value }))} /></div>
+              <div><label style={lbl}>Venue</label><input style={inp} value={e.venue} onChange={ev => setEditing(p => ({ ...p, venue: ev.target.value }))} placeholder="Room / online" /></div>
+            </div>
+            <div style={{ marginTop: 12 }}><label style={lbl}>Chairperson</label><input style={inp} value={e.chairperson} onChange={ev => setEditing(p => ({ ...p, chairperson: ev.target.value }))} placeholder="Who chaired the meeting" /></div>
+          </div>
+          <div style={card}>
+            <div style={{ marginBottom: 12 }}><label style={lbl}>Attendees</label><textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={e.attendees} onChange={ev => setEditing(p => ({ ...p, attendees: ev.target.value }))} placeholder="Names, comma separated" /></div>
+            <div><label style={lbl}>Absent (with apology)</label><textarea style={{ ...inp, minHeight: 44, resize: 'vertical' }} value={e.absentees} onChange={ev => setEditing(p => ({ ...p, absentees: ev.target.value }))} placeholder="Optional" /></div>
+          </div>
+          <div style={card}>
+            <label style={lbl}>Agenda Points</label>
+            {(e.agenda || []).map((a, i) => <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}><input style={inp} value={a} onChange={ev => setArr('agenda', i, ev.target.value)} placeholder={'Agenda point ' + (i + 1)} /><button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('agenda', i)}>✕</button></div>)}
+            <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('agenda', '')}>+ Add agenda point</button>
+          </div>
+          <div style={card}>
+            <label style={lbl}>Discussion &amp; Decisions</label>
+            {(e.decisions || []).map((a, i) => <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}><textarea style={{ ...inp, minHeight: 40, resize: 'vertical' }} value={a} onChange={ev => setArr('decisions', i, ev.target.value)} placeholder={'Discussion / decision ' + (i + 1)} /><button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('decisions', i)}>✕</button></div>)}
+            <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('decisions', '')}>+ Add point</button>
+          </div>
+          <div style={card}>
+            <label style={lbl}>Action Items</label>
+            {(e.actionItems || []).map((a, i) => <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 6, marginBottom: 6 }}>
+              <input style={inp} value={a.task} onChange={ev => setAI(i, 'task', ev.target.value)} placeholder="Action / task" />
+              <input style={inp} value={a.owner} onChange={ev => setAI(i, 'owner', ev.target.value)} placeholder="Owner" />
+              <input type="date" style={inp} value={a.due} onChange={ev => setAI(i, 'due', ev.target.value)} />
+              <select style={inp} value={a.status} onChange={ev => setAI(i, 'status', ev.target.value)}><option>Open</option><option>In Progress</option><option>Done</option></select>
+              <button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('actionItems', i)}>✕</button>
+            </div>)}
+            <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('actionItems', { task: '', owner: '', due: '', status: 'Open' })}>+ Add action item</button>
+          </div>
+          <div style={card}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><label style={lbl}>Next Meeting Date</label><input type="date" style={inp} value={e.nextDate} onChange={ev => setEditing(p => ({ ...p, nextDate: ev.target.value }))} /></div>
+              <div><label style={lbl}>Next Meeting Time</label><input type="time" style={inp} value={e.nextTime} onChange={ev => setEditing(p => ({ ...p, nextTime: ev.target.value }))} /></div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button style={styles.primaryBtn} onClick={saveForm}>Save Minutes</button>
+            <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>Minutes of Meeting</h2>
+          <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>Record and circulate meeting minutes with action items.</div>
+        </div>
+        <button style={styles.primaryBtn} onClick={startNew}><Plus size={15} /> New MoM</button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ ...card, color: '#aaa', fontSize: 13, textAlign: 'center', padding: 40 }}>No minutes recorded yet. Click "New MoM" to create one.</div>
+      ) : list.map(m => (
+        <div key={m.id} style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.title}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>{m.number} · {fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}{m.venue ? ' · ' + m.venue : ''}</div>
+              <div style={{ fontSize: 12, color: '#666', marginTop: 6, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                <span>👥 {(m.attendees || '').split(',').filter(x => x.trim()).length} attendees</span>
+                <span>📋 {(m.agenda || []).filter(a => a && a.trim()).length} agenda</span>
+                <span>✅ {(m.actionItems || []).filter(a => a.task && a.task.trim()).length} actions</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => setViewDoc(m)}><Printer size={13} /> View / Print</button>
+              <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => startEdit(m)}><Pencil size={13} /> Edit</button>
+              {userRole === 'admin' && <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => del(m.id)}><Trash2 size={13} /></button>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, auditDocs, setAuditDocs }) {
   const curYear = new Date().getFullYear();
   const [year,   setYear]   = useState(curYear);
@@ -20567,6 +20765,7 @@ export default function App() {
   const [tcChecklists,     _setTC]     = useState([]);
   const [handoverDocs,     _setHDocs]  = useState([]);
   const [auditDocs,        _setAuditDocs]  = useState([]);
+  const [moms,             _setMoms]       = useState([]);
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -20717,6 +20916,7 @@ export default function App() {
       _setTC(data.tcChecklists || []);
       _setHDocs(data.handoverDocs || []);
       _setAuditDocs(data.auditDocs || []);
+      _setMoms(data.moms || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
     }, (err) => {
       console.warn('Firestore load error:', err);
@@ -20792,6 +20992,7 @@ export default function App() {
   const setTcChecklists     = mkSet(_setTC,    'tcChecklists');
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
   const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
+  const setMoms             = mkSet(_setMoms,'moms');
   const setRackStore        = mkSet(_setRS,        'rackStore');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
@@ -21015,6 +21216,7 @@ export default function App() {
     if (backup.tcChecklists)    setTcChecklists(backup.tcChecklists);
     if (backup.handoverDocs)    setHandoverDocs(backup.handoverDocs);
     if (backup.auditDocs)       setAuditDocs(backup.auditDocs);
+    if (backup.moms)            setMoms(backup.moms);
     if (backup.rackStore)       setRackStore(backup.rackStore);
     alert('✅ Data restored successfully! All your records are back.');
   }
@@ -21883,6 +22085,17 @@ export default function App() {
             isMultiBiz={isMultiBiz}
             auditDocs={auditDocs}
             setAuditDocs={setAuditDocs}
+          />
+        );
+      case 'mom':
+        return (
+          <MoMView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            moms={moms}
+            setMoms={setMoms}
           />
         );
       case 'notifications':
