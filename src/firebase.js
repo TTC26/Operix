@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
+import { initializeFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, uploadString, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -89,6 +89,80 @@ export async function loadCompanyData(uid) {
 
 export async function saveCompanyData(uid, data) {
   await setDoc(COMPANY_DOC(uid), data, { merge: true });
+}
+
+// ─── Branding media (separate document) ───────────────────────────────────────
+// Logo, letterhead images and letterhead HTML are large base64 blobs. Kept in the
+// main company document they can push it past Firestore's 1 MB per-document limit,
+// which makes every save silently fail to reach the server. We store them in their
+// own document so the main document always stays small and saves always succeed.
+const BRANDING_DOC = (uid) => doc(db, 'companies', uid, 'meta', 'branding');
+
+export async function loadBranding(uid) {
+  try {
+    const snap = await getDoc(BRANDING_DOC(uid));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.warn('loadBranding:', e.message);
+    return null;
+  }
+}
+
+export async function saveBranding(uid, branding) {
+  await setDoc(BRANDING_DOC(uid), branding || {}, { merge: true });
+}
+
+// One-time migration: replace the main document's businessInfo map with a
+// branding-free version. updateDoc replaces the field wholesale (unlike setDoc
+// merge), so the heavy base64 keys are dropped and the document shrinks.
+export async function stripBrandingFromMain(uid, coreBusinessInfo) {
+  await updateDoc(COMPANY_DOC(uid), { businessInfo: coreBusinessInfo });
+}
+
+// ─── Cloud backups (server-side version history, device-independent) ──────────
+// Full snapshots of the company data are stored as JSON files in Firebase Storage.
+// Storage has no 1 MB limit, snapshots live on the server (not one browser), and
+// any admin can list/restore them from any device or PC. A rolling history is kept.
+const BACKUP_FOLDER = (uid) => `companies/${uid}/backups`;
+
+export async function saveServerBackup(uid, dataObject, keep = 10) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const path = `${BACKUP_FOLDER(uid)}/backup-${stamp}.json`;
+  const json = JSON.stringify({ ...dataObject, _backupAt: new Date().toISOString() });
+  await uploadString(ref(storage, path), json, 'raw', { contentType: 'application/json' });
+  // Prune: keep only the newest `keep` snapshots (ISO filenames sort chronologically).
+  try {
+    const { items } = await listAll(ref(storage, BACKUP_FOLDER(uid)));
+    const names = items.map((i) => i.name).sort();
+    const excess = names.slice(0, Math.max(0, names.length - keep));
+    await Promise.all(excess.map((n) => deleteObject(ref(storage, `${BACKUP_FOLDER(uid)}/${n}`)).catch(() => {})));
+  } catch (_e) {}
+  return path;
+}
+
+export async function listServerBackups(uid) {
+  try {
+    const { items } = await listAll(ref(storage, BACKUP_FOLDER(uid)));
+    return items
+      .map((i) => i.name)
+      .sort()
+      .reverse()
+      .map((name) => ({
+        name,
+        path: `${BACKUP_FOLDER(uid)}/${name}`,
+        label: name.replace(/^backup-/, '').replace(/\.json$/, ''),
+      }));
+  } catch (e) {
+    console.warn('listServerBackups:', e.message);
+    return [];
+  }
+}
+
+export async function fetchServerBackup(path) {
+  const url = await getDownloadURL(ref(storage, path));
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('download failed (' + res.status + ')');
+  return await res.json();
 }
 
 export function subscribeCompanyData(uid, callback, onError) {

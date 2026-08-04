@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -2137,9 +2137,12 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
+  const [cloudBackups, setCloudBackups] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudMsg, setCloudMsg] = useState('');
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
   function handleSave() {
@@ -2232,54 +2235,6 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
             </div>
           ));
         })()}
-
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Company logo</label>
-          {form.logo && (
-            <div style={styles.logoPreviewWrap}>
-              <img src={form.logo} alt="Logo preview" style={styles.logoPreview} />
-              <button onClick={() => setForm((p) => ({ ...p, logo: '' }))} style={styles.ghostBtn}>Remove</button>
-            </div>
-          )}
-          <input type="file" accept="image/*" onChange={handleLogoUpload} style={styles.input} />
-          <div style={{ ...styles.muted, fontSize: 11.5, marginTop: 4 }}>PNG or JPG · Max 500 KB · Recommended size: 400 × 400 px (square) or 800 × 300 px (horizontal). Appears on every document.</div>
-        </div>
-
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Header Image <span style={{ fontWeight:400, color:'#888', fontSize:11 }}>(used automatically on all printed documents)</span></label>
-          {form.letterhead && (
-            <div style={{ marginBottom: 8, border:'1px solid #EAE6DB', borderRadius:8, overflow:'hidden', maxWidth:400 }}>
-              <img src={form.letterhead} alt="Letterhead preview" style={{ width:'100%', maxHeight:160, objectFit:'contain', background:'#fff' }} />
-            </div>
-          )}
-          <input type="file" accept="image/*" onChange={handleLetterheadUpload} style={styles.input} />
-          {form.letterhead && <button onClick={()=>setForm(p=>({...p,letterhead:''}))} style={{ ...styles.ghostBtn, marginTop:6, fontSize:12 }}>Remove Header</button>}
-          <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>PNG or JPG · Max 1.5 MB · Recommended 2480 × 350 px. Auto-applied to all document prints (invoices, PO, contracts, etc).</div>
-        </div>
-
-        <div style={styles.formGroup}>
-          <label style={styles.label}>HTML Letterhead <span style={{ fontWeight:400, color:'#888', fontSize:11 }}>(upload .html file — overrides image header on all prints)</span></label>
-          {form.letterheadHtml ? (
-            <div style={{ padding:'8px 12px', background:'#EAF3DE', border:'1px solid #A8D5B5', borderRadius:8, marginBottom:8, fontSize:12, color:'#2C6B3A' }}>
-              ✓ HTML letterhead loaded ({Math.round(form.letterheadHtml.length/1024)} KB)
-              <button onClick={()=>setForm(p=>({...p,letterheadHtml:''}))} style={{ ...styles.ghostBtn, fontSize:11, marginLeft:10, padding:'2px 8px', color:'#E08A7D' }}>Remove</button>
-            </div>
-          ) : null}
-          <input type="file" accept=".html,text/html" onChange={handleLetterheadHtmlUpload} style={styles.input} />
-          <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>Upload a .html file. It will render as-is at the top of every printed document (takes priority over image header). Use inline CSS for styling.</div>
-        </div>
-
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Footer Image <span style={{ fontWeight:400, color:'#888', fontSize:11 }}>(used automatically on all printed documents)</span></label>
-          {form.letterheadFooter && (
-            <div style={{ marginBottom: 8, border:'1px solid #EAE6DB', borderRadius:8, overflow:'hidden', maxWidth:400 }}>
-              <img src={form.letterheadFooter} alt="Letterhead footer preview" style={{ width:'100%', maxHeight:100, objectFit:'contain', background:'#fff' }} />
-            </div>
-          )}
-          <input type="file" accept="image/*" onChange={handleLetterheadFooterUpload} style={styles.input} />
-          {form.letterheadFooter && <button onClick={()=>setForm(p=>({...p,letterheadFooter:''}))} style={{ ...styles.ghostBtn, marginTop:6, fontSize:12 }}>Remove Footer</button>}
-          <div style={{ ...styles.muted, fontSize:11.5, marginTop:4 }}>PNG or JPG · Max 1.5 MB · Recommended 2480 × 200 px. Auto-applied to the bottom of all document prints.</div>
-        </div>
 
         {userRole === 'admin' && (<>
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Region &amp; Tax</div>
@@ -2493,6 +2448,30 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
                 <button onClick={onExportData} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} /> Export all my data (JSON)
                 </button>
+                {onRestoreBackup && (<>
+                  <label style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                    ↑ Restore from file
+                    <input type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(ev) => {
+                      const file = ev.target.files && ev.target.files[0];
+                      if (!file) return;
+                      const rdr = new FileReader();
+                      rdr.onload = () => { try { const bk = JSON.parse(rdr.result); if (window.confirm('Restore all data from this backup file? This re-saves every record to the server.')) onRestoreBackup(bk); } catch (e) { alert('That file is not a valid Operix backup.'); } };
+                      rdr.readAsText(file);
+                      ev.target.value = '';
+                    }} />
+                  </label>
+                  <button onClick={() => {
+                    try {
+                      let key = null; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf('operix_backup_') === 0) { key = k; break; } }
+                      const raw = key ? localStorage.getItem(key) : null;
+                      const bk = raw ? JSON.parse(raw) : null;
+                      if (!bk) { alert('No local backup found on this device.'); return; }
+                      if (window.confirm('Restore from this device automatic backup (' + (bk._savedAt ? new Date(bk._savedAt).toLocaleString() : 'unknown time') + ')? This re-saves every record to the server.')) onRestoreBackup(bk);
+                    } catch (e) { alert('Could not read the local backup.'); }
+                  }} style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    ⟳ Restore from this device
+                  </button>
+                </>)}
                 <a href="/privacy" target="_blank" rel="noopener noreferrer"
                   style={{ ...styles.ghostBtn, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                   Privacy Policy ↗
@@ -2504,6 +2483,51 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onSaved, us
                 ))}
               </div>
             </div>
+
+            {/* ── Cloud Backups (server-side, all devices) ── */}
+            {userRole === 'admin' && onBackupNow && (
+            <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>☁ Cloud backups (all devices)</div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 1.6 }}>
+                Automatic version history stored on the server. Any admin can restore from any device or PC. A snapshot is taken automatically each day — you can also take one now.
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button disabled={cloudBusy} onClick={async () => {
+                  setCloudBusy(true); setCloudMsg('');
+                  try { await onBackupNow(); setCloudMsg('✓ Backup saved to cloud.'); if (cloudBackups) { const l = await onListCloudBackups(); setCloudBackups(l || []); } }
+                  catch (e) { setCloudMsg('Could not save backup: ' + (e && e.message ? e.message : 'error')); }
+                  setCloudBusy(false);
+                }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>☁ Back up now</button>
+                <button disabled={cloudBusy} onClick={async () => {
+                  setCloudBusy(true); setCloudMsg('');
+                  try { const l = await onListCloudBackups(); setCloudBackups(l || []); if (!l || !l.length) setCloudMsg('No cloud backups yet.'); }
+                  catch (e) { setCloudMsg('Could not load history.'); }
+                  setCloudBusy(false);
+                }} style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>⟳ View backup history</button>
+              </div>
+              {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
+              {cloudBackups && cloudBackups.length > 0 && (
+                <div style={{ marginTop: 12, border: '1px solid #EAE6DB', borderRadius: 8, overflow: 'hidden' }}>
+                  {cloudBackups.map((b, i) => {
+                    const iso = (b.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
+                    const when = !isNaN(Date.parse(iso)) ? new Date(iso).toLocaleString() : b.label;
+                    return (
+                      <div key={b.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderTop: i ? '1px solid #F0EDE5' : 'none', fontSize: 12.5 }}>
+                        <span style={{ color: '#1E2A4A' }}>{when}</span>
+                        <button disabled={cloudBusy} onClick={async () => {
+                          if (!window.confirm('Restore this cloud backup? It re-saves every record to the server for all users.')) return;
+                          setCloudBusy(true); setCloudMsg('');
+                          try { await onRestoreCloud(b.path); setCloudMsg('✓ Restored from ' + when); }
+                          catch (e) { setCloudMsg('Restore failed: ' + (e && e.message ? e.message : 'error')); }
+                          setCloudBusy(false);
+                        }} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px' }}>Restore</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            )}
 
             {/* ── Email Notification Config ── */}
             <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
@@ -20699,6 +20723,8 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   );
 }
 
+const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml'];
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,             setView]           = useState('dashboard');
@@ -20772,6 +20798,9 @@ export default function App() {
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
   const [activeBizContext, setActiveBizContext] = useState(null);
   const [sessionContext,   setSessionContext]   = useState(null); // null = show home screen
+  const migratedRef = React.useRef(false);
+  const latestDataRef = React.useRef({});
+  const cloudBackupCheckedRef = React.useRef(false);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -20848,11 +20877,38 @@ export default function App() {
       if (Object.keys(data).length === 0) return;
       clearTimeout(biReadyFallback);
       setBiReady(true);
+      latestDataRef.current = data;
+      // Automatic cloud backup (server-side, works across every device & user).
+      // Once per session, if no snapshot in the last 12h, save one to Storage.
+      if (user && ownerUid === user.uid && !cloudBackupCheckedRef.current) {
+        cloudBackupCheckedRef.current = true;
+        const _snap = { ...data };
+        listServerBackups(ownerUid).then((list) => {
+          let recent = false;
+          const newest = list && list[0];
+          if (newest) {
+            const iso = (newest.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
+            const t = Date.parse(iso);
+            if (!isNaN(t) && (Date.now() - t) < 12 * 3600 * 1000) recent = true;
+          }
+          if (!recent) saveServerBackup(ownerUid, _snap).catch((e) => console.warn('cloud backup:', e && e.message));
+        }).catch(() => {});
+      }
       // ── Auto-backup: silently save to localStorage on every real data load ──
       // If Firestore is ever wiped again, the user can restore from this copy.
       try {
-        const _bk = { ...data, _savedAt: new Date().toISOString(), _uid: ownerUid };
-        localStorage.setItem('operix_backup_' + ownerUid, JSON.stringify(_bk));
+        const _key = 'operix_backup_' + ownerUid;
+        const _incomingDocs = Array.isArray(data.documents) ? data.documents.length : 0;
+        let _skipBk = false;
+        try {
+          const _existing = JSON.parse(localStorage.getItem(_key) || 'null');
+          const _existingDocs = _existing && Array.isArray(_existing.documents) ? _existing.documents.length : -1;
+          if (_existingDocs > _incomingDocs) _skipBk = true; // don't clobber a richer backup
+        } catch (_ignore) {}
+        if (!_skipBk) {
+          const _bk = { ...data, _savedAt: new Date().toISOString(), _uid: ownerUid };
+          localStorage.setItem(_key, JSON.stringify(_bk));
+        }
       } catch(_e) {
         // localStorage full — save only the critical business data
         try {
@@ -20869,7 +20925,20 @@ export default function App() {
           }));
         } catch(_e2) { /* storage unavailable — skip silently */ }
       }
-      _setBi(data.businessInfo || {});
+      const _biRaw = data.businessInfo || {};
+      const _biClean = {};
+      Object.keys(_biRaw).forEach((k) => { if (!BRANDING_KEYS.includes(k)) _biClean[k] = _biRaw[k]; });
+      _setBi(_biClean);
+      // One-time cleanup: strip any legacy letterhead/logo from the main document
+      // so it drops below Firestore's 1 MB limit and saves reach the server again.
+      try {
+        const _legacy = BRANDING_KEYS.filter((k) => _biRaw[k]);
+        if (_legacy.length && !migratedRef.current && user && ownerUid === user.uid) {
+          migratedRef.current = true;
+          stripBrandingFromMain(ownerUid, _biClean)
+            .catch((e) => console.warn('letterhead cleanup:', e && e.message));
+        }
+      } catch (_e) {}
       _setDocs(data.documents || []);
       _setCusts(data.customers || []);
       _setVends(data.vendors || []);
@@ -20950,7 +21019,17 @@ export default function App() {
     };
   }
 
-  const setBusinessInfo     = mkSet(_setBi,    'businessInfo');
+  function setBusinessInfo(v) {
+    _setBi((prev) => {
+      const raw = typeof v === 'function' ? v(prev) : v;
+      // Letterhead/logo are intentionally NOT stored — keeps the company document
+      // well under Firestore's 1 MB limit so every save reaches the server.
+      const core = {};
+      Object.keys(raw || {}).forEach((k) => { if (!BRANDING_KEYS.includes(k)) core[k] = raw[k]; });
+      persist({ businessInfo: core });
+      return core;
+    });
+  }
   const setDocuments        = mkSet(_setDocs,  'documents');
   const setCustomers        = mkSet(_setCusts, 'customers');
   const setVendors          = mkSet(_setVends, 'vendors');
@@ -21623,7 +21702,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList
