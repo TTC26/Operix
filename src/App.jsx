@@ -10615,17 +10615,20 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
-function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, moms, setMoms }) {
+function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, moms, setMoms, employees = [] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const blankRow = () => ({ point: '', decision: '', actionBy: '', followup: '' });
   const blank = () => ({
-    title: '', date: new Date().toISOString().slice(0, 10), time: '', venue: '',
-    chairperson: '', attendees: '', absentees: '',
-    agenda: [''], decisions: [''],
-    actionItems: [{ task: '', owner: '', due: '', status: 'Open' }],
+    type: 'internal',
+    title: '', date: today, time: '', venue: '', chairperson: '',
+    internalAttendees: [],
+    extCompany: '', extPersons: [],
+    agenda: [''],
+    rows: [blankRow()],
     nextDate: '', nextTime: '',
   });
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
-  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead || businessInfo?.letterheadHtml));
 
   const list = (Array.isArray(moms) ? moms : [])
     .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
@@ -10641,9 +10644,10 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   function startEdit(m) {
     setEditing({
       ...blank(), ...m,
+      internalAttendees: Array.isArray(m.internalAttendees) ? m.internalAttendees : [],
+      extPersons: Array.isArray(m.extPersons) ? m.extPersons : [],
       agenda: (m.agenda && m.agenda.length) ? m.agenda : [''],
-      decisions: (m.decisions && m.decisions.length) ? m.decisions : [''],
-      actionItems: (m.actionItems && m.actionItems.length) ? m.actionItems : [{ task: '', owner: '', due: '', status: 'Open' }],
+      rows: (m.rows && m.rows.length) ? m.rows : [blankRow()],
     });
   }
 
@@ -10658,115 +10662,230 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   }
   function del(id) { if (!window.confirm('Delete this Minutes of Meeting?')) return; setMoms(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
 
+  const upd = (patch) => setEditing(e => ({ ...e, ...patch }));
   const setArr = (key, i, val) => setEditing(e => { const a = [...(e[key] || [])]; a[i] = val; return { ...e, [key]: a }; });
-  const setAI = (i, field, val) => setEditing(e => { const a = [...(e.actionItems || [])]; a[i] = { ...a[i], [field]: val }; return { ...e, actionItems: a }; });
-  const addArr = (key, blankVal) => setEditing(e => ({ ...e, [key]: [...(e[key] || []), blankVal] }));
+  const addArr = (key, v) => setEditing(e => ({ ...e, [key]: [...(e[key] || []), v] }));
   const delArr = (key, i) => setEditing(e => ({ ...e, [key]: (e[key] || []).filter((_, idx) => idx !== i) }));
+  const setRow = (i, field, val) => setEditing(e => { const r = [...(e.rows || [])]; r[i] = { ...r[i], [field]: val }; return { ...e, rows: r }; });
+  const setExtP = (i, field, val) => setEditing(e => { const p = [...(e.extPersons || [])]; p[i] = { ...p[i], [field]: val }; return { ...e, extPersons: p }; });
+
+  function addEmployee(val) {
+    if (!val) return;
+    const emp = (employees || []).find(x => (x.id && String(x.id) === val) || (x.empId && String(x.empId) === val));
+    if (!emp) return;
+    setEditing(e => {
+      const key = emp.empId || emp.id;
+      if ((e.internalAttendees || []).some(a => (a.empId || a.name) === key || a.name === emp.name)) return e;
+      return { ...e, internalAttendees: [...(e.internalAttendees || []), { empId: emp.empId || emp.id, name: emp.name, department: emp.department || '', designation: emp.designation || '' }] };
+    });
+  }
 
   const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
   const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
   const inp = { ...styles.input, marginBottom: 0 };
   const lbl = { fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 4, display: 'block' };
+  const th = { padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11, background: '#F8F5EE' };
+  const td = { padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#333', fontSize: 12, verticalAlign: 'top' };
 
+  // ── PRINT VIEW ─────────────────────────────────────────────────────────────
   if (viewDoc) {
     const m = viewDoc;
+    const rows = (m.rows || []).filter(r => (r.point || r.decision || r.actionBy || r.followup));
     return (
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
-          {(businessInfo?.letterhead || businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v => !v)} style={{ ...styles.ghostBtn, ...(useLH ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}</button>}
           <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
-          {useLH && <LetterheadHeader bi={businessInfo} />}
-          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: useLH ? 'center' : 'space-between', alignItems: 'flex-start' }}>
-            {!useLH && <div>
+          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
               <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
               <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
-            </div>}
-            <div style={{ textAlign: useLH ? 'center' : 'right' }}>
+            </div>
+            <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>MINUTES OF MEETING</div>
-              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number}</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.type === 'external' ? 'External' : 'Internal')}</div>
             </div>
           </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
-          <table style={{ width: '100%', fontSize: 12.5, marginBottom: 18, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
-              <tr><td style={{ padding: '3px 0', color: '#888', width: 130 }}>Date</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}</td><td style={{ padding: '3px 0', color: '#888', width: 130 }}>Venue</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.venue || '—'}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Date</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}</td><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Venue</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.venue || '—'}</td></tr>
               <tr><td style={{ padding: '3px 0', color: '#888' }}>Chairperson</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.chairperson || '—'}</td><td style={{ padding: '3px 0', color: '#888' }}>Next Meeting</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.nextDate ? fmtDate(m.nextDate) + (m.nextTime ? ' · ' + m.nextTime : '') : '—'}</td></tr>
             </tbody>
           </table>
-          <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>ATTENDEES</div><div style={{ fontSize: 12.5, color: '#333' }}>{m.attendees || '—'}</div></div>
-          {m.absentees && m.absentees.trim() && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>ABSENT WITH APOLOGY</div><div style={{ fontSize: 12.5, color: '#333' }}>{m.absentees}</div></div>}
-          {(m.agenda || []).filter(a => a && a.trim()).length > 0 && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>AGENDA</div><ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: '#333' }}>{(m.agenda || []).filter(a => a && a.trim()).map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a}</li>)}</ol></div>}
-          {(m.decisions || []).filter(a => a && a.trim()).length > 0 && <div style={{ marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>DISCUSSION &amp; DECISIONS</div><ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: '#333' }}>{(m.decisions || []).filter(a => a && a.trim()).map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a}</li>)}</ol></div>}
-          {(m.actionItems || []).filter(a => a.task && a.task.trim()).length > 0 && <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 6 }}>ACTION ITEMS</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead><tr style={{ background: '#F8F5EE' }}>{['#', 'Action', 'Owner', 'Due', 'Status'].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11 }}>{h}</th>)}</tr></thead>
-              <tbody>{(m.actionItems || []).filter(a => a.task && a.task.trim()).map((a, i) => <tr key={i}><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{i + 1}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#1E2A4A' }}>{a.task}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.owner || '—'}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.due ? fmtDate(a.due) : '—'}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#555' }}>{a.status || 'Open'}</td></tr>)}</tbody>
-            </table>
-          </div>}
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>{m.type === 'external' ? 'OUR ATTENDEES (' + (businessInfo.name || 'Company') + ')' : 'ATTENDEES'}</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+            <thead><tr>{['Name', 'Designation', 'Department'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {(m.internalAttendees || []).length ? (m.internalAttendees || []).map((a, i) => (
+                <tr key={i}><td style={td}>{a.name}</td><td style={td}>{a.designation || '—'}</td><td style={td}>{a.department || '—'}</td></tr>
+              )) : <tr><td style={td} colSpan={3}>—</td></tr>}
+            </tbody>
+          </table>
+          {m.type === 'external' && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>{(m.extCompany || 'EXTERNAL PARTY').toUpperCase()}</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+                <thead><tr>{['Name', 'Designation'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {(m.extPersons || []).length ? (m.extPersons || []).map((p, i) => (
+                    <tr key={i}><td style={td}>{p.name || '—'}</td><td style={td}>{p.designation || '—'}</td></tr>
+                  )) : <tr><td style={td} colSpan={2}>—</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {(m.agenda || []).filter(a => a && a.trim()).length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 4 }}>AGENDA</div>
+              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12.5, color: '#333' }}>{(m.agenda || []).filter(a => a && a.trim()).map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a}</li>)}</ol>
+            </div>
+          )}
+          {rows.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#C9A24B', marginBottom: 6 }}>DISCUSSION, DECISIONS &amp; ACTIONS</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead><tr>{['#', 'Discussion / Point', 'Decision', 'Action By', 'Follow-up'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i}>
+                      <td style={td}>{i + 1}</td>
+                      <td style={td}>{r.point || '—'}</td>
+                      <td style={td}>{r.decision || '—'}</td>
+                      <td style={td}>{r.actionBy || '—'}</td>
+                      <td style={td}>{r.followup ? fmtDate(r.followup) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div style={{ marginTop: 40, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Prepared by</div>
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Chairperson</div>
           </div>
-          {useLH && businessInfo?.letterheadFooter && <div className="lh-pad-footer" style={{ background: '#fff' }}><img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} /></div>}
         </div>
       </div>
     );
   }
 
+  // ── FORM VIEW ──────────────────────────────────────────────────────────────
   if (editing) {
     const e = editing;
+    const actionByOptions = [
+      ...(e.internalAttendees || []).map(a => a.name),
+      ...(e.extPersons || []).map(p => p.name),
+    ].filter(Boolean);
     return (
       <div style={styles.page}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>{list.some(m => m.id === e.id) ? 'Edit' : 'New'} Minutes of Meeting <span style={{ fontSize: 13, color: '#888', fontWeight: 500 }}>{e.number}</span></h2>
           <button style={styles.ghostBtn} onClick={() => setEditing(null)}>← Cancel</button>
         </div>
-        <div style={{ maxWidth: 720 }}>
+        <div style={{ maxWidth: 900 }}>
           <div style={card}>
-            <div style={{ marginBottom: 12 }}><label style={lbl}>Meeting Title *</label><input style={inp} value={e.title} onChange={ev => setEditing(p => ({ ...p, title: ev.target.value }))} placeholder="e.g. Monthly Review Meeting" /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
-              <div><label style={lbl}>Time</label><input type="time" style={inp} value={e.time} onChange={ev => setEditing(p => ({ ...p, time: ev.target.value }))} /></div>
-              <div><label style={lbl}>Venue</label><input style={inp} value={e.venue} onChange={ev => setEditing(p => ({ ...p, venue: ev.target.value }))} placeholder="Room / online" /></div>
+            <label style={lbl}>Meeting Type</label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              {[['internal', 'Internal'], ['external', 'External']].map(([val, label]) => (
+                <button key={val} onClick={() => upd({ type: val })}
+                  style={{ ...styles.ghostBtn, padding: '7px 16px', ...(e.type === val ? { background: '#1E2A4A', color: '#fff', fontWeight: 600 } : {}) }}>{label}</button>
+              ))}
             </div>
-            <div style={{ marginTop: 12 }}><label style={lbl}>Chairperson</label><input style={inp} value={e.chairperson} onChange={ev => setEditing(p => ({ ...p, chairperson: ev.target.value }))} placeholder="Who chaired the meeting" /></div>
+            <div style={{ marginBottom: 12 }}><label style={lbl}>Meeting Title *</label><input style={inp} value={e.title} onChange={ev => upd({ title: ev.target.value })} placeholder="e.g. Monthly Review Meeting" /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => upd({ date: ev.target.value })} /></div>
+              <div><label style={lbl}>Time</label><input type="time" style={inp} value={e.time} onChange={ev => upd({ time: ev.target.value })} /></div>
+              <div><label style={lbl}>Venue</label><input style={inp} value={e.venue} onChange={ev => upd({ venue: ev.target.value })} placeholder="Room / online" /></div>
+            </div>
+            <div style={{ marginTop: 12 }}><label style={lbl}>Chairperson</label><input style={inp} value={e.chairperson} onChange={ev => upd({ chairperson: ev.target.value })} placeholder="Who chaired the meeting" /></div>
           </div>
+
           <div style={card}>
-            <div style={{ marginBottom: 12 }}><label style={lbl}>Attendees</label><textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={e.attendees} onChange={ev => setEditing(p => ({ ...p, attendees: ev.target.value }))} placeholder="Names, comma separated" /></div>
-            <div><label style={lbl}>Absent (with apology)</label><textarea style={{ ...inp, minHeight: 44, resize: 'vertical' }} value={e.absentees} onChange={ev => setEditing(p => ({ ...p, absentees: ev.target.value }))} placeholder="Optional" /></div>
+            <label style={lbl}>{e.type === 'external' ? 'Our Attendees (' + (businessInfo.name || 'Company') + ')' : 'Attendees'}</label>
+            <select value="" onChange={ev => { addEmployee(ev.target.value); ev.target.value = ''; }} style={{ ...inp, marginBottom: 8 }}>
+              <option value="">+ Add employee…</option>
+              {(employees || []).map(emp => <option key={emp.id || emp.empId} value={String(emp.id || emp.empId)}>{emp.name}{emp.designation ? ' — ' + emp.designation : ''}</option>)}
+            </select>
+            {(!employees || employees.length === 0) && <div style={{ fontSize: 11.5, color: '#999', marginBottom: 8 }}>No employees yet — add them under HR › Employees first.</div>}
+            {(e.internalAttendees || []).length > 0 && (
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 4 }}>
+                <thead><tr>{['Name', 'Designation', 'Department', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {(e.internalAttendees || []).map((a, i) => (
+                    <tr key={i}>
+                      <td style={td}>{a.name}</td>
+                      <td style={td}>{a.designation || '—'}</td>
+                      <td style={td}>{a.department || '—'}</td>
+                      <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delArr('internalAttendees', i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
+
+          {e.type === 'external' && (
+            <div style={card}>
+              <label style={lbl}>External Party (Supplier / Client)</label>
+              <input style={{ ...inp, marginBottom: 10 }} value={e.extCompany} onChange={ev => upd({ extCompany: ev.target.value })} placeholder="Company name" />
+              <label style={{ ...lbl, fontSize: 11.5, color: '#666' }}>Their Persons</label>
+              {(e.extPersons || []).map((p, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr auto', gap: 6, marginBottom: 6 }}>
+                  <input style={inp} value={p.name} onChange={ev => setExtP(i, 'name', ev.target.value)} placeholder="Person name" />
+                  <input style={inp} value={p.designation} onChange={ev => setExtP(i, 'designation', ev.target.value)} placeholder="Designation" />
+                  <button onClick={() => delArr('extPersons', i)} style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }}>✕</button>
+                </div>
+              ))}
+              <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('extPersons', { name: '', designation: '' })}>+ Add person</button>
+            </div>
+          )}
+
           <div style={card}>
             <label style={lbl}>Agenda Points</label>
-            {(e.agenda || []).map((a, i) => <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}><input style={inp} value={a} onChange={ev => setArr('agenda', i, ev.target.value)} placeholder={'Agenda point ' + (i + 1)} /><button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('agenda', i)}>✕</button></div>)}
+            {(e.agenda || []).map((a, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <input style={inp} value={a} onChange={ev => setArr('agenda', i, ev.target.value)} placeholder={'Agenda point ' + (i + 1)} />
+                <button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('agenda', i)}>✕</button>
+              </div>
+            ))}
             <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('agenda', '')}>+ Add agenda point</button>
           </div>
+
           <div style={card}>
-            <label style={lbl}>Discussion &amp; Decisions</label>
-            {(e.decisions || []).map((a, i) => <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}><textarea style={{ ...inp, minHeight: 40, resize: 'vertical' }} value={a} onChange={ev => setArr('decisions', i, ev.target.value)} placeholder={'Discussion / decision ' + (i + 1)} /><button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('decisions', i)}>✕</button></div>)}
-            <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('decisions', '')}>+ Add point</button>
+            <label style={lbl}>Discussion, Decisions &amp; Actions</label>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>{['#', 'Discussion / Point', 'Decision', 'Action By', 'Follow-up', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.rows || []).map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><textarea style={{ ...inp, minHeight: 38, resize: 'vertical' }} value={r.point} onChange={ev => setRow(i, 'point', ev.target.value)} placeholder="Point discussed" /></td>
+                    <td style={td}><textarea style={{ ...inp, minHeight: 38, resize: 'vertical' }} value={r.decision} onChange={ev => setRow(i, 'decision', ev.target.value)} placeholder="Decision taken" /></td>
+                    <td style={td}>
+                      <select style={inp} value={r.actionBy} onChange={ev => setRow(i, 'actionBy', ev.target.value)}>
+                        <option value="">—</option>
+                        {actionByOptions.map((nm, idx) => <option key={idx} value={nm}>{nm}</option>)}
+                      </select>
+                    </td>
+                    <td style={td}><input type="date" style={inp} value={r.followup} onChange={ev => setRow(i, 'followup', ev.target.value)} /></td>
+                    <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delArr('rows', i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={() => addArr('rows', blankRow())}>+ Add row</button>
+            {actionByOptions.length === 0 && <div style={{ fontSize: 11.5, color: '#999', marginTop: 6 }}>Tip: add attendees above — they become the "Action By" options.</div>}
           </div>
-          <div style={card}>
-            <label style={lbl}>Action Items</label>
-            {(e.actionItems || []).map((a, i) => <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 6, marginBottom: 6 }}>
-              <input style={inp} value={a.task} onChange={ev => setAI(i, 'task', ev.target.value)} placeholder="Action / task" />
-              <input style={inp} value={a.owner} onChange={ev => setAI(i, 'owner', ev.target.value)} placeholder="Owner" />
-              <input type="date" style={inp} value={a.due} onChange={ev => setAI(i, 'due', ev.target.value)} />
-              <select style={inp} value={a.status} onChange={ev => setAI(i, 'status', ev.target.value)}><option>Open</option><option>In Progress</option><option>Done</option></select>
-              <button style={{ ...styles.ghostBtn, padding: '0 10px', color: '#B91C1C' }} onClick={() => delArr('actionItems', i)}>✕</button>
-            </div>)}
-            <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => addArr('actionItems', { task: '', owner: '', due: '', status: 'Open' })}>+ Add action item</button>
-          </div>
+
           <div style={card}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div><label style={lbl}>Next Meeting Date</label><input type="date" style={inp} value={e.nextDate} onChange={ev => setEditing(p => ({ ...p, nextDate: ev.target.value }))} /></div>
-              <div><label style={lbl}>Next Meeting Time</label><input type="time" style={inp} value={e.nextTime} onChange={ev => setEditing(p => ({ ...p, nextTime: ev.target.value }))} /></div>
+              <div><label style={lbl}>Next Meeting Date</label><input type="date" style={inp} value={e.nextDate} onChange={ev => upd({ nextDate: ev.target.value })} /></div>
+              <div><label style={lbl}>Next Meeting Time</label><input type="time" style={inp} value={e.nextTime} onChange={ev => upd({ nextTime: ev.target.value })} /></div>
             </div>
           </div>
+
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <button style={styles.primaryBtn} onClick={saveForm}>Save Minutes</button>
             <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
@@ -10776,12 +10895,13 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
     );
   }
 
+  // ── LIST VIEW ──────────────────────────────────────────────────────────────
   return (
     <div style={styles.page}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>Minutes of Meeting</h2>
-          <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>Record and circulate meeting minutes with action items.</div>
+          <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>Internal &amp; external meeting minutes with attendees, decisions and action tracking.</div>
         </div>
         <button style={styles.primaryBtn} onClick={startNew}><Plus size={15} /> New MoM</button>
       </div>
@@ -10791,12 +10911,15 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         <div key={m.id} style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.title}</div>
-              <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>{m.number} · {fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}{m.venue ? ' · ' + m.venue : ''}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 8px', borderRadius: 20, background: m.type === 'external' ? '#FDF0E6' : '#EAF3DE', color: m.type === 'external' ? '#B5651D' : '#3D7A2A' }}>{m.type === 'external' ? 'EXTERNAL' : 'INTERNAL'}</span>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.title}</div>
+              </div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{m.number} · {fmtDate(m.date)}{m.time ? ' · ' + m.time : ''}{m.venue ? ' · ' + m.venue : ''}{m.type === 'external' && m.extCompany ? ' · with ' + m.extCompany : ''}</div>
               <div style={{ fontSize: 12, color: '#666', marginTop: 6, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                <span>👥 {(m.attendees || '').split(',').filter(x => x.trim()).length} attendees</span>
+                <span>👥 {((m.internalAttendees || []).length + (m.extPersons || []).length)} attendees</span>
                 <span>📋 {(m.agenda || []).filter(a => a && a.trim()).length} agenda</span>
-                <span>✅ {(m.actionItems || []).filter(a => a.task && a.task.trim()).length} actions</span>
+                <span>✅ {(m.rows || []).filter(r => r.point || r.decision).length} points</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -22175,6 +22298,7 @@ export default function App() {
             isMultiBiz={isMultiBiz}
             moms={moms}
             setMoms={setMoms}
+            employees={employees}
           />
         );
       case 'notifications':
