@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -2137,7 +2137,7 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   const [cloudBackups, setCloudBackups] = useState(null);
@@ -2504,6 +2504,12 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                   catch (e) { setCloudMsg('Could not load history.'); }
                   setCloudBusy(false);
                 }} style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>⟳ View backup history</button>
+                {onTestConnection && <button disabled={cloudBusy} onClick={async () => {
+                  setCloudBusy(true); setCloudMsg('Testing server…');
+                  try { const m = await onTestConnection(); setCloudMsg(m); window.alert(m); }
+                  catch (e) { const m = '❌ ' + (e && e.message ? e.message : e); setCloudMsg(m); window.alert(m); }
+                  setCloudBusy(false);
+                }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>}
               </div>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
               {cloudBackups && cloudBackups.length > 0 && (
@@ -21825,7 +21831,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList

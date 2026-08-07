@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { initializeFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, uploadString, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
@@ -106,6 +106,15 @@ export async function saveCompanyData(uid, data) {
   // never hit the 1 MB per-document limit and always reach the server.
   const entries = Object.entries(data || {});
   await Promise.all(entries.map(([k, v]) => setDoc(PART_DOC(uid, k), { v: v === undefined ? null : v })));
+}
+
+// Diagnostic: write a tiny doc then force-read it back FROM THE SERVER (not cache).
+// Proves whether writes actually reach Firestore, and surfaces the exact error.
+export async function testServerWrite(uid) {
+  const ref = doc(db, 'companies', uid, 'parts', '_conntest');
+  await setDoc(ref, { v: Date.now() });
+  const snap = await getDocFromServer(ref);
+  return snap.exists() ? snap.data() : null;
 }
 
 // ─── Branding media (separate document) ───────────────────────────────────────
