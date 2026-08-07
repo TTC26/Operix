@@ -75,12 +75,22 @@ export function watchAuth(callback) {
 }
 
 const COMPANY_DOC = (uid) => doc(db, 'companies', uid);
+// Each data section lives in its OWN document under companies/{uid}/parts so no
+// single document ever approaches Firestore's 1 MB limit, however large the data.
+const PART_DOC = (uid, key) => doc(db, 'companies', uid, 'parts', key);
+const PARTS_COL = (uid) => collection(db, 'companies', uid, 'parts');
 
 export async function loadCompanyData(uid) {
   try {
-    const snap = await getDoc(COMPANY_DOC(uid));
-    if (snap.exists()) return snap.data();
-    return null;
+    const [mainSnap, partsSnap] = await Promise.all([
+      getDoc(COMPANY_DOC(uid)),
+      getDocs(PARTS_COL(uid)),
+    ]);
+    const main = mainSnap.exists() ? mainSnap.data() : {};
+    const parts = {};
+    partsSnap.forEach((d) => { const dd = d.data(); parts[d.id] = dd && 'v' in dd ? dd.v : dd; });
+    const merged = { ...main, ...parts };
+    return Object.keys(merged).length ? merged : null;
   } catch (e) {
     if (e.code === 'unavailable') return null;
     throw e;
@@ -88,7 +98,10 @@ export async function loadCompanyData(uid) {
 }
 
 export async function saveCompanyData(uid, data) {
-  await setDoc(COMPANY_DOC(uid), data, { merge: true });
+  // Write each top-level key to its own document. Small, isolated writes that
+  // never hit the 1 MB per-document limit and always reach the server.
+  const entries = Object.entries(data || {});
+  await Promise.all(entries.map(([k, v]) => setDoc(PART_DOC(uid, k), { v: v === undefined ? null : v })));
 }
 
 // ─── Branding media (separate document) ───────────────────────────────────────
@@ -166,34 +179,36 @@ export async function fetchServerBackup(path) {
 }
 
 export function subscribeCompanyData(uid, callback, onError) {
-  // On mobile, auth token may not be ready when onSnapshot first fires,
-  // causing a permission-denied error. Retry up to 3 times with backoff.
-  let unsub = null;
+  // Data spans the legacy main document + the companies/{uid}/parts subcollection.
+  // Listen to both and merge (parts take precedence). Retry main on auth races.
+  let mainData = {};
+  let partsData = {};
+  let unsubMain = null, unsubParts = null;
   let attempts = 0;
+  const emit = () => callback({ ...mainData, ...partsData });
 
-  function attach() {
-    unsub = onSnapshot(
+  function attachMain() {
+    unsubMain = onSnapshot(
       COMPANY_DOC(uid),
-      (snap) => {
-        attempts = 0; // reset on success
-        callback(snap.exists() ? snap.data() : {});
-      },
+      (snap) => { attempts = 0; mainData = snap.exists() ? snap.data() : {}; emit(); },
       (err) => {
-        console.warn('subscribeCompanyData error:', err.code, err.message);
-        if (err.code === 'permission-denied' && attempts < 3) {
-          // Auth token not ready yet — retry after short delay
-          attempts++;
-          setTimeout(attach, 800 * attempts);
-        } else {
-          // Persistent error — surface to caller
-          if (onError) onError(err);
-        }
+        console.warn('subscribe main error:', err.code, err.message);
+        if (err.code === 'permission-denied' && attempts < 3) { attempts++; setTimeout(attachMain, 800 * attempts); }
+        else if (onError) onError(err);
       }
     );
   }
+  function attachParts() {
+    unsubParts = onSnapshot(
+      PARTS_COL(uid),
+      (qs) => { const p = {}; qs.forEach((d) => { const dd = d.data(); p[d.id] = dd && 'v' in dd ? dd.v : dd; }); partsData = p; emit(); },
+      (err) => { console.warn('subscribe parts error:', err.code, err.message); }
+    );
+  }
 
-  attach();
-  return () => { if (unsub) unsub(); };
+  attachMain();
+  attachParts();
+  return () => { if (unsubMain) unsubMain(); if (unsubParts) unsubParts(); };
 }
 
 export async function getMembership(uid) {
@@ -341,6 +356,11 @@ export async function deleteAllCompanyFirestore(ownerUid) {
   // Delete main company document FIRST — all business data lives here.
   // Even if staff cleanup below fails or the caller's timeout hits, the primary data is gone.
   await deleteDoc(doc(db, 'companies', ownerUid));
+  // Delete the parts subcollection (business data now lives here).
+  try {
+    const partsSnap = await getDocs(collection(db, 'companies', ownerUid, 'parts'));
+    await Promise.all(partsSnap.docs.map((d) => deleteDoc(d.ref)));
+  } catch (e) { console.warn('parts cleanup (non-fatal):', e); }
   // Best-effort: clean up staff subcollection docs + their memberships.
   // Failures here are non-fatal; orphaned docs don't affect new sign-ups (new UID).
   try {
