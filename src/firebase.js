@@ -30,7 +30,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
+  // Auto-detect the best transport. Forcing long-polling caused the connection to
+  // firestore.googleapis.com to be closed (net::ERR_CONNECTION_CLOSED) on this
+  // network, so writes never reached the server. Auto-detect uses streaming
+  // (WebChannel) when available and only falls back to long-polling if needed.
+  experimentalAutoDetectLongPolling: true,
 });
 export const auth = getAuth(app);
 export const storage = getStorage(app);
