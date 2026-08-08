@@ -400,7 +400,7 @@ function parseOCRText(text) {
 // ─── styles.js ─────────────────────────────────────────────────
 
 const styles = {
-  app: { display: 'flex', minHeight: '100vh', background: '#FAF8F4', color: '#3A3F4B', fontSize: 14 },
+  app: { display: 'flex', minHeight: '100vh', background: '#F4F8E9', color: '#3A3F4B', fontSize: 14 },
   sidebar: { width: 220, background: '#E9F1D3', color: '#37451E', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
   brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
@@ -3573,7 +3573,7 @@ function ConvertDropdown({ doc, onConvert }) {
 const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
-  purchase:    ['vendors', 'grn'],
+  purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
@@ -3588,10 +3588,10 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary','mom'],
 };
@@ -3822,6 +3822,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="packing_list" bizType="trading" />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors" label="Vendors" icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType="trading" />
                 <CreateBtn docKey="purchasebill" bizType="trading" />
@@ -3856,6 +3857,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
                 <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
                 <CreateBtn docKey="purchase"     bizType="manufacturing" />
@@ -3912,6 +3914,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="scopeofwork" label="Service Catalogue"  icon={BookOpen} />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType={bt} />
                 <CreateBtn docKey="purchasebill" bizType={bt} />
@@ -4001,6 +4004,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
           {/* Purchase */}
           <Section sectionKey="purchase" label="Purchase">
+            <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
             <NavBtn id="vendors" label="Vendors" icon={Truck} />
             <CreateBtn docKey="purchase" />
             <CreateBtn docKey="purchasebill" />
@@ -10587,6 +10591,276 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
+function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const blankItem = () => ({ itemId: '', name: '', uom: '', qty: '', purpose: '' });
+  const blank = () => ({
+    type: 'project', linkId: '', linkName: '',
+    date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
+    bomRef: '', bomMult: 1,
+    items: [blankItem()],
+    remarks: '',
+    approvalStatus: 'draft',
+    convertedToPO: false,
+  });
+  const [editing, setEditing] = React.useState(null);
+  const [viewDoc, setViewDoc] = React.useState(null);
+
+  const canApprove = userRole === 'admin' || userRole === 'manager';
+
+  const list = (Array.isArray(purchaseReqs) ? purchaseReqs : [])
+    .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  function nextNumber() {
+    const yr = new Date().getFullYear();
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
+    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+  }
+
+  // Combined BOM list (manufacturing + project)
+  const allBoms = [
+    ...(Array.isArray(boms) ? boms : []).map(b => ({ ref: 'mfg:' + b.id, label: (b.name || 'BOM') + ' — Manufacturing', items: b.items || [] })),
+    ...(Array.isArray(mepBoms) ? mepBoms : []).map(b => {
+      const proj = siteProjects.find(p => p.id === b.projectId);
+      return { ref: 'mep:' + b.id, label: (b.name || b.title || (proj ? (proj.name || proj.projectName) : 'Project') ) + ' — Project', items: b.items || [] };
+    }),
+  ];
+
+  function startNew() { setEditing({ ...blank(), id: Date.now().toString(), number: nextNumber() }); }
+  function startEdit(m) {
+    setEditing({ ...blank(), ...m, items: (m.items && m.items.length) ? m.items : [blankItem()] });
+  }
+
+  function saveForm() {
+    if (!editing.items.some(it => (it.name || '').trim())) { alert('Add at least one item.'); return; }
+    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setPurchaseReqs(prev => {
+      const arr = Array.isArray(prev) ? prev : [];
+      return arr.some(x => x.id === rec.id) ? arr.map(x => x.id === rec.id ? rec : x) : [rec, ...arr];
+    });
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this requisition?')) return; setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+  function setStatus(m, status) {
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, approvalStatus: status, updatedAt: new Date().toISOString() } : x));
+  }
+
+  const upd = (patch) => setEditing(e => ({ ...e, ...patch }));
+  const setRow = (i, field, val) => setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], [field]: val }; return { ...e, items: r }; });
+  const addRow = () => setEditing(e => ({ ...e, items: [...(e.items || []), blankItem()] }));
+  const delRow = (i) => setEditing(e => ({ ...e, items: (e.items || []).filter((_, idx) => idx !== i) }));
+
+  function pickItem(i, itemId) {
+    const it = (items || []).find(x => String(x.id) === itemId);
+    if (!it) { setRow(i, 'itemId', ''); return; }
+    setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], itemId: it.id, name: it.name, uom: it.unit || r[i].uom || '' }; return { ...e, items: r }; });
+  }
+
+  function loadFromBom() {
+    const bom = allBoms.find(b => b.ref === editing.bomRef);
+    if (!bom) { alert('Select a BOM first.'); return; }
+    const mult = parseFloat(editing.bomMult) || 1;
+    const rows = (bom.items || []).map(it => ({
+      itemId: it.itemId || '',
+      name: it.name || it.itemName || it.description || it.material || it.materialName || '',
+      uom: it.unit || it.uom || '',
+      qty: ((parseFloat(it.qty) || 0) * mult) || '',
+      purpose: '',
+    })).filter(r => r.name);
+    if (!rows.length) { alert('This BOM has no items.'); return; }
+    setEditing(e => ({ ...e, items: rows }));
+  }
+
+  const linkOptions = () => {
+    if (editing.type === 'project') return (siteProjects || []).map(p => ({ id: p.id, name: p.name || p.projectName || p.title || ('Project ' + p.id) }));
+    if (editing.type === 'production') return (productionOrders || []).map(p => ({ id: p.id, name: (p.number || p.orderNo || p.product || p.productName || ('WO ' + p.id)) }));
+    if (editing.type === 'customer') return (customers || []).map(c => ({ id: c.id, name: c.name }));
+    return [];
+  };
+
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const inp = { ...styles.input, marginBottom: 0 };
+  const lbl = { fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 4, display: 'block' };
+  const th = { padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11, background: '#F8F5EE' };
+  const td = { padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#333', fontSize: 12, verticalAlign: 'top' };
+  const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
+  const typeLabel = t => t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
+
+  // ── PRINT ──
+  if (viewDoc) {
+    const m = viewDoc;
+    const rows = (m.items || []).filter(it => (it.name || '').trim());
+    return (
+      <div>
+        <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
+          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        </div>
+        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PURCHASE REQUISITION</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.approvalStatus || 'draft').toUpperCase()}</div>
+            </div>
+          </div>
+          <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Date</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.date)}</td><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Required by</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.requiredBy)}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888' }}>{typeLabel(m.type)}</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.linkName || '—'}</td><td style={{ padding: '3px 0', color: '#888' }}>Priority</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.priority || 'Normal'}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888' }}>Requested by</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.requestedBy || '—'}</td><td></td><td></td></tr>
+            </tbody>
+          </table>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+            <thead><tr>{['#', 'Item / Material', 'UOM', 'Qty', 'Purpose'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((it, i) => (
+                <tr key={i}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{it.name}</td>
+                  <td style={td}>{it.uom || '—'}</td>
+                  <td style={td}>{it.qty || '—'}</td>
+                  <td style={td}>{it.purpose || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {m.remarks && <div style={{ fontSize: 12, color: '#333', marginBottom: 14 }}><strong>Remarks:</strong> {m.remarks}</div>}
+          <div style={{ marginTop: 40, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Requested by</div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Approved by</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── FORM ──
+  if (editing) {
+    const e = editing;
+    const opts = linkOptions();
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>{list.some(m => m.id === e.id) ? 'Edit' : 'New'} Purchase Requisition <span style={{ fontSize: 13, color: '#888', fontWeight: 500 }}>{e.number}</span></h2>
+          <button style={styles.ghostBtn} onClick={() => setEditing(null)}>← Cancel</button>
+        </div>
+        <div style={{ maxWidth: 900 }}>
+          <div style={card}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => upd({ date: ev.target.value })} /></div>
+              <div><label style={lbl}>Required by</label><input type="date" style={inp} value={e.requiredBy} onChange={ev => upd({ requiredBy: ev.target.value })} /></div>
+              <div><label style={lbl}>Priority</label><select style={inp} value={e.priority} onChange={ev => upd({ priority: ev.target.value })}><option>Normal</option><option>Urgent</option></select></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 12 }}>
+              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option></select></div>
+              <div><label style={lbl}>{typeLabel(e.type)}</label>
+                <select style={inp} value={e.linkId} onChange={ev => { const o = opts.find(x => String(x.id) === ev.target.value); upd({ linkId: ev.target.value, linkName: o ? o.name : '' }); }}>
+                  <option value="">— Select —</option>
+                  {opts.map(o => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+                </select>
+                {opts.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>No {typeLabel(e.type).toLowerCase()} records yet.</div>}
+              </div>
+            </div>
+            <div><label style={lbl}>Requested by</label><input style={inp} value={e.requestedBy} onChange={ev => upd({ requestedBy: ev.target.value })} placeholder="Name / department" /></div>
+          </div>
+
+          <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
+            <label style={lbl}>Auto-fill items from BOM (optional)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
+              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select BOM —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
+              <div><input type="number" min="1" style={inp} value={e.bomMult} onChange={ev => upd({ bomMult: ev.target.value })} placeholder="× Qty" title="Multiplier" /></div>
+              <button style={{ ...styles.secondaryBtn, whiteSpace: 'nowrap' }} onClick={loadFromBom}>Load items ↓</button>
+            </div>
+            {allBoms.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>No BOMs found yet.</div>}
+          </div>
+
+          <div style={card}>
+            <label style={lbl}>Items required</label>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>{['#', 'Item (master)', 'Item / Material name', 'UOM', 'Qty', 'Purpose', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.items || []).map((it, i) => (
+                  <tr key={i}>
+                    <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><select style={inp} value={it.itemId} onChange={ev => pickItem(i, ev.target.value)}><option value="">— pick —</option>{(items || []).map(x => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select></td>
+                    <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Item / material" /></td>
+                    <td style={td}><input style={{ ...inp, width: 70 }} value={it.uom} onChange={ev => setRow(i, 'uom', ev.target.value)} placeholder="nos" /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 80 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input style={inp} value={it.purpose} onChange={ev => setRow(i, 'purpose', ev.target.value)} placeholder="optional" /></td>
+                    <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delRow(i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add item</button>
+          </div>
+
+          <div style={card}>
+            <label style={lbl}>Remarks</label>
+            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder="Any notes for the purchase team" />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button style={styles.primaryBtn} onClick={saveForm}>Save Requisition</button>
+            <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST ──
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>Purchase Requisition</h2>
+          <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>Request materials against a project, work order or customer — with BOM auto-fill.</div>
+        </div>
+        <button style={styles.primaryBtn} onClick={startNew}><Plus size={15} /> New Requisition</button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ ...card, color: '#aaa', fontSize: 13, textAlign: 'center', padding: 40 }}>No requisitions yet. Click "New Requisition" to raise one.</div>
+      ) : list.map(m => {
+        const st = m.approvalStatus || 'draft';
+        return (
+          <div key={m.id} style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 8px', borderRadius: 20, background: '#F0EDE0', color: STATUS_COL[st] || '#888' }}>{st.toUpperCase()}</span>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.number}</div>
+                  {m.priority === 'Urgent' && <span style={{ fontSize: 10, fontWeight: 700, color: '#B91C1C' }}>● URGENT</span>}
+                  {m.convertedToPO && <span style={{ fontSize: 10, fontWeight: 700, color: '#2C7A3F' }}>→ PO created</span>}
+                </div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{fmtDate(m.date)} · {typeLabel(m.type)}: {m.linkName || '—'}{m.requiredBy ? ' · required by ' + fmtDate(m.requiredBy) : ''}</div>
+                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>📦 {(m.items || []).filter(it => it.name).length} items{m.requestedBy ? ' · by ' + m.requestedBy : ''}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {st === 'draft' && <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B5651D' }} onClick={() => setStatus(m, 'pending')}>Submit</button>}
+                {st === 'pending' && canApprove && <>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#2C7A3F' }} onClick={() => setStatus(m, 'approved')}>Approve</button>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => setStatus(m, 'rejected')}>Reject</button>
+                </>}
+                {st === 'approved' && !m.convertedToPO && onConvertToPO && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => onConvertToPO(m)}>Convert to PO →</button>}
+                <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => setViewDoc(m)}><Printer size={13} /> Print</button>
+                <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => startEdit(m)}><Pencil size={13} /></button>
+                {userRole === 'admin' && <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => del(m.id)}><Trash2 size={13} /></button>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, moms, setMoms, employees = [] }) {
   const today = new Date().toISOString().slice(0, 10);
   const blankRow = () => ({ point: '', decision: '', actionBy: '', followup: '' });
@@ -20888,6 +21162,7 @@ export default function App() {
   const [handoverDocs,     _setHDocs]  = useState([]);
   const [auditDocs,        _setAuditDocs]  = useState([]);
   const [moms,             _setMoms]       = useState([]);
+  const [purchaseReqs,     _setPReqs]      = useState([]);
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -21069,6 +21344,7 @@ export default function App() {
       _setHDocs(data.handoverDocs || []);
       _setAuditDocs(data.auditDocs || []);
       _setMoms(data.moms || []);
+      _setPReqs(data.purchaseReqs || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
     }, (err) => {
       console.warn('Firestore load error:', err);
@@ -21155,6 +21431,7 @@ export default function App() {
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
   const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
   const setMoms             = mkSet(_setMoms,'moms');
+  const setPurchaseReqs     = mkSet(_setPReqs,'purchaseReqs');
   const setRackStore        = mkSet(_setRS,        'rackStore');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
@@ -21318,7 +21595,7 @@ export default function App() {
       vouchers, pettyCash, employees, payrollRuns, hrLetters, storeIssues,
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
-      qualityDocs, pdvs, moms, siteProjects, siteActivities, progressUpdates,
+      qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
       clientMaterials, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
@@ -21384,6 +21661,7 @@ export default function App() {
     if (backup.handoverDocs)    setHandoverDocs(backup.handoverDocs);
     if (backup.auditDocs)       setAuditDocs(backup.auditDocs);
     if (backup.moms)            setMoms(backup.moms);
+    if (backup.purchaseReqs)    setPurchaseReqs(backup.purchaseReqs);
     if (backup.rackStore)       setRackStore(backup.rackStore);
     alert('✅ Data restored successfully! All your records are back.');
   }
@@ -22264,6 +22542,28 @@ export default function App() {
             moms={moms}
             setMoms={setMoms}
             employees={employees}
+          />
+        );
+      case 'purchasereq':
+        return (
+          <PurchaseRequisitionView
+            purchaseReqs={purchaseReqs}
+            setPurchaseReqs={setPurchaseReqs}
+            items={items}
+            siteProjects={siteProjects}
+            productionOrders={productionOrders}
+            customers={customers}
+            boms={boms}
+            mepBoms={mepBoms}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            onConvertToPO={(pr) => {
+              const its = (pr.items || []).filter(it => it.name).map(it => ({ ...EMPTY_ITEM_ROW(businessInfo), itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1 }));
+              startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
+              setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
+            }}
           />
         );
       case 'notifications':
