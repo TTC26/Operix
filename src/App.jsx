@@ -7190,10 +7190,7 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
                   <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
                     <button style={{...styles.primaryBtn,background:'#2C6B3A'}} onClick={()=>setAction({slot:action.slot,type:'receive'})}>↓ Receive (IN)</button>
                     <button style={{...styles.primaryBtn,background:'#6B2C2C'}} onClick={()=>setAction({slot:action.slot,type:'issue'})}>↑ Issue / MDR (OUT)</button>
-                    {Math.max(0,slotData[action.slot]?.qty||0)===0 && outward.some(m=>m.status==='delivered'&&(m.items||[]).some(i=>i.rackId===rack.id&&i.slot===action.slot)) &&
-                      <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>}
-                    {Math.max(0,slotData[action.slot]?.qty||0)>0 &&
-                      <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>}
+                    <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>
                     <button style={styles.ghostBtn} onClick={()=>setAction(null)}>Cancel</button>
                   </div>
                 </div>
@@ -7326,7 +7323,7 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
   const [search, setSearch]     = React.useState(['']);
   const [showDrop, setShowDrop] = React.useState([false]);
 
-  const approvedSivs = (storeIssues||[]).filter(s=>s.approvalStatus==='approved'||s.status==='approved');
+  const approvedSivs = (storeIssues||[]).filter(s=>s.sivNumber||s.number||s.id);
 
   function pickItem(idx,it){ const r=[...rows]; r[idx]={...r[idx],itemId:it.id,itemName:it.name,unit:it.unit||'nos'}; setRows(r); const s=[...search]; s[idx]=it.name; setSearch(s); const d=[...showDrop]; d[idx]=false; setShowDrop(d); }
   function setRow(idx,k,v){ const r=[...rows]; r[idx]={...r[idx],[k]:v}; setRows(r); }
@@ -7349,7 +7346,7 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
         <div style={styles.formGroup}>
           <label style={styles.label}>SIV Reference</label>
           {approvedSivs.length>0
-            ?<select value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input}><option value="">— select SIV —</option>{approvedSivs.map(s=><option key={s.id} value={s.sivNumber||s.id}>{s.sivNumber}</option>)}</select>
+            ?<select value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input}><option value="">— select SIV —</option>{approvedSivs.map(s=><option key={s.id} value={s.sivNumber||s.number||s.id}>{s.sivNumber||s.number||('SIV '+String(s.id).slice(-4))}</option>)}</select>
             :<input value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input} placeholder="SIV number"/>}
         </div>
         <div style={styles.formGroup}><label style={styles.label}>Issued To</label><input value={issuedTo} onChange={e=>setIssuedTo(e.target.value)} style={styles.input} placeholder="Dept / Person"/></div>
@@ -7359,7 +7356,7 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
           <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
+            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
             {showDrop[idx]&&search[idx]&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
                 {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
@@ -7393,7 +7390,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
   const [search, setSearch]     = React.useState(['']);
   const [showDrop, setShowDrop] = React.useState([false]);
 
-  const deliveredMdrs = (outward||[]).filter(m=>m.status==='delivered'&&(m.items||[]).some(i=>i.rackId===rack.id&&i.slot===slot));
+  const deliveredMdrs = (outward||[]).filter(m=>(m.items||[]).some(i=>i.rackId===rack.id));
 
   function pickItem(idx,it){ const r=[...rows]; r[idx]={...r[idx],itemId:it.id,itemName:it.name,unit:it.unit||'nos'}; setRows(r); const s=[...search]; s[idx]=it.name; setSearch(s); const d=[...showDrop]; d[idx]=false; setShowDrop(d); }
   function setRow(idx,k,v){ const r=[...rows]; r[idx]={...r[idx],[k]:v}; setRows(r); }
@@ -7424,7 +7421,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
           <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
+            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
             {showDrop[idx]&&search[idx]&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
                 {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
