@@ -7127,9 +7127,15 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
   ].sort((a,b)=>b.date>a.date?1:-1);
 
   const tabSt = t => ({ padding:'6px 16px', fontSize:12, fontWeight:activeTab===t?600:400, borderBottom:activeTab===t?'2px solid #2C3E6B':'2px solid transparent', color:activeTab===t?'#2C3E6B':'#888', cursor:'pointer', background:'none', border:'none' });
+  function printRack(){
+    const w=window.open('','_blank'); if(!w) return;
+    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'\u2014')+'</td></tr>';}).join('');
+    w.document.write('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    w.document.close(); setTimeout(function(){w.print();},300);
+  }
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'stretch', justifyContent:'flex-end' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'stretch', justifyContent:'flex-end' }}>
       <div style={{ width:'min(780px,96vw)', background:'#fff', display:'flex', flexDirection:'column', overflowY:'auto', boxShadow:'-4px 0 24px rgba(0,0,0,0.15)' }}>
         {/* Header */}
         <div style={{ padding:'16px 24px', borderBottom:'1px solid #E8E4DC', display:'flex', justifyContent:'space-between', alignItems:'center', background:'#2C3E6B' }}>
@@ -7137,7 +7143,10 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
             <div style={{ fontWeight:700, fontSize:17, color:'#fff' }}>{rack.name}</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.7)', marginTop:2 }}>{rows}R × {cols}C · {slots.length} slots{capacity?` · cap ${capacity}/slot`:''}</div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', color:'#fff', cursor:'pointer', padding:4 }}><X size={20}/></button>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <button onClick={printRack} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 12px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><Printer size={14}/> Print</button>
+            <button onClick={onClose} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 10px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><X size={16}/> Close</button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -7253,7 +7262,7 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function handleSave(){
-    const validRows = rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows = rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item with qty');return;}
     onSave({ receiptNo, date, sourceType, sourceRef, items: validRows.map(r=>({...r, rackId:rack.id, rackName:rack.name, slot, qty:parseFloat(r.qty)})) });
   }
@@ -7284,7 +7293,7 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
           <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); setRow(idx,'itemName',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
+            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
             {showDrop[idx]&&search[idx]&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
                 {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
@@ -7325,7 +7334,7 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function doSave(status){
-    const validRows=rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows=rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item');return;}
     onSave({mdrNo,date,sivRef,issuedTo,purpose,status,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
   }
@@ -7392,7 +7401,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function handleSave(){
-    const validRows=rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows=rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item');return;}
     onSave({returnNo,date,returnFrom,mdrRef,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
   }
