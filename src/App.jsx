@@ -7026,6 +7026,7 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
           onSaveInward={saveInward} onSaveOutward={saveOutward} onSaveReturn={saveReturn}
           onMarkDelivered={markDelivered} onDeleteRecord={deleteRecord}
           onClose={()=>setActiveRack(null)}
+          onEditRack={()=>{ setEditRack(activeRack); setShowRackForm(true); setActiveRack(null); }}
           businessInfo={businessInfo}
         />
       )}
@@ -7092,7 +7093,7 @@ function RackCard({ rack, inward=[], outward=[], returns=[], onClick, onEdit, on
 }
 
 // ── Rack Detail Modal (main management screen) ───────────────────────────────
-function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo }) {
+function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo, onEditRack }) {
   const [action, setAction]     = React.useState(null); // {type:'receive'|'issue'|'return', slot}
   const [printDoc, setPrintDoc] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState('slots'); // 'slots' | 'history'
@@ -7144,6 +7145,7 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.7)', marginTop:2 }}>{rows}R × {cols}C · {slots.length} slots{capacity?` · cap ${capacity}/slot`:''}</div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {onEditRack && <button onClick={onEditRack} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 12px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><Pencil size={14}/> Edit</button>}
             <button onClick={printRack} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 12px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><Printer size={14}/> Print</button>
             <button onClick={onClose} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 10px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><X size={16}/> Close</button>
           </div>
