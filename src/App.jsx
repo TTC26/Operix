@@ -8934,9 +8934,9 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
 
       <div style={{ background: '#F8F9FC', borderRadius: 8, padding: '14px 18px', marginBottom: 18 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          <EmpField {...fp} label="Reference No." name="refNo" />
-          <EmpField {...fp} label="Issue Date" name="issueDate" type="date" />
-          <EmpField {...fp} label="Status" name="status" options={[
+          <HRLetterField form={form} set={set} label="Reference No." name="refNo" />
+          <HRLetterField form={form} set={set} label="Issue Date" name="issueDate" type="date" />
+          <HRLetterField form={form} set={set} label="Status" name="status" options={[
             { value: 'draft',        label: 'Draft' },
             { value: 'issued',       label: 'Issued' },
             { value: 'acknowledged', label: 'Acknowledged' },
@@ -8957,24 +8957,24 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
       {isWarn ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Warning Type" name="warnType" options={[
+            <HRLetterField form={form} set={set} label="Warning Type" name="warnType" options={[
               { value: 'verbal',  label: 'Verbal Warning' },
               { value: 'written', label: 'Written Warning' },
               { value: 'final',   label: 'Final Warning' },
             ]} />
-            <EmpField {...fp} label="Incident Date" name="incidentDate" type="date" />
-            <EmpField {...fp} label="Previous Warnings on Record" name="previousWarnings" type="number" />
+            <HRLetterField form={form} set={set} label="Incident Date" name="incidentDate" type="date" />
+            <HRLetterField form={form} set={set} label="Previous Warnings on Record" name="previousWarnings" type="number" />
           </div>
-          <EmpField {...fp} label="Reason / Incident Description *" name="reason" textarea />
-          <EmpField {...fp} label="Corrective Action Required" name="correctiveAction" textarea />
-          <EmpField {...fp} label="Consequence if Not Corrected" name="consequence" textarea />
+          <HRLetterField form={form} set={set} label="Reason / Incident Description *" name="reason" textarea />
+          <HRLetterField form={form} set={set} label="Corrective Action Required" name="correctiveAction" textarea />
+          <HRLetterField form={form} set={set} label="Consequence if Not Corrected" name="consequence" textarea />
         </>
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Termination Date" name="terminationDate" type="date" />
-            <EmpField {...fp} label="Last Working Day" name="lastWorkingDay" type="date" />
-            <EmpField {...fp} label="Reason for Termination" name="termReason" options={[
+            <HRLetterField form={form} set={set} label="Termination Date" name="terminationDate" type="date" />
+            <HRLetterField form={form} set={set} label="Last Working Day" name="lastWorkingDay" type="date" />
+            <HRLetterField form={form} set={set} label="Reason for Termination" name="termReason" options={[
               { value: 'misconduct',    label: 'Misconduct' },
               { value: 'performance',   label: 'Poor Performance' },
               { value: 'redundancy',    label: 'Redundancy / Restructuring' },
@@ -8982,15 +8982,15 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
               { value: 'contract-end',  label: 'End of Contract' },
               { value: 'other',         label: 'Other' },
             ]} />
-            <EmpField {...fp} label="Notice Period" name="noticePeriodServed" options={[
+            <HRLetterField form={form} set={set} label="Notice Period" name="noticePeriodServed" options={[
               { value: 'yes',     label: 'Served in full' },
               { value: 'payment', label: 'Payment in lieu of notice' },
               { value: 'waived',  label: 'Waived by mutual agreement' },
             ]} />
           </div>
-          <EmpField {...fp} label="Additional Details" name="termDetails" textarea />
-          <EmpField {...fp} label="Settlement / Final Pay Details (gratuity, leave encashment, etc.)" name="settlementDetails" textarea />
-          <EmpField {...fp} label="Company Property to be Returned" name="returnItems" textarea />
+          <HRLetterField form={form} set={set} label="Additional Details" name="termDetails" textarea />
+          <HRLetterField form={form} set={set} label="Settlement / Final Pay Details (gratuity, leave encashment, etc.)" name="settlementDetails" textarea />
+          <HRLetterField form={form} set={set} label="Company Property to be Returned" name="returnItems" textarea />
         </>
       )}
     </div>
@@ -9418,6 +9418,33 @@ function EmployeeDetailView({ emp, businessInfo, isGulf, country, canEdit, onEdi
 function EmpSecTitle({ t }) {
   return <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 5, marginBottom: 12, marginTop: 18 }}>{t}</div>;
 }
+function HRLetterField({ label, name, type = 'text', textarea = false, options, form, set }) {
+  if (options) {
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}</label>
+        <select style={styles.input} value={form[name] || ''} onChange={e => set(name, e.target.value)}>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+    );
+  }
+  if (textarea) {
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}</label>
+        <textarea style={{ ...styles.input, height: 76, resize: 'vertical' }} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+      </div>
+    );
+  }
+  return (
+    <div style={styles.formGroup}>
+      <label style={styles.label}>{label}</label>
+      <input style={styles.input} type={type} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+    </div>
+  );
+}
+
 function EmpField({ label, name, type='text', required=false, form, onSet, errors, onClearErr }) {
   return (
     <div style={styles.formGroup}>
