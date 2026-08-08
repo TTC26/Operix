@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, doc, getDoc, getDocFromServer, setDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, uploadString, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
@@ -29,11 +29,15 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+// ─── RECOVERY MODE ───────────────────────────────────────────────────────────
+// Temporarily points at the '(default)' database WITH its old offline cache, so the
+// app re-reads the data that was cached in the browser (IndexedDB
+// firestore/[DEFAULT]/operix-15516/main) but never synced to the server.
+// After exporting the recovered data, switch back to the 'default' database.
 export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache(),
   experimentalAutoDetectLongPolling: true,
-}, 'default'); // <-- IMPORTANT: this project's Firestore database is named 'default'
-              //     (not the standard '(default)'). Without this the app talked to a
-              //     non-existent database, so no data ever reached the server.
+});
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
