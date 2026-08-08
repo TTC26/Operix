@@ -400,16 +400,16 @@ function parseOCRText(text) {
 // ─── styles.js ─────────────────────────────────────────────────
 
 const styles = {
-  app: { display: 'flex', minHeight: '100vh', background: '#F4F8E9', color: '#3A3F4B', fontSize: 14 },
-  sidebar: { width: 220, background: '#E9F1D3', color: '#37451E', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
+  app: { display: 'flex', minHeight: '100vh', background: '#F3F7F2', color: '#3A3F4B', fontSize: 14 },
+  sidebar: { width: 220, background: '#234F3A', color: '#DCEAE0', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
   brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
-  brandName: { fontSize: 17, fontWeight: 600, color: '#2E3D18' },
-  brandSub: { fontSize: 11, color: '#6E7C45', letterSpacing: '0.04em' },
+  brandName: { fontSize: 17, fontWeight: 600, color: '#FFFFFF' },
+  brandSub: { fontSize: 11, color: '#9FBCAC', letterSpacing: '0.04em' },
   navGroup: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 },
-  navLabel: { fontSize: 11, color: '#7A8A4A', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
-  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#3A4A22', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
-  navItemActive: { background: 'rgba(78,122,42,0.18)', color: '#2E3D18' },
+  navLabel: { fontSize: 11, color: '#8FB29E', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
+  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#CFE0D4', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
+  navItemActive: { background: 'rgba(255,255,255,0.10)', color: '#FFFFFF' },
   main: { flex: 1, minWidth: 0 },
   page: { padding: '32px 40px', maxWidth: 1100 },
   pageHeader: { marginBottom: 24 },
@@ -3610,7 +3610,7 @@ function NavBtn({ id, label, icon: Icon, small }) {
       style={{
         ...styles.navItem,
         ...(active ? styles.navItemActive : {}),
-        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#8A9758' } : {}),
+        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#8FB29E' } : {}),
       }}>
       <Icon size={small ? 13 : 17} strokeWidth={1.8} />{label}
     </button>
@@ -3645,7 +3645,7 @@ function Section({ sectionKey, label, children }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           width: '100%', background: 'none', border: 'none', cursor: 'pointer',
           padding: '5px 10px 4px 10px',
-          color: hasActive ? '#C9A24B' : '#6E7C45',
+          color: hasActive ? '#D9B45A' : '#8FB29E',
           fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
         }}>
         <span>{label}</span>
@@ -3655,7 +3655,7 @@ function Section({ sectionKey, label, children }) {
       </button>
       {isOpen && (
         <div style={{
-          borderLeft: '1px solid rgba(0,0,0,0.08)',
+          borderLeft: '1px solid rgba(255,255,255,0.12)',
           marginLeft: 14,
           paddingLeft: 0,
         }}>
@@ -3700,7 +3700,7 @@ function BizSection({ bizType, defaultOpen, children }) {
             width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
             cursor: 'pointer', padding: '8px 12px 8px 10px',
             borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
-            color: isOpen ? cfg.color : '#6E7C45',
+            color: isOpen ? cfg.color : '#8FB29E',
             fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
             transition: 'all 0.15s',
           }}>
@@ -3721,8 +3721,8 @@ function SubLabel({ label }) {
   return (
     <div style={{
       fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
-      color: '#6E7C45', padding: '7px 12px 2px 14px', marginTop: 3,
-      borderTop: '1px solid rgba(0,0,0,0.06)',
+      color: '#8FB29E', padding: '7px 12px 2px 14px', marginTop: 3,
+      borderTop: '1px solid rgba(255,255,255,0.08)',
     }}>
       {label}
     </div>
@@ -3740,7 +3740,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   const sbCtx = { view, setView, setActiveDoc, startNewDoc, activeTypes, activeBizContext, onBizContextChange, activeDocBizType, isMultiBiz };
 
   const Brand = () => (
-    <div style={{ borderBottom: '1px solid rgba(0,0,0,0.08)', paddingBottom: 10, marginBottom: 6 }}>
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: 10, marginBottom: 6 }}>
       {/* Top row: logo + settings + logout */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
         <div style={styles.brandMark}>O</div>
@@ -3753,7 +3753,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <button
             title="Business Settings"
             onClick={() => setView('settings')}
-            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#C9A24B' : '#6E7C45', display: 'flex', alignItems: 'center' }}>
+            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#D9B45A' : '#8FB29E', display: 'flex', alignItems: 'center' }}>
             <Settings size={16} strokeWidth={1.8} />
           </button>
         )}
@@ -3761,12 +3761,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <button
           title="Log out"
           onClick={onLogout}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#6E7C45', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#8FB29E', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
           <LogOut size={16} strokeWidth={1.8} />
         </button>
       </div>
       {/* Signed in as */}
-      <div style={{ padding: '0 14px', fontSize: 11, color: '#6E7C45', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ padding: '0 14px', fontSize: 11, color: '#9FBCAC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {user?.email}
       </div>
     </div>
@@ -4324,9 +4324,9 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       {/* Notification Bell */}
       <button onClick={onShowNotifications} style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-        background: view === 'notifications' ? 'rgba(78,122,42,0.16)' : 'transparent',
+        background: view === 'notifications' ? 'rgba(255,255,255,0.12)' : 'transparent',
         border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer',
-        color: '#37451E', fontSize: 13, marginBottom: 4, position: 'relative',
+        color: '#DCEAE0', fontSize: 13, marginBottom: 4, position: 'relative',
       }}>
         <span style={{ fontSize: 16 }}>🔔</span>
         <span>Notifications</span>
@@ -22653,7 +22653,7 @@ export default function App() {
         @page { size: A4; margin: 15mm; }
       `}</style>
       <button className="nav-toggle" onClick={() => setNavOpen(o => !o)} title="Menu"
-        style={{ position: 'fixed', top: 12, left: 12, zIndex: 1300, width: 38, height: 38, borderRadius: 8, border: 'none', background: '#E9F1D3', color: '#37451E', display: 'none', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.18)', fontSize: 20 }}>☰</button>
+        style={{ position: 'fixed', top: 12, left: 12, zIndex: 1300, width: 38, height: 38, borderRadius: 8, border: 'none', background: '#234F3A', color: '#DCEAE0', display: 'none', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.18)', fontSize: 20 }}>☰</button>
       <div className={"nav-overlay" + (navOpen ? " show" : "")} onClick={() => setNavOpen(false)} />
       <Sidebar
         view={view}
