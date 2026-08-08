@@ -401,15 +401,15 @@ function parseOCRText(text) {
 
 const styles = {
   app: { display: 'flex', minHeight: '100vh', background: '#FAF8F4', color: '#3A3F4B', fontSize: 14 },
-  sidebar: { width: 220, background: '#1E2A4A', color: '#E8E6DE', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
+  sidebar: { width: 220, background: '#E9F1D3', color: '#37451E', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
   brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
-  brandName: { fontSize: 17, fontWeight: 600, color: '#fff' },
-  brandSub: { fontSize: 11, color: '#A9B0C9', letterSpacing: '0.04em' },
+  brandName: { fontSize: 17, fontWeight: 600, color: '#2E3D18' },
+  brandSub: { fontSize: 11, color: '#6E7C45', letterSpacing: '0.04em' },
   navGroup: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 },
-  navLabel: { fontSize: 11, color: '#7E89AD', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
-  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#C9CEDF', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
-  navItemActive: { background: 'rgba(255,255,255,0.08)', color: '#fff' },
+  navLabel: { fontSize: 11, color: '#7A8A4A', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
+  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#3A4A22', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
+  navItemActive: { background: 'rgba(78,122,42,0.18)', color: '#2E3D18' },
   main: { flex: 1, minWidth: 0 },
   page: { padding: '32px 40px', maxWidth: 1100 },
   pageHeader: { marginBottom: 24 },
@@ -2485,53 +2485,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             </div>
 
             {/* ── Cloud Backups (server-side, all devices) ── */}
-            {userRole === 'admin' && onBackupNow && (
+            {userRole === 'admin' && onTestConnection && (
             <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>☁ Cloud backups (all devices)</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>🔌 Server connection</div>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 1.6 }}>
-                Automatic version history stored on the server. Any admin can restore from any device or PC. A snapshot is taken automatically each day — you can also take one now.
+                Check that your data is reaching the server. Your data syncs automatically and is also backed up on this device.
               </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button disabled={cloudBusy} onClick={async () => {
-                  setCloudBusy(true); setCloudMsg('');
-                  try { await onBackupNow(); setCloudMsg('✓ Backup saved to cloud.'); if (cloudBackups) { const l = await onListCloudBackups(); setCloudBackups(l || []); } }
-                  catch (e) { setCloudMsg('Could not save backup: ' + (e && e.message ? e.message : 'error')); }
-                  setCloudBusy(false);
-                }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>☁ Back up now</button>
-                <button disabled={cloudBusy} onClick={async () => {
-                  setCloudBusy(true); setCloudMsg('');
-                  try { const l = await onListCloudBackups(); setCloudBackups(l || []); if (!l || !l.length) setCloudMsg('No cloud backups yet.'); }
-                  catch (e) { setCloudMsg('Could not load history.'); }
-                  setCloudBusy(false);
-                }} style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>⟳ View backup history</button>
-                {onTestConnection && <button disabled={cloudBusy} onClick={async () => {
-                  setCloudBusy(true); setCloudMsg('Testing server…');
-                  try { const m = await onTestConnection(); setCloudMsg(m); window.alert(m); }
-                  catch (e) { const m = '❌ ' + (e && e.message ? e.message : e); setCloudMsg(m); window.alert(m); }
-                  setCloudBusy(false);
-                }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>}
-              </div>
+              <button disabled={cloudBusy} onClick={async () => {
+                setCloudBusy(true); setCloudMsg('Testing server…');
+                try { const m = await onTestConnection(); setCloudMsg(m); window.alert(m); }
+                catch (e) { const m = '❌ ' + (e && e.message ? e.message : e); setCloudMsg(m); window.alert(m); }
+                setCloudBusy(false);
+              }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
-              {cloudBackups && cloudBackups.length > 0 && (
-                <div style={{ marginTop: 12, border: '1px solid #EAE6DB', borderRadius: 8, overflow: 'hidden' }}>
-                  {cloudBackups.map((b, i) => {
-                    const iso = (b.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
-                    const when = !isNaN(Date.parse(iso)) ? new Date(iso).toLocaleString() : b.label;
-                    return (
-                      <div key={b.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderTop: i ? '1px solid #F0EDE5' : 'none', fontSize: 12.5 }}>
-                        <span style={{ color: '#1E2A4A' }}>{when}</span>
-                        <button disabled={cloudBusy} onClick={async () => {
-                          if (!window.confirm('Restore this cloud backup? It re-saves every record to the server for all users.')) return;
-                          setCloudBusy(true); setCloudMsg('');
-                          try { await onRestoreCloud(b.path); setCloudMsg('✓ Restored from ' + when); }
-                          catch (e) { setCloudMsg('Restore failed: ' + (e && e.message ? e.message : 'error')); }
-                          setCloudBusy(false);
-                        }} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px' }}>Restore</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
             )}
 
@@ -3644,7 +3610,7 @@ function NavBtn({ id, label, icon: Icon, small }) {
       style={{
         ...styles.navItem,
         ...(active ? styles.navItemActive : {}),
-        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#A9B0C9' } : {}),
+        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#8A9758' } : {}),
       }}>
       <Icon size={small ? 13 : 17} strokeWidth={1.8} />{label}
     </button>
@@ -3679,7 +3645,7 @@ function Section({ sectionKey, label, children }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           width: '100%', background: 'none', border: 'none', cursor: 'pointer',
           padding: '5px 10px 4px 10px',
-          color: hasActive ? '#C9A24B' : '#6B7494',
+          color: hasActive ? '#C9A24B' : '#6E7C45',
           fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
         }}>
         <span>{label}</span>
@@ -3689,7 +3655,7 @@ function Section({ sectionKey, label, children }) {
       </button>
       {isOpen && (
         <div style={{
-          borderLeft: '1px solid rgba(255,255,255,0.08)',
+          borderLeft: '1px solid rgba(0,0,0,0.08)',
           marginLeft: 14,
           paddingLeft: 0,
         }}>
@@ -3734,7 +3700,7 @@ function BizSection({ bizType, defaultOpen, children }) {
             width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
             cursor: 'pointer', padding: '8px 12px 8px 10px',
             borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
-            color: isOpen ? cfg.color : '#6B7494',
+            color: isOpen ? cfg.color : '#6E7C45',
             fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
             transition: 'all 0.15s',
           }}>
@@ -3755,8 +3721,8 @@ function SubLabel({ label }) {
   return (
     <div style={{
       fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
-      color: '#6B7494', padding: '7px 12px 2px 14px', marginTop: 3,
-      borderTop: '1px solid rgba(255,255,255,0.05)',
+      color: '#6E7C45', padding: '7px 12px 2px 14px', marginTop: 3,
+      borderTop: '1px solid rgba(0,0,0,0.06)',
     }}>
       {label}
     </div>
@@ -3764,7 +3730,7 @@ function SubLabel({ label }) {
 }
 
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null }) {
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -3774,7 +3740,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   const sbCtx = { view, setView, setActiveDoc, startNewDoc, activeTypes, activeBizContext, onBizContextChange, activeDocBizType, isMultiBiz };
 
   const Brand = () => (
-    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 10, marginBottom: 6 }}>
+    <div style={{ borderBottom: '1px solid rgba(0,0,0,0.08)', paddingBottom: 10, marginBottom: 6 }}>
       {/* Top row: logo + settings + logout */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
         <div style={styles.brandMark}>O</div>
@@ -3787,7 +3753,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <button
             title="Business Settings"
             onClick={() => setView('settings')}
-            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#C9A24B' : '#6B7494', display: 'flex', alignItems: 'center' }}>
+            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#C9A24B' : '#6E7C45', display: 'flex', alignItems: 'center' }}>
             <Settings size={16} strokeWidth={1.8} />
           </button>
         )}
@@ -3795,12 +3761,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <button
           title="Log out"
           onClick={onLogout}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#6B7494', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#6E7C45', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
           <LogOut size={16} strokeWidth={1.8} />
         </button>
       </div>
       {/* Signed in as */}
-      <div style={{ padding: '0 14px', fontSize: 11, color: '#6B7494', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ padding: '0 14px', fontSize: 11, color: '#6E7C45', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {user?.email}
       </div>
     </div>
@@ -3809,7 +3775,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   function renderSidebarContent() {
   // ── Admin / Manager sidebar ───────────────────────────────────────────────
   if (userRole === 'admin' || userRole === 'manager') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button — shown when user entered from home screen */}
@@ -4171,7 +4137,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Sales staff ───────────────────────────────────────────────────────────
   if (userRole === 'sales') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4207,7 +4173,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Purchase staff ────────────────────────────────────────────────────────
   if (userRole === 'purchase') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4240,7 +4206,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Inventory staff ───────────────────────────────────────────────────────
   if (userRole === 'inventory') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4286,7 +4252,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Accounts staff ────────────────────────────────────────────────────────
   if (userRole === 'accounts') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4320,7 +4286,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Fallback ──────────────────────────────────────────────────────────────
   return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4354,9 +4320,9 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       {/* Notification Bell */}
       <button onClick={onShowNotifications} style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-        background: view === 'notifications' ? 'rgba(255,255,255,0.12)' : 'transparent',
+        background: view === 'notifications' ? 'rgba(78,122,42,0.16)' : 'transparent',
         border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer',
-        color: '#E8E6DE', fontSize: 13, marginBottom: 4, position: 'relative',
+        color: '#37451E', fontSize: 13, marginBottom: 4, position: 'relative',
       }}>
         <span style={{ fontSize: 16 }}>🔔</span>
         <span>Notifications</span>
@@ -20857,6 +20823,7 @@ const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,             setView]           = useState('dashboard');
+  const [navOpen,          setNavOpen]        = useState(false);
   const [activeDoc,        setActiveDoc]       = useState(null);
   const [user,             setUser]            = useState(null);
   const [ownerUid,         setOwnerUid]        = useState(null);
@@ -20980,6 +20947,9 @@ export default function App() {
     setBiReady(false);
   }, [user?.uid]);
 
+  // Close the mobile nav drawer whenever the view changes
+  useEffect(() => { setNavOpen(false); }, [view]);
+
   // ── Grace period expiry check — auto-open delete modal if 30-day window passed ──
   useEffect(() => {
     if (!biReady) return;
@@ -21007,22 +20977,6 @@ export default function App() {
       clearTimeout(biReadyFallback);
       setBiReady(true);
       latestDataRef.current = data;
-      // Automatic cloud backup (server-side, works across every device & user).
-      // Once per session, if no snapshot in the last 12h, save one to Storage.
-      if (user && ownerUid === user.uid && !cloudBackupCheckedRef.current) {
-        cloudBackupCheckedRef.current = true;
-        const _snap = { ...data };
-        listServerBackups(ownerUid).then((list) => {
-          let recent = false;
-          const newest = list && list[0];
-          if (newest) {
-            const iso = (newest.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
-            const t = Date.parse(iso);
-            if (!isNaN(t) && (Date.now() - t) < 12 * 3600 * 1000) recent = true;
-          }
-          if (!recent) saveServerBackup(ownerUid, _snap).catch((e) => console.warn('cloud backup:', e && e.message));
-        }).catch(() => {});
-      }
       // ── Auto-backup: silently save to localStorage on every real data load ──
       // If Firestore is ever wiped again, the user can restore from this copy.
       try {
@@ -21361,9 +21315,14 @@ export default function App() {
       exportedAt: new Date().toISOString(),
       exportedBy: user?.email || '',
       businessInfo, documents, customers, vendors, items, stockLedger, grns,
-      vouchers, pettyCash, employees, payrollRuns, serviceOrders, productionOrders,
-      rawMaterials, boms, parts, engDocs, enquiries, contracts, channelPartners,
-      termsLibrary, scopeOfWork, qualityDocs, pdvs,
+      vouchers, pettyCash, employees, payrollRuns, hrLetters, storeIssues,
+      serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
+      enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
+      qualityDocs, pdvs, moms, siteProjects, siteActivities, progressUpdates,
+      clientMaterials, siteAttendance, evaluations, capaRecords, internalAudits,
+      vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
+      amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
+      handoverDocs, auditDocs, rackStore, mepBoms,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -22350,6 +22309,15 @@ export default function App() {
     <div style={styles.app} className="no-print-bg">
       <style>{`
         * { box-sizing: border-box; }
+        .nav-toggle { display: none; }
+        .nav-overlay { display: none; }
+        @media (max-width: 820px) {
+          .sidebar-nav { position: fixed !important; left: 0; top: 0; height: 100vh !important; z-index: 1200; transform: translateX(-100%); transition: transform .25s ease; box-shadow: 2px 0 18px rgba(0,0,0,0.22); }
+          .sidebar-nav.open { transform: translateX(0); }
+          .nav-toggle { display: flex !important; }
+          .nav-overlay.show { display: block !important; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1100; }
+          .app-main { padding-top: 54px !important; }
+        }
         body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
         .serif { font-family: 'Lora', Georgia, serif; }
         button { cursor: pointer; font-family: inherit; }
@@ -22384,6 +22352,9 @@ export default function App() {
         }
         @page { size: A4; margin: 15mm; }
       `}</style>
+      <button className="nav-toggle" onClick={() => setNavOpen(o => !o)} title="Menu"
+        style={{ position: 'fixed', top: 12, left: 12, zIndex: 1300, width: 38, height: 38, borderRadius: 8, border: 'none', background: '#E9F1D3', color: '#37451E', display: 'none', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.18)', fontSize: 20 }}>☰</button>
+      <div className={"nav-overlay" + (navOpen ? " show" : "")} onClick={() => setNavOpen(false)} />
       <Sidebar
         view={view}
         setView={setView}
@@ -22402,6 +22373,7 @@ export default function App() {
         activeBizContext={effectiveBizContext}
         onBizContextChange={setActiveBizContext}
         onSwitchActivity={activeTypes.length > 1 ? () => setSessionContext(null) : null}
+        navOpen={navOpen}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
@@ -22427,7 +22399,7 @@ export default function App() {
         )}
       </button>
 
-      <div style={styles.main}>
+      <div style={styles.main} className="app-main">
         {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && (
           <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
         )}
