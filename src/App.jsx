@@ -112,7 +112,7 @@ const EMPTY_ITEM_ROW = (businessInfo) => {
   return {
     id: crypto.randomUUID(),
     itemId: '', name: '', hsn: '',
-    qty: 1, rate: 0, gst: defaultGst,
+    qty: 1, rate: 0, discount: 0, gst: defaultGst,
     packages: 1, netWeight: 0, grossWeight: 0, dimensions: '',
   };
 };
@@ -200,15 +200,17 @@ function makeFmt(businessInfo) {
 }
 
 function computeTotals(doc, sellerState, country) {
-  let subtotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
+  let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
   (doc.items || []).forEach((it) => {
     const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const disc = amt * (Number(it.discount) || 0) / 100;
     subtotal += amt;
+    discountTotal += disc;
     if (cc.hasTax) {
-      const taxAmt = amt * (Number(it.gst) || 0) / 100;
+      const taxAmt = (amt - disc) * (Number(it.gst) || 0) / 100;
       if (cc.splitTax) {
         if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
         else { igst += taxAmt; }
@@ -218,8 +220,8 @@ function computeTotals(doc, sellerState, country) {
     }
   });
   const totalTax = cgst + sgst + igst + vat;
-  const grandTotal = subtotal + totalTax;
-  return { subtotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
+  const grandTotal = subtotal - discountTotal + totalTax;
+  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
 }
 
 // ─── Shared tax helper for non-DocEditor modules (Tender, RA Bill, AMC, etc.) ─
@@ -1434,9 +1436,9 @@ function printCustomerDetail(c, docs, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #1A1A2E; margin: 0; padding: 0; }
   .page { max-width: 740px; margin: 0 auto; padding: 40px 48px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:14px; margin-bottom:24px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:14px; margin-bottom:24px; }
   .bname { font-size:20px; font-weight:700; color:#1E2A4A; }
-  .binfo { font-size:11px; color:#555; line-height:1.6; text-align:right; }
+  .binfo { font-size:11px; color:#555; line-height:1.6; }
   h2 { font-size:18px; color:#1E2A4A; margin:0 0 16px; }
   .grid { display:grid; grid-template-columns:140px 1fr; gap:8px 12px; margin-bottom:20px; }
   .lbl { color:#6B7494; font-size:12px; }
@@ -1495,7 +1497,7 @@ function printAllCustomers(customers, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 12px; color: #1A1A2E; margin: 0; padding: 0; }
   .page { padding: 30px 36px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:12px; margin-bottom:20px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:12px; margin-bottom:20px; }
   .bname { font-size:18px; font-weight:700; color:#1E2A4A; }
   h2 { font-size:15px; color:#1E2A4A; margin:0 0 14px; }
   table { width:100%; border-collapse:collapse; font-size:11.5px; }
@@ -5071,6 +5073,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
                         title="Rate"
                       />
+                      {cc.hasTax && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {cc.hasTax && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
                       {isEditable && (
                         <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
                       )}
@@ -5569,6 +5573,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#555', borderBottom: '1px solid #F2EFE6' }}>
                 <span>Subtotal</span><span>{fmt(totals.subtotal)}</span>
               </div>
+              {totals.discountTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#B5453A', borderBottom: '1px solid #F2EFE6' }}>
+                  <span>Less: Discount</span><span>− {fmt(totals.discountTotal)}</span>
+                </div>
+              )}
               {cc.hasTax && (cc.splitTax ? (
                 totals.sameState ? (
                   <>
@@ -8440,9 +8449,9 @@ function printHRLetter(letter, emp, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; position: relative; }
-  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .letterhead { border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
   .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
-  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; }
   h2 { text-align: center; color: #1E2A4A; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 24px; }
   .ref { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 20px; }
   p { line-height: 1.75; margin: 0 0 12px; }
@@ -8489,9 +8498,9 @@ function printOfferLetterDoc(ol, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:16px; margin-bottom:28px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:16px; margin-bottom:28px; }
   .bname { font-size:20px; font-weight:700; color:#1E2A4A; }
-  .binfo { font-size:11px; color:#555; line-height:1.6; text-align:right; }
+  .binfo { font-size:11px; color:#555; line-height:1.6; }
   h2 { text-align:center; color:#1E2A4A; margin:0 0 24px; font-size:16px; letter-spacing:.05em; text-transform:uppercase; }
   .ref { text-align:right; font-size:12px; color:#555; margin-bottom:20px; }
   p { line-height:1.7; margin:0 0 12px; }
@@ -9157,9 +9166,9 @@ function printOfferLetter(emp, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; }
-  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .letterhead { border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
   .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
-  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; }
   h2 { text-align: center; color: #1E2A4A; margin: 0 0 24px; font-size: 16px; letter-spacing: 0.05em; text-transform: uppercase; }
   .ref { text-align: right; font-size: 12px; color: #555; margin-bottom: 20px; }
   p { line-height: 1.7; margin: 0 0 12px; }
