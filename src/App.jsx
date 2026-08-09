@@ -5500,6 +5500,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           )}
 
+          <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }`}</style>
           <table style={styles.table}>
             <thead>
               <tr>
@@ -5530,18 +5531,21 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
                       {isEditable
-                        ? <div style={{ display: 'grid', minWidth: 180, width: '100%' }}>
-                            <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', border: '1px solid transparent', fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 28 }}>{(it.name || 'Item description') + ' '}</div>
-                            <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', height: '100%', width: '100%' }} />
-                          </div>
+                        ? <>
+                            <div className="di-screen" style={{ display: 'grid', minWidth: 180, width: '100%' }}>
+                              <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', border: '1px solid transparent', fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 28 }}>{(it.name || 'Item description') + ' '}</div>
+                              <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', height: '100%', width: '100%' }} />
+                            </div>
+                            <div className="di-print" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>
+                          </>
                         : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
                       <td style={styles.td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
+                          <input className="di-input" value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
                           {isEditable && cc.splitTax && (
-                            <button type="button" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
+                            <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>
                               🔍
                             </button>
@@ -5551,13 +5555,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                     )}
                     <td style={styles.td}><input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
                     {doc.type === 'packing_list' ? (<>
-                      <td style={styles.td}><input type="number" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
                     </>) : (<>
-                      <td style={styles.td}><input type="number" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      {cc.hasTax && <td style={styles.td}><input type="number" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
+                      <td style={styles.td}><input type="number" className="di-input" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      {cc.hasTax && <td style={styles.td}><input type="number" className="di-input" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
                     </>)}
                     {isEditable && <td className="no-print" style={styles.td}>
@@ -17544,7 +17548,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
       {form.items.map((it,i)=>(
         <div key={i} style={{ display:'grid', gridTemplateColumns:'3fr 1fr 1fr 1.2fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
           <input value={it.description} onChange={e=>updateItem(i,'description',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Description" />
-          <input value={it.qty} onChange={e=>updateItem(i,'qty',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Qty" />
+          <input className="di-input" value={it.qty} onChange={e=>updateItem(i,'qty',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Qty" />
           <select value={it.unit} onChange={e=>updateItem(i,'unit',e.target.value)} style={{ ...styles.input, fontSize:12 }}>
             {['nos','m','m²','kg','ltr','roll','set','lot'].map(u=><option key={u} value={u}>{u}</option>)}
           </select>
