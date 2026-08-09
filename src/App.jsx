@@ -6527,13 +6527,17 @@ function printHTML(html){
 function StdDocHeader({ businessInfo, title, subtitle }) {
   const bi = businessInfo || {};
   const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
-  const contact = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean).join('  ·  ');
+  const cParts = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean);
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
       <div>
         <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>
         {bi.address && <div style={{ fontSize: 11.5, color: '#666', marginTop: 3, maxWidth: 340 }}>{bi.address}</div>}
-        {contact && <div style={{ fontSize: 11.5, color: '#666', marginTop: 2 }}>{contact}</div>}
+        {cParts.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: '#666', marginTop: 3 }}>
+            {cParts.map((x, i) => (<span key={i} style={{ whiteSpace: 'nowrap' }}>{i > 0 && <span style={{ margin: '0 8px', color: '#bbb' }}>·</span>}{x}</span>))}
+          </div>
+        )}
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, paddingLeft: 16 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</div>
@@ -6563,6 +6567,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
           <div style={{ fontSize: 11, color: '#666', marginTop: 2, maxWidth: 300 }}>{businessInfo.address}</div>
           {businessInfo.gstin && <div style={{ fontSize: 11, color: '#666' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>}
           {businessInfo.phone && <div style={{ fontSize: 11, color: '#666' }}>{businessInfo.phone}</div>}
+          {(businessInfo.email || businessInfo.website) && <div style={{ fontSize: 11, color: '#666' }}>{[businessInfo.email, businessInfo.website].filter(Boolean).join(' · ')}</div>}
         </div>
       </div>
     </div>
@@ -14466,6 +14471,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         <div style="font-size:20px;font-weight:700;color:#1E2A4A;">${bi?.name||bi?.companyName||''}</div>
         <div style="font-size:11px;color:#666;margin-top:4px;">${bi?.address||''}</div>
         ${isIndia && bi?.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${bi.gstin}</div>` : ''}
+        ${[bi?.phone, bi?.email, bi?.website].filter(Boolean).length ? `<div style="font-size:11px;color:#666;margin-top:2px;">${[bi?.phone, bi?.email, bi?.website].filter(Boolean).join(' · ')}</div>` : ''}
       </div>` : '';
 
     const draftWm = isDraft ? `
