@@ -6455,6 +6455,25 @@ function LetterheadHeader({ bi, style = {} }) {
   return null;
 }
 
+function StdDocHeader({ businessInfo, title, subtitle }) {
+  const bi = businessInfo || {};
+  const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
+  const contact = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || ''].filter(Boolean).join('  ·  ');
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
+      <div>
+        <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>
+        {bi.address && <div style={{ fontSize: 11.5, color: '#666', marginTop: 3, maxWidth: 340 }}>{bi.address}</div>}
+        {contact && <div style={{ fontSize: 11.5, color: '#666', marginTop: 2 }}>{contact}</div>}
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0, paddingLeft: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11.5, color: '#888', marginTop: 4 }}>{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
 function VoucherPrintHeader({ businessInfo, useLH }) {
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   if (useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) {
@@ -8481,6 +8500,7 @@ function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, busi
     return (
       <OfferLetterForm
         ol={active}
+        existingCount={offerLetters.length}
         employees={employees}
         businessInfo={businessInfo}
         onSave={saveOffer}
@@ -8563,11 +8583,11 @@ function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, busi
   );
 }
 
-function OfferLetterForm({ ol, employees, businessInfo, onSave, onClose }) {
+function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSave, onClose }) {
   const country = businessInfo?.country || 'india';
 
   function nextRef() {
-    return 'OL-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-4);
+    return 'OL-' + new Date().getFullYear() + '-' + String((existingCount || 0) + 1).padStart(3, '0');
   }
 
   const blank = {
@@ -8752,6 +8772,7 @@ function HRLettersView({ letterType, hrLetters, setHrLetters, employees, userRol
     return (
       <HRLetterForm
         letterType={letterType}
+        existingCount={filtered.length}
         letter={activeLetter}
         employees={employees}
         businessInfo={businessInfo}
@@ -8863,15 +8884,15 @@ function HRLettersView({ letterType, hrLetters, setHrLetters, employees, userRol
   );
 }
 
-function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onClose }) {
+function HRLetterForm({ letterType, existingCount = 0, letter, employees, businessInfo, onSave, onClose }) {
   const isWarn = letterType === 'warning';
-  const count  = Date.now();
+  const count  = (existingCount || 0) + 1;
   const prefix = isWarn ? 'HR/WL/' : 'HR/TL/';
 
   const blank = isWarn ? {
     id: crypto.randomUUID(),
     type: 'warning',
-    refNo: prefix + String(count).slice(-4),
+    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     warnType: 'written',
@@ -8884,7 +8905,7 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
   } : {
     id: crypto.randomUUID(),
     type: 'termination',
-    refNo: prefix + String(count).slice(-4),
+    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     terminationDate: '',
@@ -10979,16 +11000,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
-              <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>MINUTES OF MEETING</div>
-              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.type === 'external' ? 'External' : 'Internal')}</div>
-            </div>
-          </div>
+          <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
@@ -14571,12 +14583,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       <div className="print-area contract-print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)', overflow:'hidden' }}>
         {effLHH && <div style={{ background:'#fff', lineHeight:0 }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ padding: '32px 56px' }}>
-        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
-          {!effLHH && bi.name && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
-          {!effLHH && bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
-          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>CONTRACT AGREEMENT</div>
-          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}{c.poRefNumber ? ` | PO Ref: ${c.poRefNumber}` : ''}</div>
-        </div>
+        <StdDocHeader businessInfo={bi} title="Contract Agreement" subtitle={'Contract No: ' + c.number + ' | Date: ' + c.date + (c.poRefNumber ? ' | PO Ref: ' + c.poRefNumber : '')} />
         <div style={{ marginBottom: 28 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: '#1E2A4A', textTransform: 'uppercase' }}>Parties</div>
           <p>This Contract Agreement is entered into between <strong>{bi.name || bi.companyName || 'the Company'}</strong> (the "{c.buyerRole || 'Buyer'}") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "{c.supplierRole || 'Supplier'}").</p>
