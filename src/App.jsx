@@ -10744,7 +10744,7 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
   const today = new Date().toISOString().slice(0, 10);
-  const blankItem = () => ({ itemId: '', name: '', uom: '', qty: '', purpose: '' });
+  const blankItem = () => ({ itemId: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
   const blank = () => ({
     type: 'project', linkId: '', linkName: '',
     date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
@@ -10805,20 +10805,25 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   function pickItem(i, itemId) {
     const it = (items || []).find(x => String(x.id) === itemId);
     if (!it) { setRow(i, 'itemId', ''); return; }
-    setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], itemId: it.id, name: it.name, uom: it.unit || r[i].uom || '' }; return { ...e, items: r }; });
+    setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], itemId: it.id, name: it.name, uom: it.unit || r[i].uom || '', rate: (it.purchaseRate ?? it.rate ?? r[i].rate ?? ''), hsn: (it.hsn || r[i].hsn || '') }; return { ...e, items: r }; });
   }
 
   function loadFromBom() {
     const bom = allBoms.find(b => b.ref === editing.bomRef);
     if (!bom) { alert('Select a BOM first.'); return; }
     const mult = parseFloat(editing.bomMult) || 1;
-    const rows = (bom.items || []).map(it => ({
-      itemId: it.itemId || '',
-      name: it.name || it.itemName || it.description || it.material || it.materialName || '',
-      uom: it.unit || it.uom || '',
-      qty: ((parseFloat(it.qty) || 0) * mult) || '',
-      purpose: '',
-    })).filter(r => r.name);
+    const rows = (bom.items || []).map(it => {
+      const m = (items || []).find(x => String(x.id) === String(it.itemId));
+      return {
+        itemId: it.itemId || '',
+        name: it.name || it.itemName || it.description || it.material || it.materialName || '',
+        uom: it.unit || it.uom || '',
+        qty: ((parseFloat(it.qty) || 0) * mult) || '',
+        rate: m ? (m.purchaseRate ?? m.rate ?? '') : (it.rate ?? ''),
+        hsn: m ? (m.hsn || '') : (it.hsn || ''),
+        purpose: '',
+      };
+    }).filter(r => r.name);
     if (!rows.length) { alert('This BOM has no items.'); return; }
     setEditing(e => ({ ...e, items: rows }));
   }
@@ -10934,20 +10939,33 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           <div style={card}>
             <label style={lbl}>Items required</label>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['#', 'Item (master)', 'Item / Material name', 'UOM', 'Qty', 'Purpose', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead><tr>{['#', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
               <tbody>
-                {(e.items || []).map((it, i) => (
+                {(e.items || []).map((it, i) => {
+                  const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+                  return (
                   <tr key={i}>
                     <td style={{ ...td, color: '#888' }}>{i + 1}</td>
                     <td style={td}><select style={inp} value={it.itemId} onChange={ev => pickItem(i, ev.target.value)}><option value="">— pick —</option>{(items || []).map(x => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select></td>
                     <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Item / material" /></td>
+                    <td style={td}><input style={{ ...inp, width: 90 }} value={it.hsn || ''} onChange={ev => setRow(i, 'hsn', ev.target.value)} placeholder="HSN" /></td>
                     <td style={td}><input style={{ ...inp, width: 70 }} value={it.uom} onChange={ev => setRow(i, 'uom', ev.target.value)} placeholder="nos" /></td>
-                    <td style={td}><input type="number" style={{ ...inp, width: 80 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 70 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 90, textAlign: 'right' }} value={it.rate ?? ''} onChange={ev => setRow(i, 'rate', ev.target.value)} placeholder="0" /></td>
+                    <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{amt ? amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
                     <td style={td}><input style={inp} value={it.purpose} onChange={ev => setRow(i, 'purpose', ev.target.value)} placeholder="optional" /></td>
                     <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delRow(i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={7} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Total</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{(e.items || []).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
             </table>
             <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add item</button>
           </div>
