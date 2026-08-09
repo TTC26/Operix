@@ -4597,6 +4597,26 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [useLH, setUseLH] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [mergeSel, setMergeSel] = useState([]);
+  function toggleMerge(id) { setMergeSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); }
+  function mergeSelected() {
+    const selSet = new Set(mergeSel);
+    setDoc((d) => {
+      const sel = (d.items || []).filter((it) => selSet.has(it.id));
+      if (sel.length < 2) return d;
+      const totalAmt = sel.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
+      const names = sel.map((it) => (it.name || '').trim()).filter(Boolean);
+      const merged = { ...EMPTY_ITEM_ROW(businessInfo), id: crypto.randomUUID(), name: names.join('\n'), qty: 1, rate: totalAmt, gst: sel[0].gst, discount: 0, hsn: sel[0].hsn || '' };
+      let inserted = false;
+      const out = [];
+      for (const it of d.items) {
+        if (selSet.has(it.id)) { if (!inserted) { out.push(merged); inserted = true; } }
+        else out.push(it);
+      }
+      return { ...d, items: out };
+    });
+    setMergeSel([]);
+  }
   const bizBadge = BIZ_BADGE[doc.bizType];
   const showBizBadge = !!bizBadge;
 
@@ -5510,7 +5530,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
                       {isEditable
-                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { const grow = () => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }; grow(); requestAnimationFrame(grow); } }} onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block', minWidth: 180, boxSizing: 'border-box' }} />
+                        ? <div style={{ display: 'grid', minWidth: 180, width: '100%' }}>
+                            <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', border: '1px solid transparent', fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 28 }}>{(it.name || 'Item description') + ' '}</div>
+                            <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', height: '100%', width: '100%' }} />
+                          </div>
                         : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
@@ -5538,7 +5561,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
                     </>)}
                     {isEditable && <td className="no-print" style={styles.td}>
-                      <button onClick={() => removeRow(it.id)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="checkbox" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Select to merge into one line" style={{ cursor: 'pointer', width: 15, height: 15 }} />
+                        <button onClick={() => removeRow(it.id)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
+                      </div>
                     </td>}
                   </tr>
                 );
@@ -5546,7 +5572,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </tbody>
           </table>
 
-          {isEditable && <button onClick={addRow} className="no-print" style={styles.addRowBtn}><Plus size={14} /> Add line item</button>}
+          {isEditable && <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={addRow} style={styles.addRowBtn}><Plus size={14} /> Add line item</button>
+            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Merge {mergeSel.length} items into one line</button>}
+            {mergeSel.length >= 1 && <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(select 2+ to merge)' : ''}</span>}
+          </div>}
 
           {/* ── Packing List weight totals ── */}
           {doc.type === 'packing_list' && (() => {
