@@ -5510,7 +5510,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
                       {isEditable
-                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block', minWidth: 180, boxSizing: 'border-box' }} />
+                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { const grow = () => { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }; grow(); requestAnimationFrame(grow); } }} onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block', minWidth: 180, boxSizing: 'border-box' }} />
                         : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
