@@ -22699,7 +22699,11 @@ export default function App() {
             currentBizType={effectiveBizContext}
             isMultiBiz={isMultiBiz}
             onConvertToPO={(pr) => {
-              const its = (pr.items || []).filter(it => it.name).map(it => ({ ...EMPTY_ITEM_ROW(businessInfo), itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1 }));
+              const its = (pr.items || []).filter(it => it.name).map(it => {
+                const m = (items || []).find(x => String(x.id) === String(it.itemId));
+                const base = EMPTY_ITEM_ROW(businessInfo);
+                return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
+              });
               startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
             }}
