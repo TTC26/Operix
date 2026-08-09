@@ -1725,6 +1725,61 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  function handleItemImport(e){
+    const file = e.target.files && e.target.files[0]; if(!file) return;
+    const rdr = new FileReader();
+    rdr.onload = () => {
+      try {
+        const text = String(rdr.result || '');
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if(!lines.length){ alert('The file is empty.'); e.target.value=''; return; }
+        const parseLine = (l) => l.split(',').map(c => c.replace(/^"|"$/g,'').trim());
+        const headers = parseLine(lines[0]).map(h => h.toLowerCase());
+        const idx = (arr) => { for(const nm of arr){ const i = headers.indexOf(nm); if(i>=0) return i; } return -1; };
+        const iName = idx(['name','item','item name','description','product']);
+        const iUnit = idx(['unit','uom']);
+        const iCat  = idx(['category','group']);
+        const iHsn  = idx(['hsn','sac','hsn/sac','hsn code']);
+        const iOpen = idx(['opening stock','openingstock','opening','stock','qty']);
+        const iMin  = idx(['min stock','minstock','minimum','reorder']);
+        const iBuy  = idx(['purchase rate','purchaserate','buy','cost','purchase']);
+        const iSell = idx(['sale rate','salerate','sell','price','sale','mrp']);
+        const iGst  = idx(['gst','tax','tax %','gst %']);
+        const iCode = idx(['item code','itemcode','code','sku']);
+        const startRow = iName>=0 ? 1 : 0;
+        const cc2 = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india;
+        const defGst = (businessInfo && businessInfo.taxRate!=null) ? businessInfo.taxRate : cc2.defaultTaxRate;
+        let seq = (items||[]).length;
+        const nextCode = () => { seq += 1; return 'IT-' + String(seq).padStart(3,'0'); };
+        const num = (v) => { const n = parseFloat(v); return isNaN(n)?0:n; };
+        const newItems = [];
+        for(let r=startRow; r<lines.length; r++){
+          const cols = parseLine(lines[r]);
+          const get = (i) => (i>=0 && cols[i]!=null) ? cols[i] : '';
+          const name = iName>=0 ? get(iName) : (cols[0]||'');
+          if(!name) continue;
+          newItems.push({
+            id: crypto.randomUUID(),
+            itemCode: (iCode>=0 && get(iCode)) ? get(iCode) : nextCode(),
+            name,
+            unit: get(iUnit),
+            category: get(iCat),
+            hsn: get(iHsn),
+            openingStock: num(get(iOpen)),
+            minStock: num(get(iMin)),
+            purchaseRate: num(get(iBuy)),
+            saleRate: num(get(iSell)),
+            gst: get(iGst)!=='' ? num(get(iGst)) : defGst,
+          });
+        }
+        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); e.target.value=''; return; }
+        setItems(prev => [...(prev||[]), ...newItems]);
+        alert('✅ Imported ' + newItems.length + ' items (item codes auto-assigned).');
+      } catch(err){ alert('Could not read the file. Please use a CSV (save Excel as CSV) with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
+      e.target.value = '';
+    };
+    rdr.readAsText(file);
+  }
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -1733,6 +1788,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -6706,7 +6762,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
   const stockMap = computeStock(stockLedger, items);
 
   const rows = Object.values(stockMap)
-    .filter(r => r.item && r.item.name && r.item.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(r => { const it = r.item; if (!it) return false; const q = search.trim().toLowerCase(); return !q || (it.name||'').toLowerCase().includes(q) || (it.itemCode||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q) || (it.hsn||'').toLowerCase().includes(q); })
     .sort((a, b) => (a.item.name || '').localeCompare(b.item.name || ''));
 
   const totalValue = rows.reduce((s, r) => s + Math.max(0, r.value), 0);
@@ -6734,6 +6790,13 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
     setShowAdj(false); setAdjItem(''); setAdjQty(''); setAdjNote('');
   }
 
+  function printStock(){
+    const w=window.open('','_blank'); if(!w) return;
+    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'\u2014')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'\u2014')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
+    w.document.write('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    w.document.close(); setTimeout(function(){w.print();},300);
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -6742,6 +6805,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
           <div style={{ fontSize: 13, color: '#888780' }}>Current inventory levels across all items</div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button style={styles.ghostBtn} onClick={printStock}>🖨 Print</button>
           {lowStock.length > 0 && (
             <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, color: '#B91C1C', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               ⚠️ {lowStock.length} item{lowStock.length > 1 ? 's' : ''} low on stock
@@ -6921,7 +6985,7 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 
 // ─── Vertical Rack ──────────────────────────────────────────────────────────
 
-function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIssues = [], setStockLedger, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
+function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIssues = [], employees = [], siteProjects = [], productionOrders = [], setStockLedger, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
   const [showRackForm, setShowRackForm]   = React.useState(false);
   const [editRack,     setEditRack]       = React.useState(null);
   const [activeRack,   setActiveRack]     = React.useState(null); // rack being managed
@@ -7038,6 +7102,7 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
           rack={activeRack}
           inward={inward} outward={outward} returns={returns}
           items={items} grns={grns} storeIssues={storeIssues}
+          employees={employees} siteProjects={siteProjects} productionOrders={productionOrders}
           nextInNo={nextNo('RIN-',inward,'receiptNo')}
           nextMdrNo={nextNo('MDR-',outward,'mdrNo')}
           nextRtnNo={nextNo('RTN-',returns,'returnNo')}
@@ -7112,7 +7177,7 @@ function RackCard({ rack, inward=[], outward=[], returns=[], onClick, onEdit, on
 }
 
 // ── Rack Detail Modal (main management screen) ───────────────────────────────
-function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo, onEditRack }) {
+function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, employees = [], siteProjects = [], productionOrders = [], nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo, onEditRack }) {
   const [action, setAction]     = React.useState(null); // {type:'receive'|'issue'|'return', slot}
   const [printDoc, setPrintDoc] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState('slots'); // 'slots' | 'history'
@@ -7232,6 +7297,7 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
                 <SlotIssueForm
                   slot={action.slot} rack={rack} nextNo={nextMdrNo}
                   items={items} storeIssues={storeIssues}
+                  employees={employees} siteProjects={siteProjects} productionOrders={productionOrders}
                   slotItems={slotData[action.slot]?.items||[]}
                   onSave={doc=>{ onSaveOutward(doc); setAction(null); }}
                   onCancel={()=>setAction(null)}
@@ -7334,12 +7400,13 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
   );
 }
 
-function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSave, onCancel }) {
+function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems = [], employees = [], siteProjects = [], productionOrders = [], onSave, onCancel }) {
   const [mdrNo,    setMdrNo]    = React.useState(nextNo);
   const [date,     setDate]     = React.useState(new Date().toISOString().slice(0,10));
   const [sivRef,   setSivRef]   = React.useState('');
   const [issuedTo, setIssuedTo] = React.useState('');
   const [purpose,  setPurpose]  = React.useState('');
+  const [projectWo, setProjectWo] = React.useState('');
   const [rows, setRows]         = React.useState([{ itemId:'', itemName:'', qty:'', unit:'' }]);
   const [search, setSearch]     = React.useState(['']);
   const [showDrop, setShowDrop] = React.useState([false]);
@@ -7354,7 +7421,7 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
   function doSave(status){
     const validRows=rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item');return;}
-    onSave({mdrNo,date,sivRef,issuedTo,purpose,status,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
+    onSave({mdrNo,date,sivRef,issuedTo,projectWo,purpose,status,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
   }
 
   return (
@@ -7370,21 +7437,15 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
             ?<select value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input}><option value="">— select SIV —</option>{approvedSivs.map(s=><option key={s.id} value={s.sivNumber||s.number||s.id}>{s.sivNumber||s.number||('SIV '+String(s.id).slice(-4))}</option>)}</select>
             :<input value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input} placeholder="SIV number"/>}
         </div>
-        <div style={styles.formGroup}><label style={styles.label}>Issued To</label><input value={issuedTo} onChange={e=>setIssuedTo(e.target.value)} style={styles.input} placeholder="Dept / Person"/></div>
-        <div style={{...styles.formGroup,gridColumn:'2/-1'}}><label style={styles.label}>Purpose</label><input value={purpose} onChange={e=>setPurpose(e.target.value)} style={styles.input} placeholder="Purpose / project ref"/></div>
+        <div style={styles.formGroup}><label style={styles.label}>Issued To</label><input list="issue-emps" value={issuedTo} onChange={e=>setIssuedTo(e.target.value)} style={styles.input} placeholder="Dept / Person"/><datalist id="issue-emps">{(employees||[]).map(emp=><option key={emp.id} value={(emp.name||'')+(emp.department?' — '+emp.department:'')}/>)}</datalist></div>
+        <div style={styles.formGroup}><label style={styles.label}>Project / WO</label><input list="issue-projwo" value={projectWo} onChange={e=>setProjectWo(e.target.value)} style={styles.input} placeholder="Project / Work Order"/><datalist id="issue-projwo">{(siteProjects||[]).map(p=><option key={'p'+p.id} value={(p.name||p.projectName||('Project '+p.id))+' (Project)'}/>)}{(productionOrders||[]).map(o=><option key={'o'+o.id} value={((o.number||o.product||o.id))+' (WO)'}/>)}</datalist></div><div style={{...styles.formGroup,gridColumn:'1/-1'}}><label style={styles.label}>Purpose</label><input value={purpose} onChange={e=>setPurpose(e.target.value)} style={styles.input} placeholder="Purpose / remarks"/></div>
       </div>
       <div style={{ fontSize:12, fontWeight:600, color:'#555', marginBottom:6 }}>Items to Issue</div>
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
-          <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
-            {showDrop[idx]&&search[idx]&&(
-              <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
-                {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
-                  <div key={it.id} onClick={()=>pickItem(idx,it)} style={{padding:'6px 10px',fontSize:12,cursor:'pointer',borderBottom:'1px solid #F5F3EE'}} onMouseEnter={e=>e.currentTarget.style.background='#F5F3EE'} onMouseLeave={e=>e.currentTarget.style.background=''}>{it.name}</div>
-                ))}
-              </div>
-            )}
+          <div>
+            <input list={"slotitems-"+idx} value={row.itemName||''} onChange={e=>{ const val=e.target.value; setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:val}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Item (from slot)…"/>
+            <datalist id={"slotitems-"+idx}>{(slotItems||[]).map((nm,i2)=><option key={'s'+i2} value={nm}/>)}{(items||[]).map(it=><option key={it.id} value={it.name}/>)}</datalist>
           </div>
           <input type="number" value={row.qty} onChange={e=>setRow(idx,'qty',e.target.value)} style={{...styles.input,margin:0}} placeholder="Qty" min={0}/>
           <input value={row.unit} onChange={e=>setRow(idx,'unit',e.target.value)} style={{...styles.input,margin:0}} placeholder="Unit"/>
@@ -7433,7 +7494,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
         <div style={styles.formGroup}>
           <label style={styles.label}>MDR Reference</label>
           {deliveredMdrs.length>0
-            ?<select value={mdrRef} onChange={e=>setMdrRef(e.target.value)} style={styles.input}><option value="">— select MDR —</option>{deliveredMdrs.map(m=><option key={m.id} value={m.mdrNo}>{m.mdrNo} · {m.date}</option>)}</select>
+            ?<select value={mdrRef} onChange={e=>{ const v=e.target.value; setMdrRef(v); const mdr=(outward||[]).find(m=>m.mdrNo===v); if(mdr){ const rr=(mdr.items||[]).filter(i=>i.rackId===rack.id).map(i=>({itemId:i.itemId||'',itemName:i.itemName||'',qty:i.qty||'',unit:i.unit||''})); if(rr.length){ setRows(rr); setSearch(rr.map(x=>x.itemName)); setShowDrop(rr.map(()=>false)); } } }} style={styles.input}><option value="">— select MDR —</option>{deliveredMdrs.map(m=><option key={m.id} value={m.mdrNo}>{m.mdrNo} · {m.date}</option>)}</select>
             :<input value={mdrRef} onChange={e=>setMdrRef(e.target.value)} style={styles.input} placeholder="MDR number"/>}
         </div>
         <div style={{...styles.formGroup,gridColumn:'1/-1'}}><label style={styles.label}>Returned From</label><input value={returnFrom} onChange={e=>setReturnFrom(e.target.value)} style={styles.input} placeholder="Department / Person returning"/></div>
@@ -7516,10 +7577,14 @@ function RackFormModal({ rack, onSave, onClose }) {
 function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
   const [useLHBin, setUseLHBin] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
+  const [binSearch, setBinSearch] = React.useState('');
+  const [binFrom, setBinFrom] = React.useState('');
+  const [binTo, setBinTo] = React.useState('');
   // Filter by current division in multi-biz mode
   const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
   const storeIssues = isMultiBiz ? (allSIV || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allSIV || []);
   const item = items.find(i => i.id === selectedItemId);
+  const filteredItems = (items || []).filter(it => { const q = binSearch.trim().toLowerCase(); return !q || (it.name||'').toLowerCase().includes(q) || (it.itemCode||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q) || (it.hsn||'').toLowerCase().includes(q); });
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
     packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN', siv: 'Issue Voucher', 'rack-in': 'Rack IN', 'rack-mdr': 'Rack MDR', 'rack-return': 'Rack Return' };
@@ -7541,6 +7606,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 
   // SIV rows that appear in this item's card (for print signature blocks)
   const sivRows = rows.filter(r => r.siv);
+  const displayRows = rows.filter(r => (!binFrom || (r.date||'') >= binFrom) && (!binTo || (r.date||'') <= binTo));
 
   const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -7557,11 +7623,19 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
       </div>
 
       {/* Item selector */}
-      <div className="no-print" style={{ ...styles.formGroup, maxWidth: 340, marginBottom: 20 }}>
-        <label style={styles.label}>Select item</label>
-        <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)} style={styles.input}>
-          {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-        </select>
+      <div className="no-print" style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'flex-end', marginBottom:20 }}>
+        <div style={{ ...styles.formGroup, marginBottom:0, minWidth:200, flex:1 }}>
+          <label style={styles.label}>Search item (code / description)</label>
+          <input value={binSearch} onChange={e=>setBinSearch(e.target.value)} style={styles.input} placeholder="Item code, name, category, HSN…"/>
+        </div>
+        <div style={{ ...styles.formGroup, marginBottom:0, minWidth:200 }}>
+          <label style={styles.label}>Select item</label>
+          <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)} style={styles.input}>
+            {filteredItems.map(it => <option key={it.id} value={it.id}>{it.itemCode ? it.itemCode + ' — ' : ''}{it.name}</option>)}
+          </select>
+        </div>
+        <div style={{ ...styles.formGroup, marginBottom:0 }}><label style={styles.label}>From</label><input type="date" value={binFrom} onChange={e=>setBinFrom(e.target.value)} style={styles.input}/></div>
+        <div style={{ ...styles.formGroup, marginBottom:0 }}><label style={styles.label}>To</label><input type="date" value={binTo} onChange={e=>setBinTo(e.target.value)} style={styles.input}/></div>
       </div>
 
       {/* Print header */}
@@ -7617,7 +7691,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
           {rows.length === 0 && (
             <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No stock movements for this item yet.</td></tr>
           )}
-          {rows.map((e, i) => (
+          {displayRows.map((e, i) => (
             <React.Fragment key={e.id || i}>
               <tr style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
                 <td style={styles.td}>{e.date}</td>
@@ -22208,6 +22282,9 @@ export default function App() {
             items={items}
             grns={grns}
             storeIssues={storeIssues}
+            employees={employees}
+            siteProjects={siteProjects}
+            productionOrders={productionOrders}
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
