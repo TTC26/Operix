@@ -8375,8 +8375,8 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   <h2>${title}</h2>
   ${bodyHtml}
   <div class="sig">
-    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Authorised Signatory<br/>${biz.name || ''}</div></div>
-    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Employee Acknowledgement<br/>${emp?.name || ''}</div></div>
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Authorised Signatory${biz.name ? '<br/>For ' + biz.name : ''}</div></div>
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Employee Acknowledgement${emp && emp.name ? '<br/>' + emp.name : ''}</div></div>
   </div>
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
