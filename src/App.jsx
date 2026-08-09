@@ -5483,7 +5483,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Item</th>
+                <th style={{ ...styles.th, width: '100%', minWidth: 200 }}>Item</th>
                 {doc.type !== 'packing_list' && cc.splitTax && <th style={styles.th}>HSN</th>}
                 <th style={{ ...styles.th, textAlign: 'right' }}>Qty</th>
                 {doc.type === 'packing_list' ? (<>
@@ -5510,8 +5510,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
                       {isEditable
-                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block' }} />
-                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
+                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block', minWidth: 180, boxSizing: 'border-box' }} />
+                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
                       <td style={styles.td}>
