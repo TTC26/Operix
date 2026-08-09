@@ -1470,10 +1470,7 @@ function printCustomerDetail(c, docs, businessInfo) {
   <tbody>${docsHtml}</tbody>
 </table>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 350);
+  printHTML(html);
 }
 
 function printAllCustomers(customers, businessInfo) {
@@ -1532,10 +1529,7 @@ function printAllCustomers(customers, businessInfo) {
 </table>
 <div class="footer">Operix · ${date}</div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 350);
+  printHTML(html);
 }
 
 function CustomersList({ customers, setEditing, setCustomers, documents, businessInfo }) {
@@ -6511,10 +6505,29 @@ function LetterheadHeader({ bi, style = {} }) {
   return null;
 }
 
+function printHTML(html){
+  try {
+    const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const css = styleMatch ? styleMatch[1] : '';
+    const body = bodyMatch ? bodyMatch[1] : html;
+    const holder = document.createElement('div');
+    holder.className = 'print-area';
+    holder.setAttribute('style','position:fixed;inset:0;background:#fff;z-index:99999;overflow:auto;');
+    holder.innerHTML = '<style>'+css+'</style>'+body;
+    document.body.appendChild(holder);
+    const done = () => { try{ document.body.removeChild(holder); }catch(_e){} window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => { window.print(); setTimeout(done, 2000); }, 80);
+  } catch(e){
+    const w = window.open('', '_blank'); if(w){ w.document.write(html); w.document.close(); setTimeout(()=>w.print(),300); }
+  }
+}
+
 function StdDocHeader({ businessInfo, title, subtitle }) {
   const bi = businessInfo || {};
   const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
-  const contact = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || ''].filter(Boolean).join('  ·  ');
+  const contact = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean).join('  ·  ');
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
       <div>
@@ -6791,10 +6804,8 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
   }
 
   function printStock(){
-    const w=window.open('','_blank'); if(!w) return;
     const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'\u2014')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'\u2014')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
-    w.document.write('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
-    w.document.close(); setTimeout(function(){w.print();},300);
+    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -7213,10 +7224,8 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
 
   const tabSt = t => ({ padding:'6px 16px', fontSize:12, fontWeight:activeTab===t?600:400, borderBottom:activeTab===t?'2px solid #2C3E6B':'2px solid transparent', color:activeTab===t?'#2C3E6B':'#888', cursor:'pointer', background:'none', border:'none' });
   function printRack(){
-    const w=window.open('','_blank'); if(!w) return;
     const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'\u2014')+'</td></tr>';}).join('');
-    w.document.write('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
-    w.document.close(); setTimeout(function(){w.print();},300);
+    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -8455,10 +8464,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
 
@@ -8532,10 +8538,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -9193,10 +9196,7 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
 function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
@@ -17982,7 +17982,7 @@ ${isTransport&&(a.fuelLogs||[]).length>0?`<div class="sec">Fuel Consumption Log<
   <span>${co.companyName||''} — Asset Register</span>
 </div>
 </body></html>`;
-    const w = window.open('','_blank'); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),300);
+    printHTML(html);
   }
 
   const selected = assets.find(a=>a.id===selectedId);
@@ -22819,7 +22819,7 @@ export default function App() {
       </button>
 
       <div style={styles.main} className="app-main">
-        {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && (
+        {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && !isTestAccount && (
           <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
         )}
         {/* Deletion-scheduled banner */}
@@ -22846,8 +22846,8 @@ export default function App() {
         {renderContent()}
       </div>
 
-      {/* Powered-by watermark — shown during trial, hidden once subscribed */}
-      {!isSubscribed && trialDaysLeft !== null && (
+      {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
+      {!isSubscribed && !isTestAccount && trialDaysLeft !== null && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
