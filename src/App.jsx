@@ -5378,6 +5378,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
                           <span>Taxable</span><span style={{ fontWeight:600 }}>{fmt(totals.subtotal)}</span>
                         </div>
+                        {totals.discountTotal > 0 && (
+                          <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd', color:'#B5453A' }}>
+                            <span>Less: Discount</span><span style={{ fontWeight:600 }}>− {fmt(totals.discountTotal)}</span>
+                          </div>
+                        )}
                         {taxRows.map(([label,val])=>(
                           <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
                             <span>{label}</span><span style={{ fontWeight:600 }}>{fmt(val||0)}</span>
