@@ -5339,7 +5339,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                           <tr key={it.id||i} style={{ borderBottom:'1px solid #ddd', background: i%2===0?'#fff':'#fafafa' }}>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{i+1}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
-                            <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500 }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
+                            <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.gst||0}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
@@ -5509,7 +5509,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <option value="">Custom item</option>
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
-                      <input value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} style={{ ...styles.inlineInput, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="Item description" readOnly={!isEditable} />
+                      {isEditable
+                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} rows={1} placeholder="Item description" ref={(el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }} style={{ ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', display: 'block' }} />
+                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
                       <td style={styles.td}>
