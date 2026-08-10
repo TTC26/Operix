@@ -17774,23 +17774,39 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
-function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
+function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [catFilter, setCatFilter]   = React.useState('all');
   const [editing, setEditing]       = React.useState(null);
   const canEdit    = userRole === 'admin' || userRole === 'manager' || userRole === 'engineer' || userRole === 'staff';
   const canApprove = userRole === 'admin' || userRole === 'manager';
   const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
-  const CATS = ['Drawings', 'Technical', 'Submittals', 'Site Records', 'Commercial', 'Handover'];
+  const CATS = ['Drawings', 'Technical Documents', 'Approvals & Submittals', 'Site / Project Records', 'Commercial / Contract', 'Handover Documents'];
+  const SUBTYPES = {
+    'Drawings': ['IFC Drawings', 'Shop Drawings', 'Coordination Drawings', 'As-Built Drawings', 'Single Line Diagrams', 'MEP Layouts', 'Detail Drawings'],
+    'Technical Documents': ['Specifications', 'Material Submittals', 'Method Statements', 'Technical Datasheets', 'Compliance Documents', 'Manufacturer Documents'],
+    'Approvals & Submittals': ['Material Submittal', 'Shop Drawing Submittal', 'Method Statement Submittal', 'Consultant Comments', 'Approval / Rejection', 'Resubmission'],
+    'Site / Project Records': ['Site Instructions', 'RFI', 'Inspection Requests', 'MIR', 'WIR', 'NCR', 'Snag Lists', 'Site Photos'],
+    'Commercial / Contract': ['Contract', 'BOQ', 'LOA / Award Letter', 'VO (Variation Order)', 'Client Correspondence', 'Subcontract Agreements'],
+    'Handover Documents': ['Testing & Commissioning Reports', 'O&M Manuals', 'Warranty Certificates', 'As-Built', 'Training Records', 'Handover Certificates', 'DLP Records'],
+  };
   const STATUSES = ['Draft', 'Submitted', 'Under Review', 'Approved', 'Approved w/ Comments', 'Rejected', 'Superseded'];
   const statusColor = (st) => ({ 'Approved': '#1A7A3E', 'Approved w/ Comments': '#C9752A', 'Submitted': '#2C6FB5', 'Under Review': '#8A6FD6', 'Rejected': '#B5453A', 'Superseded': '#888780', 'Draft': '#B0AC9F' }[st] || '#888780');
   const projName = (id) => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
 
   const scoped = isMultiBiz ? projectDocuments.filter(d => (d.bizType || 'trading') === currentBizType) : projectDocuments;
-  const list = scoped
+  const manual = scoped
     .filter(d => projFilter === 'all' || String(d.projectId) === String(projFilter))
-    .filter(d => catFilter === 'all' || d.category === catFilter)
-    .sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+    .filter(d => catFilter === 'all' || d.category === catFilter);
+
+  // Auto-linked records pulled from other modules (read-only)
+  const autoRows = [];
+  (tcChecklists || []).forEach(c => autoRows.push({ id: 'tc-' + c.id, auto: true, source: 'tcommissioning', sourceLabel: 'T&C', projectId: c.projectId, title: c.title || c.system || c.description || 'T&C Checklist', category: 'Handover Documents', subType: 'Testing & Commissioning Reports', docNo: c.refNo || c.number || '', revision: '—', date: c.date || c.createdAt || '', status: c.status || 'Linked' }));
+  (handoverDocs || []).forEach(h => autoRows.push({ id: 'ho-' + h.id, auto: true, source: 'handover', sourceLabel: 'Handover', projectId: h.projectId, title: h.title || 'Handover Certificate', category: 'Handover Documents', subType: 'Handover Certificates', docNo: h.number || '', revision: '—', date: h.handoverDate || h.date || '', status: h.status || 'Linked' }));
+  (subcontractors || []).forEach(sc => (sc.workOrders || []).forEach(w => autoRows.push({ id: 'sub-' + w.id, auto: true, source: 'subcontractors', sourceLabel: 'Subcontract', projectId: w.projectId, title: (sc.name || 'Subcontractor') + ' — ' + (w.scope || 'Work Order'), category: 'Commercial / Contract', subType: 'Subcontract Agreements', docNo: w.number || '', revision: '—', date: w.startDate || '', status: w.status || 'Linked' })));
+  const autoFiltered = autoRows.filter(d => d.projectId && (projFilter === 'all' || String(d.projectId) === String(projFilter)) && (catFilter === 'all' || d.category === catFilter));
+
+  const list = [...manual, ...autoFiltered].sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
 
   function save(rec) {
     const t = { ...rec, bizType: rec.bizType || currentBizType };
@@ -17807,7 +17823,7 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
     setProjectDocuments(prev => prev.map(x => x.id === d.id ? { ...x, status: 'Superseded' } : x));
     setEditing({ id: crypto.randomUUID(), projectId: d.projectId, title: d.title, category: d.category, docNo: d.docNo, revision: nextRev, date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: d.submittedTo || '', link: '', remarks: '', supersedes: d.id });
   }
-  function blank() { return { id: crypto.randomUUID(), projectId: projFilter !== 'all' ? projFilter : '', title: '', category: catFilter !== 'all' ? catFilter : 'Drawings', docNo: '', revision: '0', date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: '', link: '', remarks: '' }; }
+  function blank() { const c = catFilter !== 'all' ? catFilter : 'Drawings'; return { id: crypto.randomUUID(), projectId: projFilter !== 'all' ? projFilter : '', title: '', category: c, subType: (SUBTYPES[c] || [''])[0], docNo: '', revision: '0', date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: '', link: '', remarks: '' }; }
 
   const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
   const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', verticalAlign: 'top' };
@@ -17847,21 +17863,24 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
                   <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.docNo || '—'}</td>
                   <td style={td}>{d.title}{d.link && <a href={d.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(d.projectId)}</td>
-                  <td style={td}>{d.category}</td>
+                  <td style={td}>{d.category}{d.subType && <div style={{ fontSize: 11, color: '#999' }}>{d.subType}</div>}</td>
                   <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{d.revision}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.date}</td>
                   <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: statusColor(d.status), padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' }}>{d.status}</span></td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    {canEdit && d.status === 'Draft' && <button onClick={() => setStatus(d.id, 'Submitted')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Submit</button>}
-                    {canApprove && (d.status === 'Submitted' || d.status === 'Under Review') && <>
+                    {d.auto && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6FD6', background: '#F1ECFB', padding: '2px 7px', borderRadius: 20 }}>linked · {d.sourceLabel}</span>}
+                    {!d.auto && canEdit && d.status === 'Draft' && <button onClick={() => setStatus(d.id, 'Submitted')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Submit</button>}
+                    {!d.auto && canApprove && (d.status === 'Submitted' || d.status === 'Under Review') && <>
                       <button onClick={() => setStatus(d.id, 'Approved')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#1A7A3E' }}>Approve</button>
                       <button onClick={() => setStatus(d.id, 'Rejected')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>Reject</button>
                     </>}
-                    {canEdit && (d.status === 'Approved' || d.status === 'Approved w/ Comments') && <button onClick={() => newRevision(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#C9752A' }}>+ Revision</button>}
+                    {!d.auto && canEdit && (d.status === 'Approved' || d.status === 'Approved w/ Comments') && <button onClick={() => newRevision(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#C9752A' }}>+ Revision</button>}
                   </td>
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {canEdit && <button onClick={() => setEditing(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
-                    {canEdit && <button onClick={() => del(d.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                    {d.auto ? <button onClick={() => setView(d.source)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Open ↗</button> : <>
+                      {canEdit && <button onClick={() => setEditing(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                      {canEdit && <button onClick={() => del(d.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                    </>}
                   </td>
                 </tr>
               ))}
@@ -17870,12 +17889,12 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
         </div>
       )}
 
-      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function ProjectDocForm({ rec, siteProjects, cats, statuses, onSave, onClose }) {
+function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose }) {
   const [form, setForm] = React.useState(rec);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
@@ -17885,9 +17904,10 @@ function ProjectDocForm({ rec, siteProjects, cats, statuses, onSave, onClose }) 
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={modalCard} onClick={e => e.stopPropagation()}>
         <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{rec.supersedes ? 'New Revision' : (rec.title ? 'Edit' : 'New')} Document</h3>
+        <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-          <div style={row}><label style={lbl}>Category</label><select style={styles.input} value={form.category} onChange={e => set('category', e.target.value)}>{cats.map(c => <option key={c}>{c}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Category</label><select style={styles.input} value={form.category} onChange={e => { const c = e.target.value; setForm(fm => ({ ...fm, category: c, subType: (subtypes[c] || [''])[0] })); }}>{cats.map(c => <option key={c}>{c}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Document Type</label><select style={styles.input} value={form.subType || ''} onChange={e => set('subType', e.target.value)}>{(subtypes[form.category] || []).map(st => <option key={st}>{st}</option>)}</select></div>
         </div>
         <div style={row}><label style={lbl}>Title</label><input style={styles.input} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Document title" /></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 1fr', gap: 12 }}>
@@ -22522,6 +22542,10 @@ export default function App() {
         currentBizType={effectiveBizContext}
         isMultiBiz={isMultiBiz}
         currentUserName={user?.displayName || user?.email || ''}
+        tcChecklists={tcChecklists}
+        handoverDocs={handoverDocs}
+        subcontractors={subcontractors}
+        setView={setView}
       />
     );
     if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
