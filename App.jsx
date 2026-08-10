@@ -4103,14 +4103,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_tender" label="Tender & Estimation">
-              <NavBtn id="tender"     label="Tender"     icon={FileText} />
-              <NavBtn id="boq"        label="BOQ"        icon={ClipboardList} />
-              <NavBtn id="estimation" label="Estimation" icon={BarChart2} />
-              <CreateBtn docKey="quotation" />
-            </Section>
-
-            <Section sectionKey="mep_resources" label="Resource Master">
+              <NavBtn id="tender"         label="Tender"          icon={FileText} />
+              <NavBtn id="boq"            label="BOQ"             icon={ClipboardList} />
               <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
+              <NavBtn id="estimation"     label="Estimation"      icon={BarChart2} />
+              <CreateBtn docKey="quotation" />
             </Section>
 
             <Section sectionKey="mep_bom" label="BOM & Materials">
