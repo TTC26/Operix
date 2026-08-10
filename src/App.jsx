@@ -9435,7 +9435,7 @@ function printOfferLetter(emp, businessInfo) {
   printHTML(html);
 }
 
-function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
+function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
   const [subView,   setSubView]   = useState('list');
   const [activeEmp, setActiveEmp] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -9448,12 +9448,13 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
   );
 
   function saveEmployee(emp) {
+    const tagged = { ...emp, bizType: emp.bizType || currentBizType };
     setEmployees(prev => {
-      const idx = prev.findIndex(e => e.id === emp.id);
-      if (idx >= 0) { const a = [...prev]; a[idx] = emp; return a; }
-      return [...prev, emp];
+      const idx = prev.findIndex(e => e.id === tagged.id);
+      if (idx >= 0) { const a = [...prev]; a[idx] = tagged; return a; }
+      return [...prev, tagged];
     });
-    setActiveEmp(emp);
+    setActiveEmp(tagged);
     setSubView('detail');
   }
 
@@ -22319,6 +22320,9 @@ export default function App() {
   const sessionVouchers = sessionContext
     ? (Array.isArray(vouchers) ? vouchers : []).filter(v => (v.bizType || bizDefault) === sessionContext)
     : vouchers;
+  const sessionEmployees = sessionContext
+    ? (Array.isArray(employees) ? employees : []).filter(e => (e.bizType || bizDefault) === sessionContext)
+    : employees;
   const sessionPettyCash = (sessionContext && isMultiBiz)
     ? { ...pettyCash, entries: (pettyCash?.entries || []).filter(e => (e.bizType || 'trading') === sessionContext), openingBalance: (pettyCash?.openingBalances?.[sessionContext] ?? 0) }
     : pettyCash;
@@ -22728,11 +22732,12 @@ export default function App() {
       case 'employees':
         return (
           <EmployeesView
-            employees={employees}
+            employees={sessionEmployees}
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
           />
         );
             case 'offerletter':
@@ -22740,7 +22745,7 @@ export default function App() {
           <OfferLetterView
             offerLetters={hrLetters.filter(l => l.type === 'offer')}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -22751,7 +22756,7 @@ export default function App() {
             letterType="warning"
             hrLetters={hrLetters}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -22762,7 +22767,7 @@ export default function App() {
             letterType="termination"
             hrLetters={hrLetters}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -22770,7 +22775,7 @@ export default function App() {
       case 'payroll':
         return (
           <PayrollView
-            employees={employees}
+            employees={sessionEmployees}
             payrollRuns={payrollRuns}
             setPayrollRuns={setPayrollRuns}
             businessInfo={businessInfo}
