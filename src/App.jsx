@@ -19977,10 +19977,23 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   }
   const BUILDUP_CATS = ['Materials', 'Manhours', 'Equipment', 'Subcontract'];
   const BUILDUP_SUBCATS = ['Civil', 'Electrical', 'Mechanical', 'Plumbing', 'HVAC', 'Fire Fighting', 'ELV', 'General'];
+  const CAT_CODE = { Materials:'01', Manhours:'02', Equipment:'03', Subcontract:'04' };
+  const SUB_CODE = { Civil:'01', Electrical:'02', Mechanical:'03', Plumbing:'04', HVAC:'05', 'Fire Fighting':'06', ELV:'07', General:'08' };
+  function nextCodeFor(cat, sub, boq, exclId) {
+    const key = (CAT_CODE[cat]||'00') + (SUB_CODE[sub]||'00');
+    let mx = 0;
+    (boq||[]).forEach(l => { if (l.id !== exclId && l.itemCode && String(l.itemCode).slice(0,4)===key) { const n = parseInt(String(l.itemCode).slice(4))||0; if (n>mx) mx=n; } });
+    return key + String(mx+1).padStart(6,'0');
+  }
+  function withItemCodes(boq) {
+    const seq = {};
+    (boq||[]).forEach(l => { if (l.itemCode && String(l.itemCode).length>=4) { const k=String(l.itemCode).slice(0,4); const n=parseInt(String(l.itemCode).slice(4))||0; seq[k]=Math.max(seq[k]||0,n); } });
+    return (boq||[]).map(l => { if (l.itemCode) return l; const k=(CAT_CODE[l.category]||'00')+(SUB_CODE[l.subcategory]||'00'); seq[k]=(seq[k]||0)+1; return { ...l, itemCode: k+String(seq[k]).padStart(6,'0') }; });
+  }
   function lineMarkup(l) { return (parseFloat(l.siteOH)||0) + (parseFloat(l.hoOH)||0) + (parseFloat(l.contingency)||0) + (parseFloat(l.profit)||0); }
   function sellRate(l) { return (parseFloat(l.rate)||0) * (1 + lineMarkup(l)/100); }
   function lineBaseCost(l) { return (parseFloat(l.tenderQty)||0) * (parseFloat(l.rate)||0); }
-  function blankLine() { return { id:crypto.randomUUID(), category:'Materials', subcategory:'', description:'', unit:'', tenderQty:0, finalisedQty:0, variationQty:0, actualQty:0, rate:0, siteOH:0, hoOH:0, contingency:0, profit:0 }; }
+  function blankLine() { return { id:crypto.randomUUID(), itemCode:'', category:'Materials', subcategory:'', description:'', unit:'', tenderQty:0, finalisedQty:0, variationQty:0, actualQty:0, rate:0, siteOH:0, hoOH:0, contingency:0, profit:0 }; }
   function lineTotal(l) { return (parseFloat(l.tenderQty)||0) * sellRate(l); }
   function boqSubtotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
   function computeEstimation(t) {
@@ -20024,8 +20037,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     rows.push(['Submission Date', t.submissionDate||'']);
     rows.push(['Valid Until', t.validUntil||'']);
     rows.push([]);
-    rows.push(['#','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount']);
-    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]));
+    rows.push(['#','Item Code','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount']);
+    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.itemCode||'', l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]));
     rows.push([]);
     rows.push(['','','','','Subtotal', boqSubtotal(t)]);
     if (cc.hasTax) rows.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
@@ -20041,8 +20054,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       const aoa = [
         ['Tender No.', t.number], ['Title', t.title||''], ['Client', client?.name||''],
         ['Submission Date', t.submissionDate||''], ['Valid Until', t.validUntil||''], [],
-        ['#','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount'],
-        ...(t.boq||[]).map((l,i)=>[i+1, l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]),
+        ['#','Item Code','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount'],
+        ...(t.boq||[]).map((l,i)=>[i+1, l.itemCode||'', l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]),
         [], ['','','','','Subtotal', boqSubtotal(t)],
       ];
       if (cc.hasTax) aoa.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
@@ -20080,7 +20093,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
         }
         const parsed = boqRowsToLines(rows);
         if (!parsed.length) { alert('No rows found. Use columns in order: Category, Subcategory, Description, Unit, Qty, Rate'); return; }
-        set('boq', [...(t.boq||[]), ...parsed]);
+        set('boq', withItemCodes([...(t.boq||[]), ...parsed]));
         alert(parsed.length + ' line(s) imported.');
       } catch (err) {
         alert('Import failed: ' + err.message + '. If Excel fails, save the sheet as CSV and import that.');
@@ -20120,15 +20133,17 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:1040 }}>
               <thead><tr style={{ background:'#F8F7F4' }}>
-                {['Category','Subcat','Description','Unit','Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 5px', textAlign: ['Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+                {['Code','Category','Subcat','Description','Unit','Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 5px', textAlign: ['Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {(t.boq||[]).map((l,i)=>{
                   const upd=(k,v)=>set('boq',t.boq.map((x,j)=>j===i?{...x,[k]:v}:x));
+                  const updCat=(k,v)=>set('boq',t.boq.map((x,j)=>j===i?{...x,[k]:v, itemCode: nextCodeFor(k==='category'?v:x.category, k==='subcategory'?v:x.subcategory, t.boq, x.id)}:x));
                   return (
                   <tr key={l.id}>
-                    <td style={{ padding:'3px 3px', width:98 }}><select value={l.category||'Materials'} onChange={e=>upd('category',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{BUILDUP_CATS.map(c=><option key={c}>{c}</option>)}</select></td>
-                    <td style={{ padding:'3px 3px', width:92 }}><select value={l.subcategory||''} onChange={e=>upd('subcategory',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}><option value=''>—</option>{BUILDUP_SUBCATS.map(c=><option key={c}>{c}</option>)}</select></td>
+                    <td style={{ padding:'3px 3px', width:88 }}><input value={l.itemCode||''} onChange={e=>upd('itemCode',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11, fontFamily:'monospace', padding:'4px 4px' }} title='Item Code (auto)'/></td>
+                    <td style={{ padding:'3px 3px', width:98 }}><select value={l.category||'Materials'} onChange={e=>updCat('category',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{BUILDUP_CATS.map(c=><option key={c}>{c}</option>)}</select></td>
+                    <td style={{ padding:'3px 3px', width:92 }}><select value={l.subcategory||''} onChange={e=>updCat('subcategory',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}><option value=''>—</option>{BUILDUP_SUBCATS.map(c=><option key={c}>{c}</option>)}</select></td>
                     <td style={{ padding:'3px 3px', minWidth:150 }}><input value={l.description} onChange={e=>upd('description',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }}/></td>
                     <td style={{ padding:'3px 3px', width:50 }}><input value={l.unit} onChange={e=>upd('unit',e.target.value)} style={{ ...styles.input, margin:0 }} placeholder='m'/></td>
                     <td style={{ padding:'3px 3px', width:64 }}><input type='number' value={l.tenderQty} onChange={e=>upd('tenderQty',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right', background:'#F4FAF5' }} title='Tender Qty (priced)'/></td>
@@ -20149,7 +20164,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <div style={{ fontSize:11, color:'#B0AC9F', marginTop:4 }}>Base Rate = direct cost. Sell Rate = Base × (1 + markup%). Markup set via Cost Build-up per Category/Subcategory. Tender = estimate qty, Finalised = post-award, Variation, Actual = consumed.</div>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-                <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <button onClick={()=>set('boq',[...(t.boq||[]), {...blankLine(), itemCode: nextCodeFor('Materials','', t.boq, null)}])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <button onClick={()=>set('boq', withItemCodes((t.boq||[]).map(l=>({...l, itemCode:''}))))} style={styles.ghostBtn} title="Regenerate all item codes by Category/Subcategory">⟳ Auto Item Codes</button>
                 <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
