@@ -4103,10 +4103,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_tender" label="Tender & Estimation">
-              <NavBtn id="tender"     label="Tender"     icon={FileText} />
-              <NavBtn id="boq"        label="BOQ"        icon={ClipboardList} />
-              <NavBtn id="estimation" label="Estimation" icon={BarChart2} />
+              <NavBtn id="tender"         label="Tender & Estimation" icon={FileText} />
               <CreateBtn docKey="quotation" />
+              <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
             </Section>
 
             <Section sectionKey="mep_bom" label="BOM & Materials">
@@ -4253,7 +4252,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
               <SubLabel label="Tender & Estimation" />
               <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
-              <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
               <SubLabel label="Planning & Progress" />
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
