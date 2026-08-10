@@ -3645,7 +3645,7 @@ const BIZ_SECTION_VIEWS = {
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
-  admin:         ['staff','contracts','termslibrary','mom'],
+  admin:         ['staff','contracts','termslibrary','mom','assetregister'],
 };
 
 const BizTypeCtx = React.createContext(null);
@@ -3961,16 +3961,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="customers"   label="Customers"     icon={Users} />
                 <CreateBtn docKey="quotation"  bizType={bt} />
                 <CreateBtn docKey="invoice"    bizType={bt} />
-                <NavBtn id="rabilling"   label="RA Billing"         icon={FileMinus} />
-                <NavBtn id="mepbom"      label="Project BOM"        icon={ClipboardList} />
-                <NavBtn id="scopeofwork" label="Service Catalogue"  icon={BookOpen} />
 
                 <SubLabel label="Purchase" />
                 <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType={bt} />
                 <CreateBtn docKey="purchasebill" bizType={bt} />
-                <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
                 <NavBtn id="grn"            label="Goods Receipt (GRN)" icon={Truck} />
 
                 <SubLabel label="Stores" />
@@ -3981,21 +3977,62 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
-                <SubLabel label="Site Operations" />
-                <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-                <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-                <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-                <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-                <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-                <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-                <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-
                 {bt === 'service' && <>
-                  <SubLabel label="Assets" />
-                  <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+                  {/* ─── MEP SUITE ─────────────────────────────── */}
+                  <SubLabel label="Projects" />
+                  <NavBtn id="siteprojects" label="Project Master"  icon={MapPin} />
+                  <NavBtn id="contracts"    label="Contracts / T&C" icon={FileSignature} />
+
+                  <SubLabel label="Tender & Estimation" />
+                  <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+
+                  <SubLabel label="Service Catalogue" />
+                  <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
+
+                  <SubLabel label="BOM & Materials" />
+                  <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
+                  <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+
+                  <SubLabel label="Planning & Progress" />
+                  <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+                  <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+                  <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+
+                  <SubLabel label="Billing & Commercial" />
+                  <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
+
+                  <SubLabel label="Subcontractors" />
+                  <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+
+                  <SubLabel label="HSE" />
+                  <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+
+                  <SubLabel label="Handover & DLP" />
+                  <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+                  <NavBtn id="handover"       label="Handover / DLP"          icon={CheckSquare} />
+
+                  <SubLabel label="Attendance & Manpower" />
+                  <NavBtn id="siteattendance" label="Attendance / Manpower" icon={Users} />
+
+                  <SubLabel label="Reports & Reviews" />
+                  <NavBtn id="mepreports" label="MEP Reports"      icon={FileText} />
+                  <NavBtn id="evaluation" label="Quarterly Review" icon={BarChart2} />
                 </>}
 
                 {bt === 'fmamc' && <>
+                  <SubLabel label="Site Operations" />
+                  <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+                  <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+                  <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
+                  <NavBtn id="mepbom"          label="Project BOM"        icon={ClipboardList} />
+                  <NavBtn id="scopeofwork"     label="Service Catalogue"  icon={BookOpen} />
+                  <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
+                  <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+                  <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+                  <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+                  <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+                  <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+
                   <SubLabel label="FM Suite" />
                   <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
                   <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
@@ -4003,14 +4040,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                   <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
                   <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
                   <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
-                </>}
 
-                <SubLabel label="Compliance" />
-                <NavBtn id="hse"            label="HSE"              icon={Shield} />
-                <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
-                <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
-                <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
-                <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+                  <SubLabel label="Compliance" />
+                  <NavBtn id="hse"            label="HSE"              icon={Shield} />
+                  <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
+                  <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
+                  <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
+                  <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+                </>}
 
                 <SubLabel label="Accounts" />
                 <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
@@ -4177,6 +4214,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
@@ -4184,6 +4222,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </Section>
       ))}
 
