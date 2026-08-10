@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -112,7 +112,7 @@ const EMPTY_ITEM_ROW = (businessInfo) => {
   return {
     id: crypto.randomUUID(),
     itemId: '', name: '', hsn: '',
-    qty: 1, rate: 0, gst: defaultGst,
+    qty: 1, rate: 0, discount: 0, gst: defaultGst,
     packages: 1, netWeight: 0, grossWeight: 0, dimensions: '',
   };
 };
@@ -200,15 +200,17 @@ function makeFmt(businessInfo) {
 }
 
 function computeTotals(doc, sellerState, country) {
-  let subtotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
+  let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
   (doc.items || []).forEach((it) => {
     const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const disc = amt * (Number(it.discount) || 0) / 100;
     subtotal += amt;
+    discountTotal += disc;
     if (cc.hasTax) {
-      const taxAmt = amt * (Number(it.gst) || 0) / 100;
+      const taxAmt = (amt - disc) * (Number(it.gst) || 0) / 100;
       if (cc.splitTax) {
         if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
         else { igst += taxAmt; }
@@ -218,8 +220,8 @@ function computeTotals(doc, sellerState, country) {
     }
   });
   const totalTax = cgst + sgst + igst + vat;
-  const grandTotal = subtotal + totalTax;
-  return { subtotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
+  const grandTotal = subtotal - discountTotal + totalTax;
+  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
 }
 
 // ─── Shared tax helper for non-DocEditor modules (Tender, RA Bill, AMC, etc.) ─
@@ -400,16 +402,16 @@ function parseOCRText(text) {
 // ─── styles.js ─────────────────────────────────────────────────
 
 const styles = {
-  app: { display: 'flex', minHeight: '100vh', background: '#FAF8F4', color: '#3A3F4B', fontSize: 14 },
-  sidebar: { width: 220, background: '#1E2A4A', color: '#E8E6DE', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
+  app: { display: 'flex', minHeight: '100vh', background: '#F3F7F2', color: '#3A3F4B', fontSize: 14 },
+  sidebar: { width: 220, background: '#234F3A', color: '#DCEAE0', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
   brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
-  brandName: { fontSize: 17, fontWeight: 600, color: '#fff' },
-  brandSub: { fontSize: 11, color: '#A9B0C9', letterSpacing: '0.04em' },
+  brandName: { fontSize: 17, fontWeight: 600, color: '#FFFFFF' },
+  brandSub: { fontSize: 11, color: '#9FBCAC', letterSpacing: '0.04em' },
   navGroup: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 },
-  navLabel: { fontSize: 11, color: '#7E89AD', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
-  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#C9CEDF', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
-  navItemActive: { background: 'rgba(255,255,255,0.08)', color: '#fff' },
+  navLabel: { fontSize: 11, color: '#8FB29E', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '14px 12px 4px' },
+  navItem: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: '#CFE0D4', textAlign: 'left', fontSize: 13.5, transition: 'background 0.15s' },
+  navItemActive: { background: 'rgba(255,255,255,0.10)', color: '#FFFFFF' },
   main: { flex: 1, minWidth: 0 },
   page: { padding: '32px 40px', maxWidth: 1100 },
   pageHeader: { marginBottom: 24 },
@@ -1434,9 +1436,9 @@ function printCustomerDetail(c, docs, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #1A1A2E; margin: 0; padding: 0; }
   .page { max-width: 740px; margin: 0 auto; padding: 40px 48px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:14px; margin-bottom:24px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:14px; margin-bottom:24px; }
   .bname { font-size:20px; font-weight:700; color:#1E2A4A; }
-  .binfo { font-size:11px; color:#555; line-height:1.6; text-align:right; }
+  .binfo { font-size:11px; color:#555; line-height:1.6; }
   h2 { font-size:18px; color:#1E2A4A; margin:0 0 16px; }
   .grid { display:grid; grid-template-columns:140px 1fr; gap:8px 12px; margin-bottom:20px; }
   .lbl { color:#6B7494; font-size:12px; }
@@ -1470,10 +1472,7 @@ function printCustomerDetail(c, docs, businessInfo) {
   <tbody>${docsHtml}</tbody>
 </table>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 350);
+  printHTML(html);
 }
 
 function printAllCustomers(customers, businessInfo) {
@@ -1498,7 +1497,7 @@ function printAllCustomers(customers, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 12px; color: #1A1A2E; margin: 0; padding: 0; }
   .page { padding: 30px 36px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:12px; margin-bottom:20px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:12px; margin-bottom:20px; }
   .bname { font-size:18px; font-weight:700; color:#1E2A4A; }
   h2 { font-size:15px; color:#1E2A4A; margin:0 0 14px; }
   table { width:100%; border-collapse:collapse; font-size:11.5px; }
@@ -1532,10 +1531,7 @@ function printAllCustomers(customers, businessInfo) {
 </table>
 <div class="footer">Operix · ${date}</div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 350);
+  printHTML(html);
 }
 
 function CustomersList({ customers, setEditing, setCustomers, documents, businessInfo }) {
@@ -1725,6 +1721,61 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  function handleItemImport(e){
+    const file = e.target.files && e.target.files[0]; if(!file) return;
+    const rdr = new FileReader();
+    rdr.onload = () => {
+      try {
+        const text = String(rdr.result || '');
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if(!lines.length){ alert('The file is empty.'); e.target.value=''; return; }
+        const parseLine = (l) => l.split(',').map(c => c.replace(/^"|"$/g,'').trim());
+        const headers = parseLine(lines[0]).map(h => h.toLowerCase());
+        const idx = (arr) => { for(const nm of arr){ const i = headers.indexOf(nm); if(i>=0) return i; } return -1; };
+        const iName = idx(['name','item','item name','description','product']);
+        const iUnit = idx(['unit','uom']);
+        const iCat  = idx(['category','group']);
+        const iHsn  = idx(['hsn','sac','hsn/sac','hsn code']);
+        const iOpen = idx(['opening stock','openingstock','opening','stock','qty']);
+        const iMin  = idx(['min stock','minstock','minimum','reorder']);
+        const iBuy  = idx(['purchase rate','purchaserate','buy','cost','purchase']);
+        const iSell = idx(['sale rate','salerate','sell','price','sale','mrp']);
+        const iGst  = idx(['gst','tax','tax %','gst %']);
+        const iCode = idx(['item code','itemcode','code','sku']);
+        const startRow = iName>=0 ? 1 : 0;
+        const cc2 = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india;
+        const defGst = (businessInfo && businessInfo.taxRate!=null) ? businessInfo.taxRate : cc2.defaultTaxRate;
+        let seq = (items||[]).length;
+        const nextCode = () => { seq += 1; return 'IT-' + String(seq).padStart(3,'0'); };
+        const num = (v) => { const n = parseFloat(v); return isNaN(n)?0:n; };
+        const newItems = [];
+        for(let r=startRow; r<lines.length; r++){
+          const cols = parseLine(lines[r]);
+          const get = (i) => (i>=0 && cols[i]!=null) ? cols[i] : '';
+          const name = iName>=0 ? get(iName) : (cols[0]||'');
+          if(!name) continue;
+          newItems.push({
+            id: crypto.randomUUID(),
+            itemCode: (iCode>=0 && get(iCode)) ? get(iCode) : nextCode(),
+            name,
+            unit: get(iUnit),
+            category: get(iCat),
+            hsn: get(iHsn),
+            openingStock: num(get(iOpen)),
+            minStock: num(get(iMin)),
+            purchaseRate: num(get(iBuy)),
+            saleRate: num(get(iSell)),
+            gst: get(iGst)!=='' ? num(get(iGst)) : defGst,
+          });
+        }
+        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); e.target.value=''; return; }
+        setItems(prev => [...(prev||[]), ...newItems]);
+        alert('✅ Imported ' + newItems.length + ' items (item codes auto-assigned).');
+      } catch(err){ alert('Could not read the file. Please use a CSV (save Excel as CSV) with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
+      e.target.value = '';
+    };
+    rdr.readAsText(file);
+  }
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -1733,6 +1784,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -2137,7 +2189,7 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   const [cloudBackups, setCloudBackups] = useState(null);
@@ -2485,47 +2537,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             </div>
 
             {/* ── Cloud Backups (server-side, all devices) ── */}
-            {userRole === 'admin' && onBackupNow && (
+            {userRole === 'admin' && onTestConnection && (
             <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>☁ Cloud backups (all devices)</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>🔌 Server connection</div>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 1.6 }}>
-                Automatic version history stored on the server. Any admin can restore from any device or PC. A snapshot is taken automatically each day — you can also take one now.
+                Check that your data is reaching the server. Your data syncs automatically and is also backed up on this device.
               </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button disabled={cloudBusy} onClick={async () => {
-                  setCloudBusy(true); setCloudMsg('');
-                  try { await onBackupNow(); setCloudMsg('✓ Backup saved to cloud.'); if (cloudBackups) { const l = await onListCloudBackups(); setCloudBackups(l || []); } }
-                  catch (e) { setCloudMsg('Could not save backup: ' + (e && e.message ? e.message : 'error')); }
-                  setCloudBusy(false);
-                }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6 }}>☁ Back up now</button>
-                <button disabled={cloudBusy} onClick={async () => {
-                  setCloudBusy(true); setCloudMsg('');
-                  try { const l = await onListCloudBackups(); setCloudBackups(l || []); if (!l || !l.length) setCloudMsg('No cloud backups yet.'); }
-                  catch (e) { setCloudMsg('Could not load history.'); }
-                  setCloudBusy(false);
-                }} style={{ ...styles.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>⟳ View backup history</button>
-              </div>
+              <button disabled={cloudBusy} onClick={async () => {
+                setCloudBusy(true); setCloudMsg('Testing server…');
+                try { const m = await onTestConnection(); setCloudMsg(m); window.alert(m); }
+                catch (e) { const m = '❌ ' + (e && e.message ? e.message : e); setCloudMsg(m); window.alert(m); }
+                setCloudBusy(false);
+              }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
-              {cloudBackups && cloudBackups.length > 0 && (
-                <div style={{ marginTop: 12, border: '1px solid #EAE6DB', borderRadius: 8, overflow: 'hidden' }}>
-                  {cloudBackups.map((b, i) => {
-                    const iso = (b.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
-                    const when = !isNaN(Date.parse(iso)) ? new Date(iso).toLocaleString() : b.label;
-                    return (
-                      <div key={b.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderTop: i ? '1px solid #F0EDE5' : 'none', fontSize: 12.5 }}>
-                        <span style={{ color: '#1E2A4A' }}>{when}</span>
-                        <button disabled={cloudBusy} onClick={async () => {
-                          if (!window.confirm('Restore this cloud backup? It re-saves every record to the server for all users.')) return;
-                          setCloudBusy(true); setCloudMsg('');
-                          try { await onRestoreCloud(b.path); setCloudMsg('✓ Restored from ' + when); }
-                          catch (e) { setCloudMsg('Restore failed: ' + (e && e.message ? e.message : 'error')); }
-                          setCloudBusy(false);
-                        }} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px' }}>Restore</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
             )}
 
@@ -3601,7 +3625,7 @@ function ConvertDropdown({ doc, onConvert }) {
 const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
-  purchase:    ['vendors', 'grn'],
+  purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders'],
@@ -3616,12 +3640,12 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
-  admin:         ['staff','contracts','termslibrary','mom'],
+  admin:         ['staff','contracts','termslibrary','mom','assetregister'],
 };
 
 const BizTypeCtx = React.createContext(null);
@@ -3638,7 +3662,7 @@ function NavBtn({ id, label, icon: Icon, small }) {
       style={{
         ...styles.navItem,
         ...(active ? styles.navItemActive : {}),
-        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#A9B0C9' } : {}),
+        ...(small ? { fontSize: 12.5, paddingLeft: 28, color: active ? undefined : '#8FB29E' } : {}),
       }}>
       <Icon size={small ? 13 : 17} strokeWidth={1.8} />{label}
     </button>
@@ -3673,7 +3697,7 @@ function Section({ sectionKey, label, children }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           width: '100%', background: 'none', border: 'none', cursor: 'pointer',
           padding: '5px 10px 4px 10px',
-          color: hasActive ? '#C9A24B' : '#6B7494',
+          color: hasActive ? '#D9B45A' : '#8FB29E',
           fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
         }}>
         <span>{label}</span>
@@ -3683,7 +3707,7 @@ function Section({ sectionKey, label, children }) {
       </button>
       {isOpen && (
         <div style={{
-          borderLeft: '1px solid rgba(255,255,255,0.08)',
+          borderLeft: '1px solid rgba(255,255,255,0.12)',
           marginLeft: 14,
           paddingLeft: 0,
         }}>
@@ -3728,7 +3752,7 @@ function BizSection({ bizType, defaultOpen, children }) {
             width: '100%', background: isOpen ? cfg.bg : 'none', border: 'none',
             cursor: 'pointer', padding: '8px 12px 8px 10px',
             borderLeft: `3px solid ${isOpen ? cfg.color : 'transparent'}`,
-            color: isOpen ? cfg.color : '#6B7494',
+            color: isOpen ? cfg.color : '#8FB29E',
             fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
             transition: 'all 0.15s',
           }}>
@@ -3749,8 +3773,8 @@ function SubLabel({ label }) {
   return (
     <div style={{
       fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase',
-      color: '#6B7494', padding: '7px 12px 2px 14px', marginTop: 3,
-      borderTop: '1px solid rgba(255,255,255,0.05)',
+      color: '#8FB29E', padding: '7px 12px 2px 14px', marginTop: 3,
+      borderTop: '1px solid rgba(255,255,255,0.08)',
     }}>
       {label}
     </div>
@@ -3758,7 +3782,29 @@ function SubLabel({ label }) {
 }
 
 
-function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null }) {
+function ComingSoon({ label = 'This module' }) {
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 14, textAlign: 'center' }}>
+        <div style={{ fontSize: 44 }}>🚧</div>
+        <h2 className="serif" style={{ margin: 0, color: '#1E2A4A', fontSize: 22 }}>{label}</h2>
+        <div style={{ fontSize: 14, color: '#888780', maxWidth: 380 }}>This module is part of the MEP ERP roadmap and will be enabled in an upcoming update.</div>
+        <div style={{ fontSize: 12, color: '#B0AC9F', background: '#F4F1E9', padding: '4px 12px', borderRadius: 20 }}>Coming soon</div>
+      </div>
+    </div>
+  );
+}
+const COMING_SOON = {
+  boq: 'BOQ', estimation: 'Estimation',
+  matrequests: 'Material Requests', procurement: 'Procurement', manpower: 'Manpower',
+  variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
+  subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
+  hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
+  dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
+  projectreports: 'Project Reports',
+};
+
+function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
   const showService    = activeTypes.includes('service');
@@ -3768,7 +3814,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   const sbCtx = { view, setView, setActiveDoc, startNewDoc, activeTypes, activeBizContext, onBizContextChange, activeDocBizType, isMultiBiz };
 
   const Brand = () => (
-    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 10, marginBottom: 6 }}>
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: 10, marginBottom: 6 }}>
       {/* Top row: logo + settings + logout */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
         <div style={styles.brandMark}>O</div>
@@ -3781,7 +3827,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <button
             title="Business Settings"
             onClick={() => setView('settings')}
-            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#C9A24B' : '#6B7494', display: 'flex', alignItems: 'center' }}>
+            style={{ background: view === 'settings' ? 'rgba(201,162,75,0.18)' : 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: view === 'settings' ? '#D9B45A' : '#8FB29E', display: 'flex', alignItems: 'center' }}>
             <Settings size={16} strokeWidth={1.8} />
           </button>
         )}
@@ -3789,12 +3835,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <button
           title="Log out"
           onClick={onLogout}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#6B7494', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+          style={{ background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 6px', color: '#8FB29E', display: 'flex', alignItems: 'center', marginLeft: 2 }}>
           <LogOut size={16} strokeWidth={1.8} />
         </button>
       </div>
       {/* Signed in as */}
-      <div style={{ padding: '0 14px', fontSize: 11, color: '#6B7494', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ padding: '0 14px', fontSize: 11, color: '#9FBCAC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {user?.email}
       </div>
     </div>
@@ -3803,7 +3849,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
   function renderSidebarContent() {
   // ── Admin / Manager sidebar ───────────────────────────────────────────────
   if (userRole === 'admin' || userRole === 'manager') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button — shown when user entered from home screen */}
@@ -3850,6 +3896,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="packing_list" bizType="trading" />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors" label="Vendors" icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType="trading" />
                 <CreateBtn docKey="purchasebill" bizType="trading" />
@@ -3884,6 +3931,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
                 <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
                 <CreateBtn docKey="purchase"     bizType="manufacturing" />
@@ -3935,15 +3983,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="customers"   label="Customers"     icon={Users} />
                 <CreateBtn docKey="quotation"  bizType={bt} />
                 <CreateBtn docKey="invoice"    bizType={bt} />
-                <NavBtn id="rabilling"   label="RA Billing"         icon={FileMinus} />
-                <NavBtn id="mepbom"      label="Project BOM"        icon={ClipboardList} />
-                <NavBtn id="scopeofwork" label="Service Catalogue"  icon={BookOpen} />
 
                 <SubLabel label="Purchase" />
+                <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"        label="Vendors"        icon={Truck} />
                 <CreateBtn docKey="purchase"     bizType={bt} />
                 <CreateBtn docKey="purchasebill" bizType={bt} />
-                <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
                 <NavBtn id="grn"            label="Goods Receipt (GRN)" icon={Truck} />
 
                 <SubLabel label="Stores" />
@@ -3954,21 +3999,63 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
                 <NavBtn id="bincard"     label="Bin Card"             icon={ClipboardList} />
 
-                <SubLabel label="Site Operations" />
-                <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-                <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-                <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-                <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-                <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-                <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-                <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-
                 {bt === 'service' && <>
-                  <SubLabel label="Assets" />
-                  <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+                  {/* ─── MEP SUITE ─────────────────────────────── */}
+                  <SubLabel label="Projects" />
+                  <NavBtn id="siteprojects" label="Project Master" icon={MapPin} />
+
+                  <SubLabel label="BOM & Materials" />
+                  <NavBtn id="mepbom" label="BOM &amp; Materials" icon={ClipboardList} />
+
+                  <SubLabel label="Service Catalogue" />
+                  <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
+
+                  <SubLabel label="Tender & Estimation" />
+                  <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+
+                  <SubLabel label="Planning & Progress" />
+                  <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+                  <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+                  <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+
+                  <SubLabel label="Billing" />
+                  <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
+
+                  <SubLabel label="Subcontractors" />
+                  <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+
+                  <SubLabel label="HSE" />
+                  <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+
+                  <SubLabel label="T&C / Contracts" />
+                  <NavBtn id="contracts" label="Contracts / T&C" icon={FileSignature} />
+
+                  <SubLabel label="Handover & DLP" />
+                  <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+                  <NavBtn id="handover"       label="Handover / DLP"          icon={CheckSquare} />
+
+                  <SubLabel label="Attendance & Manpower" />
+                  <NavBtn id="siteattendance" label="Attendance / Manpower" icon={Users} />
+
+                  <SubLabel label="Reports & Reviews" />
+                  <NavBtn id="mepreports" label="MEP Reports"      icon={FileText} />
+                  <NavBtn id="evaluation" label="Quarterly Review" icon={BarChart2} />
                 </>}
 
                 {bt === 'fmamc' && <>
+                  <SubLabel label="Site Operations" />
+                  <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
+                  <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
+                  <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
+                  <NavBtn id="mepbom"          label="Project BOM"        icon={ClipboardList} />
+                  <NavBtn id="scopeofwork"     label="Service Catalogue"  icon={BookOpen} />
+                  <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
+                  <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
+                  <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
+                  <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
+                  <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
+                  <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
+
                   <SubLabel label="FM Suite" />
                   <NavBtn id="fmkpi"         label="KPI Dashboard"  icon={BarChart2} />
                   <NavBtn id="assetregister" label="Asset Register"  icon={Package} />
@@ -3976,14 +4063,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                   <NavBtn id="fmworkorders"  label="Work Orders"     icon={Wrench} />
                   <NavBtn id="amccontracts"  label="AMC Contracts"   icon={FileSignature} />
                   <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
-                </>}
 
-                <SubLabel label="Compliance" />
-                <NavBtn id="hse"            label="HSE"              icon={Shield} />
-                <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
-                <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
-                <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
-                <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+                  <SubLabel label="Compliance" />
+                  <NavBtn id="hse"            label="HSE"              icon={Shield} />
+                  <NavBtn id="tcommissioning" label="T&C"              icon={CheckCircle} />
+                  <NavBtn id="handover"       label="Handover / DLP"   icon={CheckSquare} />
+                  <NavBtn id="evaluation"     label="Quarterly Review" icon={BarChart2} />
+                  <NavBtn id="mepreports"     label="MEP Reports"      icon={FileText} />
+                </>}
 
                 <SubLabel label="Accounts" />
                 <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
@@ -4005,6 +4092,114 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <NavBtn id="documents" label="All Documents" icon={FileText} />
           </div>
 
+          {/* ═══════════ MEP ERP (service division) ═══════════ */}
+          {showService && (<>
+            <div style={{ padding: '10px 14px 4px', fontSize: 11, fontWeight: 800, letterSpacing: '0.09em', color: '#1A7A3E', textTransform: 'uppercase' }}>MEP ERP</div>
+
+            <Section sectionKey="mep_projects" label="Projects">
+              <NavBtn id="siteprojects" label="Project Master"    icon={MapPin} />
+              <NavBtn id="contracts"    label="Contracts / T&C"   icon={FileSignature} />
+              <NavBtn id="projectdocs"  label="Project Documents" icon={FileText} />
+            </Section>
+
+            <Section sectionKey="mep_tender" label="Tender & Estimation">
+              <NavBtn id="tender"     label="Tender"     icon={FileText} />
+              <NavBtn id="boq"        label="BOQ"        icon={ClipboardList} />
+              <NavBtn id="estimation" label="Estimation" icon={BarChart2} />
+              <CreateBtn docKey="quotation" />
+            </Section>
+
+            <Section sectionKey="mep_resources" label="Resource Master">
+              <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
+            </Section>
+
+            <Section sectionKey="mep_bom" label="BOM & Materials">
+              <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
+              <NavBtn id="matrequests"     label="Material Requests" icon={FileText} />
+              <NavBtn id="procurement"     label="Procurement"      icon={Truck} />
+              <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+            </Section>
+
+            <Section sectionKey="mep_planning" label="Planning & Progress">
+              <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+              <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+              <NavBtn id="manpower"        label="Manpower"         icon={Users} />
+            </Section>
+
+            <Section sectionKey="mep_billing" label="Billing & Commercial">
+              <NavBtn id="rabilling"          label="RA Billing"          icon={FileMinus} />
+              <NavBtn id="variations"         label="Variations"          icon={FileText} />
+              <NavBtn id="subcontractbilling" label="Subcontract Billing" icon={FileMinus} />
+              <NavBtn id="paymenttracking"    label="Payment Tracking"    icon={BarChart2} />
+            </Section>
+
+            <Section sectionKey="mep_subcon" label="Subcontractors">
+              <NavBtn id="subcontractors"   label="Subcontractor Master" icon={Truck} />
+              <NavBtn id="subworkorders"    label="Work Orders"          icon={FileSignature} />
+              <NavBtn id="subprogress"      label="Progress"             icon={BarChart2} />
+              <NavBtn id="subcertification" label="Certification"        icon={CheckSquare} />
+            </Section>
+
+            <Section sectionKey="mep_hse" label="HSE">
+              <NavBtn id="hseinspections" label="Inspections"    icon={CheckSquare} />
+              <NavBtn id="toolbox"        label="Toolbox Talks"  icon={BookOpen} />
+              <NavBtn id="incidents"      label="Incidents"      icon={AlertTriangle} />
+              <NavBtn id="hse"            label="Safety Reports" icon={Shield} />
+            </Section>
+
+            <Section sectionKey="mep_handover" label="Handover & DLP">
+              <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+              <NavBtn id="handover"       label="Handover"                icon={CheckSquare} />
+              <NavBtn id="dlpdefects"     label="DLP / Defects"           icon={AlertTriangle} />
+            </Section>
+
+            <Section sectionKey="mep_assets" label="Assets & Service">
+              <NavBtn id="scopeofwork"    label="Service Catalogue"      icon={BookOpen} />
+              <NavBtn id="pmaintenance"   label="Preventive Maintenance" icon={ClipboardList} />
+              <NavBtn id="servicehistory" label="Service History"        icon={FileText} />
+            </Section>
+
+            <Section sectionKey="mep_reports" label="Reports & Analytics">
+              <NavBtn id="projectpnl" label="Project P&amp;L" icon={BarChart2} />
+              <NavBtn id="mepreports"     label="MEP Reports"       icon={FileText} />
+              <NavBtn id="audit"          label="Financial Reports" icon={BarChart2} />
+              <NavBtn id="evaluation"     label="Management Review" icon={CheckCircle} />
+            </Section>
+
+            <Section sectionKey="accounts" label="Accounts">
+              <CreateBtn docKey="invoice" />
+              <CreateBtn docKey="creditnote" />
+              <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+              <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+              {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+              {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+              {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+              {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+            </Section>
+
+            <Section sectionKey="purchase" label="Purchase">
+              <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
+              <NavBtn id="vendors"     label="Vendors"              icon={Truck} />
+              <CreateBtn docKey="purchase" />
+              <CreateBtn docKey="purchasebill" />
+              <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+            </Section>
+
+            <Section sectionKey="stores" label="Stores">
+              <NavBtn id="items"        label="Item Master"          icon={Package} />
+              <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
+              <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
+              <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
+              <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
+              <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
+              <CreateBtn docKey="delivery" />
+              <CreateBtn docKey="packing_list" />
+            </Section>
+          </>)}
+
+          {/* ═══════════ Standard layout (trading / manufacturing / fm) ═══════════ */}
+          {!showService && (<>
           {/* Sales */}
           <Section sectionKey="sales" label="Sales">
             <NavBtn id="customers" label="Customers"    icon={Users} />
@@ -4029,6 +4224,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
           {/* Purchase */}
           <Section sectionKey="purchase" label="Purchase">
+            <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
             <NavBtn id="vendors" label="Vendors" icon={Truck} />
             <CreateBtn docKey="purchase" />
             <CreateBtn docKey="purchasebill" />
@@ -4050,32 +4246,45 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
           )}
 
-          {/* Project BOM + Service Catalogue */}
-          {(showService || showFMAMC) && (
-            <Section sectionKey="scope" label="Projects">
-              <NavBtn id="mepbom"      label="Project BOM"       icon={ClipboardList} />
+          {/* ─── MEP SUITE (grouped) ─────────────────────────── */}
+          {showService && (
+            <Section sectionKey="site" label="MEP Suite">
+              <SubLabel label="Projects" />
+              <NavBtn id="siteprojects" label="Project Master" icon={MapPin} />
+              <SubLabel label="BOM & Materials" />
+              <NavBtn id="mepbom" label="BOM &amp; Materials" icon={ClipboardList} />
+              <SubLabel label="Service Catalogue" />
               <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
+              <SubLabel label="Tender & Estimation" />
+              <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+              <SubLabel label="Planning & Progress" />
+              <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+              <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+              <SubLabel label="Billing" />
+              <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
+              <SubLabel label="Subcontractors" />
+              <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+              <SubLabel label="HSE" />
+              <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+              <SubLabel label="T&C / Contracts" />
+              <NavBtn id="contracts" label="Contracts / T&C" icon={FileSignature} />
+              <SubLabel label="Handover & DLP" />
+              <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+              <NavBtn id="handover"       label="Handover / DLP"          icon={CheckSquare} />
+              <SubLabel label="Attendance & Manpower" />
+              <NavBtn id="siteattendance" label="Attendance / Manpower" icon={Users} />
+              <SubLabel label="Reports & Reviews" />
+              <NavBtn id="mepreports" label="MEP Reports"      icon={FileText} />
+              <NavBtn id="evaluation" label="Quarterly Review" icon={BarChart2} />
             </Section>
           )}
 
-          {/* MEP Suite */}
-          {showService && (
-            <Section sectionKey="site" label="MEP Suite">
-              <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-              <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-              <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-              <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
-              <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
-              <NavBtn id="hse"             label="HSE"                icon={Shield} />
-              <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
-              <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
-              <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-              <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-              <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-              <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-              <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
-              <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
-              <NavBtn id="assetregister"   label="Asset Register"     icon={Package} />
+          {/* FM / AMC keeps its project BOM + catalogue */}
+          {showFMAMC && (
+            <Section sectionKey="scope" label="Projects">
+              <NavBtn id="mepbom"      label="Project BOM"       icon={ClipboardList} />
+              <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
             </Section>
           )}
 
@@ -4120,6 +4329,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
             </Section>
           )}
+          </>)}
         </>
       )}
 
@@ -4149,6 +4359,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
@@ -4156,6 +4367,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="contracts"    label="Contracts"     icon={FileSignature} />
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
+          <NavBtn id="assetregister" label="Asset Register" icon={Package} />
         </Section>
       ))}
 
@@ -4165,7 +4377,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Sales staff ───────────────────────────────────────────────────────────
   if (userRole === 'sales') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4201,7 +4413,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Purchase staff ────────────────────────────────────────────────────────
   if (userRole === 'purchase') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4234,7 +4446,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Inventory staff ───────────────────────────────────────────────────────
   if (userRole === 'inventory') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4280,7 +4492,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Accounts staff ────────────────────────────────────────────────────────
   if (userRole === 'accounts') return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4314,7 +4526,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
   // ── Fallback ──────────────────────────────────────────────────────────────
   return (
-    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className="no-print">
+    <div style={{ ...styles.sidebar, overflowY: 'auto' }} className={"no-print sidebar-nav" + (navOpen ? " open" : "")}>
       {Brand()}
 
       {/* Switch Activity button */}
@@ -4350,7 +4562,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         background: view === 'notifications' ? 'rgba(255,255,255,0.12)' : 'transparent',
         border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer',
-        color: '#E8E6DE', fontSize: 13, marginBottom: 4, position: 'relative',
+        color: '#DCEAE0', fontSize: 13, marginBottom: 4, position: 'relative',
       }}>
         <span style={{ fontSize: 16 }}>🔔</span>
         <span>Notifications</span>
@@ -4569,6 +4781,26 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [useLH, setUseLH] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [mergeSel, setMergeSel] = useState([]);
+  function toggleMerge(id) { setMergeSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); }
+  function mergeSelected() {
+    const selSet = new Set(mergeSel);
+    setDoc((d) => {
+      const sel = (d.items || []).filter((it) => selSet.has(it.id));
+      if (sel.length < 2) return d;
+      const totalAmt = sel.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
+      const names = sel.map((it) => (it.name || '').trim()).filter(Boolean);
+      const merged = { ...EMPTY_ITEM_ROW(businessInfo), id: crypto.randomUUID(), name: names.join('\n'), qty: 1, rate: totalAmt, gst: sel[0].gst, discount: 0, hsn: sel[0].hsn || '' };
+      let inserted = false;
+      const out = [];
+      for (const it of d.items) {
+        if (selSet.has(it.id)) { if (!inserted) { out.push(merged); inserted = true; } }
+        else out.push(it);
+      }
+      return { ...d, items: out };
+    });
+    setMergeSel([]);
+  }
   const bizBadge = BIZ_BADGE[doc.bizType];
   const showBizBadge = !!bizBadge;
 
@@ -5045,6 +5277,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
                         title="Rate"
                       />
+                      {cc.hasTax && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {cc.hasTax && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
                       {isEditable && (
                         <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
                       )}
@@ -5309,7 +5543,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                           <tr key={it.id||i} style={{ borderBottom:'1px solid #ddd', background: i%2===0?'#fff':'#fafafa' }}>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{i+1}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
-                            <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500 }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
+                            <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.gst||0}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
@@ -5348,6 +5582,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
                           <span>Taxable</span><span style={{ fontWeight:600 }}>{fmt(totals.subtotal)}</span>
                         </div>
+                        {totals.discountTotal > 0 && (
+                          <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd', color:'#B5453A' }}>
+                            <span>Less: Discount</span><span style={{ fontWeight:600 }}>− {fmt(totals.discountTotal)}</span>
+                          </div>
+                        )}
                         {taxRows.map(([label,val])=>(
                           <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', borderBottom:'1px solid #ddd' }}>
                             <span>{label}</span><span style={{ fontWeight:600 }}>{fmt(val||0)}</span>
@@ -5445,10 +5684,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           )}
 
+          <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }`}</style>
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Item</th>
+                <th style={{ ...styles.th, width: 34, textAlign: 'center' }}>Sl</th>
+                <th style={{ ...styles.th, width: '100%', minWidth: 200 }}>Item</th>
                 {doc.type !== 'packing_list' && cc.splitTax && <th style={styles.th}>HSN</th>}
                 <th style={{ ...styles.th, textAlign: 'right' }}>Qty</th>
                 {doc.type === 'packing_list' ? (<>
@@ -5465,23 +5706,32 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               </tr>
             </thead>
             <tbody>
-              {doc.items.map((it) => {
+              {doc.items.map((it, idx) => {
                 const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
                 return (
                   <tr key={it.id}>
+                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{isEditable && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick to merge rows into one line" style={{ cursor: 'pointer', display: 'block', margin: '0 auto 5px', width: 15, height: 15 }} />}{idx + 1}</td>
                     <td style={styles.td}>
                       {isEditable && <select className="no-print" value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={styles.inlineSelect}>
                         <option value="">Custom item</option>
                         {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>}
-                      <input value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} style={{ ...styles.inlineInput, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="Item description" readOnly={!isEditable} />
+                      {isEditable
+                        ? <>
+                            <div className="di-screen" style={{ display: 'grid', minWidth: 180, width: '100%' }}>
+                              <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', border: '1px solid transparent', fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 28 }}>{(it.name || 'Item description') + ' '}</div>
+                              <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', height: '100%', width: '100%' }} />
+                            </div>
+                            <div className="di-print" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>
+                          </>
+                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
                     </td>
                     {doc.type !== 'packing_list' && cc.splitTax && (
                       <td style={styles.td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
+                          <input className="di-input" value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
                           {isEditable && cc.splitTax && (
-                            <button type="button" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
+                            <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>
                               🔍
                             </button>
@@ -5491,13 +5741,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                     )}
                     <td style={styles.td}><input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
                     {doc.type === 'packing_list' ? (<>
-                      <td style={styles.td}><input type="number" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input type="number" className="di-input" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      <td style={styles.td}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
                     </>) : (<>
-                      <td style={styles.td}><input type="number" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      {cc.hasTax && <td style={styles.td}><input type="number" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
+                      <td style={styles.td}><input type="number" className="di-input" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
+                      {cc.hasTax && <td style={styles.td}><input type="number" className="di-input" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
                     </>)}
                     {isEditable && <td className="no-print" style={styles.td}>
@@ -5509,7 +5759,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </tbody>
           </table>
 
-          {isEditable && <button onClick={addRow} className="no-print" style={styles.addRowBtn}><Plus size={14} /> Add line item</button>}
+          {isEditable && <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={addRow} style={styles.addRowBtn}><Plus size={14} /> Add line item</button>
+            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Merge {mergeSel.length} items into one line</button>}
+            {mergeSel.length >= 1
+              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to merge)' : ''}</span>
+              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick the checkbox on rows to merge them into a single line</span>}
+          </div>}
 
           {/* ── Packing List weight totals ── */}
           {doc.type === 'packing_list' && (() => {
@@ -5543,6 +5799,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#555', borderBottom: '1px solid #F2EFE6' }}>
                 <span>Subtotal</span><span>{fmt(totals.subtotal)}</span>
               </div>
+              {totals.discountTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, color: '#B5453A', borderBottom: '1px solid #F2EFE6' }}>
+                  <span>Less: Discount</span><span>− {fmt(totals.discountTotal)}</span>
+                </div>
+              )}
               {cc.hasTax && (cc.splitTax ? (
                 totals.sameState ? (
                   <>
@@ -6479,6 +6740,48 @@ function LetterheadHeader({ bi, style = {} }) {
   return null;
 }
 
+function printHTML(html){
+  try {
+    const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const css = styleMatch ? styleMatch[1] : '';
+    const body = bodyMatch ? bodyMatch[1] : html;
+    const holder = document.createElement('div');
+    holder.className = 'print-area';
+    holder.setAttribute('style','position:fixed;inset:0;background:#fff;z-index:99999;overflow:auto;');
+    holder.innerHTML = '<style>'+css+'</style>'+body;
+    document.body.appendChild(holder);
+    const done = () => { try{ document.body.removeChild(holder); }catch(_e){} window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => { window.print(); setTimeout(done, 2000); }, 80);
+  } catch(e){
+    const w = window.open('', '_blank'); if(w){ w.document.write(html); w.document.close(); setTimeout(()=>w.print(),300); }
+  }
+}
+
+function StdDocHeader({ businessInfo, title, subtitle }) {
+  const bi = businessInfo || {};
+  const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
+  const cParts = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
+      <div>
+        <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>
+        {bi.address && <div style={{ fontSize: 11.5, color: '#666', marginTop: 3, maxWidth: 340 }}>{bi.address}</div>}
+        {cParts.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: '#666', marginTop: 3 }}>
+            {cParts.map((x, i) => (<span key={i} style={{ whiteSpace: 'nowrap' }}>{i > 0 && <span style={{ margin: '0 8px', color: '#bbb' }}>·</span>}{x}</span>))}
+          </div>
+        )}
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0, paddingLeft: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11.5, color: '#888', marginTop: 4 }}>{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
 function VoucherPrintHeader({ businessInfo, useLH }) {
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   if (useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)) {
@@ -6499,6 +6802,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
           <div style={{ fontSize: 11, color: '#666', marginTop: 2, maxWidth: 300 }}>{businessInfo.address}</div>
           {businessInfo.gstin && <div style={{ fontSize: 11, color: '#666' }}>{cc.taxIdLabel}: {businessInfo.gstin}</div>}
           {businessInfo.phone && <div style={{ fontSize: 11, color: '#666' }}>{businessInfo.phone}</div>}
+          {(businessInfo.email || businessInfo.website) && <div style={{ fontSize: 11, color: '#666' }}>{[businessInfo.email, businessInfo.website].filter(Boolean).join(' · ')}</div>}
         </div>
       </div>
     </div>
@@ -6711,7 +7015,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
   const stockMap = computeStock(stockLedger, items);
 
   const rows = Object.values(stockMap)
-    .filter(r => r.item && r.item.name && r.item.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(r => { const it = r.item; if (!it) return false; const q = search.trim().toLowerCase(); return !q || (it.name||'').toLowerCase().includes(q) || (it.itemCode||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q) || (it.hsn||'').toLowerCase().includes(q); })
     .sort((a, b) => (a.item.name || '').localeCompare(b.item.name || ''));
 
   const totalValue = rows.reduce((s, r) => s + Math.max(0, r.value), 0);
@@ -6739,6 +7043,11 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
     setShowAdj(false); setAdjItem(''); setAdjQty(''); setAdjNote('');
   }
 
+  function printStock(){
+    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'\u2014')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'\u2014')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -6747,6 +7056,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
           <div style={{ fontSize: 13, color: '#888780' }}>Current inventory levels across all items</div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button style={styles.ghostBtn} onClick={printStock}>🖨 Print</button>
           {lowStock.length > 0 && (
             <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, color: '#B91C1C', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               ⚠️ {lowStock.length} item{lowStock.length > 1 ? 's' : ''} low on stock
@@ -6926,7 +7236,7 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
 
 // ─── Vertical Rack ──────────────────────────────────────────────────────────
 
-function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIssues = [], setStockLedger, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
+function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIssues = [], employees = [], siteProjects = [], productionOrders = [], setStockLedger, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
   const [showRackForm, setShowRackForm]   = React.useState(false);
   const [editRack,     setEditRack]       = React.useState(null);
   const [activeRack,   setActiveRack]     = React.useState(null); // rack being managed
@@ -7043,6 +7353,7 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
           rack={activeRack}
           inward={inward} outward={outward} returns={returns}
           items={items} grns={grns} storeIssues={storeIssues}
+          employees={employees} siteProjects={siteProjects} productionOrders={productionOrders}
           nextInNo={nextNo('RIN-',inward,'receiptNo')}
           nextMdrNo={nextNo('MDR-',outward,'mdrNo')}
           nextRtnNo={nextNo('RTN-',returns,'returnNo')}
@@ -7050,6 +7361,7 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
           onSaveInward={saveInward} onSaveOutward={saveOutward} onSaveReturn={saveReturn}
           onMarkDelivered={markDelivered} onDeleteRecord={deleteRecord}
           onClose={()=>setActiveRack(null)}
+          onEditRack={()=>{ setEditRack(activeRack); setShowRackForm(true); setActiveRack(null); }}
           businessInfo={businessInfo}
         />
       )}
@@ -7116,7 +7428,7 @@ function RackCard({ rack, inward=[], outward=[], returns=[], onClick, onEdit, on
 }
 
 // ── Rack Detail Modal (main management screen) ───────────────────────────────
-function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo }) {
+function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIssues, employees = [], siteProjects = [], productionOrders = [], nextInNo, nextMdrNo, nextRtnNo, currentUserName, onSaveInward, onSaveOutward, onSaveReturn, onMarkDelivered, onDeleteRecord, onClose, businessInfo, onEditRack }) {
   const [action, setAction]     = React.useState(null); // {type:'receive'|'issue'|'return', slot}
   const [printDoc, setPrintDoc] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState('slots'); // 'slots' | 'history'
@@ -7151,9 +7463,13 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
   ].sort((a,b)=>b.date>a.date?1:-1);
 
   const tabSt = t => ({ padding:'6px 16px', fontSize:12, fontWeight:activeTab===t?600:400, borderBottom:activeTab===t?'2px solid #2C3E6B':'2px solid transparent', color:activeTab===t?'#2C3E6B':'#888', cursor:'pointer', background:'none', border:'none' });
+  function printRack(){
+    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'\u2014')+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+  }
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:500, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'stretch', justifyContent:'flex-end' }}>
+    <div style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'stretch', justifyContent:'flex-end' }}>
       <div style={{ width:'min(780px,96vw)', background:'#fff', display:'flex', flexDirection:'column', overflowY:'auto', boxShadow:'-4px 0 24px rgba(0,0,0,0.15)' }}>
         {/* Header */}
         <div style={{ padding:'16px 24px', borderBottom:'1px solid #E8E4DC', display:'flex', justifyContent:'space-between', alignItems:'center', background:'#2C3E6B' }}>
@@ -7161,7 +7477,11 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
             <div style={{ fontWeight:700, fontSize:17, color:'#fff' }}>{rack.name}</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.7)', marginTop:2 }}>{rows}R × {cols}C · {slots.length} slots{capacity?` · cap ${capacity}/slot`:''}</div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', color:'#fff', cursor:'pointer', padding:4 }}><X size={20}/></button>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {onEditRack && <button onClick={onEditRack} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 12px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><Pencil size={14}/> Edit</button>}
+            <button onClick={printRack} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 12px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><Printer size={14}/> Print</button>
+            <button onClick={onClose} style={{ background:'rgba(255,255,255,0.16)', border:'none', color:'#fff', cursor:'pointer', padding:'6px 10px', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:5 }}><X size={16}/> Close</button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -7205,10 +7525,7 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
                   <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
                     <button style={{...styles.primaryBtn,background:'#2C6B3A'}} onClick={()=>setAction({slot:action.slot,type:'receive'})}>↓ Receive (IN)</button>
                     <button style={{...styles.primaryBtn,background:'#6B2C2C'}} onClick={()=>setAction({slot:action.slot,type:'issue'})}>↑ Issue / MDR (OUT)</button>
-                    {Math.max(0,slotData[action.slot]?.qty||0)===0 && outward.some(m=>m.status==='delivered'&&(m.items||[]).some(i=>i.rackId===rack.id&&i.slot===action.slot)) &&
-                      <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>}
-                    {Math.max(0,slotData[action.slot]?.qty||0)>0 &&
-                      <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>}
+                    <button style={{...styles.primaryBtn,background:'#2255A0'}} onClick={()=>setAction({slot:action.slot,type:'return'})}>↩ Return</button>
                     <button style={styles.ghostBtn} onClick={()=>setAction(null)}>Cancel</button>
                   </div>
                 </div>
@@ -7229,6 +7546,7 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
                 <SlotIssueForm
                   slot={action.slot} rack={rack} nextNo={nextMdrNo}
                   items={items} storeIssues={storeIssues}
+                  employees={employees} siteProjects={siteProjects} productionOrders={productionOrders}
                   slotItems={slotData[action.slot]?.items||[]}
                   onSave={doc=>{ onSaveOutward(doc); setAction(null); }}
                   onCancel={()=>setAction(null)}
@@ -7277,7 +7595,7 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function handleSave(){
-    const validRows = rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows = rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item with qty');return;}
     onSave({ receiptNo, date, sourceType, sourceRef, items: validRows.map(r=>({...r, rackId:rack.id, rackName:rack.name, slot, qty:parseFloat(r.qty)})) });
   }
@@ -7308,7 +7626,7 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
           <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); setRow(idx,'itemName',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
+            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
             {showDrop[idx]&&search[idx]&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
                 {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
@@ -7331,17 +7649,18 @@ function SlotReceiveForm({ slot, rack, nextNo, items, grns, onSave, onCancel }) 
   );
 }
 
-function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSave, onCancel }) {
+function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems = [], employees = [], siteProjects = [], productionOrders = [], onSave, onCancel }) {
   const [mdrNo,    setMdrNo]    = React.useState(nextNo);
   const [date,     setDate]     = React.useState(new Date().toISOString().slice(0,10));
   const [sivRef,   setSivRef]   = React.useState('');
   const [issuedTo, setIssuedTo] = React.useState('');
   const [purpose,  setPurpose]  = React.useState('');
+  const [projectWo, setProjectWo] = React.useState('');
   const [rows, setRows]         = React.useState([{ itemId:'', itemName:'', qty:'', unit:'' }]);
   const [search, setSearch]     = React.useState(['']);
   const [showDrop, setShowDrop] = React.useState([false]);
 
-  const approvedSivs = (storeIssues||[]).filter(s=>s.approvalStatus==='approved'||s.status==='approved');
+  const approvedSivs = (storeIssues||[]).filter(s=>s.sivNumber||s.number||s.id);
 
   function pickItem(idx,it){ const r=[...rows]; r[idx]={...r[idx],itemId:it.id,itemName:it.name,unit:it.unit||'nos'}; setRows(r); const s=[...search]; s[idx]=it.name; setSearch(s); const d=[...showDrop]; d[idx]=false; setShowDrop(d); }
   function setRow(idx,k,v){ const r=[...rows]; r[idx]={...r[idx],[k]:v}; setRows(r); }
@@ -7349,9 +7668,9 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function doSave(status){
-    const validRows=rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows=rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item');return;}
-    onSave({mdrNo,date,sivRef,issuedTo,purpose,status,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
+    onSave({mdrNo,date,sivRef,issuedTo,projectWo,purpose,status,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
   }
 
   return (
@@ -7364,24 +7683,18 @@ function SlotIssueForm({ slot, rack, nextNo, items, storeIssues, slotItems, onSa
         <div style={styles.formGroup}>
           <label style={styles.label}>SIV Reference</label>
           {approvedSivs.length>0
-            ?<select value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input}><option value="">— select SIV —</option>{approvedSivs.map(s=><option key={s.id} value={s.sivNumber||s.id}>{s.sivNumber}</option>)}</select>
+            ?<select value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input}><option value="">— select SIV —</option>{approvedSivs.map(s=><option key={s.id} value={s.sivNumber||s.number||s.id}>{s.sivNumber||s.number||('SIV '+String(s.id).slice(-4))}</option>)}</select>
             :<input value={sivRef} onChange={e=>setSivRef(e.target.value)} style={styles.input} placeholder="SIV number"/>}
         </div>
-        <div style={styles.formGroup}><label style={styles.label}>Issued To</label><input value={issuedTo} onChange={e=>setIssuedTo(e.target.value)} style={styles.input} placeholder="Dept / Person"/></div>
-        <div style={{...styles.formGroup,gridColumn:'2/-1'}}><label style={styles.label}>Purpose</label><input value={purpose} onChange={e=>setPurpose(e.target.value)} style={styles.input} placeholder="Purpose / project ref"/></div>
+        <div style={styles.formGroup}><label style={styles.label}>Issued To</label><input list="issue-emps" value={issuedTo} onChange={e=>setIssuedTo(e.target.value)} style={styles.input} placeholder="Dept / Person"/><datalist id="issue-emps">{(employees||[]).map(emp=><option key={emp.id} value={(emp.name||'')+(emp.department?' — '+emp.department:'')}/>)}</datalist></div>
+        <div style={styles.formGroup}><label style={styles.label}>Project / WO</label><input list="issue-projwo" value={projectWo} onChange={e=>setProjectWo(e.target.value)} style={styles.input} placeholder="Project / Work Order"/><datalist id="issue-projwo">{(siteProjects||[]).map(p=><option key={'p'+p.id} value={(p.name||p.projectName||('Project '+p.id))+' (Project)'}/>)}{(productionOrders||[]).map(o=><option key={'o'+o.id} value={((o.number||o.product||o.id))+' (WO)'}/>)}</datalist></div><div style={{...styles.formGroup,gridColumn:'1/-1'}}><label style={styles.label}>Purpose</label><input value={purpose} onChange={e=>setPurpose(e.target.value)} style={styles.input} placeholder="Purpose / remarks"/></div>
       </div>
       <div style={{ fontSize:12, fontWeight:600, color:'#555', marginBottom:6 }}>Items to Issue</div>
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
-          <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
-            {showDrop[idx]&&search[idx]&&(
-              <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
-                {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
-                  <div key={it.id} onClick={()=>pickItem(idx,it)} style={{padding:'6px 10px',fontSize:12,cursor:'pointer',borderBottom:'1px solid #F5F3EE'}} onMouseEnter={e=>e.currentTarget.style.background='#F5F3EE'} onMouseLeave={e=>e.currentTarget.style.background=''}>{it.name}</div>
-                ))}
-              </div>
-            )}
+          <div>
+            <input list={"slotitems-"+idx} value={row.itemName||''} onChange={e=>{ const val=e.target.value; setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:val}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Item (from slot)…"/>
+            <datalist id={"slotitems-"+idx}>{(slotItems||[]).map((nm,i2)=><option key={'s'+i2} value={nm}/>)}{(items||[]).map(it=><option key={it.id} value={it.name}/>)}</datalist>
           </div>
           <input type="number" value={row.qty} onChange={e=>setRow(idx,'qty',e.target.value)} style={{...styles.input,margin:0}} placeholder="Qty" min={0}/>
           <input value={row.unit} onChange={e=>setRow(idx,'unit',e.target.value)} style={{...styles.input,margin:0}} placeholder="Unit"/>
@@ -7408,7 +7721,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
   const [search, setSearch]     = React.useState(['']);
   const [showDrop, setShowDrop] = React.useState([false]);
 
-  const deliveredMdrs = (outward||[]).filter(m=>m.status==='delivered'&&(m.items||[]).some(i=>i.rackId===rack.id&&i.slot===slot));
+  const deliveredMdrs = (outward||[]).filter(m=>(m.items||[]).some(i=>i.rackId===rack.id));
 
   function pickItem(idx,it){ const r=[...rows]; r[idx]={...r[idx],itemId:it.id,itemName:it.name,unit:it.unit||'nos'}; setRows(r); const s=[...search]; s[idx]=it.name; setSearch(s); const d=[...showDrop]; d[idx]=false; setShowDrop(d); }
   function setRow(idx,k,v){ const r=[...rows]; r[idx]={...r[idx],[k]:v}; setRows(r); }
@@ -7416,7 +7729,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
   function removeRow(idx){ setRows(r=>r.filter((_,i)=>i!==idx)); setSearch(s=>s.filter((_,i)=>i!==idx)); setShowDrop(d=>d.filter((_,i)=>i!==idx)); }
 
   function handleSave(){
-    const validRows=rows.filter(r=>r.itemId&&parseFloat(r.qty)>0);
+    const validRows=rows.filter(r=>(r.itemId||(r.itemName||'').trim())&&parseFloat(r.qty)>0);
     if(!validRows.length){alert('Add at least one item');return;}
     onSave({returnNo,date,returnFrom,mdrRef,items:validRows.map(r=>({...r,rackId:rack.id,rackName:rack.name,slot,qty:parseFloat(r.qty)}))});
   }
@@ -7430,7 +7743,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
         <div style={styles.formGroup}>
           <label style={styles.label}>MDR Reference</label>
           {deliveredMdrs.length>0
-            ?<select value={mdrRef} onChange={e=>setMdrRef(e.target.value)} style={styles.input}><option value="">— select MDR —</option>{deliveredMdrs.map(m=><option key={m.id} value={m.mdrNo}>{m.mdrNo} · {m.date}</option>)}</select>
+            ?<select value={mdrRef} onChange={e=>{ const v=e.target.value; setMdrRef(v); const mdr=(outward||[]).find(m=>m.mdrNo===v); if(mdr){ const rr=(mdr.items||[]).filter(i=>i.rackId===rack.id).map(i=>({itemId:i.itemId||'',itemName:i.itemName||'',qty:i.qty||'',unit:i.unit||''})); if(rr.length){ setRows(rr); setSearch(rr.map(x=>x.itemName)); setShowDrop(rr.map(()=>false)); } } }} style={styles.input}><option value="">— select MDR —</option>{deliveredMdrs.map(m=><option key={m.id} value={m.mdrNo}>{m.mdrNo} · {m.date}</option>)}</select>
             :<input value={mdrRef} onChange={e=>setMdrRef(e.target.value)} style={styles.input} placeholder="MDR number"/>}
         </div>
         <div style={{...styles.formGroup,gridColumn:'1/-1'}}><label style={styles.label}>Returned From</label><input value={returnFrom} onChange={e=>setReturnFrom(e.target.value)} style={styles.input} placeholder="Department / Person returning"/></div>
@@ -7439,7 +7752,7 @@ function SlotReturnForm({ slot, rack, nextNo, items, outward, onSave, onCancel }
       {rows.map((row,idx)=>(
         <div key={idx} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, marginBottom:8, alignItems:'flex-start' }}>
           <div style={{ position:'relative' }}>
-            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRow(idx,'itemId',''); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
+            <input value={search[idx]||''} onChange={e=>{ const s=[...search]; s[idx]=e.target.value; setSearch(s); const d=[...showDrop]; d[idx]=true; setShowDrop(d); setRows(rs=>{const rr=[...rs]; rr[idx]={...rr[idx], itemId:'', itemName:e.target.value}; return rr;}); }} style={{...styles.input,margin:0}} placeholder="Search item…"/>
             {showDrop[idx]&&search[idx]&&(
               <div style={{position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid #E8E4DC',borderRadius:6,zIndex:100,maxHeight:140,overflowY:'auto'}}>
                 {(items||[]).filter(it=>it.name?.toLowerCase().includes((search[idx]||'').toLowerCase())).slice(0,15).map(it=>(
@@ -7513,10 +7826,14 @@ function RackFormModal({ rack, onSave, onClose }) {
 function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV = [], currentBizType = 'trading', isMultiBiz = false }) {
   const [useLHBin, setUseLHBin] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [selectedItemId, setSelectedItemId] = useState(items[0]?.id || '');
+  const [binSearch, setBinSearch] = React.useState('');
+  const [binFrom, setBinFrom] = React.useState('');
+  const [binTo, setBinTo] = React.useState('');
   // Filter by current division in multi-biz mode
   const stockLedger = isMultiBiz ? (allSL || []).filter(e => (e.bizType || 'trading') === currentBizType) : (allSL || []);
   const storeIssues = isMultiBiz ? (allSIV || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allSIV || []);
   const item = items.find(i => i.id === selectedItemId);
+  const filteredItems = (items || []).filter(it => { const q = binSearch.trim().toLowerCase(); return !q || (it.name||'').toLowerCase().includes(q) || (it.itemCode||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q) || (it.hsn||'').toLowerCase().includes(q); });
 
   const SOURCE_LABEL = { invoice: 'Invoice', purchasebill: 'Purchase Bill', delivery: 'Delivery Note',
     packing_list: 'Packing List', manual: 'Manual Adj.', production: 'Production', grn: 'GRN', siv: 'Issue Voucher', 'rack-in': 'Rack IN', 'rack-mdr': 'Rack MDR', 'rack-return': 'Rack Return' };
@@ -7538,6 +7855,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 
   // SIV rows that appear in this item's card (for print signature blocks)
   const sivRows = rows.filter(r => r.siv);
+  const displayRows = rows.filter(r => (!binFrom || (r.date||'') >= binFrom) && (!binTo || (r.date||'') <= binTo));
 
   const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -7554,11 +7872,19 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
       </div>
 
       {/* Item selector */}
-      <div className="no-print" style={{ ...styles.formGroup, maxWidth: 340, marginBottom: 20 }}>
-        <label style={styles.label}>Select item</label>
-        <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)} style={styles.input}>
-          {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-        </select>
+      <div className="no-print" style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'flex-end', marginBottom:20 }}>
+        <div style={{ ...styles.formGroup, marginBottom:0, minWidth:200, flex:1 }}>
+          <label style={styles.label}>Search item (code / description)</label>
+          <input value={binSearch} onChange={e=>setBinSearch(e.target.value)} style={styles.input} placeholder="Item code, name, category, HSN…"/>
+        </div>
+        <div style={{ ...styles.formGroup, marginBottom:0, minWidth:200 }}>
+          <label style={styles.label}>Select item</label>
+          <select value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)} style={styles.input}>
+            {filteredItems.map(it => <option key={it.id} value={it.id}>{it.itemCode ? it.itemCode + ' — ' : ''}{it.name}</option>)}
+          </select>
+        </div>
+        <div style={{ ...styles.formGroup, marginBottom:0 }}><label style={styles.label}>From</label><input type="date" value={binFrom} onChange={e=>setBinFrom(e.target.value)} style={styles.input}/></div>
+        <div style={{ ...styles.formGroup, marginBottom:0 }}><label style={styles.label}>To</label><input type="date" value={binTo} onChange={e=>setBinTo(e.target.value)} style={styles.input}/></div>
       </div>
 
       {/* Print header */}
@@ -7614,7 +7940,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
           {rows.length === 0 && (
             <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No stock movements for this item yet.</td></tr>
           )}
-          {rows.map((e, i) => (
+          {displayRows.map((e, i) => (
             <React.Fragment key={e.id || i}>
               <tr style={{ background: i % 2 === 0 ? '#fff' : '#FAFAF8' }}>
                 <td style={styles.td}>{e.date}</td>
@@ -8349,9 +8675,9 @@ function printHRLetter(letter, emp, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; position: relative; }
-  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .letterhead { border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
   .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
-  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; }
   h2 { text-align: center; color: #1E2A4A; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 24px; }
   .ref { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 20px; }
   p { line-height: 1.75; margin: 0 0 12px; }
@@ -8372,16 +8698,13 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   <h2>${title}</h2>
   ${bodyHtml}
   <div class="sig">
-    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Authorised Signatory<br/>${biz.name || ''}</div></div>
-    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Employee Acknowledgement<br/>${emp?.name || ''}</div></div>
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Authorised Signatory${biz.name ? '<br/>For ' + biz.name : ''}</div></div>
+    <div class="sig-box"><div style="height:50px"></div><div class="sig-line">Employee Acknowledgement${emp && emp.name ? '<br/>' + emp.name : ''}</div></div>
   </div>
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
 
@@ -8401,9 +8724,9 @@ function printOfferLetterDoc(ol, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; }
-  .lh { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1E2A4A; padding-bottom:16px; margin-bottom:28px; }
+  .lh { border-bottom:2px solid #1E2A4A; padding-bottom:16px; margin-bottom:28px; }
   .bname { font-size:20px; font-weight:700; color:#1E2A4A; }
-  .binfo { font-size:11px; color:#555; line-height:1.6; text-align:right; }
+  .binfo { font-size:11px; color:#555; line-height:1.6; }
   h2 { text-align:center; color:#1E2A4A; margin:0 0 24px; font-size:16px; letter-spacing:.05em; text-transform:uppercase; }
   .ref { text-align:right; font-size:12px; color:#555; margin-bottom:20px; }
   p { line-height:1.7; margin:0 0 12px; }
@@ -8455,10 +8778,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -8497,6 +8817,7 @@ function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, busi
     return (
       <OfferLetterForm
         ol={active}
+        existingCount={offerLetters.length}
         employees={employees}
         businessInfo={businessInfo}
         onSave={saveOffer}
@@ -8579,11 +8900,11 @@ function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, busi
   );
 }
 
-function OfferLetterForm({ ol, employees, businessInfo, onSave, onClose }) {
+function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSave, onClose }) {
   const country = businessInfo?.country || 'india';
 
   function nextRef() {
-    return 'OL-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-4);
+    return 'OL-' + new Date().getFullYear() + '-' + String((existingCount || 0) + 1).padStart(3, '0');
   }
 
   const blank = {
@@ -8768,6 +9089,7 @@ function HRLettersView({ letterType, hrLetters, setHrLetters, employees, userRol
     return (
       <HRLetterForm
         letterType={letterType}
+        existingCount={filtered.length}
         letter={activeLetter}
         employees={employees}
         businessInfo={businessInfo}
@@ -8879,15 +9201,15 @@ function HRLettersView({ letterType, hrLetters, setHrLetters, employees, userRol
   );
 }
 
-function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onClose }) {
+function HRLetterForm({ letterType, existingCount = 0, letter, employees, businessInfo, onSave, onClose }) {
   const isWarn = letterType === 'warning';
-  const count  = Date.now();
+  const count  = (existingCount || 0) + 1;
   const prefix = isWarn ? 'HR/WL/' : 'HR/TL/';
 
   const blank = isWarn ? {
     id: crypto.randomUUID(),
     type: 'warning',
-    refNo: prefix + String(count).slice(-4),
+    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     warnType: 'written',
@@ -8900,7 +9222,7 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
   } : {
     id: crypto.randomUUID(),
     type: 'termination',
-    refNo: prefix + String(count).slice(-4),
+    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     terminationDate: '',
@@ -8958,9 +9280,9 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
 
       <div style={{ background: '#F8F9FC', borderRadius: 8, padding: '14px 18px', marginBottom: 18 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          <EmpField {...fp} label="Reference No." name="refNo" />
-          <EmpField {...fp} label="Issue Date" name="issueDate" type="date" />
-          <EmpField {...fp} label="Status" name="status" options={[
+          <HRLetterField form={form} set={set} label="Reference No." name="refNo" />
+          <HRLetterField form={form} set={set} label="Issue Date" name="issueDate" type="date" />
+          <HRLetterField form={form} set={set} label="Status" name="status" options={[
             { value: 'draft',        label: 'Draft' },
             { value: 'issued',       label: 'Issued' },
             { value: 'acknowledged', label: 'Acknowledged' },
@@ -8981,24 +9303,24 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
       {isWarn ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Warning Type" name="warnType" options={[
+            <HRLetterField form={form} set={set} label="Warning Type" name="warnType" options={[
               { value: 'verbal',  label: 'Verbal Warning' },
               { value: 'written', label: 'Written Warning' },
               { value: 'final',   label: 'Final Warning' },
             ]} />
-            <EmpField {...fp} label="Incident Date" name="incidentDate" type="date" />
-            <EmpField {...fp} label="Previous Warnings on Record" name="previousWarnings" type="number" />
+            <HRLetterField form={form} set={set} label="Incident Date" name="incidentDate" type="date" />
+            <HRLetterField form={form} set={set} label="Previous Warnings on Record" name="previousWarnings" type="number" />
           </div>
-          <EmpField {...fp} label="Reason / Incident Description *" name="reason" textarea />
-          <EmpField {...fp} label="Corrective Action Required" name="correctiveAction" textarea />
-          <EmpField {...fp} label="Consequence if Not Corrected" name="consequence" textarea />
+          <HRLetterField form={form} set={set} label="Reason / Incident Description *" name="reason" textarea />
+          <HRLetterField form={form} set={set} label="Corrective Action Required" name="correctiveAction" textarea />
+          <HRLetterField form={form} set={set} label="Consequence if Not Corrected" name="consequence" textarea />
         </>
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Termination Date" name="terminationDate" type="date" />
-            <EmpField {...fp} label="Last Working Day" name="lastWorkingDay" type="date" />
-            <EmpField {...fp} label="Reason for Termination" name="termReason" options={[
+            <HRLetterField form={form} set={set} label="Termination Date" name="terminationDate" type="date" />
+            <HRLetterField form={form} set={set} label="Last Working Day" name="lastWorkingDay" type="date" />
+            <HRLetterField form={form} set={set} label="Reason for Termination" name="termReason" options={[
               { value: 'misconduct',    label: 'Misconduct' },
               { value: 'performance',   label: 'Poor Performance' },
               { value: 'redundancy',    label: 'Redundancy / Restructuring' },
@@ -9006,15 +9328,15 @@ function HRLetterForm({ letterType, letter, employees, businessInfo, onSave, onC
               { value: 'contract-end',  label: 'End of Contract' },
               { value: 'other',         label: 'Other' },
             ]} />
-            <EmpField {...fp} label="Notice Period" name="noticePeriodServed" options={[
+            <HRLetterField form={form} set={set} label="Notice Period" name="noticePeriodServed" options={[
               { value: 'yes',     label: 'Served in full' },
               { value: 'payment', label: 'Payment in lieu of notice' },
               { value: 'waived',  label: 'Waived by mutual agreement' },
             ]} />
           </div>
-          <EmpField {...fp} label="Additional Details" name="termDetails" textarea />
-          <EmpField {...fp} label="Settlement / Final Pay Details (gratuity, leave encashment, etc.)" name="settlementDetails" textarea />
-          <EmpField {...fp} label="Company Property to be Returned" name="returnItems" textarea />
+          <HRLetterField form={form} set={set} label="Additional Details" name="termDetails" textarea />
+          <HRLetterField form={form} set={set} label="Settlement / Final Pay Details (gratuity, leave encashment, etc.)" name="settlementDetails" textarea />
+          <HRLetterField form={form} set={set} label="Company Property to be Returned" name="returnItems" textarea />
         </>
       )}
     </div>
@@ -9070,9 +9392,9 @@ function printOfferLetter(emp, businessInfo) {
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 0; }
   .page { max-width: 780px; margin: 0 auto; padding: 48px 60px; }
-  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
+  .letterhead { border-bottom: 2px solid #1E2A4A; padding-bottom: 16px; margin-bottom: 28px; }
   .biz-name { font-size: 20px; font-weight: 700; color: #1E2A4A; }
-  .biz-info { font-size: 11px; color: #555; line-height: 1.6; text-align: right; }
+  .biz-info { font-size: 11px; color: #555; line-height: 1.6; }
   h2 { text-align: center; color: #1E2A4A; margin: 0 0 24px; font-size: 16px; letter-spacing: 0.05em; text-transform: uppercase; }
   .ref { text-align: right; font-size: 12px; color: #555; margin-bottom: 20px; }
   p { line-height: 1.7; margin: 0 0 12px; }
@@ -9114,13 +9436,10 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHTML(html);
 }
 
-function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
+function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
   const [subView,   setSubView]   = useState('list');
   const [activeEmp, setActiveEmp] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -9133,12 +9452,13 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo }) {
   );
 
   function saveEmployee(emp) {
+    const tagged = { ...emp, bizType: emp.bizType || currentBizType };
     setEmployees(prev => {
-      const idx = prev.findIndex(e => e.id === emp.id);
-      if (idx >= 0) { const a = [...prev]; a[idx] = emp; return a; }
-      return [...prev, emp];
+      const idx = prev.findIndex(e => e.id === tagged.id);
+      if (idx >= 0) { const a = [...prev]; a[idx] = tagged; return a; }
+      return [...prev, tagged];
     });
-    setActiveEmp(emp);
+    setActiveEmp(tagged);
     setSubView('detail');
   }
 
@@ -9442,6 +9762,33 @@ function EmployeeDetailView({ emp, businessInfo, isGulf, country, canEdit, onEdi
 function EmpSecTitle({ t }) {
   return <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#C9A24B', borderBottom: '1px solid #EAE6DB', paddingBottom: 5, marginBottom: 12, marginTop: 18 }}>{t}</div>;
 }
+function HRLetterField({ label, name, type = 'text', textarea = false, options, form, set }) {
+  if (options) {
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}</label>
+        <select style={styles.input} value={form[name] || ''} onChange={e => set(name, e.target.value)}>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+    );
+  }
+  if (textarea) {
+    return (
+      <div style={styles.formGroup}>
+        <label style={styles.label}>{label}</label>
+        <textarea style={{ ...styles.input, height: 76, resize: 'vertical' }} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+      </div>
+    );
+  }
+  return (
+    <div style={styles.formGroup}>
+      <label style={styles.label}>{label}</label>
+      <input style={styles.input} type={type} value={form[name] || ''} onChange={e => set(name, e.target.value)} />
+    </div>
+  );
+}
+
 function EmpField({ label, name, type='text', required=false, form, onSet, errors, onClearErr }) {
   return (
     <div style={styles.formGroup}>
@@ -10615,6 +10962,294 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
+function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const blankItem = () => ({ itemId: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
+  const blank = () => ({
+    type: 'project', linkId: '', linkName: '',
+    date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
+    bomRef: '', bomMult: 1,
+    items: [blankItem()],
+    remarks: '',
+    approvalStatus: 'draft',
+    convertedToPO: false,
+  });
+  const [editing, setEditing] = React.useState(null);
+  const [viewDoc, setViewDoc] = React.useState(null);
+
+  const canApprove = userRole === 'admin' || userRole === 'manager';
+
+  const list = (Array.isArray(purchaseReqs) ? purchaseReqs : [])
+    .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  function nextNumber() {
+    const yr = new Date().getFullYear();
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
+    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+  }
+
+  // Combined BOM list (manufacturing + project)
+  const allBoms = [
+    ...(Array.isArray(boms) ? boms : []).map(b => ({ ref: 'mfg:' + b.id, label: (b.name || 'BOM') + ' — Manufacturing', items: b.items || [] })),
+    ...(Array.isArray(mepBoms) ? mepBoms : []).map(b => {
+      const proj = siteProjects.find(p => p.id === b.projectId);
+      return { ref: 'mep:' + b.id, label: (b.name || b.title || (proj ? (proj.name || proj.projectName) : 'Project') ) + ' — Project', items: b.items || [] };
+    }),
+  ];
+
+  function startNew() { setEditing({ ...blank(), id: Date.now().toString(), number: nextNumber() }); }
+  function startEdit(m) {
+    setEditing({ ...blank(), ...m, items: (m.items && m.items.length) ? m.items : [blankItem()] });
+  }
+
+  function saveForm() {
+    if (!editing.items.some(it => (it.name || '').trim())) { alert('Add at least one item.'); return; }
+    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setPurchaseReqs(prev => {
+      const arr = Array.isArray(prev) ? prev : [];
+      return arr.some(x => x.id === rec.id) ? arr.map(x => x.id === rec.id ? rec : x) : [rec, ...arr];
+    });
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this requisition?')) return; setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+  function setStatus(m, status) {
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, approvalStatus: status, updatedAt: new Date().toISOString() } : x));
+  }
+
+  const upd = (patch) => setEditing(e => ({ ...e, ...patch }));
+  const setRow = (i, field, val) => setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], [field]: val }; return { ...e, items: r }; });
+  const addRow = () => setEditing(e => ({ ...e, items: [...(e.items || []), blankItem()] }));
+  const delRow = (i) => setEditing(e => ({ ...e, items: (e.items || []).filter((_, idx) => idx !== i) }));
+
+  function pickItem(i, itemId) {
+    const it = (items || []).find(x => String(x.id) === itemId);
+    if (!it) { setRow(i, 'itemId', ''); return; }
+    setEditing(e => { const r = [...(e.items || [])]; r[i] = { ...r[i], itemId: it.id, name: it.name, uom: it.unit || r[i].uom || '', rate: (it.purchaseRate ?? it.rate ?? r[i].rate ?? ''), hsn: (it.hsn || r[i].hsn || '') }; return { ...e, items: r }; });
+  }
+
+  function loadFromBom() {
+    const bom = allBoms.find(b => b.ref === editing.bomRef);
+    if (!bom) { alert('Select a BOM first.'); return; }
+    const mult = parseFloat(editing.bomMult) || 1;
+    const rows = (bom.items || []).map(it => {
+      const m = (items || []).find(x => String(x.id) === String(it.itemId));
+      return {
+        itemId: it.itemId || '',
+        name: it.name || it.itemName || it.description || it.material || it.materialName || '',
+        uom: it.unit || it.uom || '',
+        qty: ((parseFloat(it.qty) || 0) * mult) || '',
+        rate: m ? (m.purchaseRate ?? m.rate ?? '') : (it.rate ?? ''),
+        hsn: m ? (m.hsn || '') : (it.hsn || ''),
+        purpose: '',
+      };
+    }).filter(r => r.name);
+    if (!rows.length) { alert('This BOM has no items.'); return; }
+    setEditing(e => ({ ...e, items: rows }));
+  }
+
+  const linkOptions = () => {
+    if (editing.type === 'project') return (siteProjects || []).map(p => ({ id: p.id, name: p.name || p.projectName || p.title || ('Project ' + p.id) }));
+    if (editing.type === 'production') return (productionOrders || []).map(p => ({ id: p.id, name: (p.number || p.orderNo || p.product || p.productName || ('WO ' + p.id)) }));
+    if (editing.type === 'customer') return (customers || []).map(c => ({ id: c.id, name: c.name }));
+    return [];
+  };
+
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const inp = { ...styles.input, marginBottom: 0 };
+  const lbl = { fontSize: 12, fontWeight: 600, color: '#1E2A4A', marginBottom: 4, display: 'block' };
+  const th = { padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11, background: '#F8F5EE' };
+  const td = { padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#333', fontSize: 12, verticalAlign: 'top' };
+  const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
+  const typeLabel = t => t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
+
+  // ── PRINT ──
+  if (viewDoc) {
+    const m = viewDoc;
+    const rows = (m.items || []).filter(it => (it.name || '').trim());
+    return (
+      <div>
+        <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+          <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
+          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        </div>
+        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PURCHASE REQUISITION</div>
+              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.approvalStatus || 'draft').toUpperCase()}</div>
+            </div>
+          </div>
+          <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Date</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.date)}</td><td style={{ padding: '3px 0', color: '#888', width: 120 }}>Required by</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{fmtDate(m.requiredBy)}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888' }}>{typeLabel(m.type)}</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.linkName || '—'}</td><td style={{ padding: '3px 0', color: '#888' }}>Priority</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.priority || 'Normal'}</td></tr>
+              <tr><td style={{ padding: '3px 0', color: '#888' }}>Requested by</td><td style={{ color: '#1E2A4A', fontWeight: 600 }}>{m.requestedBy || '—'}</td><td></td><td></td></tr>
+            </tbody>
+          </table>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+            <thead><tr>{['#', 'Item / Material', 'UOM', 'Qty', 'Purpose'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((it, i) => (
+                <tr key={i}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{it.name}</td>
+                  <td style={td}>{it.uom || '—'}</td>
+                  <td style={td}>{it.qty || '—'}</td>
+                  <td style={td}>{it.purpose || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {m.remarks && <div style={{ fontSize: 12, color: '#333', marginBottom: 14 }}><strong>Remarks:</strong> {m.remarks}</div>}
+          <div style={{ marginTop: 40, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Requested by</div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Approved by</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── FORM ──
+  if (editing) {
+    const e = editing;
+    const opts = linkOptions();
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>{list.some(m => m.id === e.id) ? 'Edit' : 'New'} Purchase Requisition <span style={{ fontSize: 13, color: '#888', fontWeight: 500 }}>{e.number}</span></h2>
+          <button style={styles.ghostBtn} onClick={() => setEditing(null)}>← Cancel</button>
+        </div>
+        <div style={{ maxWidth: 900 }}>
+          <div style={card}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => upd({ date: ev.target.value })} /></div>
+              <div><label style={lbl}>Required by</label><input type="date" style={inp} value={e.requiredBy} onChange={ev => upd({ requiredBy: ev.target.value })} /></div>
+              <div><label style={lbl}>Priority</label><select style={inp} value={e.priority} onChange={ev => upd({ priority: ev.target.value })}><option>Normal</option><option>Urgent</option></select></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 12 }}>
+              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option></select></div>
+              <div><label style={lbl}>{typeLabel(e.type)}</label>
+                <select style={inp} value={e.linkId} onChange={ev => { const o = opts.find(x => String(x.id) === ev.target.value); upd({ linkId: ev.target.value, linkName: o ? o.name : '' }); }}>
+                  <option value="">— Select —</option>
+                  {opts.map(o => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+                </select>
+                {opts.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>No {typeLabel(e.type).toLowerCase()} records yet.</div>}
+              </div>
+            </div>
+            <div><label style={lbl}>Requested by</label><input style={inp} value={e.requestedBy} onChange={ev => upd({ requestedBy: ev.target.value })} placeholder="Name / department" /></div>
+          </div>
+
+          <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
+            <label style={lbl}>Auto-fill items from BOM (optional)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
+              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select BOM —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
+              <div><input type="number" min="1" style={inp} value={e.bomMult} onChange={ev => upd({ bomMult: ev.target.value })} placeholder="× Qty" title="Multiplier" /></div>
+              <button style={{ ...styles.secondaryBtn, whiteSpace: 'nowrap' }} onClick={loadFromBom}>Load items ↓</button>
+            </div>
+            {allBoms.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>No BOMs found yet.</div>}
+          </div>
+
+          <div style={card}>
+            <label style={lbl}>Items required</label>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>{['#', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.items || []).map((it, i) => {
+                  const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+                  return (
+                  <tr key={i}>
+                    <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><select style={inp} value={it.itemId} onChange={ev => pickItem(i, ev.target.value)}><option value="">— pick —</option>{(items || []).map(x => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select></td>
+                    <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Item / material" /></td>
+                    <td style={td}><input style={{ ...inp, width: 90 }} value={it.hsn || ''} onChange={ev => setRow(i, 'hsn', ev.target.value)} placeholder="HSN" /></td>
+                    <td style={td}><input style={{ ...inp, width: 70 }} value={it.uom} onChange={ev => setRow(i, 'uom', ev.target.value)} placeholder="nos" /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 70 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 90, textAlign: 'right' }} value={it.rate ?? ''} onChange={ev => setRow(i, 'rate', ev.target.value)} placeholder="0" /></td>
+                    <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{amt ? amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
+                    <td style={td}><input style={inp} value={it.purpose} onChange={ev => setRow(i, 'purpose', ev.target.value)} placeholder="optional" /></td>
+                    <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delRow(i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={7} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Total</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{(e.items || []).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+            <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add item</button>
+          </div>
+
+          <div style={card}>
+            <label style={lbl}>Remarks</label>
+            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder="Any notes for the purchase team" />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button style={styles.primaryBtn} onClick={saveForm}>Save Requisition</button>
+            <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST ──
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1E2A4A' }}>Purchase Requisition</h2>
+          <div style={{ fontSize: 12.5, color: '#888', marginTop: 2 }}>Request materials against a project, work order or customer — with BOM auto-fill.</div>
+        </div>
+        <button style={styles.primaryBtn} onClick={startNew}><Plus size={15} /> New Requisition</button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ ...card, color: '#aaa', fontSize: 13, textAlign: 'center', padding: 40 }}>No requisitions yet. Click "New Requisition" to raise one.</div>
+      ) : list.map(m => {
+        const st = m.approvalStatus || 'draft';
+        return (
+          <div key={m.id} style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 8px', borderRadius: 20, background: '#F0EDE0', color: STATUS_COL[st] || '#888' }}>{st.toUpperCase()}</span>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.number}</div>
+                  {m.priority === 'Urgent' && <span style={{ fontSize: 10, fontWeight: 700, color: '#B91C1C' }}>● URGENT</span>}
+                  {m.convertedToPO && <span style={{ fontSize: 10, fontWeight: 700, color: '#2C7A3F' }}>→ PO created</span>}
+                </div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{fmtDate(m.date)} · {typeLabel(m.type)}: {m.linkName || '—'}{m.requiredBy ? ' · required by ' + fmtDate(m.requiredBy) : ''}</div>
+                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>📦 {(m.items || []).filter(it => it.name).length} items{m.requestedBy ? ' · by ' + m.requestedBy : ''}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {st === 'draft' && <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B5651D' }} onClick={() => setStatus(m, 'pending')}>Submit</button>}
+                {st === 'pending' && canApprove && <>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#2C7A3F' }} onClick={() => setStatus(m, 'approved')}>Approve</button>
+                  <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => setStatus(m, 'rejected')}>Reject</button>
+                </>}
+                {st === 'approved' && !m.convertedToPO && onConvertToPO && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => onConvertToPO(m)}>Convert to PO →</button>}
+                <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => setViewDoc(m)}><Printer size={13} /> Print</button>
+                <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => startEdit(m)}><Pencil size={13} /></button>
+                {userRole === 'admin' && <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => del(m.id)}><Trash2 size={13} /></button>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, moms, setMoms, employees = [] }) {
   const today = new Date().toISOString().slice(0, 10);
   const blankRow = () => ({ point: '', decision: '', actionBy: '', followup: '' });
@@ -10698,16 +11333,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-          <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div>
-              <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>MINUTES OF MEETING</div>
-              <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.type === 'external' ? 'External' : 'Internal')}</div>
-            </div>
-          </div>
+          <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
@@ -10930,6 +11556,143 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, businessInfo }) {
+  const fmt = makeFmt(businessInfo);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const raTotal = (rb) => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
+  const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+
+  const rows = (siteProjects || []).map(p => {
+    const raBilled = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id)).reduce((s, rb) => s + raTotal(rb), 0);
+    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
+    const earned = acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0) * (getActivityProgress(a.id, progressUpdates) / 100), 0);
+    const contractValue = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
+    const matCost  = (mepBoms || []).filter(b => String(b.projectId) === String(p.id)).reduce((s, b) => s + (b.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
+    const procCost = (purchaseReqs || []).filter(pr => pr.type === 'project' && String(pr.linkId) === String(p.id)).reduce((s, pr) => s + (pr.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
+    const subCost  = (subcontractors || []).reduce((s, sc) => s + (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).reduce((t, w) => t + (parseFloat(w.value) || 0), 0), 0);
+    const labCost  = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const totalCost = matCost + procCost + subCost + labCost;
+    const profitRA = raBilled - totalCost;
+    const profitEarned = earned - totalCost;
+    const marginRA = raBilled > 0 ? (profitRA / raBilled * 100) : 0;
+    return { p, contractValue, raBilled, earned, matCost, procCost, subCost, labCost, totalCost, profitRA, profitEarned, marginRA };
+  });
+
+  const tot = rows.reduce((a, r) => ({
+    contractValue: a.contractValue + r.contractValue, raBilled: a.raBilled + r.raBilled, earned: a.earned + r.earned,
+    matCost: a.matCost + r.matCost, procCost: a.procCost + r.procCost, subCost: a.subCost + r.subCost, labCost: a.labCost + r.labCost,
+    totalCost: a.totalCost + r.totalCost, profitRA: a.profitRA + r.profitRA, profitEarned: a.profitEarned + r.profitEarned,
+  }), { contractValue: 0, raBilled: 0, earned: 0, matCost: 0, procCost: 0, subCost: 0, labCost: 0, totalCost: 0, profitRA: 0, profitEarned: 0 });
+
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap', textAlign: 'right' };
+  const thL = { ...th, textAlign: 'left' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', textAlign: 'right', whiteSpace: 'nowrap' };
+  const tdL = { ...td, textAlign: 'left', fontWeight: 600, color: '#1E2A4A' };
+  const pcol = (v) => ({ ...td, fontWeight: 700, color: v >= 0 ? '#1A7A3E' : '#B5453A' });
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Project P&amp;L</h2>
+          <p style={styles.muted}>Profit &amp; loss per project — billing vs cost</p>
+        </div>
+        <button style={styles.secondaryBtn} className="no-print" onClick={() => window.print()}>Print</button>
+      </div>
+
+      {rows.length > 0 && (() => {
+        const sRow = (label, val, opts = {}) => (
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: opts.big ? 15 : 13, borderBottom: opts.noBorder ? 'none' : '1px solid #F2EFE6', color: opts.color || '#3A3A34', fontWeight: opts.bold ? 700 : 400 }}>
+            <span>{label}</span><span style={{ fontWeight: opts.bold ? 700 : 500, color: opts.color }}>{val}</span>
+          </div>
+        );
+        const netRA = tot.raBilled - tot.totalCost;
+        const netEarned = tot.earned - tot.totalCost;
+        return (
+          <div style={{ ...card, maxWidth: 520 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#1A7A3E', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Overall P&amp;L — All Projects</div>
+            {sRow('Revenue — RA Billed', fmt(tot.raBilled), { bold: true })}
+            {sRow('Revenue — Earned (progress)', fmt(tot.earned), { color: '#888780' })}
+            <div style={{ height: 8 }} />
+            {sRow('Less: Materials (BOM)', fmt(tot.matCost), { color: '#B5453A' })}
+            {sRow('Less: Procurement', fmt(tot.procCost), { color: '#B5453A' })}
+            {sRow('Less: Subcontractors', fmt(tot.subCost), { color: '#B5453A' })}
+            {sRow('Less: Labour / Petty cash', fmt(tot.labCost), { color: '#B5453A' })}
+            {sRow('Total Cost', fmt(tot.totalCost), { bold: true })}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 12px', marginTop: 10, borderRadius: 8, background: netRA >= 0 ? '#EDF7EE' : '#FCEDEB', border: `1.5px solid ${netRA >= 0 ? '#1A7A3E' : '#B5453A'}` }}>
+              <span style={{ fontWeight: 800, fontSize: 15 }}>NET {netRA >= 0 ? 'PROFIT' : 'LOSS'} (RA)</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: netRA >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(Math.abs(netRA))} · {tot.raBilled > 0 ? (netRA / tot.raBilled * 100).toFixed(1) : '0.0'}%</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 12px', marginTop: 6, fontSize: 12.5, color: '#555' }}>
+              <span>Net (on earned value)</span>
+              <span style={{ fontWeight: 700, color: netEarned >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(Math.abs(netEarned))} {netEarned >= 0 ? 'profit' : 'loss'}</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {rows.length === 0 ? (
+        <div style={styles.emptyBox}>No projects yet. Create a project to see its P&amp;L.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1050 }}>
+            <thead>
+              <tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Contract Value</th>
+                <th style={th}>RA Billed</th>
+                <th style={th}>Earned</th>
+                <th style={th}>Materials</th>
+                <th style={th}>Procurement</th>
+                <th style={th}>Subcontract</th>
+                <th style={th}>Labour</th>
+                <th style={th}>Total Cost</th>
+                <th style={th}>Profit (RA)</th>
+                <th style={th}>Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.p.id}>
+                  <td style={tdL}>{r.p.name || r.p.projectName || 'Untitled'}</td>
+                  <td style={td}>{fmt(r.contractValue)}</td>
+                  <td style={td}>{fmt(r.raBilled)}</td>
+                  <td style={{ ...td, color: '#888780' }}>{fmt(r.earned)}</td>
+                  <td style={td}>{fmt(r.matCost)}</td>
+                  <td style={td}>{fmt(r.procCost)}</td>
+                  <td style={td}>{fmt(r.subCost)}</td>
+                  <td style={td}>{fmt(r.labCost)}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{fmt(r.totalCost)}</td>
+                  <td style={pcol(r.profitRA)}>{fmt(r.profitRA)}</td>
+                  <td style={pcol(r.profitRA)}>{r.marginRA.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td style={{ ...tdL, borderTop: '2px solid #1E2A4A' }}>TOTAL</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.contractValue)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.raBilled)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#888780' }}>{fmt(tot.earned)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.matCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.procCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.subCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.labCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.totalCost)}</td>
+                <td style={{ ...pcol(tot.profitRA), borderTop: '2px solid #1E2A4A' }}>{fmt(tot.profitRA)}</td>
+                <td style={{ ...pcol(tot.profitRA), borderTop: '2px solid #1E2A4A' }}>{tot.raBilled > 0 ? (tot.profitRA / tot.raBilled * 100).toFixed(1) : '0.0'}%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 10, lineHeight: 1.6 }}>
+        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + petty cash tagged to project. Tag petty cash entries to a project to populate Labour.
+      </div>
     </div>
   );
 }
@@ -13655,7 +14418,7 @@ function blankContract() {
   };
 }
 
-function ContractList({ contracts, setContracts, customers, vendors, documents, termsLibrary, businessInfo, userRole }) {
+function ContractList({ contracts, setContracts, customers, vendors, documents, termsLibrary, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [editing, setEditing] = useState(null); // null | contract obj | 'new'
   const [printing, setPrinting] = useState(null);
   const [search, setSearch] = useState('');
@@ -13670,7 +14433,7 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
   function handleSave(form) {
     if (!form.number) form.number = nextConNum();
     const { _isNew, ...rest } = form; // strip _isNew so Firestore doesn't reject undefined field
-    setContracts(prev => _isNew ? [...prev, rest] : prev.map(c => c.id === rest.id ? rest : c));
+    setContracts(prev => _isNew ? [...prev, { ...rest, bizType: rest.bizType || currentBizType }] : prev.map(c => c.id === rest.id ? rest : c));
     setEditing(null);
   }
 
@@ -13683,14 +14446,16 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
     setContracts(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
   }
 
-  const filtered = contracts.filter(c => {
+  const bizContracts = isMultiBiz ? contracts.filter(c => (c.bizType || 'trading') === currentBizType) : contracts;
+
+  const filtered = bizContracts.filter(c => {
     const cust = customers.find(x => x.id === c.customerId);
     const text = `${c.number} ${c.title} ${cust?.name || ''}`.toLowerCase();
     return text.includes(search.toLowerCase()) && (filterStatus === 'All' || c.status === filterStatus);
   });
 
   const counts = {};
-  CONTRACT_STATUSES.forEach(s => { counts[s] = contracts.filter(c => c.status === s).length; });
+  CONTRACT_STATUSES.forEach(s => { counts[s] = bizContracts.filter(c => c.status === s).length; });
 
   const fmt = makeFmt(businessInfo);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -14099,6 +14864,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         <div style="font-size:20px;font-weight:700;color:#1E2A4A;">${bi?.name||bi?.companyName||''}</div>
         <div style="font-size:11px;color:#666;margin-top:4px;">${bi?.address||''}</div>
         ${isIndia && bi?.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${bi.gstin}</div>` : ''}
+        ${[bi?.phone, bi?.email, bi?.website].filter(Boolean).length ? `<div style="font-size:11px;color:#666;margin-top:2px;">${[bi?.phone, bi?.email, bi?.website].filter(Boolean).join(' · ')}</div>` : ''}
       </div>` : '';
 
     const draftWm = isDraft ? `
@@ -14290,12 +15056,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       <div className="print-area contract-print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)', overflow:'hidden' }}>
         {effLHH && <div style={{ background:'#fff', lineHeight:0 }}><img src={effLHH} alt="letterpad header" style={{ width:'100%', display:'block' }} /></div>}
         <div style={{ padding: '32px 56px' }}>
-        <div style={{ textAlign: 'center', borderBottom: '2px solid #1E2A4A', paddingBottom: 24, marginBottom: 32 }}>
-          {!effLHH && bi.name && <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>}
-          {!effLHH && bi.address && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{bi.address}</div>}
-          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 2, marginTop: 20, color: '#1E2A4A', textTransform: 'uppercase' }}>CONTRACT AGREEMENT</div>
-          <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>Contract No: {c.number} | Date: {c.date}{c.poRefNumber ? ` | PO Ref: ${c.poRefNumber}` : ''}</div>
-        </div>
+        <StdDocHeader businessInfo={bi} title="Contract Agreement" subtitle={'Contract No: ' + c.number + ' | Date: ' + c.date + (c.poRefNumber ? ' | PO Ref: ' + c.poRefNumber : '')} />
         <div style={{ marginBottom: 28 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: '#1E2A4A', textTransform: 'uppercase' }}>Parties</div>
           <p>This Contract Agreement is entered into between <strong>{bi.name || bi.companyName || 'the Company'}</strong> (the "{c.buyerRole || 'Buyer'}") and <strong>{c.customerSnapshot?.name || '___________________'}</strong> (the "{c.supplierRole || 'Supplier'}").</p>
@@ -14668,6 +15429,28 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
 
 
 // ─── Scope of Work (Service companies) ───────────────────────────────────────
+function MepTabs({ tabs, tab, setTab }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #EAE6DB', margin: '0 0 10px', padding: '0 4px', flexWrap: 'wrap' }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '8px 16px', border: 'none', borderBottom: tab === t.id ? '2px solid #1A7A3E' : '2px solid transparent', background: 'none', fontSize: 13, fontWeight: 600, color: tab === t.id ? '#1A7A3E' : '#888780', cursor: 'pointer' }}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function BomMaterialsView(props) {
+  const [tab, setTab] = React.useState('bom');
+  return (
+    <div style={styles.page}>
+      <MepTabs tab={tab} setTab={setTab} tabs={[{ id: 'bom', label: 'Project BOM' }, { id: 'materials', label: 'Client Materials' }]} />
+      {tab === 'bom'
+        ? <MepBomView mepBoms={props.mepBoms} setMepBoms={props.setMepBoms} siteProjects={props.siteProjects} scopeOfWork={props.scopeOfWork} siteActivities={props.siteActivities} setSiteActivities={props.setSiteActivities} userRole={props.userRole} businessInfo={props.businessInfo} />
+        : <ClientMaterialView clientMaterials={props.clientMaterials} setClientMaterials={props.setClientMaterials} siteProjects={props.siteProjects} employees={props.employees} userRole={props.userRole} />}
+    </div>
+  );
+}
+
 function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
   const [subView, setSubView]     = useState('list');   // 'list' | 'edit'
   const [editing, setEditing]     = useState(null);
@@ -16995,6 +17778,162 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
+  const [projFilter, setProjFilter] = React.useState('all');
+  const [catFilter, setCatFilter]   = React.useState('all');
+  const [editing, setEditing]       = React.useState(null);
+  const canEdit    = userRole === 'admin' || userRole === 'manager' || userRole === 'engineer' || userRole === 'staff';
+  const canApprove = userRole === 'admin' || userRole === 'manager';
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const CATS = ['Drawings', 'Technical Documents', 'Approvals & Submittals', 'Site / Project Records', 'Commercial / Contract', 'Handover Documents'];
+  const SUBTYPES = {
+    'Drawings': ['IFC Drawings', 'Shop Drawings', 'Coordination Drawings', 'As-Built Drawings', 'Single Line Diagrams', 'MEP Layouts', 'Detail Drawings'],
+    'Technical Documents': ['Specifications', 'Material Submittals', 'Method Statements', 'Technical Datasheets', 'Compliance Documents', 'Manufacturer Documents'],
+    'Approvals & Submittals': ['Material Submittal', 'Shop Drawing Submittal', 'Method Statement Submittal', 'Consultant Comments', 'Approval / Rejection', 'Resubmission'],
+    'Site / Project Records': ['Site Instructions', 'RFI', 'Inspection Requests', 'MIR', 'WIR', 'NCR', 'Snag Lists', 'Site Photos'],
+    'Commercial / Contract': ['Contract', 'BOQ', 'LOA / Award Letter', 'VO (Variation Order)', 'Client Correspondence', 'Subcontract Agreements'],
+    'Handover Documents': ['Testing & Commissioning Reports', 'O&M Manuals', 'Warranty Certificates', 'As-Built', 'Training Records', 'Handover Certificates', 'DLP Records'],
+  };
+  const STATUSES = ['Draft', 'Submitted', 'Under Review', 'Approved', 'Approved w/ Comments', 'Rejected', 'Superseded'];
+  const statusColor = (st) => ({ 'Approved': '#1A7A3E', 'Approved w/ Comments': '#C9752A', 'Submitted': '#2C6FB5', 'Under Review': '#8A6FD6', 'Rejected': '#B5453A', 'Superseded': '#888780', 'Draft': '#B0AC9F' }[st] || '#888780');
+  const projName = (id) => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
+
+  const scoped = isMultiBiz ? projectDocuments.filter(d => (d.bizType || 'trading') === currentBizType) : projectDocuments;
+  const manual = scoped
+    .filter(d => projFilter === 'all' || String(d.projectId) === String(projFilter))
+    .filter(d => catFilter === 'all' || d.category === catFilter);
+
+  // Auto-linked records pulled from other modules (read-only)
+  const autoRows = [];
+  (tcChecklists || []).forEach(c => autoRows.push({ id: 'tc-' + c.id, auto: true, source: 'tcommissioning', sourceLabel: 'T&C', projectId: c.projectId, title: c.title || c.system || c.description || 'T&C Checklist', category: 'Handover Documents', subType: 'Testing & Commissioning Reports', docNo: c.refNo || c.number || '', revision: '—', date: c.date || c.createdAt || '', status: c.status || 'Linked' }));
+  (handoverDocs || []).forEach(h => autoRows.push({ id: 'ho-' + h.id, auto: true, source: 'handover', sourceLabel: 'Handover', projectId: h.projectId, title: h.title || 'Handover Certificate', category: 'Handover Documents', subType: 'Handover Certificates', docNo: h.number || '', revision: '—', date: h.handoverDate || h.date || '', status: h.status || 'Linked' }));
+  (subcontractors || []).forEach(sc => (sc.workOrders || []).forEach(w => autoRows.push({ id: 'sub-' + w.id, auto: true, source: 'subcontractors', sourceLabel: 'Subcontract', projectId: w.projectId, title: (sc.name || 'Subcontractor') + ' — ' + (w.scope || 'Work Order'), category: 'Commercial / Contract', subType: 'Subcontract Agreements', docNo: w.number || '', revision: '—', date: w.startDate || '', status: w.status || 'Linked' })));
+  const autoFiltered = autoRows.filter(d => d.projectId && (projFilter === 'all' || String(d.projectId) === String(projFilter)) && (catFilter === 'all' || d.category === catFilter));
+
+  const list = [...manual, ...autoFiltered].sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+
+  function save(rec) {
+    const t = { ...rec, bizType: rec.bizType || currentBizType };
+    setProjectDocuments(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]);
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this document record?')) return; setProjectDocuments(prev => prev.filter(x => x.id !== id)); }
+  function setStatus(id, status) {
+    setProjectDocuments(prev => prev.map(x => x.id === id ? { ...x, status, ...(status === 'Approved' || status === 'Approved w/ Comments' ? { approvedBy: currentUserName, approvedAt: new Date().toISOString() } : {}) } : x));
+  }
+  function newRevision(d) {
+    const curRev = d.revision || '0';
+    const nextRev = /^\d+$/.test(String(curRev)) ? String(parseInt(curRev) + 1) : String.fromCharCode((String(curRev).toUpperCase().charCodeAt(0) || 64) + 1);
+    setProjectDocuments(prev => prev.map(x => x.id === d.id ? { ...x, status: 'Superseded' } : x));
+    setEditing({ id: crypto.randomUUID(), projectId: d.projectId, title: d.title, category: d.category, docNo: d.docNo, revision: nextRev, date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: d.submittedTo || '', link: '', remarks: '', supersedes: d.id });
+  }
+  function blank() { const c = catFilter !== 'all' ? catFilter : 'Drawings'; return { id: crypto.randomUUID(), projectId: projFilter !== 'all' ? projFilter : '', title: '', category: c, subType: (SUBTYPES[c] || [''])[0], docNo: '', revision: '0', date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: '', link: '', remarks: '' }; }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', verticalAlign: 'top' };
+  const chip = (active) => ({ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (active ? '#1A7A3E' : '#DDD8CE'), background: active ? '#1A7A3E' : '#fff', color: active ? '#fff' : '#555' });
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Project Documents</h2>
+          <p style={styles.muted}>Drawings, technical, submittals, site records, commercial &amp; handover — with revisions &amp; approval</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New Document</button>}
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={projFilter} onChange={e => setProjFilter(e.target.value)} style={{ ...styles.input, maxWidth: 260 }}>
+          <option value="all">All projects</option>
+          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span onClick={() => setCatFilter('all')} style={chip(catFilter === 'all')}>All</span>
+          {CATS.map(c => <span key={c} onClick={() => setCatFilter(c)} style={chip(catFilter === c)}>{c}</span>)}
+        </div>
+        <span style={{ fontSize: 12, color: '#B0AC9F', marginLeft: 'auto' }}>{list.length} document{list.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No documents yet. Click "New Document" to add one.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
+            <thead><tr>{['Doc No', 'Title', 'Project', 'Category', 'Rev', 'Date', 'Status', 'Workflow', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(d => (
+                <tr key={d.id}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.docNo || '—'}</td>
+                  <td style={td}>{d.title}{d.link && <a href={d.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(d.projectId)}</td>
+                  <td style={td}>{d.category}{d.subType && <div style={{ fontSize: 11, color: '#999' }}>{d.subType}</div>}</td>
+                  <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{d.revision}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.date}</td>
+                  <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: statusColor(d.status), padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' }}>{d.status}</span></td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                    {d.auto && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6FD6', background: '#F1ECFB', padding: '2px 7px', borderRadius: 20 }}>linked · {d.sourceLabel}</span>}
+                    {!d.auto && canEdit && d.status === 'Draft' && <button onClick={() => setStatus(d.id, 'Submitted')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Submit</button>}
+                    {!d.auto && canApprove && (d.status === 'Submitted' || d.status === 'Under Review') && <>
+                      <button onClick={() => setStatus(d.id, 'Approved')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#1A7A3E' }}>Approve</button>
+                      <button onClick={() => setStatus(d.id, 'Rejected')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>Reject</button>
+                    </>}
+                    {!d.auto && canEdit && (d.status === 'Approved' || d.status === 'Approved w/ Comments') && <button onClick={() => newRevision(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#C9752A' }}>+ Revision</button>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {d.auto ? <button onClick={() => setView(d.source)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Open ↗</button> : <>
+                      {canEdit && <button onClick={() => setEditing(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                      {canEdit && <button onClick={() => del(d.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                    </>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose }) {
+  const [form, setForm] = React.useState(rec);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+  const row = { marginBottom: 12 };
+  const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{rec.supersedes ? 'New Revision' : (rec.title ? 'Edit' : 'New')} Document</h3>
+        <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Category</label><select style={styles.input} value={form.category} onChange={e => { const c = e.target.value; setForm(fm => ({ ...fm, category: c, subType: (subtypes[c] || [''])[0] })); }}>{cats.map(c => <option key={c}>{c}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Document Type</label><select style={styles.input} value={form.subType || ''} onChange={e => set('subType', e.target.value)}>{(subtypes[form.category] || []).map(st => <option key={st}>{st}</option>)}</select></div>
+        </div>
+        <div style={row}><label style={lbl}>Title</label><input style={styles.input} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Document title" /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Document No.</label><input style={styles.input} value={form.docNo} onChange={e => set('docNo', e.target.value)} placeholder="MEP-DWG-001" /></div>
+          <div style={row}><label style={lbl}>Rev</label><input style={styles.input} value={form.revision} onChange={e => set('revision', e.target.value)} /></div>
+          <div style={row}><label style={lbl}>Date</label><input type="date" style={styles.input} value={form.date} onChange={e => set('date', e.target.value)} /></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Status</label><select style={styles.input} value={form.status} onChange={e => set('status', e.target.value)}>{statuses.map(sx => <option key={sx}>{sx}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Submitted To</label><input style={styles.input} value={form.submittedTo} onChange={e => set('submittedTo', e.target.value)} placeholder="Consultant / Client" /></div>
+        </div>
+        <div style={row}><label style={lbl}>Link (Drive / SharePoint URL — optional)</label><input style={styles.input} value={form.link} onChange={e => set('link', e.target.value)} placeholder="https://..." /></div>
+        <div style={row}><label style={lbl}>Remarks</label><textarea style={{ ...styles.input, minHeight: 50, resize: 'vertical' }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => { if (!form.title) { alert('Enter a title'); return; } if (!form.projectId) { alert('Select a project'); return; } onSave(form); }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientMaterialView({ clientMaterials, setClientMaterials, siteProjects, employees, userRole }) {
   const [editing, setEditing] = useState(null);
   const [filterProject, setFilterProject] = useState('');
@@ -17112,7 +18051,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
       {form.items.map((it,i)=>(
         <div key={i} style={{ display:'grid', gridTemplateColumns:'3fr 1fr 1fr 1.2fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
           <input value={it.description} onChange={e=>updateItem(i,'description',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Description" />
-          <input value={it.qty} onChange={e=>updateItem(i,'qty',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Qty" />
+          <input className="di-input" value={it.qty} onChange={e=>updateItem(i,'qty',e.target.value)} style={{ ...styles.input, fontSize:12 }} placeholder="Qty" />
           <select value={it.unit} onChange={e=>updateItem(i,'unit',e.target.value)} style={{ ...styles.input, fontSize:12 }}>
             {['nos','m','m²','kg','ltr','roll','set','lot'].map(u=><option key={u} value={u}>{u}</option>)}
           </select>
@@ -17620,7 +18559,7 @@ ${isTransport&&(a.fuelLogs||[]).length>0?`<div class="sec">Fuel Consumption Log<
   <span>${co.companyName||''} — Asset Register</span>
 </div>
 </body></html>`;
-    const w = window.open('','_blank'); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),300);
+    printHTML(html);
   }
 
   const selected = assets.find(a=>a.id===selectedId);
@@ -18723,6 +19662,164 @@ function FMKPIView({ assets, pmSchedules, fmWorkOrders, amcContracts, fmSparePar
 }
 
 // ─── Tender & Estimation ─────────────────────────────────────────────────────
+function ResourceMasterView({ resources = [], setResources, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
+  const [tab, setTab] = React.useState('Material');
+  const [editing, setEditing] = React.useState(null);
+  const canEdit = ['admin', 'manager', 'engineer', 'staff'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const fmt = makeFmt(businessInfo);
+  const TYPES = [['Material', 'Materials'], ['Labour', 'Labour'], ['Equipment', 'Equipment'], ['Subcontract', 'Subcontract']];
+  const prefix = { Material: 'MAT', Labour: 'LAB', Equipment: 'EQP', Subcontract: 'SUB' };
+  const unitHint = { Material: 'm / No / kg / m²', Labour: 'Hour / Day', Equipment: 'Hour / Day', Subcontract: 'LS / No' };
+
+  const scoped = isMultiBiz ? resources.filter(r => (r.bizType || 'trading') === currentBizType) : resources;
+  const list = scoped.filter(r => r.type === tab).sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+
+  function nextCode(type) {
+    const p = prefix[type];
+    const nums = scoped.filter(r => r.type === type).map(r => parseInt(String(r.code || '').replace(/\D/g, '')) || 0);
+    return p + '-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+  }
+  function save(rec) {
+    const t = { ...rec, rate: parseFloat(rec.rate) || 0, bizType: rec.bizType || currentBizType };
+    setResources(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]);
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this resource?')) return; setResources(prev => prev.filter(x => x.id !== id)); }
+  function blank() { return { id: crypto.randomUUID(), type: tab, code: nextCode(tab), name: '', unit: '', rate: 0, supplier: '', remarks: '' }; }
+
+  async function importFile(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
+        const XLSX = await loadXLSX();
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
+      } else {
+        rows = (await file.text()).split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
+      }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim()));
+      const f0 = (r2[0] || []).join(' ').toLowerCase();
+      const start = (f0.includes('name') || f0.includes('desc') || f0.includes('material')) ? 1 : 0;
+      let n = scoped.filter(r => r.type === tab).length;
+      const parsed = r2.slice(start).map(cols => {
+        n += 1;
+        return { id: crypto.randomUUID(), type: tab, code: prefix[tab] + '-' + String(n).padStart(3, '0'), name: String(cols[0] || '').trim(), unit: String(cols[1] || '').trim(), rate: parseFloat(cols[2]) || 0, supplier: String(cols[3] || '').trim(), remarks: '' };
+      }).filter(x => x.name).map(x => ({ ...x, bizType: currentBizType }));
+      if (!parsed.length) { alert('No rows. Columns: Name, Unit, Rate, Supplier'); return; }
+      setResources(prev => [...prev, ...parsed]);
+      alert(parsed.length + ' ' + tab.toLowerCase() + ' resource(s) imported.');
+    } catch (err) { alert('Import failed: ' + err.message + '. Try CSV.'); }
+    e.target.value = '';
+  }
+  async function exportFile() {
+    const aoa = [['Code', 'Name', 'Unit', 'Rate', 'Supplier', 'Remarks'], ...list.map(r => [r.code, r.name, r.unit, r.rate, r.supplier || '', r.remarks || ''])];
+    try {
+      const XLSX = await loadXLSX();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, tab);
+      XLSX.writeFile(wb, 'Resources-' + tab + '.xlsx');
+    } catch (err) {
+      const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n');
+      const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+      const a = document.createElement('a'); a.href = url; a.download = 'Resources-' + tab + '.csv'; a.click(); URL.revokeObjectURL(url);
+    }
+  }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  const tabBtn = (id, label) => (<button key={id} onClick={() => setTab(id)} style={{ padding: '8px 16px', border: 'none', borderBottom: tab === id ? '2px solid #1A7A3E' : '2px solid transparent', background: 'none', fontSize: 13, fontWeight: 600, color: tab === id ? '#1A7A3E' : '#888780', cursor: 'pointer' }}>{label} ({scoped.filter(r => r.type === id).length})</button>);
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Resource Master</h2>
+          <p style={styles.muted}>Materials, labour, equipment &amp; subcontract rates — used by rate analysis &amp; estimation</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New {tab}</button>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #EAE6DB', marginBottom: 10, flexWrap: 'wrap' }}>{TYPES.map(([id, label]) => tabBtn(id, label))}</div>
+
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {canEdit && <label style={{ ...styles.ghostBtn, cursor: 'pointer' }} title="Import from Excel/CSV — columns: Name, Unit, Rate, Supplier">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importFile} /></label>}
+        {list.length > 0 && <button style={styles.ghostBtn} onClick={exportFile}>⭳ Export .xlsx</button>}
+        <span style={{ fontSize: 12, color: '#B0AC9F', marginLeft: 'auto' }}>{list.length} {tab.toLowerCase()} item{list.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No {tab.toLowerCase()} resources yet. Click "New {tab}" or import.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <thead><tr>{['Code', 'Name', 'Unit', 'Rate', 'Supplier', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: h === 'Rate' ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(r => (
+                <tr key={r.id}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.code}</td>
+                  <td style={td}>{r.name}{r.remarks && <div style={{ fontSize: 11, color: '#999' }}>{r.remarks}</div>}</td>
+                  <td style={td}>{r.unit}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{fmt(r.rate)}</td>
+                  <td style={td}>{r.supplier || '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(r)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(r.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (() => {
+        const set = (k, v) => setEditing(p => ({ ...p, [k]: v }));
+        const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+        const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+        return (
+          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+            <div style={modalCard} onClick={e => e.stopPropagation()}>
+              <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.name ? 'Edit' : 'New'} {editing.type} — {editing.code}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Type</label><select style={styles.input} value={editing.type} onChange={e => set('type', e.target.value)}>{TYPES.map(([id]) => <option key={id}>{id}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Code</label><input style={styles.input} value={editing.code} onChange={e => set('code', e.target.value)} /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Name / Description</label><input style={styles.input} value={editing.name} onChange={e => set('name', e.target.value)} placeholder="e.g. 2.5mm² PVC Cable" /></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Unit</label><input style={styles.input} value={editing.unit} onChange={e => set('unit', e.target.value)} placeholder={unitHint[editing.type]} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Rate ({(COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency})</label><input type="number" style={styles.input} value={editing.rate} onChange={e => set('rate', e.target.value)} /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Supplier / Source (optional)</label><input style={styles.input} value={editing.supplier} onChange={e => set('supplier', e.target.value)} /></div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+                <button style={styles.primaryBtn} onClick={() => { if (!editing.name) { alert('Enter a name'); return; } save(editing); }}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+let _xlsxPromise = null;
+function loadXLSX() {
+  if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxPromise) return _xlsxPromise;
+  _xlsxPromise = new Promise((resolve, reject) => {
+    const scr = document.createElement('script');
+    scr.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    scr.onload = () => resolve(window.XLSX);
+    scr.onerror = () => { _xlsxPromise = null; reject(new Error('Could not load the Excel library (offline or blocked)')); };
+    document.head.appendChild(scr);
+  });
+  return _xlsxPromise;
+}
+
 function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
@@ -18753,11 +19850,78 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
   }
+  function exportTenderExcel(t) {
+    const client = customers.find(c=>c.id===t.customerId);
+    const rows = [];
+    rows.push(['Tender No.', t.number]);
+    rows.push(['Title', t.title||'']);
+    rows.push(['Client', client?.name||'']);
+    rows.push(['Submission Date', t.submissionDate||'']);
+    rows.push(['Valid Until', t.validUntil||'']);
+    rows.push([]);
+    rows.push(['#','Description','Unit','Qty','Rate','Amount']);
+    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.description, l.unit, l.qty, l.rate, lineTotal(l)]));
+    rows.push([]);
+    rows.push(['','','','','Subtotal', boqSubtotal(t)]);
+    if (cc.hasTax) rows.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
+    const csv = rows.map(r => r.map(c => { const v = String(c==null?'':c); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\n');
+    const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=(t.number||'tender')+'.csv'; a.click(); URL.revokeObjectURL(url);
+  }
+  async function exportTenderXlsx(t) {
+    try {
+      const XLSX = await loadXLSX();
+      const client = customers.find(c=>c.id===t.customerId);
+      const aoa = [
+        ['Tender No.', t.number], ['Title', t.title||''], ['Client', client?.name||''],
+        ['Submission Date', t.submissionDate||''], ['Valid Until', t.validUntil||''], [],
+        ['#','Description','Unit','Qty','Rate','Amount'],
+        ...(t.boq||[]).map((l,i)=>[i+1, l.description, l.unit, parseFloat(l.qty)||0, parseFloat(l.rate)||0, lineTotal(l)]),
+        [], ['','','','','Subtotal', boqSubtotal(t)],
+      ];
+      if (cc.hasTax) aoa.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
+      XLSX.writeFile(wb, (t.number||'tender')+'.xlsx');
+    } catch (err) { alert('Excel export failed: '+err.message+'. Use "Export CSV" instead.'); }
+  }
 
   if (editing) {
     const t = editing;
     const set = (k,v) => setEditing(p=>({...p,[k]:v}));
     const subtotal = boqSubtotal(t);
+    function boqRowsToLines(rows) {
+      const r2 = (rows||[]).filter(r => (r||[]).some(c => String(c||'').trim()));
+      if (!r2.length) return [];
+      const f = (r2[0]||[]).join(' ').toLowerCase();
+      const start = (f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
+      return r2.slice(start).map(cols => ({ id: crypto.randomUUID(), description: String(cols[0]||'').trim(), unit: String(cols[1]||'').trim(), qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 })).filter(x => x.description);
+    }
+    async function importBoqCsv(e) {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      const nm = (file.name||'').toLowerCase();
+      try {
+        let rows = [];
+        if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
+          const XLSX = await loadXLSX();
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+        } else {
+          const text = await file.text();
+          rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
+        }
+        const parsed = boqRowsToLines(rows);
+        if (!parsed.length) { alert('No rows found. Use columns in order: Description, Unit, Qty, Rate'); return; }
+        set('boq', [...(t.boq||[]), ...parsed]);
+        alert(parsed.length + ' line(s) imported.');
+      } catch (err) {
+        alert('Import failed: ' + err.message + '. If Excel fails, save the sheet as CSV and import that.');
+      }
+      e.target.value = '';
+    }
     return (
       <div style={{ maxWidth:760, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
@@ -18804,8 +19968,13 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                 ))}
               </tbody>
             </table>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8 }}>
-              <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+              <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
+                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
+                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
+              </div>
               {!cc.hasTax && <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Total: {subtotal.toLocaleString(undefined,{maximumFractionDigits:2})}</div>}
             </div>
             {cc.hasTax && (
@@ -18867,7 +20036,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                       <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', justifyContent:'flex-end' }}>
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
-                        <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                        <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
+                        <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
                       </div>
@@ -20851,6 +22021,7 @@ const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,             setView]           = useState('dashboard');
+  const [navOpen,          setNavOpen]        = useState(false);
   const [activeDoc,        setActiveDoc]       = useState(null);
   const [user,             setUser]            = useState(null);
   const [ownerUid,         setOwnerUid]        = useState(null);
@@ -20895,6 +22066,8 @@ export default function App() {
   const [siteActivities,   _setSActs]  = useState([]);
   const [progressUpdates,  _setDSR]    = useState([]);
   const [clientMaterials,  _setCM]     = useState([]);
+  const [projectDocuments, _setPDocs]  = useState([]);
+  const [resources,        _setRes]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -20915,6 +22088,7 @@ export default function App() {
   const [handoverDocs,     _setHDocs]  = useState([]);
   const [auditDocs,        _setAuditDocs]  = useState([]);
   const [moms,             _setMoms]       = useState([]);
+  const [purchaseReqs,     _setPReqs]      = useState([]);
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -20974,6 +22148,9 @@ export default function App() {
     setBiReady(false);
   }, [user?.uid]);
 
+  // Close the mobile nav drawer whenever the view changes
+  useEffect(() => { setNavOpen(false); }, [view]);
+
   // ── Grace period expiry check — auto-open delete modal if 30-day window passed ──
   useEffect(() => {
     if (!biReady) return;
@@ -21001,22 +22178,6 @@ export default function App() {
       clearTimeout(biReadyFallback);
       setBiReady(true);
       latestDataRef.current = data;
-      // Automatic cloud backup (server-side, works across every device & user).
-      // Once per session, if no snapshot in the last 12h, save one to Storage.
-      if (user && ownerUid === user.uid && !cloudBackupCheckedRef.current) {
-        cloudBackupCheckedRef.current = true;
-        const _snap = { ...data };
-        listServerBackups(ownerUid).then((list) => {
-          let recent = false;
-          const newest = list && list[0];
-          if (newest) {
-            const iso = (newest.label || '').replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).*/, '$1T$2:$3:$4Z');
-            const t = Date.parse(iso);
-            if (!isNaN(t) && (Date.now() - t) < 12 * 3600 * 1000) recent = true;
-          }
-          if (!recent) saveServerBackup(ownerUid, _snap).catch((e) => console.warn('cloud backup:', e && e.message));
-        }).catch(() => {});
-      }
       // ── Auto-backup: silently save to localStorage on every real data load ──
       // If Firestore is ever wiped again, the user can restore from this copy.
       try {
@@ -21091,6 +22252,8 @@ export default function App() {
       _setSActs(data.siteActivities || []);
       _setDSR(data.progressUpdates || []);
       _setCM(data.clientMaterials || []);
+      _setPDocs(data.projectDocuments || []);
+      _setRes(data.resources || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
@@ -21109,6 +22272,7 @@ export default function App() {
       _setHDocs(data.handoverDocs || []);
       _setAuditDocs(data.auditDocs || []);
       _setMoms(data.moms || []);
+      _setPReqs(data.purchaseReqs || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
     }, (err) => {
       console.warn('Firestore load error:', err);
@@ -21182,6 +22346,8 @@ export default function App() {
   const setSiteActivities   = mkSet(_setSActs, 'siteActivities');
   const setProgressUpdates  = mkSet(_setDSR,   'progressUpdates');
   const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
+  const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
+  const setResources        = mkSet(_setRes,   'resources');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -21195,6 +22361,7 @@ export default function App() {
   const setHandoverDocs     = mkSet(_setHDocs, 'handoverDocs');
   const setAuditDocs        = mkSet(_setAuditDocs,'auditDocs');
   const setMoms             = mkSet(_setMoms,'moms');
+  const setPurchaseReqs     = mkSet(_setPReqs,'purchaseReqs');
   const setRackStore        = mkSet(_setRS,        'rackStore');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
@@ -21355,9 +22522,14 @@ export default function App() {
       exportedAt: new Date().toISOString(),
       exportedBy: user?.email || '',
       businessInfo, documents, customers, vendors, items, stockLedger, grns,
-      vouchers, pettyCash, employees, payrollRuns, serviceOrders, productionOrders,
-      rawMaterials, boms, parts, engDocs, enquiries, contracts, channelPartners,
-      termsLibrary, scopeOfWork, qualityDocs, pdvs,
+      vouchers, pettyCash, employees, payrollRuns, hrLetters, storeIssues,
+      serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
+      enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
+      qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
+      clientMaterials, projectDocuments, resources, siteAttendance, evaluations, capaRecords, internalAudits,
+      vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
+      amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
+      handoverDocs, auditDocs, rackStore, mepBoms,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -21401,6 +22573,8 @@ export default function App() {
     if (backup.siteActivities)  setSiteActivities(backup.siteActivities);
     if (backup.progressUpdates) setProgressUpdates(backup.progressUpdates);
     if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
+    if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
+    if (backup.resources) setResources(backup.resources);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -21419,6 +22593,7 @@ export default function App() {
     if (backup.handoverDocs)    setHandoverDocs(backup.handoverDocs);
     if (backup.auditDocs)       setAuditDocs(backup.auditDocs);
     if (backup.moms)            setMoms(backup.moms);
+    if (backup.purchaseReqs)    setPurchaseReqs(backup.purchaseReqs);
     if (backup.rackStore)       setRackStore(backup.rackStore);
     alert('✅ Data restored successfully! All your records are back.');
   }
@@ -21443,10 +22618,15 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
+    // Scope every figure to the currently-selected business division (dashboard isolation)
+    const _bizDef = activeTypes.length === 1 ? activeTypes[0] : 'trading';
+    const _docs   = sessionContext ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
+    const _vlist  = Array.isArray(vouchers) ? vouchers : [];
+    const _vouch  = sessionContext ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
     // Only approved invoices count toward receivables
-    const totalRevenue   = documents.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const totalPurchases = documents.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    const totalRevenue   = _docs.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = _docs.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const voucherList    = _vouch;
     // All receipts/payments for the cash flow stats
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
@@ -21455,9 +22635,12 @@ export default function App() {
     const orderPaid      = voucherList.filter(v => v.type === 'payment' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const outstanding    = Math.max(0, totalRevenue - orderReceived);
     const payable        = Math.max(0, totalPurchases - orderPaid);
-    const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
-    const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
-    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
+    const counts = _docs.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
+    const _isMB    = activeTypes.length > 1;
+    const _allPc   = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+    const pcEntries = (_isMB && sessionContext) ? _allPc.filter(e => (e.bizType || 'trading') === sessionContext) : _allPc;
+    const _pcOpen  = (_isMB && sessionContext) ? (pettyCash?.openingBalances?.[sessionContext] ?? 0) : (pettyCash?.openingBalance ?? 0);
+    const pcBalance = _pcOpen + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
     const itemCount = items.length;
     const lowStockCount = items.filter(it => {
       if (!it.minStock) return false;
@@ -21468,7 +22651,7 @@ export default function App() {
     const poCount = productionOrders.length;
     const poOpen  = productionOrders.filter(p => p.status !== 'completed' && p.status !== 'done').length;
     return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid, counts, pcBalance, itemCount, lowStockCount, rmCount, poCount, poOpen };
-  }, [documents, vouchers, businessInfo, country, pettyCash, items, stockLedger, rawMaterials, productionOrders]);
+  }, [documents, vouchers, businessInfo, country, pettyCash, items, stockLedger, rawMaterials, productionOrders, sessionContext, activeTypes]);
 
   if (!authReady) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
@@ -21534,6 +22717,16 @@ export default function App() {
   const sessionDocs = sessionContext
     ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
+  // Session-scoped accounts data (vouchers + petty cash) for reports & audit isolation
+  const sessionVouchers = sessionContext
+    ? (Array.isArray(vouchers) ? vouchers : []).filter(v => (v.bizType || bizDefault) === sessionContext)
+    : vouchers;
+  const sessionEmployees = sessionContext
+    ? (Array.isArray(employees) ? employees : []).filter(e => (e.bizType || bizDefault) === sessionContext)
+    : employees;
+  const sessionPettyCash = (sessionContext && isMultiBiz)
+    ? { ...pettyCash, entries: (pettyCash?.entries || []).filter(e => (e.bizType || 'trading') === sessionContext), openingBalance: (pettyCash?.openingBalances?.[sessionContext] ?? 0) }
+    : pettyCash;
 
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
@@ -21577,6 +22770,34 @@ export default function App() {
       }
     }
     // ──────────────────────────────────────────────────────────────────────────
+
+    if (view === 'resourcemaster') return (
+      <ResourceMasterView
+        resources={resources}
+        setResources={setResources}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+      />
+    );
+    if (view === 'projectdocs') return (
+      <ProjectDocumentsView
+        projectDocuments={projectDocuments}
+        setProjectDocuments={setProjectDocuments}
+        siteProjects={siteProjects}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+        currentUserName={user?.displayName || user?.email || ''}
+        tcChecklists={tcChecklists}
+        handoverDocs={handoverDocs}
+        subcontractors={subcontractors}
+        setView={setView}
+      />
+    );
+    if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
 
     switch (view) {
       case 'dashboard':
@@ -21764,12 +22985,14 @@ export default function App() {
           <ContractList
             contracts={contracts}
             setContracts={setContracts}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
+            documents={sessionDocs}
             termsLibrary={termsLibrary}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'termslibrary':
@@ -21825,7 +23048,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
       case 'pettycash':
         return (
           <PettyCashList
@@ -21923,6 +23146,9 @@ export default function App() {
             items={items}
             grns={grns}
             storeIssues={storeIssues}
+            employees={employees}
+            siteProjects={siteProjects}
+            productionOrders={productionOrders}
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
@@ -21935,11 +23161,12 @@ export default function App() {
       case 'employees':
         return (
           <EmployeesView
-            employees={employees}
+            employees={sessionEmployees}
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
             businessInfo={businessInfo}
+            currentBizType={effectiveBizContext}
           />
         );
             case 'offerletter':
@@ -21947,7 +23174,7 @@ export default function App() {
           <OfferLetterView
             offerLetters={hrLetters.filter(l => l.type === 'offer')}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -21958,7 +23185,7 @@ export default function App() {
             letterType="warning"
             hrLetters={hrLetters}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -21969,7 +23196,7 @@ export default function App() {
             letterType="termination"
             hrLetters={hrLetters}
             setHrLetters={setHrLetters}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
@@ -21977,7 +23204,7 @@ export default function App() {
       case 'payroll':
         return (
           <PayrollView
-            employees={employees}
+            employees={sessionEmployees}
             payrollRuns={payrollRuns}
             setPayrollRuns={setPayrollRuns}
             businessInfo={businessInfo}
@@ -22163,6 +23390,20 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'projectpnl':
+        return (
+          <ProjectPnLView
+            siteProjects={siteProjects}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
+            progressUpdates={progressUpdates}
+            mepBoms={mepBoms}
+            purchaseReqs={purchaseReqs}
+            subcontractors={subcontractors}
+            pettyCash={pettyCash}
+            businessInfo={businessInfo}
+          />
+        );
       case 'mis':
         return (
           <MISView
@@ -22245,42 +23486,42 @@ export default function App() {
       case 'gstr1':
         return (
           <GSTR1Report
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'gstr3b':
         return (
           <GSTR3BReport
-            documents={documents}
-            customers={customers}
-            vendors={vendors}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             businessInfo={businessInfo}
           />
         );
       case 'vatreport':
         return (
           <VATReport
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'taxreport':
         return (
           <TaxReport
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'audit':
         return (
           <AuditView
-            documents={documents}
-            vouchers={vouchers}
-            pettyCash={pettyCash}
+            documents={sessionDocs}
+            vouchers={sessionVouchers}
+            pettyCash={sessionPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
             currentBizType={effectiveBizContext}
@@ -22299,6 +23540,32 @@ export default function App() {
             moms={moms}
             setMoms={setMoms}
             employees={employees}
+          />
+        );
+      case 'purchasereq':
+        return (
+          <PurchaseRequisitionView
+            purchaseReqs={purchaseReqs}
+            setPurchaseReqs={setPurchaseReqs}
+            items={items}
+            siteProjects={siteProjects}
+            productionOrders={productionOrders}
+            customers={customers}
+            boms={boms}
+            mepBoms={mepBoms}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            onConvertToPO={(pr) => {
+              const its = (pr.items || []).filter(it => it.name).map(it => {
+                const m = (items || []).find(x => String(x.id) === String(it.itemId));
+                const base = EMPTY_ITEM_ROW(businessInfo);
+                return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
+              });
+              startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
+              setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
+            }}
           />
         );
       case 'notifications':
@@ -22344,6 +23611,15 @@ export default function App() {
     <div style={styles.app} className="no-print-bg">
       <style>{`
         * { box-sizing: border-box; }
+        .nav-toggle { display: none; }
+        .nav-overlay { display: none; }
+        @media (max-width: 820px) {
+          .sidebar-nav { position: fixed !important; left: 0; top: 0; height: 100vh !important; z-index: 1200; transform: translateX(-100%); transition: transform .25s ease; box-shadow: 2px 0 18px rgba(0,0,0,0.22); }
+          .sidebar-nav.open { transform: translateX(0); }
+          .nav-toggle { display: flex !important; }
+          .nav-overlay.show { display: block !important; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1100; }
+          .app-main { padding-top: 54px !important; }
+        }
         body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
         .serif { font-family: 'Lora', Georgia, serif; }
         button { cursor: pointer; font-family: inherit; }
@@ -22378,6 +23654,9 @@ export default function App() {
         }
         @page { size: A4; margin: 15mm; }
       `}</style>
+      <button className="nav-toggle" onClick={() => setNavOpen(o => !o)} title="Menu"
+        style={{ position: 'fixed', top: 12, left: 12, zIndex: 1300, width: 38, height: 38, borderRadius: 8, border: 'none', background: '#234F3A', color: '#DCEAE0', display: 'none', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.18)', fontSize: 20 }}>☰</button>
+      <div className={"nav-overlay" + (navOpen ? " show" : "")} onClick={() => setNavOpen(false)} />
       <Sidebar
         view={view}
         setView={setView}
@@ -22396,6 +23675,7 @@ export default function App() {
         activeBizContext={effectiveBizContext}
         onBizContextChange={setActiveBizContext}
         onSwitchActivity={activeTypes.length > 1 ? () => setSessionContext(null) : null}
+        navOpen={navOpen}
       />
       {/* Bell — fixed top-right, hidden during print */}
       <button
@@ -22421,8 +23701,8 @@ export default function App() {
         )}
       </button>
 
-      <div style={styles.main}>
-        {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && (
+      <div style={styles.main} className="app-main">
+        {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && !isTestAccount && (
           <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
         )}
         {/* Deletion-scheduled banner */}
@@ -22449,8 +23729,8 @@ export default function App() {
         {renderContent()}
       </div>
 
-      {/* Powered-by watermark — shown during trial, hidden once subscribed */}
-      {!isSubscribed && trialDaysLeft !== null && (
+      {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
+      {!isSubscribed && !isTestAccount && trialDaysLeft !== null && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
