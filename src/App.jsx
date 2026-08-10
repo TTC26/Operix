@@ -5526,7 +5526,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
                 return (
                   <tr key={it.id}>
-                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{idx + 1}</td>
+                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{isEditable && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick to merge rows into one line" style={{ cursor: 'pointer', display: 'block', margin: '0 auto 5px', width: 15, height: 15 }} />}{idx + 1}</td>
                     <td style={styles.td}>
                       {isEditable && <select className="no-print" value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={styles.inlineSelect}>
                         <option value="">Custom item</option>
@@ -5567,10 +5567,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
                     </>)}
                     {isEditable && <td className="no-print" style={styles.td}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="checkbox" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Select to merge into one line" style={{ cursor: 'pointer', width: 15, height: 15 }} />
-                        <button onClick={() => removeRow(it.id)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
-                      </div>
+                      <button onClick={() => removeRow(it.id)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
                     </td>}
                   </tr>
                 );
@@ -5581,7 +5578,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           {isEditable && <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={addRow} style={styles.addRowBtn}><Plus size={14} /> Add line item</button>
             {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Merge {mergeSel.length} items into one line</button>}
-            {mergeSel.length >= 1 && <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(select 2+ to merge)' : ''}</span>}
+            {mergeSel.length >= 1
+              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to merge)' : ''}</span>
+              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick the checkbox on rows to merge them into a single line</span>}
           </div>}
 
           {/* ── Packing List weight totals ── */}
@@ -21878,10 +21877,15 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
+    // Scope every figure to the currently-selected business division (dashboard isolation)
+    const _bizDef = activeTypes.length === 1 ? activeTypes[0] : 'trading';
+    const _docs   = sessionContext ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
+    const _vlist  = Array.isArray(vouchers) ? vouchers : [];
+    const _vouch  = sessionContext ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
     // Only approved invoices count toward receivables
-    const totalRevenue   = documents.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const totalPurchases = documents.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
-    const voucherList    = Array.isArray(vouchers) ? vouchers : [];
+    const totalRevenue   = _docs.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const totalPurchases = _docs.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const voucherList    = _vouch;
     // All receipts/payments for the cash flow stats
     const totalReceived  = voucherList.filter(v => v.type === 'receipt').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const totalPaid      = voucherList.filter(v => v.type === 'payment').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
@@ -21890,7 +21894,7 @@ export default function App() {
     const orderPaid      = voucherList.filter(v => v.type === 'payment' && v.voucherSubtype !== 'nonorder').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const outstanding    = Math.max(0, totalRevenue - orderReceived);
     const payable        = Math.max(0, totalPurchases - orderPaid);
-    const counts = documents.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
+    const counts = _docs.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
     const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
     const itemCount = items.length;
@@ -21903,7 +21907,7 @@ export default function App() {
     const poCount = productionOrders.length;
     const poOpen  = productionOrders.filter(p => p.status !== 'completed' && p.status !== 'done').length;
     return { totalRevenue, totalPurchases, outstanding, payable, totalReceived, totalPaid, counts, pcBalance, itemCount, lowStockCount, rmCount, poCount, poOpen };
-  }, [documents, vouchers, businessInfo, country, pettyCash, items, stockLedger, rawMaterials, productionOrders]);
+  }, [documents, vouchers, businessInfo, country, pettyCash, items, stockLedger, rawMaterials, productionOrders, sessionContext, activeTypes]);
 
   if (!authReady) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 16, color: '#888' }}>Loading…</div>
