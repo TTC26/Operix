@@ -19658,6 +19658,20 @@ function FMKPIView({ assets, pmSchedules, fmWorkOrders, amcContracts, fmSparePar
 }
 
 // ─── Tender & Estimation ─────────────────────────────────────────────────────
+let _xlsxPromise = null;
+function loadXLSX() {
+  if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxPromise) return _xlsxPromise;
+  _xlsxPromise = new Promise((resolve, reject) => {
+    const scr = document.createElement('script');
+    scr.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    scr.onload = () => resolve(window.XLSX);
+    scr.onerror = () => { _xlsxPromise = null; reject(new Error('Could not load the Excel library (offline or blocked)')); };
+    document.head.appendChild(scr);
+  });
+  return _xlsxPromise;
+}
+
 function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
@@ -19707,29 +19721,57 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href=url; a.download=(t.number||'tender')+'.csv'; a.click(); URL.revokeObjectURL(url);
   }
+  async function exportTenderXlsx(t) {
+    try {
+      const XLSX = await loadXLSX();
+      const client = customers.find(c=>c.id===t.customerId);
+      const aoa = [
+        ['Tender No.', t.number], ['Title', t.title||''], ['Client', client?.name||''],
+        ['Submission Date', t.submissionDate||''], ['Valid Until', t.validUntil||''], [],
+        ['#','Description','Unit','Qty','Rate','Amount'],
+        ...(t.boq||[]).map((l,i)=>[i+1, l.description, l.unit, parseFloat(l.qty)||0, parseFloat(l.rate)||0, lineTotal(l)]),
+        [], ['','','','','Subtotal', boqSubtotal(t)],
+      ];
+      if (cc.hasTax) aoa.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
+      XLSX.writeFile(wb, (t.number||'tender')+'.xlsx');
+    } catch (err) { alert('Excel export failed: '+err.message+'. Use "Export CSV" instead.'); }
+  }
 
   if (editing) {
     const t = editing;
     const set = (k,v) => setEditing(p=>({...p,[k]:v}));
     const subtotal = boqSubtotal(t);
-    function importBoqCsv(e) {
+    function boqRowsToLines(rows) {
+      const r2 = (rows||[]).filter(r => (r||[]).some(c => String(c||'').trim()));
+      if (!r2.length) return [];
+      const f = (r2[0]||[]).join(' ').toLowerCase();
+      const start = (f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
+      return r2.slice(start).map(cols => ({ id: crypto.randomUUID(), description: String(cols[0]||'').trim(), unit: String(cols[1]||'').trim(), qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 })).filter(x => x.description);
+    }
+    async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = String(ev.target.result || '');
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) return;
-        const first = lines[0].toLowerCase();
-        const start = (first.includes('desc') || first.includes('item') || first.includes('particular')) ? 1 : 0;
-        const parsed = lines.slice(start).map(line => {
-          const cols = line.split(/,|;|\t/).map(c => c.replace(/^"|"$/g,'').trim());
-          return { id: crypto.randomUUID(), description: cols[0]||'', unit: cols[1]||'', qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 };
-        }).filter(r => r.description);
+      const nm = (file.name||'').toLowerCase();
+      try {
+        let rows = [];
+        if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
+          const XLSX = await loadXLSX();
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+        } else {
+          const text = await file.text();
+          rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
+        }
+        const parsed = boqRowsToLines(rows);
         if (!parsed.length) { alert('No rows found. Use columns in order: Description, Unit, Qty, Rate'); return; }
         set('boq', [...(t.boq||[]), ...parsed]);
         alert(parsed.length + ' line(s) imported.');
-      };
-      reader.readAsText(file);
+      } catch (err) {
+        alert('Import failed: ' + err.message + '. If Excel fails, save the sheet as CSV and import that.');
+      }
       e.target.value = '';
     }
     return (
@@ -19781,8 +19823,9 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
-                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel/CSV (columns: Description, Unit, Qty, Rate)">⬆ Import Excel/CSV<input type="file" accept=".csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
-                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to Excel (CSV)">⭳ Export Excel</button>}
+                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
+                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
+                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
               </div>
               {!cc.hasTax && <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Total: {subtotal.toLocaleString(undefined,{maximumFractionDigits:2})}</div>}
             </div>
@@ -19846,7 +19889,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
                         <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
-                        <button onClick={()=>exportTenderExcel(t)} style={styles.iconBtn} title="Export Excel (CSV)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
+                        <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
                       </div>
