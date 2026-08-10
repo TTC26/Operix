@@ -14414,7 +14414,7 @@ function blankContract() {
   };
 }
 
-function ContractList({ contracts, setContracts, customers, vendors, documents, termsLibrary, businessInfo, userRole }) {
+function ContractList({ contracts, setContracts, customers, vendors, documents, termsLibrary, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
   const [editing, setEditing] = useState(null); // null | contract obj | 'new'
   const [printing, setPrinting] = useState(null);
   const [search, setSearch] = useState('');
@@ -14429,7 +14429,7 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
   function handleSave(form) {
     if (!form.number) form.number = nextConNum();
     const { _isNew, ...rest } = form; // strip _isNew so Firestore doesn't reject undefined field
-    setContracts(prev => _isNew ? [...prev, rest] : prev.map(c => c.id === rest.id ? rest : c));
+    setContracts(prev => _isNew ? [...prev, { ...rest, bizType: rest.bizType || currentBizType }] : prev.map(c => c.id === rest.id ? rest : c));
     setEditing(null);
   }
 
@@ -14442,14 +14442,16 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
     setContracts(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
   }
 
-  const filtered = contracts.filter(c => {
+  const bizContracts = isMultiBiz ? contracts.filter(c => (c.bizType || 'trading') === currentBizType) : contracts;
+
+  const filtered = bizContracts.filter(c => {
     const cust = customers.find(x => x.id === c.customerId);
     const text = `${c.number} ${c.title} ${cust?.name || ''}`.toLowerCase();
     return text.includes(search.toLowerCase()) && (filterStatus === 'All' || c.status === filterStatus);
   });
 
   const counts = {};
-  CONTRACT_STATUSES.forEach(s => { counts[s] = contracts.filter(c => c.status === s).length; });
+  CONTRACT_STATUSES.forEach(s => { counts[s] = bizContracts.filter(c => c.status === s).length; });
 
   const fmt = makeFmt(businessInfo);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -22558,12 +22560,14 @@ export default function App() {
           <ContractList
             contracts={contracts}
             setContracts={setContracts}
-            customers={customers}
-            vendors={vendors}
-            documents={documents}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
+            documents={sessionDocs}
             termsLibrary={termsLibrary}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={isMultiBiz}
           />
         );
       case 'termslibrary':
