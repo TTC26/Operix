@@ -4157,7 +4157,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_reports" label="Reports & Analytics">
-              <NavBtn id="projectreports" label="Project Reports"   icon={BarChart2} />
+              <NavBtn id="projectpnl" label="Project P&amp;L" icon={BarChart2} />
               <NavBtn id="mepreports"     label="MEP Reports"       icon={FileText} />
               <NavBtn id="audit"          label="Financial Reports" icon={BarChart2} />
               <NavBtn id="evaluation"     label="Management Review" icon={CheckCircle} />
@@ -11551,6 +11551,143 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, businessInfo }) {
+  const fmt = makeFmt(businessInfo);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const raTotal = (rb) => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
+  const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+
+  const rows = (siteProjects || []).map(p => {
+    const raBilled = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id)).reduce((s, rb) => s + raTotal(rb), 0);
+    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
+    const earned = acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0) * (getActivityProgress(a.id, progressUpdates) / 100), 0);
+    const contractValue = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
+    const matCost  = (mepBoms || []).filter(b => String(b.projectId) === String(p.id)).reduce((s, b) => s + (b.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
+    const procCost = (purchaseReqs || []).filter(pr => pr.type === 'project' && String(pr.linkId) === String(p.id)).reduce((s, pr) => s + (pr.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
+    const subCost  = (subcontractors || []).reduce((s, sc) => s + (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).reduce((t, w) => t + (parseFloat(w.value) || 0), 0), 0);
+    const labCost  = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const totalCost = matCost + procCost + subCost + labCost;
+    const profitRA = raBilled - totalCost;
+    const profitEarned = earned - totalCost;
+    const marginRA = raBilled > 0 ? (profitRA / raBilled * 100) : 0;
+    return { p, contractValue, raBilled, earned, matCost, procCost, subCost, labCost, totalCost, profitRA, profitEarned, marginRA };
+  });
+
+  const tot = rows.reduce((a, r) => ({
+    contractValue: a.contractValue + r.contractValue, raBilled: a.raBilled + r.raBilled, earned: a.earned + r.earned,
+    matCost: a.matCost + r.matCost, procCost: a.procCost + r.procCost, subCost: a.subCost + r.subCost, labCost: a.labCost + r.labCost,
+    totalCost: a.totalCost + r.totalCost, profitRA: a.profitRA + r.profitRA, profitEarned: a.profitEarned + r.profitEarned,
+  }), { contractValue: 0, raBilled: 0, earned: 0, matCost: 0, procCost: 0, subCost: 0, labCost: 0, totalCost: 0, profitRA: 0, profitEarned: 0 });
+
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap', textAlign: 'right' };
+  const thL = { ...th, textAlign: 'left' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', textAlign: 'right', whiteSpace: 'nowrap' };
+  const tdL = { ...td, textAlign: 'left', fontWeight: 600, color: '#1E2A4A' };
+  const pcol = (v) => ({ ...td, fontWeight: 700, color: v >= 0 ? '#1A7A3E' : '#B5453A' });
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Project P&amp;L</h2>
+          <p style={styles.muted}>Profit &amp; loss per project — billing vs cost</p>
+        </div>
+        <button style={styles.secondaryBtn} className="no-print" onClick={() => window.print()}>Print</button>
+      </div>
+
+      {rows.length > 0 && (() => {
+        const sRow = (label, val, opts = {}) => (
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: opts.big ? 15 : 13, borderBottom: opts.noBorder ? 'none' : '1px solid #F2EFE6', color: opts.color || '#3A3A34', fontWeight: opts.bold ? 700 : 400 }}>
+            <span>{label}</span><span style={{ fontWeight: opts.bold ? 700 : 500, color: opts.color }}>{val}</span>
+          </div>
+        );
+        const netRA = tot.raBilled - tot.totalCost;
+        const netEarned = tot.earned - tot.totalCost;
+        return (
+          <div style={{ ...card, maxWidth: 520 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#1A7A3E', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Overall P&amp;L — All Projects</div>
+            {sRow('Revenue — RA Billed', fmt(tot.raBilled), { bold: true })}
+            {sRow('Revenue — Earned (progress)', fmt(tot.earned), { color: '#888780' })}
+            <div style={{ height: 8 }} />
+            {sRow('Less: Materials (BOM)', fmt(tot.matCost), { color: '#B5453A' })}
+            {sRow('Less: Procurement', fmt(tot.procCost), { color: '#B5453A' })}
+            {sRow('Less: Subcontractors', fmt(tot.subCost), { color: '#B5453A' })}
+            {sRow('Less: Labour / Petty cash', fmt(tot.labCost), { color: '#B5453A' })}
+            {sRow('Total Cost', fmt(tot.totalCost), { bold: true })}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 12px', marginTop: 10, borderRadius: 8, background: netRA >= 0 ? '#EDF7EE' : '#FCEDEB', border: `1.5px solid ${netRA >= 0 ? '#1A7A3E' : '#B5453A'}` }}>
+              <span style={{ fontWeight: 800, fontSize: 15 }}>NET {netRA >= 0 ? 'PROFIT' : 'LOSS'} (RA)</span>
+              <span style={{ fontWeight: 800, fontSize: 15, color: netRA >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(Math.abs(netRA))} · {tot.raBilled > 0 ? (netRA / tot.raBilled * 100).toFixed(1) : '0.0'}%</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 12px', marginTop: 6, fontSize: 12.5, color: '#555' }}>
+              <span>Net (on earned value)</span>
+              <span style={{ fontWeight: 700, color: netEarned >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(Math.abs(netEarned))} {netEarned >= 0 ? 'profit' : 'loss'}</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {rows.length === 0 ? (
+        <div style={styles.emptyBox}>No projects yet. Create a project to see its P&amp;L.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1050 }}>
+            <thead>
+              <tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Contract Value</th>
+                <th style={th}>RA Billed</th>
+                <th style={th}>Earned</th>
+                <th style={th}>Materials</th>
+                <th style={th}>Procurement</th>
+                <th style={th}>Subcontract</th>
+                <th style={th}>Labour</th>
+                <th style={th}>Total Cost</th>
+                <th style={th}>Profit (RA)</th>
+                <th style={th}>Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.p.id}>
+                  <td style={tdL}>{r.p.name || r.p.projectName || 'Untitled'}</td>
+                  <td style={td}>{fmt(r.contractValue)}</td>
+                  <td style={td}>{fmt(r.raBilled)}</td>
+                  <td style={{ ...td, color: '#888780' }}>{fmt(r.earned)}</td>
+                  <td style={td}>{fmt(r.matCost)}</td>
+                  <td style={td}>{fmt(r.procCost)}</td>
+                  <td style={td}>{fmt(r.subCost)}</td>
+                  <td style={td}>{fmt(r.labCost)}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{fmt(r.totalCost)}</td>
+                  <td style={pcol(r.profitRA)}>{fmt(r.profitRA)}</td>
+                  <td style={pcol(r.profitRA)}>{r.marginRA.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td style={{ ...tdL, borderTop: '2px solid #1E2A4A' }}>TOTAL</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.contractValue)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.raBilled)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#888780' }}>{fmt(tot.earned)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.matCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.procCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.subCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A' }}>{fmt(tot.labCost)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.totalCost)}</td>
+                <td style={{ ...pcol(tot.profitRA), borderTop: '2px solid #1E2A4A' }}>{fmt(tot.profitRA)}</td>
+                <td style={{ ...pcol(tot.profitRA), borderTop: '2px solid #1E2A4A' }}>{tot.raBilled > 0 ? (tot.profitRA / tot.raBilled * 100).toFixed(1) : '0.0'}%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 10, lineHeight: 1.6 }}>
+        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + petty cash tagged to project. Tag petty cash entries to a project to populate Labour.
+      </div>
     </div>
   );
 }
@@ -22816,6 +22953,20 @@ export default function App() {
             siteActivities={siteActivities}
             setSiteActivities={setSiteActivities}
             userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'projectpnl':
+        return (
+          <ProjectPnLView
+            siteProjects={siteProjects}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
+            progressUpdates={progressUpdates}
+            mepBoms={mepBoms}
+            purchaseReqs={purchaseReqs}
+            subcontractors={subcontractors}
+            pettyCash={pettyCash}
             businessInfo={businessInfo}
           />
         );
