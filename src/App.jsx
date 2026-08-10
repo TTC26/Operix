@@ -19815,9 +19815,107 @@ function loadXLSX() {
   return _xlsxPromise;
 }
 
-function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo }) {
+function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose }) {
+  const fmt = makeFmt(businessInfo);
+  const cur = (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency;
+  const a = line.analysis || {};
+  const [comps, setComps]   = React.useState(a.components && a.components.length ? a.components : []);
+  const [siteOH, setSiteOH] = React.useState(a.siteOH ?? 0);
+  const [hoOH, setHoOH]     = React.useState(a.hoOH ?? 0);
+  const [conti, setConti]   = React.useState(a.contingency ?? 0);
+  const [profit, setProfit] = React.useState(a.profit ?? 0);
+
+  const compAmt = c => (parseFloat(c.qtyPerUnit) || 0) * (parseFloat(c.rate) || 0);
+  const direct  = comps.reduce((s, c) => s + compAmt(c), 0);
+  const siteOHamt = direct * (parseFloat(siteOH) || 0) / 100;
+  const hoOHamt   = direct * (parseFloat(hoOH) || 0) / 100;
+  const contAmt   = direct * (parseFloat(conti) || 0) / 100;
+  const costRate  = direct + siteOHamt + hoOHamt + contAmt;
+  const profitAmt = costRate * (parseFloat(profit) || 0) / 100;
+  const selling   = costRate + profitAmt;
+
+  function addComp() { setComps(c => [...c, { id: crypto.randomUUID(), resourceId: '', type: 'Material', name: '', unit: '', qtyPerUnit: 1, rate: 0 }]); }
+  function pick(i, rid) { const r = resources.find(x => String(x.id) === String(rid)); setComps(cs => cs.map((c, j) => j === i ? (r ? { ...c, resourceId: rid, type: r.type, name: r.name, unit: r.unit, rate: parseFloat(r.rate) || 0 } : { ...c, resourceId: '' }) : c)); }
+  function upd(i, k, v) { setComps(cs => cs.map((c, j) => j === i ? { ...c, [k]: v } : c)); }
+  function delComp(i) { setComps(cs => cs.filter((_, j) => j !== i)); }
+
+  const modalCard = { background: '#fff', borderRadius: 14, padding: 22, width: '94%', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+  const th = { textAlign: 'left', fontSize: 10.5, color: '#888', textTransform: 'uppercase', padding: '5px 6px', borderBottom: '1px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '3px 4px', fontSize: 12.5, borderBottom: '1px solid #F5F2EC' };
+  const inp = { ...styles.input, margin: 0 };
+  const sumRow = (label, val, opts = {}) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: opts.big ? 15 : 13, fontWeight: opts.bold ? 700 : 400, color: opts.color || '#3A3A34', borderTop: opts.top ? '1px solid #EAE6DB' : 'none' }}>
+      <span>{label}</span><span style={{ fontWeight: opts.bold ? 700 : 500 }}>{fmt(val)}</span>
+    </div>
+  );
+  const mk = (label, val, setV) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 12, color: '#888', flex: 1 }}>{label}</span>
+      <input type="number" value={val} onChange={e => setV(e.target.value)} style={{ ...inp, width: 64, textAlign: 'right' }} /><span style={{ fontSize: 12, color: '#888' }}>%</span>
+    </div>
+  );
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className="serif" style={{ margin: '0 0 4px', color: '#1E2A4A' }}>Rate Analysis</h3>
+        <div style={{ fontSize: 12.5, color: '#888', marginBottom: 14 }}>{line.description || 'BOQ item'} — per 1 {line.unit || 'unit'}</div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Type', 'Resource', 'Unit', 'Qty/unit', 'Rate', 'Amount', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Qty/unit', 'Rate', 'Amount'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {comps.map((c, i) => (
+              <tr key={c.id}>
+                <td style={{ ...td, width: 90 }}>{c.type || '—'}</td>
+                <td style={td}>
+                  <select value={c.resourceId} onChange={e => pick(i, e.target.value)} style={{ ...inp, width: '100%' }}>
+                    <option value="">— pick resource —</option>
+                    {resources.map(r => <option key={r.id} value={r.id}>{r.code} · {r.name} ({r.type})</option>)}
+                  </select>
+                  {!c.resourceId && <input value={c.name} onChange={e => upd(i, 'name', e.target.value)} placeholder="or type manually" style={{ ...inp, width: '100%', marginTop: 3 }} />}
+                </td>
+                <td style={{ ...td, width: 56 }}><input value={c.unit} onChange={e => upd(i, 'unit', e.target.value)} style={{ ...inp, width: 50 }} /></td>
+                <td style={{ ...td, width: 70 }}><input type="number" value={c.qtyPerUnit} onChange={e => upd(i, 'qtyPerUnit', e.target.value)} style={{ ...inp, width: 64, textAlign: 'right' }} /></td>
+                <td style={{ ...td, width: 80 }}><input type="number" value={c.rate} onChange={e => upd(i, 'rate', e.target.value)} style={{ ...inp, width: 72, textAlign: 'right' }} /></td>
+                <td style={{ ...td, width: 90, textAlign: 'right', fontWeight: 600 }}>{fmt(compAmt(c))}</td>
+                <td style={{ ...td, width: 28 }}><button onClick={() => delComp(i)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={12} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button onClick={addComp} style={{ ...styles.ghostBtn, marginTop: 8, fontSize: 12 }}><Plus size={13} /> Add resource</button>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {mk('Site Overhead', siteOH, setSiteOH)}
+            {mk('Head Office Overhead', hoOH, setHoOH)}
+            {mk('Contingency', conti, setConti)}
+            {mk('Profit', profit, setProfit)}
+          </div>
+          <div style={{ background: '#FAF8F4', borderRadius: 10, padding: '10px 14px' }}>
+            {sumRow('Direct Cost', direct, { bold: true })}
+            {sumRow('+ Site OH', siteOHamt, { color: '#888' })}
+            {sumRow('+ HO OH', hoOHamt, { color: '#888' })}
+            {sumRow('+ Contingency', contAmt, { color: '#888' })}
+            {sumRow('Cost Rate', costRate, { bold: true, top: true })}
+            {sumRow('+ Profit', profitAmt, { color: '#1A7A3E' })}
+            {sumRow('Selling Rate', selling, { bold: true, big: true, top: true, color: '#1A7A3E' })}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => onSave({ components: comps, siteOH: parseFloat(siteOH) || 0, hoOH: parseFloat(hoOH) || 0, contingency: parseFloat(conti) || 0, profit: parseFloat(profit) || 0, direct, costRate, selling })}>Apply to BOQ (Rate = {fmt(selling)})</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo, resources = [] }) {
   const [editing, setEditing] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
+  const [analysing, setAnalysing] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -19962,7 +20060,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                     <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.actualQty ?? ''} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,actualQty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Actual executed Qty'/></td>
                     <td style={{ padding:'4px 4px', width:90 }}><input type='number' value={l.rate} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,rate:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
                     <td style={{ padding:'4px 8px', fontWeight:600, width:100, textAlign:'right', whiteSpace:'nowrap' }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
-                    <td style={{ padding:'4px 4px', width:30 }}><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                    <td style={{ padding:'4px 4px', width:56, whiteSpace:'nowrap' }}><button onClick={()=>setAnalysing(i)} style={{ ...styles.iconBtn, color: l.analysis ? '#1A7A3E' : '#888' }} title="Rate Analysis (build-up)"><BarChart2 size={13}/></button><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -19992,6 +20090,15 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
           </div>
         </div>
+        {analysing !== null && t.boq[analysing] && (
+          <RateAnalysisModal
+            line={t.boq[analysing]}
+            resources={resources}
+            businessInfo={businessInfo}
+            onClose={()=>setAnalysing(null)}
+            onSave={(res)=>{ set('boq', t.boq.map((x,j)=> j===analysing ? { ...x, rate: Math.round(res.selling*100)/100, analysis: res } : x)); setAnalysing(null); }}
+          />
+        )}
       </div>
     );
   }
@@ -23305,6 +23412,7 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            resources={resources}
           />
         );
       case 'rabilling':
