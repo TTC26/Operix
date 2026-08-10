@@ -4253,6 +4253,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
               <SubLabel label="Tender & Estimation" />
               <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+              <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
               <SubLabel label="Planning & Progress" />
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
@@ -19658,6 +19659,150 @@ function FMKPIView({ assets, pmSchedules, fmWorkOrders, amcContracts, fmSparePar
 }
 
 // ─── Tender & Estimation ─────────────────────────────────────────────────────
+function ResourceMasterView({ resources = [], setResources, userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
+  const [tab, setTab] = React.useState('Material');
+  const [editing, setEditing] = React.useState(null);
+  const canEdit = ['admin', 'manager', 'engineer', 'staff'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const fmt = makeFmt(businessInfo);
+  const TYPES = [['Material', 'Materials'], ['Labour', 'Labour'], ['Equipment', 'Equipment'], ['Subcontract', 'Subcontract']];
+  const prefix = { Material: 'MAT', Labour: 'LAB', Equipment: 'EQP', Subcontract: 'SUB' };
+  const unitHint = { Material: 'm / No / kg / m²', Labour: 'Hour / Day', Equipment: 'Hour / Day', Subcontract: 'LS / No' };
+
+  const scoped = isMultiBiz ? resources.filter(r => (r.bizType || 'trading') === currentBizType) : resources;
+  const list = scoped.filter(r => r.type === tab).sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+
+  function nextCode(type) {
+    const p = prefix[type];
+    const nums = scoped.filter(r => r.type === type).map(r => parseInt(String(r.code || '').replace(/\D/g, '')) || 0);
+    return p + '-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+  }
+  function save(rec) {
+    const t = { ...rec, rate: parseFloat(rec.rate) || 0, bizType: rec.bizType || currentBizType };
+    setResources(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]);
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this resource?')) return; setResources(prev => prev.filter(x => x.id !== id)); }
+  function blank() { return { id: crypto.randomUUID(), type: tab, code: nextCode(tab), name: '', unit: '', rate: 0, supplier: '', remarks: '' }; }
+
+  async function importFile(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
+        const XLSX = await loadXLSX();
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
+      } else {
+        rows = (await file.text()).split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
+      }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim()));
+      const f0 = (r2[0] || []).join(' ').toLowerCase();
+      const start = (f0.includes('name') || f0.includes('desc') || f0.includes('material')) ? 1 : 0;
+      let n = scoped.filter(r => r.type === tab).length;
+      const parsed = r2.slice(start).map(cols => {
+        n += 1;
+        return { id: crypto.randomUUID(), type: tab, code: prefix[tab] + '-' + String(n).padStart(3, '0'), name: String(cols[0] || '').trim(), unit: String(cols[1] || '').trim(), rate: parseFloat(cols[2]) || 0, supplier: String(cols[3] || '').trim(), remarks: '' };
+      }).filter(x => x.name).map(x => ({ ...x, bizType: currentBizType }));
+      if (!parsed.length) { alert('No rows. Columns: Name, Unit, Rate, Supplier'); return; }
+      setResources(prev => [...prev, ...parsed]);
+      alert(parsed.length + ' ' + tab.toLowerCase() + ' resource(s) imported.');
+    } catch (err) { alert('Import failed: ' + err.message + '. Try CSV.'); }
+    e.target.value = '';
+  }
+  async function exportFile() {
+    const aoa = [['Code', 'Name', 'Unit', 'Rate', 'Supplier', 'Remarks'], ...list.map(r => [r.code, r.name, r.unit, r.rate, r.supplier || '', r.remarks || ''])];
+    try {
+      const XLSX = await loadXLSX();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, tab);
+      XLSX.writeFile(wb, 'Resources-' + tab + '.xlsx');
+    } catch (err) {
+      const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n');
+      const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+      const a = document.createElement('a'); a.href = url; a.download = 'Resources-' + tab + '.csv'; a.click(); URL.revokeObjectURL(url);
+    }
+  }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  const tabBtn = (id, label) => (<button key={id} onClick={() => setTab(id)} style={{ padding: '8px 16px', border: 'none', borderBottom: tab === id ? '2px solid #1A7A3E' : '2px solid transparent', background: 'none', fontSize: 13, fontWeight: 600, color: tab === id ? '#1A7A3E' : '#888780', cursor: 'pointer' }}>{label} ({scoped.filter(r => r.type === id).length})</button>);
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Resource Master</h2>
+          <p style={styles.muted}>Materials, labour, equipment &amp; subcontract rates — used by rate analysis &amp; estimation</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New {tab}</button>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #EAE6DB', marginBottom: 10, flexWrap: 'wrap' }}>{TYPES.map(([id, label]) => tabBtn(id, label))}</div>
+
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {canEdit && <label style={{ ...styles.ghostBtn, cursor: 'pointer' }} title="Import from Excel/CSV — columns: Name, Unit, Rate, Supplier">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importFile} /></label>}
+        {list.length > 0 && <button style={styles.ghostBtn} onClick={exportFile}>⭳ Export .xlsx</button>}
+        <span style={{ fontSize: 12, color: '#B0AC9F', marginLeft: 'auto' }}>{list.length} {tab.toLowerCase()} item{list.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No {tab.toLowerCase()} resources yet. Click "New {tab}" or import.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <thead><tr>{['Code', 'Name', 'Unit', 'Rate', 'Supplier', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: h === 'Rate' ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(r => (
+                <tr key={r.id}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.code}</td>
+                  <td style={td}>{r.name}{r.remarks && <div style={{ fontSize: 11, color: '#999' }}>{r.remarks}</div>}</td>
+                  <td style={td}>{r.unit}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{fmt(r.rate)}</td>
+                  <td style={td}>{r.supplier || '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(r)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(r.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (() => {
+        const set = (k, v) => setEditing(p => ({ ...p, [k]: v }));
+        const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+        const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+        return (
+          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+            <div style={modalCard} onClick={e => e.stopPropagation()}>
+              <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.name ? 'Edit' : 'New'} {editing.type} — {editing.code}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Type</label><select style={styles.input} value={editing.type} onChange={e => set('type', e.target.value)}>{TYPES.map(([id]) => <option key={id}>{id}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Code</label><input style={styles.input} value={editing.code} onChange={e => set('code', e.target.value)} /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Name / Description</label><input style={styles.input} value={editing.name} onChange={e => set('name', e.target.value)} placeholder="e.g. 2.5mm² PVC Cable" /></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Unit</label><input style={styles.input} value={editing.unit} onChange={e => set('unit', e.target.value)} placeholder={unitHint[editing.type]} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Rate ({(COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency})</label><input type="number" style={styles.input} value={editing.rate} onChange={e => set('rate', e.target.value)} /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Supplier / Source (optional)</label><input style={styles.input} value={editing.supplier} onChange={e => set('supplier', e.target.value)} /></div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+                <button style={styles.primaryBtn} onClick={() => { if (!editing.name) { alert('Enter a name'); return; } save(editing); }}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 let _xlsxPromise = null;
 function loadXLSX() {
   if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
@@ -21919,6 +22064,7 @@ export default function App() {
   const [progressUpdates,  _setDSR]    = useState([]);
   const [clientMaterials,  _setCM]     = useState([]);
   const [projectDocuments, _setPDocs]  = useState([]);
+  const [resources,        _setRes]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -22104,6 +22250,7 @@ export default function App() {
       _setDSR(data.progressUpdates || []);
       _setCM(data.clientMaterials || []);
       _setPDocs(data.projectDocuments || []);
+      _setRes(data.resources || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
@@ -22197,6 +22344,7 @@ export default function App() {
   const setProgressUpdates  = mkSet(_setDSR,   'progressUpdates');
   const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
   const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
+  const setResources        = mkSet(_setRes,   'resources');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -22375,7 +22523,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -22423,6 +22571,7 @@ export default function App() {
     if (backup.progressUpdates) setProgressUpdates(backup.progressUpdates);
     if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
     if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
+    if (backup.resources) setResources(backup.resources);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -22619,6 +22768,16 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'resourcemaster') return (
+      <ResourceMasterView
+        resources={resources}
+        setResources={setResources}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+      />
+    );
     if (view === 'projectdocs') return (
       <ProjectDocumentsView
         projectDocuments={projectDocuments}
