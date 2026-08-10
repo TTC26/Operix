@@ -3980,25 +3980,23 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {bt === 'service' && <>
                   {/* ─── MEP SUITE ─────────────────────────────── */}
                   <SubLabel label="Projects" />
-                  <NavBtn id="siteprojects" label="Project Master"  icon={MapPin} />
-                  <NavBtn id="contracts"    label="Contracts / T&C" icon={FileSignature} />
+                  <NavBtn id="siteprojects" label="Project Master" icon={MapPin} />
 
-                  <SubLabel label="Tender & Estimation" />
-                  <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+                  <SubLabel label="BOM & Materials" />
+                  <NavBtn id="mepbom" label="BOM &amp; Materials" icon={ClipboardList} />
 
                   <SubLabel label="Service Catalogue" />
                   <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
 
-                  <SubLabel label="BOM & Materials" />
-                  <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
-                  <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+                  <SubLabel label="Tender & Estimation" />
+                  <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
 
                   <SubLabel label="Planning & Progress" />
                   <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
                   <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
                   <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
 
-                  <SubLabel label="Billing & Commercial" />
+                  <SubLabel label="Billing" />
                   <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
 
                   <SubLabel label="Subcontractors" />
@@ -4006,6 +4004,9 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
                   <SubLabel label="HSE" />
                   <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+
+                  <SubLabel label="T&C / Contracts" />
+                  <NavBtn id="contracts" label="Contracts / T&C" icon={FileSignature} />
 
                   <SubLabel label="Handover & DLP" />
                   <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
@@ -4119,25 +4120,25 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {showService && (
             <Section sectionKey="site" label="MEP Suite">
               <SubLabel label="Projects" />
-              <NavBtn id="siteprojects" label="Project Master"  icon={MapPin} />
-              <NavBtn id="contracts"    label="Contracts / T&C" icon={FileSignature} />
-              <SubLabel label="Tender & Estimation" />
-              <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+              <NavBtn id="siteprojects" label="Project Master" icon={MapPin} />
+              <SubLabel label="BOM & Materials" />
+              <NavBtn id="mepbom" label="BOM &amp; Materials" icon={ClipboardList} />
               <SubLabel label="Service Catalogue" />
               <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
-              <SubLabel label="BOM & Materials" />
-              <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
-              <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+              <SubLabel label="Tender & Estimation" />
+              <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
               <SubLabel label="Planning & Progress" />
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
               <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
-              <SubLabel label="Billing & Commercial" />
+              <SubLabel label="Billing" />
               <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
               <SubLabel label="Subcontractors" />
               <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
               <SubLabel label="HSE" />
               <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+              <SubLabel label="T&C / Contracts" />
+              <NavBtn id="contracts" label="Contracts / T&C" icon={FileSignature} />
               <SubLabel label="Handover & DLP" />
               <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
               <NavBtn id="handover"       label="Handover / DLP"          icon={CheckSquare} />
@@ -15157,6 +15158,28 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
 
 
 // ─── Scope of Work (Service companies) ───────────────────────────────────────
+function MepTabs({ tabs, tab, setTab }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #EAE6DB', margin: '0 0 10px', padding: '0 4px', flexWrap: 'wrap' }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '8px 16px', border: 'none', borderBottom: tab === t.id ? '2px solid #1A7A3E' : '2px solid transparent', background: 'none', fontSize: 13, fontWeight: 600, color: tab === t.id ? '#1A7A3E' : '#888780', cursor: 'pointer' }}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function BomMaterialsView(props) {
+  const [tab, setTab] = React.useState('bom');
+  return (
+    <div style={styles.page}>
+      <MepTabs tab={tab} setTab={setTab} tabs={[{ id: 'bom', label: 'Project BOM' }, { id: 'materials', label: 'Client Materials' }]} />
+      {tab === 'bom'
+        ? <MepBomView mepBoms={props.mepBoms} setMepBoms={props.setMepBoms} siteProjects={props.siteProjects} scopeOfWork={props.scopeOfWork} siteActivities={props.siteActivities} setSiteActivities={props.setSiteActivities} userRole={props.userRole} businessInfo={props.businessInfo} />
+        : <ClientMaterialView clientMaterials={props.clientMaterials} setClientMaterials={props.setClientMaterials} siteProjects={props.siteProjects} employees={props.employees} userRole={props.userRole} />}
+    </div>
+  );
+}
+
 function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
   const [subView, setSubView]     = useState('list');   // 'list' | 'edit'
   const [editing, setEditing]     = useState(null);
@@ -22656,13 +22679,16 @@ export default function App() {
         );
       case 'mepbom':
         return (
-          <MepBomView
+          <BomMaterialsView
             mepBoms={mepBoms}
             setMepBoms={setMepBoms}
             siteProjects={siteProjects}
             scopeOfWork={scopeOfWork}
             siteActivities={siteActivities}
             setSiteActivities={setSiteActivities}
+            clientMaterials={clientMaterials}
+            setClientMaterials={setClientMaterials}
+            employees={employees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
