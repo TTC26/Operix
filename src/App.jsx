@@ -21895,8 +21895,11 @@ export default function App() {
     const outstanding    = Math.max(0, totalRevenue - orderReceived);
     const payable        = Math.max(0, totalPurchases - orderPaid);
     const counts = _docs.reduce((acc, d) => { if (d.type) acc[d.type] = (acc[d.type] || 0) + 1; return acc; }, {});
-    const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
-    const pcBalance = (pettyCash?.openingBalance || 0) + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
+    const _isMB    = activeTypes.length > 1;
+    const _allPc   = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+    const pcEntries = (_isMB && sessionContext) ? _allPc.filter(e => (e.bizType || 'trading') === sessionContext) : _allPc;
+    const _pcOpen  = (_isMB && sessionContext) ? (pettyCash?.openingBalances?.[sessionContext] ?? 0) : (pettyCash?.openingBalance ?? 0);
+    const pcBalance = _pcOpen + pcEntries.reduce((s, e) => s + (e.credit || 0) - (e.debit || 0), 0);
     const itemCount = items.length;
     const lowStockCount = items.filter(it => {
       if (!it.minStock) return false;
@@ -21973,6 +21976,13 @@ export default function App() {
   const sessionDocs = sessionContext
     ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
+  // Session-scoped accounts data (vouchers + petty cash) for reports & audit isolation
+  const sessionVouchers = sessionContext
+    ? (Array.isArray(vouchers) ? vouchers : []).filter(v => (v.bizType || bizDefault) === sessionContext)
+    : vouchers;
+  const sessionPettyCash = (sessionContext && isMultiBiz)
+    ? { ...pettyCash, entries: (pettyCash?.entries || []).filter(e => (e.bizType || 'trading') === sessionContext), openingBalance: (pettyCash?.openingBalances?.[sessionContext] ?? 0) }
+    : pettyCash;
 
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
@@ -22687,42 +22697,42 @@ export default function App() {
       case 'gstr1':
         return (
           <GSTR1Report
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'gstr3b':
         return (
           <GSTR3BReport
-            documents={documents}
-            customers={customers}
-            vendors={vendors}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
             businessInfo={businessInfo}
           />
         );
       case 'vatreport':
         return (
           <VATReport
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'taxreport':
         return (
           <TaxReport
-            documents={documents}
-            customers={customers}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
           />
         );
       case 'audit':
         return (
           <AuditView
-            documents={documents}
-            vouchers={vouchers}
-            pettyCash={pettyCash}
+            documents={sessionDocs}
+            vouchers={sessionVouchers}
+            pettyCash={sessionPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
             currentBizType={effectiveBizContext}
