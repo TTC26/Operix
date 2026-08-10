@@ -15732,7 +15732,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
   );
 }
 
-function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
+function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole, resources = [], businessInfo }) {
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'sales';
@@ -15772,15 +15772,16 @@ function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
       </div>
       {(creating || editing) && (
         <Modal title={creating ? 'New Scope Item' : 'Edit Scope Item'} onClose={() => { setEditing(null); setCreating(false); }}>
-          <ScopeItemForm item={editing} onSave={saveScope} onClose={() => { setEditing(null); setCreating(false); }} />
+          <ScopeItemForm item={editing} onSave={saveScope} onClose={() => { setEditing(null); setCreating(false); }} resources={resources} businessInfo={businessInfo} />
         </Modal>
       )}
     </div>
   );
 }
 
-function ScopeItemForm({ item, onSave, onClose }) {
-  const [form, setForm] = useState({ _isNew: !!item?._isNew, id: item?.id || crypto.randomUUID(), name: item?.name || '', category: item?.category || '', description: item?.description || '', unit: item?.unit || 'hrs', rate: item?.rate || '' });
+function ScopeItemForm({ item, onSave, onClose, resources = [], businessInfo }) {
+  const [form, setForm] = useState({ _isNew: !!item?._isNew, id: item?.id || crypto.randomUUID(), name: item?.name || '', category: item?.category || '', description: item?.description || '', unit: item?.unit || 'hrs', rate: item?.rate || '', analysis: item?.analysis || null });
+  const [showRA, setShowRA] = useState(false);
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -15791,12 +15792,18 @@ function ScopeItemForm({ item, onSave, onClose }) {
           {['hrs','days','project','lump sum','visit','month','year'].map(u => <option key={u} value={u}>{u}</option>)}
         </select>
       </div>
-      <div style={styles.formGroup}><label style={styles.label}>Rate</label><input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} style={styles.input} placeholder="0.00" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Rate</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} style={{ ...styles.input, flex: 1 }} placeholder="0.00" />
+          <button type="button" onClick={() => setShowRA(true)} style={{ ...styles.ghostBtn, whiteSpace: 'nowrap', color: form.analysis ? '#1A7A3E' : '#2C6FB5', borderColor: form.analysis ? '#1A7A3E' : '#2C6FB5' }}>{form.analysis ? '✓ Built-up' : '📊 Build-up'}</button>
+        </div>
+      </div>
       <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}><label style={styles.label}>Description</label><textarea value={form.description} onChange={e => set('description', e.target.value)} style={{ ...styles.input, minHeight: 70 }} placeholder="Detailed description of the scope..." /></div>
       <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
         <button style={styles.primaryBtn} onClick={() => { if (!form.name) return alert('Name required'); onSave(form); }}>Save</button>
       </div>
+      {showRA && <RateAnalysisModal line={{ description: form.name, unit: form.unit, analysis: form.analysis }} resources={resources} businessInfo={businessInfo} onClose={() => setShowRA(false)} onSave={(res) => { set('rate', Math.round(res.selling * 100) / 100); setForm(f => ({ ...f, analysis: res })); setShowRA(false); }} />}
     </div>
   );
 }
@@ -19815,6 +19822,21 @@ function loadXLSX() {
   return _xlsxPromise;
 }
 
+function CatalogueAddRow({ item, businessInfo, onAdd }) {
+  const [q, setQ] = React.useState(1);
+  const fmt = makeFmt(businessInfo);
+  const td = { padding: '6px 8px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  return (
+    <tr>
+      <td style={td}>{item.name}{item.analysis && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#1A7A3E' }}>build-up</span>}{item.category && <div style={{ fontSize: 11, color: '#999' }}>{item.category}</div>}</td>
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>{item.unit}</td>
+      <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{fmt(item.rate || 0)}</td>
+      <td style={{ ...td, width: 80 }}><input type="number" value={q} onChange={e => setQ(e.target.value)} style={{ ...styles.input, margin: 0, width: 70, textAlign: 'right' }} /></td>
+      <td style={{ ...td, textAlign: 'right' }}><button onClick={() => onAdd(item, parseFloat(q) || 0)} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px', color: '#1A7A3E' }}>Add</button></td>
+    </tr>
+  );
+}
+
 function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose }) {
   const fmt = makeFmt(businessInfo);
   const cur = (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency;
@@ -19912,10 +19934,11 @@ function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose
   );
 }
 
-function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo, resources = [] }) {
+function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo, resources = [], scopeOfWork = [] }) {
   const [editing, setEditing] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
   const [analysing, setAnalysing] = useState(null);
+  const [showCat, setShowCat] = useState(false);
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -19930,6 +19953,34 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   function blankLine() { return { id:crypto.randomUUID(), description:'', unit:'', clientQty:0, qty:0, approvedQty:0, actualQty:0, rate:0 }; }
   function lineTotal(l) { return (parseFloat(l.qty)||0)*(parseFloat(l.rate)||0); }
   function boqSubtotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
+  function computeEstimation(t) {
+    let mat=0, lab=0, equ=0, sub=0, siteOH=0, hoOH=0, cont=0, prof=0, price=0, analysedLines=0, manualLines=0;
+    (t.boq||[]).forEach(l => {
+      const q = parseFloat(l.qty)||0;
+      const amount = q * (parseFloat(l.rate)||0);
+      price += amount;
+      const a = l.analysis;
+      if (a && a.components && a.components.length) {
+        a.components.forEach(c => {
+          const camt = q * (parseFloat(c.qtyPerUnit)||0) * (parseFloat(c.rate)||0);
+          if (c.type==='Labour') lab+=camt; else if (c.type==='Equipment') equ+=camt; else if (c.type==='Subcontract') sub+=camt; else mat+=camt;
+        });
+        const direct = q * (parseFloat(a.direct)||0);
+        siteOH += direct*(parseFloat(a.siteOH)||0)/100;
+        hoOH   += direct*(parseFloat(a.hoOH)||0)/100;
+        cont   += direct*(parseFloat(a.contingency)||0)/100;
+        const costRate = q * (parseFloat(a.costRate)||0);
+        prof += costRate*(parseFloat(a.profit)||0)/100;
+        analysedLines++;
+      } else { manualLines++; }
+    });
+    const direct = mat+lab+equ+sub;
+    const totalCost = direct + siteOH + hoOH + cont;
+    const grossProfit = price - totalCost;
+    const margin = price>0 ? grossProfit/price*100 : 0;
+    const markup = totalCost>0 ? grossProfit/totalCost*100 : 0;
+    return { mat, lab, equ, sub, direct, siteOH, hoOH, cont, totalCost, price, grossProfit, margin, markup, prof, analysedLines, manualLines };
+  }
   function grandTotal(t) {
     const sub = boqSubtotal(t);
     if (!cc.hasTax) return sub;
@@ -20047,7 +20098,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:820 }}>
               <thead><tr style={{ background:'#F8F7F4' }}>
-                {['Description','Unit','Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign: ['Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount'].includes(h)?'right':'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+                {['Description','Unit','Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount','Analysis'].map(h=><th key={h} style={{ padding:'6px 8px', textAlign: ['Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount'].includes(h)?'right':'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {(t.boq||[]).map((l,i)=>(
@@ -20060,7 +20111,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                     <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.actualQty ?? ''} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,actualQty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Actual executed Qty'/></td>
                     <td style={{ padding:'4px 4px', width:90 }}><input type='number' value={l.rate} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,rate:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
                     <td style={{ padding:'4px 8px', fontWeight:600, width:100, textAlign:'right', whiteSpace:'nowrap' }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
-                    <td style={{ padding:'4px 4px', width:56, whiteSpace:'nowrap' }}><button onClick={()=>setAnalysing(i)} style={{ ...styles.iconBtn, color: l.analysis ? '#1A7A3E' : '#888' }} title="Rate Analysis (build-up)"><BarChart2 size={13}/></button><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                    <td style={{ padding:'4px 4px', width:110, whiteSpace:'nowrap' }}><button onClick={()=>setAnalysing(i)} style={{ ...styles.ghostBtn, fontSize:11, padding:'3px 8px', color: l.analysis ? '#1A7A3E' : '#2C6FB5', borderColor: l.analysis ? '#1A7A3E' : '#2C6FB5' }} title="Rate Analysis build-up">{l.analysis ? '✓ Rate' : '📊 Analyse'}</button><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A', marginLeft:2 }}><Trash2 size={13}/></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -20070,6 +20121,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <button onClick={()=>setShowCat(true)} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }} title="Add priced lines from Service Catalogue"><BookOpen size={13}/> From Catalogue</button>
                 <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
@@ -20084,6 +20136,50 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               />
             )}
           </div>
+          {(() => {
+            const est = computeEstimation(t);
+            const area = parseFloat(t.builtupArea)||0;
+            const units = parseFloat(t.noUnits)||0;
+            const pct = (v) => est.direct>0 ? (v/est.direct*100).toFixed(1)+'%' : '—';
+            const row = (label,val,opts={}) => (<div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:opts.big?15:13,fontWeight:opts.bold?700:400,color:opts.color||'#3A3A34',borderTop:opts.top?'1px solid #DCE8D6':'none'}}><span>{label}</span><span style={{fontWeight:opts.bold?700:500}}>{typeof val==='number'?fmt(val):val}</span></div>);
+            return (
+              <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:10, padding:'16px 20px', marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:'#1A7A3E', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:12 }}>Estimation Summary</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 32px' }}>
+                  <div>
+                    {row('Materials', est.mat)}
+                    {row('Labour', est.lab)}
+                    {row('Equipment', est.equ)}
+                    {row('Subcontract', est.sub)}
+                    {row('Direct Cost', est.direct, {bold:true, top:true})}
+                    {row('Site Overhead', est.siteOH, {color:'#888'})}
+                    {row('Head Office OH', est.hoOH, {color:'#888'})}
+                    {row('Contingency', est.cont, {color:'#888'})}
+                    {row('Total Cost', est.totalCost, {bold:true, top:true})}
+                  </div>
+                  <div>
+                    {row('Tender Price', est.price, {bold:true, big:true})}
+                    {row('Gross Profit', est.grossProfit, {bold:true, color: est.grossProfit>=0?'#1A7A3E':'#B5453A'})}
+                    {row('Gross Margin', est.margin.toFixed(1)+'%', {color: est.margin>=0?'#1A7A3E':'#B5453A'})}
+                    {row('Markup', est.markup.toFixed(1)+'%')}
+                    <div style={{ borderTop:'1px solid #DCE8D6', marginTop:6, paddingTop:6 }}>
+                      {row('Material %', pct(est.mat))}
+                      {row('Labour %', pct(est.lab))}
+                      {row('Equipment %', pct(est.equ))}
+                      {row('Subcontract %', pct(est.sub))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:14, marginTop:12, flexWrap:'wrap', alignItems:'center' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{fontSize:12,color:'#888'}}>Built-up area (m²)</span><input type='number' value={t.builtupArea||''} onChange={e=>set('builtupArea',e.target.value)} style={{...styles.input, margin:0, width:100}}/></div>
+                  {area>0 && <span style={{fontSize:12.5, color:'#1E2A4A'}}>Cost/m²: <b>{fmt(est.totalCost/area)}</b></span>}
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{fontSize:12,color:'#888'}}>No. of units</span><input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{...styles.input, margin:0, width:80}}/></div>
+                  {units>0 && <span style={{fontSize:12.5, color:'#1E2A4A'}}>Cost/unit: <b>{fmt(est.totalCost/units)}</b></span>}
+                </div>
+                {est.manualLines>0 && <div style={{ fontSize:11, color:'#C9752A', marginTop:8 }}>⚠ {est.manualLines} line(s) have manual rates (no cost build-up) — their cost is not in the cost heads above, only in Tender Price.</div>}
+              </div>
+            );
+          })()}
           <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
             <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
@@ -20098,6 +20194,25 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             onClose={()=>setAnalysing(null)}
             onSave={(res)=>{ set('boq', t.boq.map((x,j)=> j===analysing ? { ...x, rate: Math.round(res.selling*100)/100, analysis: res } : x)); setAnalysing(null); }}
           />
+        )}
+        {showCat && (
+          <div style={styles.modalOverlay} onClick={()=>setShowCat(false)}>
+            <div style={{ background:'#fff', borderRadius:14, padding:22, width:'94%', maxWidth:620, maxHeight:'88vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.3)' }} onClick={e=>e.stopPropagation()}>
+              <h3 className="serif" style={{ margin:'0 0 4px', color:'#1E2A4A' }}>Add from Service Catalogue</h3>
+              <div style={{ fontSize:12, color:'#888', marginBottom:14 }}>Pick catalogue items, enter qty — rate &amp; build-up come across automatically.</div>
+              {(scopeOfWork||[]).length===0 ? (
+                <div style={styles.emptyBox}>No catalogue items yet. Build them in Service Catalogue (with rate build-up).</div>
+              ) : (
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr>{['Item','Unit','Rate','Qty',''].map((h,i)=><th key={i} style={{ textAlign: ['Rate'].includes(h)?'right':'left', fontSize:11, color:'#888', textTransform:'uppercase', padding:'6px 8px', borderBottom:'2px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {scopeOfWork.map(sc => <CatalogueAddRow key={sc.id} item={sc} businessInfo={businessInfo} onAdd={(item,qy)=>{ set('boq', [...(t.boq||[]), { id:crypto.randomUUID(), description:item.name, unit:item.unit||'', clientQty:qy, qty:qy, approvedQty:0, actualQty:0, rate:parseFloat(item.rate)||0, analysis:item.analysis||null }]); }} />)}
+                  </tbody>
+                </table>
+              )}
+              <div style={{ display:'flex', justifyContent:'flex-end', marginTop:16 }}><button style={styles.primaryBtn} onClick={()=>setShowCat(false)}>Done</button></div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -23413,6 +23528,7 @@ export default function App() {
             userRole={userRole}
             businessInfo={businessInfo}
             resources={resources}
+            scopeOfWork={scopeOfWork}
           />
         );
       case 'rabilling':
@@ -23484,6 +23600,8 @@ export default function App() {
             scopeOfWork={scopeOfWork}
             setScopeOfWork={setScopeOfWork}
             userRole={userRole}
+            resources={resources}
+            businessInfo={businessInfo}
           />
         );
       case 'mepbom':
