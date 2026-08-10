@@ -5504,6 +5504,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           <table style={styles.table}>
             <thead>
               <tr>
+                <th style={{ ...styles.th, width: 34, textAlign: 'center' }}>Sl</th>
                 <th style={{ ...styles.th, width: '100%', minWidth: 200 }}>Item</th>
                 {doc.type !== 'packing_list' && cc.splitTax && <th style={styles.th}>HSN</th>}
                 <th style={{ ...styles.th, textAlign: 'right' }}>Qty</th>
@@ -5521,10 +5522,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               </tr>
             </thead>
             <tbody>
-              {doc.items.map((it) => {
+              {doc.items.map((it, idx) => {
                 const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
                 return (
                   <tr key={it.id}>
+                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{idx + 1}</td>
                     <td style={styles.td}>
                       {isEditable && <select className="no-print" value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={styles.inlineSelect}>
                         <option value="">Custom item</option>
