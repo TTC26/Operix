@@ -4115,32 +4115,45 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
           )}
 
-          {/* Project BOM + Service Catalogue */}
-          {(showService || showFMAMC) && (
-            <Section sectionKey="scope" label="Projects">
-              <NavBtn id="mepbom"      label="Project BOM"       icon={ClipboardList} />
+          {/* ─── MEP SUITE (grouped) ─────────────────────────── */}
+          {showService && (
+            <Section sectionKey="site" label="MEP Suite">
+              <SubLabel label="Projects" />
+              <NavBtn id="siteprojects" label="Project Master"  icon={MapPin} />
+              <NavBtn id="contracts"    label="Contracts / T&C" icon={FileSignature} />
+              <SubLabel label="Tender & Estimation" />
+              <NavBtn id="tender" label="Tender / BOQ / Quote" icon={FileText} />
+              <SubLabel label="Service Catalogue" />
               <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
+              <SubLabel label="BOM & Materials" />
+              <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
+              <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+              <SubLabel label="Planning & Progress" />
+              <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+              <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+              <SubLabel label="Billing & Commercial" />
+              <NavBtn id="rabilling" label="RA Billing" icon={FileMinus} />
+              <SubLabel label="Subcontractors" />
+              <NavBtn id="subcontractors" label="Subcontractors" icon={Truck} />
+              <SubLabel label="HSE" />
+              <NavBtn id="hse" label="HSE / Safety" icon={Shield} />
+              <SubLabel label="Handover & DLP" />
+              <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+              <NavBtn id="handover"       label="Handover / DLP"          icon={CheckSquare} />
+              <SubLabel label="Attendance & Manpower" />
+              <NavBtn id="siteattendance" label="Attendance / Manpower" icon={Users} />
+              <SubLabel label="Reports & Reviews" />
+              <NavBtn id="mepreports" label="MEP Reports"      icon={FileText} />
+              <NavBtn id="evaluation" label="Quarterly Review" icon={BarChart2} />
             </Section>
           )}
 
-          {/* MEP Suite */}
-          {showService && (
-            <Section sectionKey="site" label="MEP Suite">
-              <NavBtn id="siteprojects"    label="Projects"           icon={MapPin} />
-              <NavBtn id="tender"          label="Tender & Estimation" icon={FileText} />
-              <NavBtn id="activityplanner" label="Activity Planner"   icon={ClipboardList} />
-              <NavBtn id="rabilling"       label="RA Billing"         icon={FileMinus} />
-              <NavBtn id="subcontractors"  label="Subcontractors"     icon={Truck} />
-              <NavBtn id="hse"             label="HSE"                icon={Shield} />
-              <NavBtn id="tcommissioning"  label="T&C"                icon={CheckCircle} />
-              <NavBtn id="handover"        label="Handover / DLP"     icon={CheckSquare} />
-              <NavBtn id="dailyupdates"    label="Daily Updates"      icon={Pencil} />
-              <NavBtn id="progressboard"   label="Progress Board"     icon={BarChart2} />
-              <NavBtn id="clientmaterials" label="Client Materials"   icon={Package} />
-              <NavBtn id="siteattendance"  label="Attendance"         icon={Users} />
-              <NavBtn id="evaluation"      label="Quarterly Review"   icon={BarChart2} />
-              <NavBtn id="mepreports"      label="MEP Reports"        icon={FileText} />
-              <NavBtn id="assetregister"   label="Asset Register"     icon={Package} />
+          {/* FM / AMC keeps its project BOM + catalogue */}
+          {showFMAMC && (
+            <Section sectionKey="scope" label="Projects">
+              <NavBtn id="mepbom"      label="Project BOM"       icon={ClipboardList} />
+              <NavBtn id="scopeofwork" label="Service Catalogue" icon={BookOpen} />
             </Section>
           )}
 
