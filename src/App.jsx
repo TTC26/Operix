@@ -19688,11 +19688,50 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
   }
+  function exportTenderExcel(t) {
+    const client = customers.find(c=>c.id===t.customerId);
+    const rows = [];
+    rows.push(['Tender No.', t.number]);
+    rows.push(['Title', t.title||'']);
+    rows.push(['Client', client?.name||'']);
+    rows.push(['Submission Date', t.submissionDate||'']);
+    rows.push(['Valid Until', t.validUntil||'']);
+    rows.push([]);
+    rows.push(['#','Description','Unit','Qty','Rate','Amount']);
+    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.description, l.unit, l.qty, l.rate, lineTotal(l)]));
+    rows.push([]);
+    rows.push(['','','','','Subtotal', boqSubtotal(t)]);
+    if (cc.hasTax) rows.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
+    const csv = rows.map(r => r.map(c => { const v = String(c==null?'':c); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\n');
+    const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=(t.number||'tender')+'.csv'; a.click(); URL.revokeObjectURL(url);
+  }
 
   if (editing) {
     const t = editing;
     const set = (k,v) => setEditing(p=>({...p,[k]:v}));
     const subtotal = boqSubtotal(t);
+    function importBoqCsv(e) {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = String(ev.target.result || '');
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (!lines.length) return;
+        const first = lines[0].toLowerCase();
+        const start = (first.includes('desc') || first.includes('item') || first.includes('particular')) ? 1 : 0;
+        const parsed = lines.slice(start).map(line => {
+          const cols = line.split(/,|;|\t/).map(c => c.replace(/^"|"$/g,'').trim());
+          return { id: crypto.randomUUID(), description: cols[0]||'', unit: cols[1]||'', qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 };
+        }).filter(r => r.description);
+        if (!parsed.length) { alert('No rows found. Use columns in order: Description, Unit, Qty, Rate'); return; }
+        set('boq', [...(t.boq||[]), ...parsed]);
+        alert(parsed.length + ' line(s) imported.');
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
     return (
       <div style={{ maxWidth:760, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
@@ -19739,8 +19778,12 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                 ))}
               </tbody>
             </table>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8 }}>
-              <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+              <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel/CSV (columns: Description, Unit, Qty, Rate)">⬆ Import Excel/CSV<input type="file" accept=".csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
+                {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to Excel (CSV)">⭳ Export Excel</button>}
+              </div>
               {!cc.hasTax && <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Total: {subtotal.toLocaleString(undefined,{maximumFractionDigits:2})}</div>}
             </div>
             {cc.hasTax && (
@@ -19802,7 +19845,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                       <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', justifyContent:'flex-end' }}>
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
-                        <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                        <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
+                        <button onClick={()=>exportTenderExcel(t)} style={styles.iconBtn} title="Export Excel (CSV)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
                       </div>
