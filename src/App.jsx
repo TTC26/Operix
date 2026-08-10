@@ -19829,7 +19829,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   function blank() {
     return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
   }
-  function blankLine() { return { id:crypto.randomUUID(), description:'', unit:'', qty:0, rate:0 }; }
+  function blankLine() { return { id:crypto.randomUUID(), description:'', unit:'', clientQty:0, qty:0, approvedQty:0, actualQty:0, rate:0 }; }
   function lineTotal(l) { return (parseFloat(l.qty)||0)*(parseFloat(l.rate)||0); }
   function boqSubtotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
   function grandTotal(t) {
@@ -19891,7 +19891,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       if (!r2.length) return [];
       const f = (r2[0]||[]).join(' ').toLowerCase();
       const start = (f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
-      return r2.slice(start).map(cols => ({ id: crypto.randomUUID(), description: String(cols[0]||'').trim(), unit: String(cols[1]||'').trim(), qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 })).filter(x => x.description);
+      return r2.slice(start).map(cols => { const q = parseFloat(cols[2])||0; return { id: crypto.randomUUID(), description: String(cols[0]||'').trim(), unit: String(cols[1]||'').trim(), clientQty: q, qty: q, approvedQty: 0, actualQty: 0, rate: parseFloat(cols[3])||0 }; }).filter(x => x.description);
     }
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
@@ -19918,7 +19918,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       e.target.value = '';
     }
     return (
-      <div style={{ maxWidth:760, margin:'0 auto', padding:'24px 0' }}>
+      <div style={{ maxWidth:1080, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
           <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
           <h2 className="serif" style={styles.pageTitle}>{t.id?'Edit':'New'} Tender — {t.number}</h2>
@@ -19946,23 +19946,29 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           {/* BOQ */}
           <div>
             <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Bill of Quantities (BOQ)</div>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:820 }}>
               <thead><tr style={{ background:'#F8F7F4' }}>
-                {['Description','Unit','Qty','Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+                {['Description','Unit','Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign: ['Client Qty','Est. Qty','Appr. Qty','Actual Qty','Rate','Amount'].includes(h)?'right':'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {(t.boq||[]).map((l,i)=>(
                   <tr key={l.id}>
-                    <td style={{ padding:'4px 4px' }}><input value={l.description} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,description:e.target.value}:x))} style={{ ...styles.input, margin:0, width:'100%' }}/></td>
-                    <td style={{ padding:'4px 4px', width:70 }}><input value={l.unit} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,unit:e.target.value}:x))} style={{ ...styles.input, margin:0 }} placeholder='m²'/></td>
-                    <td style={{ padding:'4px 4px', width:80 }}><input type='number' value={l.qty} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,qty:e.target.value}:x))} style={{ ...styles.input, margin:0 }}/></td>
-                    <td style={{ padding:'4px 4px', width:100 }}><input type='number' value={l.rate} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,rate:e.target.value}:x))} style={{ ...styles.input, margin:0 }}/></td>
-                    <td style={{ padding:'4px 8px', fontWeight:600, width:100 }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'4px 4px', minWidth:180 }}><input value={l.description} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,description:e.target.value}:x))} style={{ ...styles.input, margin:0, width:'100%' }}/></td>
+                    <td style={{ padding:'4px 4px', width:64 }}><input value={l.unit} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,unit:e.target.value}:x))} style={{ ...styles.input, margin:0 }} placeholder='m²'/></td>
+                    <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.clientQty ?? ''} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,clientQty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Client BOQ Qty'/></td>
+                    <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.qty} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,qty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right', background:'#F4FAF5' }} title='Estimated Qty (priced)'/></td>
+                    <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.approvedQty ?? ''} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,approvedQty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Approved Qty (post-award)'/></td>
+                    <td style={{ padding:'4px 4px', width:74 }}><input type='number' value={l.actualQty ?? ''} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,actualQty:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Actual executed Qty'/></td>
+                    <td style={{ padding:'4px 4px', width:90 }}><input type='number' value={l.rate} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,rate:e.target.value}:x))} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                    <td style={{ padding:'4px 8px', fontWeight:600, width:100, textAlign:'right', whiteSpace:'nowrap' }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
                     <td style={{ padding:'4px 4px', width:30 }}><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
+            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:4 }}>Est. Qty (green) is the priced/estimated quantity. Client = tender BOQ, Approved = post-award, Actual = executed — for variation &amp; final billing tracking.</div>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
