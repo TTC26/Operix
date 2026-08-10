@@ -3782,6 +3782,28 @@ function SubLabel({ label }) {
 }
 
 
+function ComingSoon({ label = 'This module' }) {
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 14, textAlign: 'center' }}>
+        <div style={{ fontSize: 44 }}>🚧</div>
+        <h2 className="serif" style={{ margin: 0, color: '#1E2A4A', fontSize: 22 }}>{label}</h2>
+        <div style={{ fontSize: 14, color: '#888780', maxWidth: 380 }}>This module is part of the MEP ERP roadmap and will be enabled in an upcoming update.</div>
+        <div style={{ fontSize: 12, color: '#B0AC9F', background: '#F4F1E9', padding: '4px 12px', borderRadius: 20 }}>Coming soon</div>
+      </div>
+    </div>
+  );
+}
+const COMING_SOON = {
+  projectdocs: 'Project Documents', boq: 'BOQ', estimation: 'Estimation',
+  matrequests: 'Material Requests', procurement: 'Procurement', manpower: 'Manpower',
+  variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
+  subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
+  hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
+  dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
+  projectreports: 'Project Reports',
+};
+
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
@@ -4070,6 +4092,110 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <NavBtn id="documents" label="All Documents" icon={FileText} />
           </div>
 
+          {/* ═══════════ MEP ERP (service division) ═══════════ */}
+          {showService && (<>
+            <div style={{ padding: '10px 14px 4px', fontSize: 11, fontWeight: 800, letterSpacing: '0.09em', color: '#1A7A3E', textTransform: 'uppercase' }}>MEP ERP</div>
+
+            <Section sectionKey="mep_projects" label="Projects">
+              <NavBtn id="siteprojects" label="Project Master"    icon={MapPin} />
+              <NavBtn id="contracts"    label="Contracts / T&C"   icon={FileSignature} />
+              <NavBtn id="projectdocs"  label="Project Documents" icon={FileText} />
+            </Section>
+
+            <Section sectionKey="mep_tender" label="Tender & Estimation">
+              <NavBtn id="tender"     label="Tender"     icon={FileText} />
+              <NavBtn id="boq"        label="BOQ"        icon={ClipboardList} />
+              <NavBtn id="estimation" label="Estimation" icon={BarChart2} />
+              <CreateBtn docKey="quotation" />
+            </Section>
+
+            <Section sectionKey="mep_bom" label="BOM & Materials">
+              <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
+              <NavBtn id="matrequests"     label="Material Requests" icon={FileText} />
+              <NavBtn id="procurement"     label="Procurement"      icon={Truck} />
+              <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
+            </Section>
+
+            <Section sectionKey="mep_planning" label="Planning & Progress">
+              <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
+              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
+              <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
+              <NavBtn id="manpower"        label="Manpower"         icon={Users} />
+            </Section>
+
+            <Section sectionKey="mep_billing" label="Billing & Commercial">
+              <NavBtn id="rabilling"          label="RA Billing"          icon={FileMinus} />
+              <NavBtn id="variations"         label="Variations"          icon={FileText} />
+              <NavBtn id="subcontractbilling" label="Subcontract Billing" icon={FileMinus} />
+              <NavBtn id="paymenttracking"    label="Payment Tracking"    icon={BarChart2} />
+            </Section>
+
+            <Section sectionKey="mep_subcon" label="Subcontractors">
+              <NavBtn id="subcontractors"   label="Subcontractor Master" icon={Truck} />
+              <NavBtn id="subworkorders"    label="Work Orders"          icon={FileSignature} />
+              <NavBtn id="subprogress"      label="Progress"             icon={BarChart2} />
+              <NavBtn id="subcertification" label="Certification"        icon={CheckSquare} />
+            </Section>
+
+            <Section sectionKey="mep_hse" label="HSE">
+              <NavBtn id="hseinspections" label="Inspections"    icon={CheckSquare} />
+              <NavBtn id="toolbox"        label="Toolbox Talks"  icon={BookOpen} />
+              <NavBtn id="incidents"      label="Incidents"      icon={AlertTriangle} />
+              <NavBtn id="hse"            label="Safety Reports" icon={Shield} />
+            </Section>
+
+            <Section sectionKey="mep_handover" label="Handover & DLP">
+              <NavBtn id="tcommissioning" label="Testing & Commissioning" icon={CheckCircle} />
+              <NavBtn id="handover"       label="Handover"                icon={CheckSquare} />
+              <NavBtn id="dlpdefects"     label="DLP / Defects"           icon={AlertTriangle} />
+            </Section>
+
+            <Section sectionKey="mep_assets" label="Assets & Service">
+              <NavBtn id="scopeofwork"    label="Service Catalogue"      icon={BookOpen} />
+              <NavBtn id="pmaintenance"   label="Preventive Maintenance" icon={ClipboardList} />
+              <NavBtn id="servicehistory" label="Service History"        icon={FileText} />
+            </Section>
+
+            <Section sectionKey="mep_reports" label="Reports & Analytics">
+              <NavBtn id="projectreports" label="Project Reports"   icon={BarChart2} />
+              <NavBtn id="mepreports"     label="MEP Reports"       icon={FileText} />
+              <NavBtn id="audit"          label="Financial Reports" icon={BarChart2} />
+              <NavBtn id="evaluation"     label="Management Review" icon={CheckCircle} />
+            </Section>
+
+            <Section sectionKey="accounts" label="Accounts">
+              <CreateBtn docKey="invoice" />
+              <CreateBtn docKey="creditnote" />
+              <NavBtn id="pettycash" label="Petty Cash" icon={FileMinus} />
+              <NavBtn id="vouchers"  label="Vouchers"   icon={FileSignature} />
+              {country === 'india' && <NavBtn id="gstr1"  label="GSTR-1 Report" icon={FileText} />}
+              {country === 'india' && <NavBtn id="gstr3b" label="GSTR-3B Return" icon={FileText} />}
+              {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
+              {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
+            </Section>
+
+            <Section sectionKey="purchase" label="Purchase">
+              <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
+              <NavBtn id="vendors"     label="Vendors"              icon={Truck} />
+              <CreateBtn docKey="purchase" />
+              <CreateBtn docKey="purchasebill" />
+              <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
+            </Section>
+
+            <Section sectionKey="stores" label="Stores">
+              <NavBtn id="items"        label="Item Master"          icon={Package} />
+              <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
+              <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
+              <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
+              <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
+              <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
+              <CreateBtn docKey="delivery" />
+              <CreateBtn docKey="packing_list" />
+            </Section>
+          </>)}
+
+          {/* ═══════════ Standard layout (trading / manufacturing / fm) ═══════════ */}
+          {!showService && (<>
           {/* Sales */}
           <Section sectionKey="sales" label="Sales">
             <NavBtn id="customers" label="Customers"    icon={Users} />
@@ -4199,6 +4325,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="fmspareparts"  label="Spare Parts"     icon={Package} />
             </Section>
           )}
+          </>)}
         </>
       )}
 
@@ -22102,6 +22229,8 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
+
     switch (view) {
       case 'dashboard':
         return (
@@ -22679,16 +22808,13 @@ export default function App() {
         );
       case 'mepbom':
         return (
-          <BomMaterialsView
+          <MepBomView
             mepBoms={mepBoms}
             setMepBoms={setMepBoms}
             siteProjects={siteProjects}
             scopeOfWork={scopeOfWork}
             siteActivities={siteActivities}
             setSiteActivities={setSiteActivities}
-            clientMaterials={clientMaterials}
-            setClientMaterials={setClientMaterials}
-            employees={employees}
             userRole={userRole}
             businessInfo={businessInfo}
           />
