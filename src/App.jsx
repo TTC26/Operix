@@ -20337,37 +20337,54 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           </div>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, marginBottom:16 }}>
             <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
-              {['#','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Qty'||h==='Rate'||h==='Amount'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
+              {['#','Item Code','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Qty'||h==='Rate'||h==='Amount'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {(t.boq||[]).map((l,i)=>(
-                <tr key={l.id} style={{ background:i%2===0?'#fff':'#F8F7F4', borderBottom:'1px solid #eee' }}>
-                  <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{i+1}</td>
-                  <td style={{ padding:'7px 10px' }}>{l.description}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'center' }}>{l.unit||'—'}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(l.tenderQty||0).toLocaleString()}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+sellRate(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-                </tr>
-              ))}
+              {(() => {
+                const groups = {}; const order = [];
+                (t.boq||[]).forEach(l => { const key=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[key]){groups[key]=[];order.push(key);} groups[key].push(l); });
+                let sl = 0;
+                return order.map(key => {
+                  const parts = key.split('||'); const cat = parts[0]; const sub = parts[1];
+                  const lines = groups[key];
+                  const gt = lines.reduce((s,l)=>s+lineTotal(l),0);
+                  return (
+                    <React.Fragment key={key}>
+                      <tr style={{ background:'#EEF1F6' }}><td colSpan={7} style={{ padding:'6px 10px', fontWeight:700, color:'#1E2A4A', fontSize:12 }}>{cat}{sub && sub!=='—' ? ' › '+sub : ''}</td></tr>
+                      {lines.map(l => { sl++; return (
+                        <tr key={l.id} style={{ borderBottom:'1px solid #eee' }}>
+                          <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{sl}</td>
+                          <td style={{ padding:'7px 10px', fontFamily:'monospace', fontSize:11.5 }}>{l.itemCode||''}</td>
+                          <td style={{ padding:'7px 10px' }}>{l.description}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'center' }}>{l.unit||'—'}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(l.tenderQty||0).toLocaleString()}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+sellRate(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                        </tr>
+                      );})}
+                      <tr><td colSpan={6} style={{ padding:'5px 10px', textAlign:'right', fontStyle:'italic', color:'#555' }}>Subtotal — {cat}{sub && sub!=='—' ? ' › '+sub : ''}</td><td style={{ padding:'5px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+gt.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </tbody>
             <tfoot>
               <tr style={{ borderTop:'2px solid #1E2A4A' }}>
-                <td colSpan={5} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>Subtotal</td>
+                <td colSpan={6} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>Subtotal</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>
               {tax && tax.cgst>0 && <>
-                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
-                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
               </>}
-              {tax && tax.igst>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
-              {tax && tax.vat>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.igst>0 && <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.vat>0 && <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
               {tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
-                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td>
+                <td colSpan={6} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td>
                 <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+tax.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>}
               {!tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
-                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td>
+                <td colSpan={6} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td>
                 <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>}
             </tfoot>
