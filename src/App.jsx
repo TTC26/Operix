@@ -19946,6 +19946,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const country = businessInfo?.country || 'other';
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sellerState = businessInfo?.state || '';
+  const fmt = makeFmt(businessInfo);
 
   function blank() {
     return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
