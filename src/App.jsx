@@ -3795,7 +3795,7 @@ function ComingSoon({ label = 'This module' }) {
   );
 }
 const COMING_SOON = {
-  projectdocs: 'Project Documents', boq: 'BOQ', estimation: 'Estimation',
+  boq: 'BOQ', estimation: 'Estimation',
   matrequests: 'Material Requests', procurement: 'Procurement', manpower: 'Manpower',
   variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
@@ -17774,6 +17774,142 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '' }) {
+  const [projFilter, setProjFilter] = React.useState('all');
+  const [catFilter, setCatFilter]   = React.useState('all');
+  const [editing, setEditing]       = React.useState(null);
+  const canEdit    = userRole === 'admin' || userRole === 'manager' || userRole === 'engineer' || userRole === 'staff';
+  const canApprove = userRole === 'admin' || userRole === 'manager';
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const CATS = ['Drawings', 'Technical', 'Submittals', 'Site Records', 'Commercial', 'Handover'];
+  const STATUSES = ['Draft', 'Submitted', 'Under Review', 'Approved', 'Approved w/ Comments', 'Rejected', 'Superseded'];
+  const statusColor = (st) => ({ 'Approved': '#1A7A3E', 'Approved w/ Comments': '#C9752A', 'Submitted': '#2C6FB5', 'Under Review': '#8A6FD6', 'Rejected': '#B5453A', 'Superseded': '#888780', 'Draft': '#B0AC9F' }[st] || '#888780');
+  const projName = (id) => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
+
+  const scoped = isMultiBiz ? projectDocuments.filter(d => (d.bizType || 'trading') === currentBizType) : projectDocuments;
+  const list = scoped
+    .filter(d => projFilter === 'all' || String(d.projectId) === String(projFilter))
+    .filter(d => catFilter === 'all' || d.category === catFilter)
+    .sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+
+  function save(rec) {
+    const t = { ...rec, bizType: rec.bizType || currentBizType };
+    setProjectDocuments(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]);
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this document record?')) return; setProjectDocuments(prev => prev.filter(x => x.id !== id)); }
+  function setStatus(id, status) {
+    setProjectDocuments(prev => prev.map(x => x.id === id ? { ...x, status, ...(status === 'Approved' || status === 'Approved w/ Comments' ? { approvedBy: currentUserName, approvedAt: new Date().toISOString() } : {}) } : x));
+  }
+  function newRevision(d) {
+    const curRev = d.revision || '0';
+    const nextRev = /^\d+$/.test(String(curRev)) ? String(parseInt(curRev) + 1) : String.fromCharCode((String(curRev).toUpperCase().charCodeAt(0) || 64) + 1);
+    setProjectDocuments(prev => prev.map(x => x.id === d.id ? { ...x, status: 'Superseded' } : x));
+    setEditing({ id: crypto.randomUUID(), projectId: d.projectId, title: d.title, category: d.category, docNo: d.docNo, revision: nextRev, date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: d.submittedTo || '', link: '', remarks: '', supersedes: d.id });
+  }
+  function blank() { return { id: crypto.randomUUID(), projectId: projFilter !== 'all' ? projFilter : '', title: '', category: catFilter !== 'all' ? catFilter : 'Drawings', docNo: '', revision: '0', date: new Date().toISOString().slice(0, 10), status: 'Draft', submittedTo: '', link: '', remarks: '' }; }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', verticalAlign: 'top' };
+  const chip = (active) => ({ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (active ? '#1A7A3E' : '#DDD8CE'), background: active ? '#1A7A3E' : '#fff', color: active ? '#fff' : '#555' });
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Project Documents</h2>
+          <p style={styles.muted}>Drawings, technical, submittals, site records, commercial &amp; handover — with revisions &amp; approval</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New Document</button>}
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={projFilter} onChange={e => setProjFilter(e.target.value)} style={{ ...styles.input, maxWidth: 260 }}>
+          <option value="all">All projects</option>
+          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span onClick={() => setCatFilter('all')} style={chip(catFilter === 'all')}>All</span>
+          {CATS.map(c => <span key={c} onClick={() => setCatFilter(c)} style={chip(catFilter === c)}>{c}</span>)}
+        </div>
+        <span style={{ fontSize: 12, color: '#B0AC9F', marginLeft: 'auto' }}>{list.length} document{list.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No documents yet. Click "New Document" to add one.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
+            <thead><tr>{['Doc No', 'Title', 'Project', 'Category', 'Rev', 'Date', 'Status', 'Workflow', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(d => (
+                <tr key={d.id}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.docNo || '—'}</td>
+                  <td style={td}>{d.title}{d.link && <a href={d.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(d.projectId)}</td>
+                  <td style={td}>{d.category}</td>
+                  <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{d.revision}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{d.date}</td>
+                  <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: statusColor(d.status), padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' }}>{d.status}</span></td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                    {canEdit && d.status === 'Draft' && <button onClick={() => setStatus(d.id, 'Submitted')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Submit</button>}
+                    {canApprove && (d.status === 'Submitted' || d.status === 'Under Review') && <>
+                      <button onClick={() => setStatus(d.id, 'Approved')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#1A7A3E' }}>Approve</button>
+                      <button onClick={() => setStatus(d.id, 'Rejected')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>Reject</button>
+                    </>}
+                    {canEdit && (d.status === 'Approved' || d.status === 'Approved w/ Comments') && <button onClick={() => newRevision(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#C9752A' }}>+ Revision</button>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(d)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(d.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function ProjectDocForm({ rec, siteProjects, cats, statuses, onSave, onClose }) {
+  const [form, setForm] = React.useState(rec);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+  const row = { marginBottom: 12 };
+  const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{rec.supersedes ? 'New Revision' : (rec.title ? 'Edit' : 'New')} Document</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Category</label><select style={styles.input} value={form.category} onChange={e => set('category', e.target.value)}>{cats.map(c => <option key={c}>{c}</option>)}</select></div>
+        </div>
+        <div style={row}><label style={lbl}>Title</label><input style={styles.input} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Document title" /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Document No.</label><input style={styles.input} value={form.docNo} onChange={e => set('docNo', e.target.value)} placeholder="MEP-DWG-001" /></div>
+          <div style={row}><label style={lbl}>Rev</label><input style={styles.input} value={form.revision} onChange={e => set('revision', e.target.value)} /></div>
+          <div style={row}><label style={lbl}>Date</label><input type="date" style={styles.input} value={form.date} onChange={e => set('date', e.target.value)} /></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={row}><label style={lbl}>Status</label><select style={styles.input} value={form.status} onChange={e => set('status', e.target.value)}>{statuses.map(sx => <option key={sx}>{sx}</option>)}</select></div>
+          <div style={row}><label style={lbl}>Submitted To</label><input style={styles.input} value={form.submittedTo} onChange={e => set('submittedTo', e.target.value)} placeholder="Consultant / Client" /></div>
+        </div>
+        <div style={row}><label style={lbl}>Link (Drive / SharePoint URL — optional)</label><input style={styles.input} value={form.link} onChange={e => set('link', e.target.value)} placeholder="https://..." /></div>
+        <div style={row}><label style={lbl}>Remarks</label><textarea style={{ ...styles.input, minHeight: 50, resize: 'vertical' }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => { if (!form.title) { alert('Enter a title'); return; } if (!form.projectId) { alert('Select a project'); return; } onSave(form); }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientMaterialView({ clientMaterials, setClientMaterials, siteProjects, employees, userRole }) {
   const [editing, setEditing] = useState(null);
   const [filterProject, setFilterProject] = useState('');
@@ -21675,6 +21811,7 @@ export default function App() {
   const [siteActivities,   _setSActs]  = useState([]);
   const [progressUpdates,  _setDSR]    = useState([]);
   const [clientMaterials,  _setCM]     = useState([]);
+  const [projectDocuments, _setPDocs]  = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -21859,6 +21996,7 @@ export default function App() {
       _setSActs(data.siteActivities || []);
       _setDSR(data.progressUpdates || []);
       _setCM(data.clientMaterials || []);
+      _setPDocs(data.projectDocuments || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
@@ -21951,6 +22089,7 @@ export default function App() {
   const setSiteActivities   = mkSet(_setSActs, 'siteActivities');
   const setProgressUpdates  = mkSet(_setDSR,   'progressUpdates');
   const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
+  const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -22129,7 +22268,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -22176,6 +22315,7 @@ export default function App() {
     if (backup.siteActivities)  setSiteActivities(backup.siteActivities);
     if (backup.progressUpdates) setProgressUpdates(backup.progressUpdates);
     if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
+    if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -22372,6 +22512,18 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'projectdocs') return (
+      <ProjectDocumentsView
+        projectDocuments={projectDocuments}
+        setProjectDocuments={setProjectDocuments}
+        siteProjects={siteProjects}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+        currentUserName={user?.displayName || user?.email || ''}
+      />
+    );
     if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
 
     switch (view) {
