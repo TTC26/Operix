@@ -4108,8 +4108,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_bom" label="BOM & Materials">
               <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
-              <NavBtn id="matrequests"     label="Material Requests" icon={FileText} />
-              <NavBtn id="procurement"     label="Procurement"      icon={Truck} />
               <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
             </Section>
 
@@ -11138,13 +11136,13 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
 
           <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
-            <label style={lbl}>Auto-fill items from BOM (optional)</label>
+            <label style={lbl}>Request via Project BOM  <span style={{ fontWeight: 400, color: '#999' }}>— or leave blank &amp; add items manually (non-BOM)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
-              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select BOM —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
+              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select Project BOM (via BOM) —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
               <div><input type="number" min="1" style={inp} value={e.bomMult} onChange={ev => upd({ bomMult: ev.target.value })} placeholder="× Qty" title="Multiplier" /></div>
               <button style={{ ...styles.secondaryBtn, whiteSpace: 'nowrap' }} onClick={loadFromBom}>Load items ↓</button>
             </div>
-            {allBoms.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>No BOMs found yet.</div>}
+            <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>{allBoms.length === 0 ? 'No Project BOMs yet — add items manually below (non-BOM).' : 'Via BOM: pick a Project BOM to auto-load its items. Non-BOM: skip this and add items manually below.'}</div>
           </div>
 
           <div style={card}>
