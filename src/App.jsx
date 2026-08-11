@@ -15449,6 +15449,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
   const [editing, setEditing]     = useState(null);
   const [showCatalogue, setShowCatalogue] = useState(false);
   const [showTender, setShowTender] = useState(false);
+  const [reportBom, setReportBom] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
@@ -15630,6 +15631,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           <button onClick={()=>setShowTender(s=>!s)} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}>📄 Import from Tender</button>
           {canEdit && <button onClick={()=>pushAllToActivities(editing)} style={{ ...styles.ghostBtn, color:'#1E7A9A', borderColor:'#1E7A9A' }} title="Create activities for all unlinked BOM items">→ All to Activities</button>}
           <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
+          <button onClick={()=>setReportBom(editing)} style={{ ...styles.ghostBtn, color:'#6B5BAE', borderColor:'#6B5BAE' }}>📊 Variation Report</button>
           {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><CheckCircle size={14}/> Save BOM</button>}
         </div>
       </div>
@@ -15784,6 +15786,64 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           </button>
         ))}
       </div>
+
+      {reportBom && (()=>{
+        const b = reportBom;
+        const proj = siteProjects.find(p=>p.id===b.projectId);
+        const rows = (b.items||[]);
+        let tAppr=0, tAct=0, tApprAmt=0, tActAmt=0;
+        rows.forEach(it=>{ const ap=parseFloat(it.qty)||0, ac=parseFloat(it.actualQty)||0, r=parseFloat(it.rate)||0; tAppr+=ap; tAct+=ac; tApprAmt+=ap*r; tActAmt+=ac*r; });
+        const tVarAmt = tActAmt - tApprAmt;
+        const money = (v)=> currency + ' ' + (v||0).toLocaleString('en',{minimumFractionDigits:2});
+        return (
+          <DocPrintOverlay onClose={()=>setReportBom(null)} filename={`Variation-Report-${b.ref||proj?.name||'BOM'}.pdf`} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:18 }}>
+              <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>BOM VARIATION REPORT</div>
+              <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{proj?.name||'Project'} &nbsp;|&nbsp; {b.ref||'BOM'} &nbsp;|&nbsp; {b.date||''}</div>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, marginBottom:14 }}>
+              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Item Code','Description','Disc.','Unit','Appr Qty','Actual Qty','Var Qty','Rate','Appr Amt','Actual Amt','Var Amt','Reason'].map(h=><th key={h} style={{ padding:'6px 7px', textAlign:['Appr Qty','Actual Qty','Var Qty','Rate','Appr Amt','Actual Amt','Var Amt','#'].includes(h)?'right':'left', fontSize:10, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((it,i)=>{ const ap=parseFloat(it.qty)||0, ac=parseFloat(it.actualQty)||0, r=parseFloat(it.rate)||0; const vq=ac-ap; const va=ac*r-ap*r; return (
+                  <tr key={it.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+                    <td style={{ padding:'5px 7px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                    <td style={{ padding:'5px 7px', fontFamily:'monospace', fontSize:10.5 }}>{it.itemCode||''}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.description}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.discipline}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.unit}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{ap.toLocaleString()}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{ac.toLocaleString()}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right', fontWeight:600, color:vq===0?'#888':(vq>0?'#1a6b30':'#B5453A') }}>{vq?vq.toLocaleString():'—'}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{r.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{(ap*r).toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{(ac*r).toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right', fontWeight:600, color:va===0?'#888':(va>0?'#1a6b30':'#B5453A') }}>{va?va.toLocaleString('en',{minimumFractionDigits:2}):'—'}</td>
+                    <td style={{ padding:'5px 7px', fontSize:11, color:'#555' }}>{it.variationReason||''}</td>
+                  </tr>
+                );})}
+              </tbody>
+              <tfoot>
+                <tr style={{ background:'#1E2A4A', color:'#fff', fontWeight:700 }}>
+                  <td colSpan={5} style={{ padding:'7px', textAlign:'right' }}>TOTAL</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tAppr.toLocaleString()}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tAct.toLocaleString()}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{(tAct-tAppr).toLocaleString()}</td>
+                  <td></td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tApprAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tActAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tVarAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+            <div style={{ display:'flex', gap:24, fontSize:13, marginTop:6 }}>
+              <div>Approved Value: <b>{money(tApprAmt)}</b></div>
+              <div>Actual Value: <b>{money(tActAmt)}</b></div>
+              <div>Net Variation: <b style={{ color:tVarAmt>=0?'#1a6b30':'#B5453A' }}>{money(tVarAmt)}</b></div>
+            </div>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
