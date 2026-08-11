@@ -4103,10 +4103,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_tender" label="Tender & Estimation">
-              <NavBtn id="tender"         label="Tender"          icon={FileText} />
-              <NavBtn id="boq"            label="BOQ"             icon={ClipboardList} />
-              <NavBtn id="resourcemaster" label="Resource Master" icon={Layers} />
-              <NavBtn id="estimation"     label="Estimation"      icon={BarChart2} />
+              <NavBtn id="tender"         label="Tender & Estimation" icon={FileText} />
               <CreateBtn docKey="quotation" />
             </Section>
 
@@ -4152,7 +4149,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_assets" label="Assets & Service">
-              <NavBtn id="scopeofwork"    label="Service Catalogue"      icon={BookOpen} />
               <NavBtn id="pmaintenance"   label="Preventive Maintenance" icon={ClipboardList} />
               <NavBtn id="servicehistory" label="Service History"        icon={FileText} />
             </Section>
@@ -15734,7 +15730,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
   );
 }
 
-function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
+function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole, resources = [], businessInfo }) {
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'sales';
@@ -15774,15 +15770,16 @@ function ScopeOfWorkView({ scopeOfWork, setScopeOfWork, userRole }) {
       </div>
       {(creating || editing) && (
         <Modal title={creating ? 'New Scope Item' : 'Edit Scope Item'} onClose={() => { setEditing(null); setCreating(false); }}>
-          <ScopeItemForm item={editing} onSave={saveScope} onClose={() => { setEditing(null); setCreating(false); }} />
+          <ScopeItemForm item={editing} onSave={saveScope} onClose={() => { setEditing(null); setCreating(false); }} resources={resources} businessInfo={businessInfo} />
         </Modal>
       )}
     </div>
   );
 }
 
-function ScopeItemForm({ item, onSave, onClose }) {
-  const [form, setForm] = useState({ _isNew: !!item?._isNew, id: item?.id || crypto.randomUUID(), name: item?.name || '', category: item?.category || '', description: item?.description || '', unit: item?.unit || 'hrs', rate: item?.rate || '' });
+function ScopeItemForm({ item, onSave, onClose, resources = [], businessInfo }) {
+  const [form, setForm] = useState({ _isNew: !!item?._isNew, id: item?.id || crypto.randomUUID(), name: item?.name || '', category: item?.category || '', description: item?.description || '', unit: item?.unit || 'hrs', rate: item?.rate || '', analysis: item?.analysis || null });
+  const [showRA, setShowRA] = useState(false);
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -15793,12 +15790,18 @@ function ScopeItemForm({ item, onSave, onClose }) {
           {['hrs','days','project','lump sum','visit','month','year'].map(u => <option key={u} value={u}>{u}</option>)}
         </select>
       </div>
-      <div style={styles.formGroup}><label style={styles.label}>Rate</label><input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} style={styles.input} placeholder="0.00" /></div>
+      <div style={styles.formGroup}><label style={styles.label}>Rate</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} style={{ ...styles.input, flex: 1 }} placeholder="0.00" />
+          <button type="button" onClick={() => setShowRA(true)} style={{ ...styles.ghostBtn, whiteSpace: 'nowrap', color: form.analysis ? '#1A7A3E' : '#2C6FB5', borderColor: form.analysis ? '#1A7A3E' : '#2C6FB5' }}>{form.analysis ? '✓ Built-up' : '📊 Build-up'}</button>
+        </div>
+      </div>
       <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}><label style={styles.label}>Description</label><textarea value={form.description} onChange={e => set('description', e.target.value)} style={{ ...styles.input, minHeight: 70 }} placeholder="Detailed description of the scope..." /></div>
       <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
         <button style={styles.primaryBtn} onClick={() => { if (!form.name) return alert('Name required'); onSave(form); }}>Save</button>
       </div>
+      {showRA && <RateAnalysisModal line={{ description: form.name, unit: form.unit, analysis: form.analysis }} resources={resources} businessInfo={businessInfo} onClose={() => setShowRA(false)} onSave={(res) => { set('rate', Math.round(res.selling * 100) / 100); setForm(f => ({ ...f, analysis: res })); setShowRA(false); }} />}
     </div>
   );
 }
@@ -19817,9 +19820,150 @@ function loadXLSX() {
   return _xlsxPromise;
 }
 
-function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo }) {
+function BuildupPanel({ cats, subcats, boq, onApply }) {
+  const [cat, setCat] = React.useState(cats[0]);
+  const [sub, setSub] = React.useState('');
+  const [siteOH, setSiteOH] = React.useState('');
+  const [hoOH, setHoOH] = React.useState('');
+  const [conti, setConti] = React.useState('');
+  const [profit, setProfit] = React.useState('');
+  const lbl = { fontSize: 11, color: '#888', marginBottom: 3 };
+  const num = { ...styles.input, margin: 0, width: 62, textAlign: 'right' };
+  const n = (boq || []).filter(l => l.category === cat && (!sub || l.subcategory === sub)).length;
+  return (
+    <div style={{ background: '#FBF9F3', border: '1px solid #E7E1D2', borderRadius: 8, padding: '12px 14px', marginBottom: 10 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1E2A4A', textTransform: 'uppercase', marginBottom: 8 }}>Cost Build-up — apply markup % to a Category / Subcategory</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div><div style={lbl}>Category</div><select value={cat} onChange={e => setCat(e.target.value)} style={{ ...styles.input, margin: 0 }}>{cats.map(c => <option key={c}>{c}</option>)}</select></div>
+        <div><div style={lbl}>Subcategory</div><select value={sub} onChange={e => setSub(e.target.value)} style={{ ...styles.input, margin: 0 }}><option value="">All</option>{subcats.map(c => <option key={c}>{c}</option>)}</select></div>
+        <div><div style={lbl}>Site OH %</div><input type="number" value={siteOH} onChange={e => setSiteOH(e.target.value)} style={num} /></div>
+        <div><div style={lbl}>HO OH %</div><input type="number" value={hoOH} onChange={e => setHoOH(e.target.value)} style={num} /></div>
+        <div><div style={lbl}>Conting. %</div><input type="number" value={conti} onChange={e => setConti(e.target.value)} style={num} /></div>
+        <div><div style={lbl}>Profit %</div><input type="number" value={profit} onChange={e => setProfit(e.target.value)} style={num} /></div>
+        <button onClick={() => onApply(cat, sub, { siteOH: parseFloat(siteOH)||0, hoOH: parseFloat(hoOH)||0, contingency: parseFloat(conti)||0, profit: parseFloat(profit)||0 })} style={{ ...styles.primaryBtn, whiteSpace: 'nowrap' }}>Apply to {n} line{n!==1?'s':''}</button>
+      </div>
+    </div>
+  );
+}
+
+function CatalogueAddRow({ item, businessInfo, onAdd }) {
+  const [q, setQ] = React.useState(1);
+  const fmt = makeFmt(businessInfo);
+  const td = { padding: '6px 8px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  return (
+    <tr>
+      <td style={td}>{item.name}{item.analysis && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#1A7A3E' }}>build-up</span>}{item.category && <div style={{ fontSize: 11, color: '#999' }}>{item.category}</div>}</td>
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>{item.unit}</td>
+      <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{fmt(item.rate || 0)}</td>
+      <td style={{ ...td, width: 80 }}><input type="number" value={q} onChange={e => setQ(e.target.value)} style={{ ...styles.input, margin: 0, width: 70, textAlign: 'right' }} /></td>
+      <td style={{ ...td, textAlign: 'right' }}><button onClick={() => onAdd(item, parseFloat(q) || 0)} style={{ ...styles.ghostBtn, fontSize: 12, padding: '4px 10px', color: '#1A7A3E' }}>Add</button></td>
+    </tr>
+  );
+}
+
+function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose }) {
+  const fmt = makeFmt(businessInfo);
+  const cur = (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency;
+  const a = line.analysis || {};
+  const [comps, setComps]   = React.useState(a.components && a.components.length ? a.components : []);
+  const [siteOH, setSiteOH] = React.useState(a.siteOH ?? 0);
+  const [hoOH, setHoOH]     = React.useState(a.hoOH ?? 0);
+  const [conti, setConti]   = React.useState(a.contingency ?? 0);
+  const [profit, setProfit] = React.useState(a.profit ?? 0);
+
+  const compAmt = c => (parseFloat(c.qtyPerUnit) || 0) * (parseFloat(c.rate) || 0);
+  const direct  = comps.reduce((s, c) => s + compAmt(c), 0);
+  const siteOHamt = direct * (parseFloat(siteOH) || 0) / 100;
+  const hoOHamt   = direct * (parseFloat(hoOH) || 0) / 100;
+  const contAmt   = direct * (parseFloat(conti) || 0) / 100;
+  const costRate  = direct + siteOHamt + hoOHamt + contAmt;
+  const profitAmt = costRate * (parseFloat(profit) || 0) / 100;
+  const selling   = costRate + profitAmt;
+
+  function addComp() { setComps(c => [...c, { id: crypto.randomUUID(), resourceId: '', type: 'Material', name: '', unit: '', qtyPerUnit: 1, rate: 0 }]); }
+  function pick(i, rid) { const r = resources.find(x => String(x.id) === String(rid)); setComps(cs => cs.map((c, j) => j === i ? (r ? { ...c, resourceId: rid, type: r.type, name: r.name, unit: r.unit, rate: parseFloat(r.rate) || 0 } : { ...c, resourceId: '' }) : c)); }
+  function upd(i, k, v) { setComps(cs => cs.map((c, j) => j === i ? { ...c, [k]: v } : c)); }
+  function delComp(i) { setComps(cs => cs.filter((_, j) => j !== i)); }
+
+  const modalCard = { background: '#fff', borderRadius: 14, padding: 22, width: '94%', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+  const th = { textAlign: 'left', fontSize: 10.5, color: '#888', textTransform: 'uppercase', padding: '5px 6px', borderBottom: '1px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '3px 4px', fontSize: 12.5, borderBottom: '1px solid #F5F2EC' };
+  const inp = { ...styles.input, margin: 0 };
+  const sumRow = (label, val, opts = {}) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: opts.big ? 15 : 13, fontWeight: opts.bold ? 700 : 400, color: opts.color || '#3A3A34', borderTop: opts.top ? '1px solid #EAE6DB' : 'none' }}>
+      <span>{label}</span><span style={{ fontWeight: opts.bold ? 700 : 500 }}>{fmt(val)}</span>
+    </div>
+  );
+  const mk = (label, val, setV) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 12, color: '#888', flex: 1 }}>{label}</span>
+      <input type="number" value={val} onChange={e => setV(e.target.value)} style={{ ...inp, width: 64, textAlign: 'right' }} /><span style={{ fontSize: 12, color: '#888' }}>%</span>
+    </div>
+  );
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className="serif" style={{ margin: '0 0 4px', color: '#1E2A4A' }}>Rate Analysis</h3>
+        <div style={{ fontSize: 12.5, color: '#888', marginBottom: 14 }}>{line.description || 'BOQ item'} — per 1 {line.unit || 'unit'}</div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Type', 'Resource', 'Unit', 'Qty/unit', 'Rate', 'Amount', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Qty/unit', 'Rate', 'Amount'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {comps.map((c, i) => (
+              <tr key={c.id}>
+                <td style={{ ...td, width: 90 }}>{c.type || '—'}</td>
+                <td style={td}>
+                  <select value={c.resourceId} onChange={e => pick(i, e.target.value)} style={{ ...inp, width: '100%' }}>
+                    <option value="">— pick resource —</option>
+                    {resources.map(r => <option key={r.id} value={r.id}>{r.code} · {r.name} ({r.type})</option>)}
+                  </select>
+                  {!c.resourceId && <input value={c.name} onChange={e => upd(i, 'name', e.target.value)} placeholder="or type manually" style={{ ...inp, width: '100%', marginTop: 3 }} />}
+                </td>
+                <td style={{ ...td, width: 56 }}><input value={c.unit} onChange={e => upd(i, 'unit', e.target.value)} style={{ ...inp, width: 50 }} /></td>
+                <td style={{ ...td, width: 70 }}><input type="number" value={c.qtyPerUnit} onChange={e => upd(i, 'qtyPerUnit', e.target.value)} style={{ ...inp, width: 64, textAlign: 'right' }} /></td>
+                <td style={{ ...td, width: 80 }}><input type="number" value={c.rate} onChange={e => upd(i, 'rate', e.target.value)} style={{ ...inp, width: 72, textAlign: 'right' }} /></td>
+                <td style={{ ...td, width: 90, textAlign: 'right', fontWeight: 600 }}>{fmt(compAmt(c))}</td>
+                <td style={{ ...td, width: 28 }}><button onClick={() => delComp(i)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={12} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button onClick={addComp} style={{ ...styles.ghostBtn, marginTop: 8, fontSize: 12 }}><Plus size={13} /> Add resource</button>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {mk('Site Overhead', siteOH, setSiteOH)}
+            {mk('Head Office Overhead', hoOH, setHoOH)}
+            {mk('Contingency', conti, setConti)}
+            {mk('Profit', profit, setProfit)}
+          </div>
+          <div style={{ background: '#FAF8F4', borderRadius: 10, padding: '10px 14px' }}>
+            {sumRow('Direct Cost', direct, { bold: true })}
+            {sumRow('+ Site OH', siteOHamt, { color: '#888' })}
+            {sumRow('+ HO OH', hoOHamt, { color: '#888' })}
+            {sumRow('+ Contingency', contAmt, { color: '#888' })}
+            {sumRow('Cost Rate', costRate, { bold: true, top: true })}
+            {sumRow('+ Profit', profitAmt, { color: '#1A7A3E' })}
+            {sumRow('Selling Rate', selling, { bold: true, big: true, top: true, color: '#1A7A3E' })}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.primaryBtn} onClick={() => onSave({ components: comps, siteOH: parseFloat(siteOH) || 0, hoOH: parseFloat(hoOH) || 0, contingency: parseFloat(conti) || 0, profit: parseFloat(profit) || 0, direct, costRate, selling })}>Apply to BOQ (Rate = {fmt(selling)})</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TenderView({ tenders, setTenders, customers, siteProjects, userRole, businessInfo, resources = [], scopeOfWork = [] }) {
   const [editing, setEditing] = useState(null);
   const [printDoc, setPrintDoc] = useState(null);
+  const [analysing, setAnalysing] = useState(null);
+  const [showCat, setShowCat] = useState(false);
+  const [quoteDoc, setQuoteDoc] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -19827,13 +19971,51 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const country = businessInfo?.country || 'other';
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sellerState = businessInfo?.state || '';
+  const fmt = makeFmt(businessInfo);
 
   function blank() {
     return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
   }
-  function blankLine() { return { id:crypto.randomUUID(), description:'', unit:'', qty:0, rate:0 }; }
-  function lineTotal(l) { return (parseFloat(l.qty)||0)*(parseFloat(l.rate)||0); }
+  const BUILDUP_CATS = ['Materials', 'Manhours', 'Equipment', 'Subcontract'];
+  const BUILDUP_SUBCATS = ['Civil', 'Electrical', 'Mechanical', 'Plumbing', 'HVAC', 'Fire Fighting', 'ELV', 'General'];
+  const CAT_CODE = { Materials:'01', Manhours:'02', Equipment:'03', Subcontract:'04' };
+  const SUB_CODE = { Civil:'01', Electrical:'02', Mechanical:'03', Plumbing:'04', HVAC:'05', 'Fire Fighting':'06', ELV:'07', General:'08' };
+  function nextCodeFor(cat, sub, boq, exclId) {
+    const key = (CAT_CODE[cat]||'00') + (SUB_CODE[sub]||'00');
+    let mx = 0;
+    (boq||[]).forEach(l => { if (l.id !== exclId && l.itemCode && String(l.itemCode).slice(0,4)===key) { const n = parseInt(String(l.itemCode).slice(4))||0; if (n>mx) mx=n; } });
+    return key + String(mx+1).padStart(6,'0');
+  }
+  function withItemCodes(boq) {
+    const seq = {};
+    (boq||[]).forEach(l => { if (l.itemCode && String(l.itemCode).length>=4) { const k=String(l.itemCode).slice(0,4); const n=parseInt(String(l.itemCode).slice(4))||0; seq[k]=Math.max(seq[k]||0,n); } });
+    return (boq||[]).map(l => { if (l.itemCode) return l; const k=(CAT_CODE[l.category]||'00')+(SUB_CODE[l.subcategory]||'00'); seq[k]=(seq[k]||0)+1; return { ...l, itemCode: k+String(seq[k]).padStart(6,'0') }; });
+  }
+  function lineMarkup(l) { return (parseFloat(l.siteOH)||0) + (parseFloat(l.hoOH)||0) + (parseFloat(l.contingency)||0) + (parseFloat(l.profit)||0); }
+  function sellRate(l) { return (parseFloat(l.rate)||0) * (1 + lineMarkup(l)/100); }
+  function lineBaseCost(l) { return (parseFloat(l.tenderQty)||0) * (parseFloat(l.rate)||0); }
+  function blankLine() { return { id:crypto.randomUUID(), itemCode:'', category:'Materials', subcategory:'', description:'', unit:'', tenderQty:0, finalisedQty:0, variationQty:0, actualQty:0, rate:0, siteOH:0, hoOH:0, contingency:0, profit:0 }; }
+  function lineTotal(l) { return (parseFloat(l.tenderQty)||0) * sellRate(l); }
   function boqSubtotal(t) { return (t.boq||[]).reduce((s,l)=>s+lineTotal(l),0); }
+  function computeEstimation(t) {
+    let mat=0, lab=0, equ=0, sub=0, ohTotal=0, contTotal=0, profTotal=0, price=0;
+    (t.boq||[]).forEach(l => {
+      const q = parseFloat(l.tenderQty)||0;
+      const r = parseFloat(l.rate)||0;
+      const bc = q * r;
+      if (l.category==='Manhours') lab+=bc; else if (l.category==='Equipment') equ+=bc; else if (l.category==='Subcontract') sub+=bc; else mat+=bc;
+      ohTotal   += bc * ((parseFloat(l.siteOH)||0)+(parseFloat(l.hoOH)||0))/100;
+      contTotal += bc * (parseFloat(l.contingency)||0)/100;
+      profTotal += bc * (parseFloat(l.profit)||0)/100;
+      price += lineTotal(l);
+    });
+    const direct = mat+lab+equ+sub;
+    const totalCost = direct + ohTotal + contTotal;
+    const grossProfit = price - totalCost;
+    const margin = price>0 ? grossProfit/price*100 : 0;
+    const markup = totalCost>0 ? grossProfit/totalCost*100 : 0;
+    return { mat, lab, equ, sub, direct, overhead:ohTotal, cont:contTotal, prof:profTotal, totalCost, price, grossProfit, margin, markup };
+  }
   function grandTotal(t) {
     const sub = boqSubtotal(t);
     if (!cc.hasTax) return sub;
@@ -19856,8 +20038,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     rows.push(['Submission Date', t.submissionDate||'']);
     rows.push(['Valid Until', t.validUntil||'']);
     rows.push([]);
-    rows.push(['#','Description','Unit','Qty','Rate','Amount']);
-    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.description, l.unit, l.qty, l.rate, lineTotal(l)]));
+    rows.push(['#','Item Code','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount']);
+    (t.boq||[]).forEach((l,i)=> rows.push([i+1, l.itemCode||'', l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]));
     rows.push([]);
     rows.push(['','','','','Subtotal', boqSubtotal(t)]);
     if (cc.hasTax) rows.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
@@ -19873,8 +20055,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       const aoa = [
         ['Tender No.', t.number], ['Title', t.title||''], ['Client', client?.name||''],
         ['Submission Date', t.submissionDate||''], ['Valid Until', t.validUntil||''], [],
-        ['#','Description','Unit','Qty','Rate','Amount'],
-        ...(t.boq||[]).map((l,i)=>[i+1, l.description, l.unit, parseFloat(l.qty)||0, parseFloat(l.rate)||0, lineTotal(l)]),
+        ['#','Item Code','Category','Subcat','Description','Unit','Tender Qty','Finalised','Variation','Actual','Base Rate','Sell Rate','Amount'],
+        ...(t.boq||[]).map((l,i)=>[i+1, l.itemCode||'', l.category||'', l.subcategory||'', l.description, l.unit, parseFloat(l.tenderQty)||0, parseFloat(l.finalisedQty)||0, parseFloat(l.variationQty)||0, parseFloat(l.actualQty)||0, parseFloat(l.rate)||0, sellRate(l), lineTotal(l)]),
         [], ['','','','','Subtotal', boqSubtotal(t)],
       ];
       if (cc.hasTax) aoa.push(['','','','','Grand Total (incl. tax)', grandTotal(t)]);
@@ -19892,8 +20074,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       const r2 = (rows||[]).filter(r => (r||[]).some(c => String(c||'').trim()));
       if (!r2.length) return [];
       const f = (r2[0]||[]).join(' ').toLowerCase();
-      const start = (f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
-      return r2.slice(start).map(cols => ({ id: crypto.randomUUID(), description: String(cols[0]||'').trim(), unit: String(cols[1]||'').trim(), qty: parseFloat(cols[2])||0, rate: parseFloat(cols[3])||0 })).filter(x => x.description);
+      const start = (f.includes('categ') || f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
+      return r2.slice(start).map(cols => { const q = parseFloat(cols[4])||0; return { id: crypto.randomUUID(), category: String(cols[0]||'Materials').trim() || 'Materials', subcategory: String(cols[1]||'').trim(), description: String(cols[2]||'').trim(), unit: String(cols[3]||'').trim(), tenderQty: q, finalisedQty: 0, variationQty: 0, actualQty: 0, rate: parseFloat(cols[5])||0, siteOH: 0, hoOH: 0, contingency: 0, profit: 0 }; }).filter(x => x.description);
     }
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
@@ -19911,8 +20093,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
         }
         const parsed = boqRowsToLines(rows);
-        if (!parsed.length) { alert('No rows found. Use columns in order: Description, Unit, Qty, Rate'); return; }
-        set('boq', [...(t.boq||[]), ...parsed]);
+        if (!parsed.length) { alert('No rows found. Use columns in order: Category, Subcategory, Description, Unit, Qty, Rate'); return; }
+        set('boq', withItemCodes([...(t.boq||[]), ...parsed]));
         alert(parsed.length + ' line(s) imported.');
       } catch (err) {
         alert('Import failed: ' + err.message + '. If Excel fails, save the sheet as CSV and import that.');
@@ -19920,7 +20102,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       e.target.value = '';
     }
     return (
-      <div style={{ maxWidth:760, margin:'0 auto', padding:'24px 0' }}>
+      <div style={{ maxWidth:1080, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
           <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
           <h2 className="serif" style={styles.pageTitle}>{t.id?'Edit':'New'} Tender — {t.number}</h2>
@@ -19948,26 +20130,43 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           {/* BOQ */}
           <div>
             <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Bill of Quantities (BOQ)</div>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <BuildupPanel cats={BUILDUP_CATS} subcats={BUILDUP_SUBCATS} boq={t.boq||[]} onApply={(cat,sub,mk)=>set('boq',(t.boq||[]).map(l=>(l.category===cat && (!sub || l.subcategory===sub)) ? { ...l, siteOH:mk.siteOH, hoOH:mk.hoOH, contingency:mk.contingency, profit:mk.profit } : l))} />
+            <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:1040 }}>
               <thead><tr style={{ background:'#F8F7F4' }}>
-                {['Description','Unit','Qty','Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+                {['Code','Category','Subcat','Description','Unit','Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount',''].map(h=><th key={h} style={{ padding:'6px 5px', textAlign: ['Tender','Finalised','Variation','Actual','Base Rate','Mk%','Sell Rate','Amount'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
               </tr></thead>
               <tbody>
-                {(t.boq||[]).map((l,i)=>(
+                {(t.boq||[]).map((l,i)=>{
+                  const upd=(k,v)=>set('boq',t.boq.map((x,j)=>j===i?{...x,[k]:v}:x));
+                  const updCat=(k,v)=>set('boq',t.boq.map((x,j)=>j===i?{...x,[k]:v, itemCode: nextCodeFor(k==='category'?v:x.category, k==='subcategory'?v:x.subcategory, t.boq, x.id)}:x));
+                  return (
                   <tr key={l.id}>
-                    <td style={{ padding:'4px 4px' }}><input value={l.description} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,description:e.target.value}:x))} style={{ ...styles.input, margin:0, width:'100%' }}/></td>
-                    <td style={{ padding:'4px 4px', width:70 }}><input value={l.unit} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,unit:e.target.value}:x))} style={{ ...styles.input, margin:0 }} placeholder='m²'/></td>
-                    <td style={{ padding:'4px 4px', width:80 }}><input type='number' value={l.qty} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,qty:e.target.value}:x))} style={{ ...styles.input, margin:0 }}/></td>
-                    <td style={{ padding:'4px 4px', width:100 }}><input type='number' value={l.rate} onChange={e=>set('boq',t.boq.map((x,j)=>j===i?{...x,rate:e.target.value}:x))} style={{ ...styles.input, margin:0 }}/></td>
-                    <td style={{ padding:'4px 8px', fontWeight:600, width:100 }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
-                    <td style={{ padding:'4px 4px', width:30 }}><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                    <td style={{ padding:'3px 3px', width:88 }}><input value={l.itemCode||''} onChange={e=>upd('itemCode',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11, fontFamily:'monospace', padding:'4px 4px' }} title='Item Code (auto)'/></td>
+                    <td style={{ padding:'3px 3px', width:98 }}><select value={l.category||'Materials'} onChange={e=>updCat('category',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{BUILDUP_CATS.map(c=><option key={c}>{c}</option>)}</select></td>
+                    <td style={{ padding:'3px 3px', width:92 }}><select value={l.subcategory||''} onChange={e=>updCat('subcategory',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}><option value=''>—</option>{BUILDUP_SUBCATS.map(c=><option key={c}>{c}</option>)}</select></td>
+                    <td style={{ padding:'3px 3px', minWidth:150 }}><input value={l.description} onChange={e=>upd('description',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }}/></td>
+                    <td style={{ padding:'3px 3px', width:50 }}><input value={l.unit} onChange={e=>upd('unit',e.target.value)} style={{ ...styles.input, margin:0 }} placeholder='m'/></td>
+                    <td style={{ padding:'3px 3px', width:64 }}><input type='number' value={l.tenderQty} onChange={e=>upd('tenderQty',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right', background:'#F4FAF5' }} title='Tender Qty (priced)'/></td>
+                    <td style={{ padding:'3px 3px', width:64 }}><input type='number' value={l.finalisedQty ?? ''} onChange={e=>upd('finalisedQty',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Finalised Qty (post-award)'/></td>
+                    <td style={{ padding:'3px 3px', width:64 }}><input type='number' value={l.variationQty ?? ''} onChange={e=>upd('variationQty',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Variation Qty'/></td>
+                    <td style={{ padding:'3px 3px', width:64 }}><input type='number' value={l.actualQty ?? ''} onChange={e=>upd('actualQty',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Actual consumed Qty'/></td>
+                    <td style={{ padding:'3px 3px', width:78 }}><input type='number' value={l.rate} onChange={e=>upd('rate',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }} title='Base / direct cost rate'/></td>
+                    <td style={{ padding:'3px 5px', width:44, textAlign:'right', color:'#888', whiteSpace:'nowrap' }}>{lineMarkup(l)?lineMarkup(l).toFixed(0)+'%':'—'}</td>
+                    <td style={{ padding:'3px 5px', width:80, textAlign:'right', whiteSpace:'nowrap' }}>{sellRate(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'3px 6px', fontWeight:600, width:96, textAlign:'right', whiteSpace:'nowrap' }}>{lineTotal(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                    <td style={{ padding:'3px 3px', width:26 }}><button onClick={()=>set('boq',t.boq.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
+            </div>
+            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:4 }}>Base Rate = direct cost. Sell Rate = Base × (1 + markup%). Markup set via Cost Build-up per Category/Subcategory. Tender = estimate qty, Finalised = post-award, Variation, Actual = consumed.</div>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-                <button onClick={()=>set('boq',[...(t.boq||[]),blankLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <button onClick={()=>set('boq',[...(t.boq||[]), {...blankLine(), itemCode: nextCodeFor('Materials','', t.boq, null)}])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
+                <button onClick={()=>set('boq', withItemCodes((t.boq||[]).map(l=>({...l, itemCode:''}))))} style={styles.ghostBtn} title="Regenerate all item codes by Category/Subcategory">⟳ Auto Item Codes</button>
                 <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
@@ -19982,12 +20181,90 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               />
             )}
           </div>
-          <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
-          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
-            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
-            <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
+          {(() => {
+            const est = computeEstimation(t);
+            const area = parseFloat(t.builtupArea)||0;
+            const units = parseFloat(t.noUnits)||0;
+            const pct = (v) => est.direct>0 ? (v/est.direct*100).toFixed(1)+'%' : '—';
+            const row = (label,val,opts={}) => (<div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:opts.big?15:13,fontWeight:opts.bold?700:400,color:opts.color||'#3A3A34',borderTop:opts.top?'1px solid #DCE8D6':'none'}}><span>{label}</span><span style={{fontWeight:opts.bold?700:500}}>{typeof val==='number'?fmt(val):val}</span></div>);
+            return (
+              <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:10, padding:'16px 20px', marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:'#1A7A3E', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:12 }}>Estimation Summary</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 32px' }}>
+                  <div>
+                    {row('Materials', est.mat)}
+                    {row('Labour', est.lab)}
+                    {row('Equipment', est.equ)}
+                    {row('Subcontract', est.sub)}
+                    {row('Direct Cost', est.direct, {bold:true, top:true})}
+                    {row('Overhead (Site + HO)', est.overhead, {color:'#888'})}
+                    {row('Contingency', est.cont, {color:'#888'})}
+                    {row('Total Cost', est.totalCost, {bold:true, top:true})}
+                  </div>
+                  <div>
+                    {row('Tender Price', est.price, {bold:true, big:true})}
+                    {row('Gross Profit', est.grossProfit, {bold:true, color: est.grossProfit>=0?'#1A7A3E':'#B5453A'})}
+                    {row('Gross Margin', est.margin.toFixed(1)+'%', {color: est.margin>=0?'#1A7A3E':'#B5453A'})}
+                    {row('Markup', est.markup.toFixed(1)+'%')}
+                    <div style={{ borderTop:'1px solid #DCE8D6', marginTop:6, paddingTop:6 }}>
+                      {row('Material %', pct(est.mat))}
+                      {row('Labour %', pct(est.lab))}
+                      {row('Equipment %', pct(est.equ))}
+                      {row('Subcontract %', pct(est.sub))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:14, marginTop:12, flexWrap:'wrap', alignItems:'center' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{fontSize:12,color:'#888'}}>Built-up area (m²)</span><input type='number' value={t.builtupArea||''} onChange={e=>set('builtupArea',e.target.value)} style={{...styles.input, margin:0, width:100}}/></div>
+                  {area>0 && <span style={{fontSize:12.5, color:'#1E2A4A'}}>Cost/m²: <b>{fmt(est.totalCost/area)}</b></span>}
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{fontSize:12,color:'#888'}}>No. of units</span><input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{...styles.input, margin:0, width:80}}/></div>
+                  {units>0 && <span style={{fontSize:12.5, color:'#1E2A4A'}}>Cost/unit: <b>{fmt(est.totalCost/units)}</b></span>}
+                </div>
+                {est.manualLines>0 && <div style={{ fontSize:11, color:'#C9752A', marginTop:8 }}>⚠ {est.manualLines} line(s) have manual rates (no cost build-up) — their cost is not in the cost heads above, only in Tender Price.</div>}
+              </div>
+            );
+          })()}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Covering Note (quotation cover page)</label><textarea value={t.coveringNote||''} onChange={e=>set('coveringNote',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='We are pleased to submit our quotation for the above works...'/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Terms &amp; Conditions (quotation)</label><textarea value={t.terms||''} onChange={e=>set('terms',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='1. Prices valid for 90 days.&#10;2. Payment: 30% advance...&#10;3. Delivery: as agreed.'/></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Notes (internal)</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
+          <div style={{ display:'flex', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+            <button onClick={()=>{ save(t); setQuoteDoc(t); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+              <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
+            </div>
           </div>
         </div>
+        {analysing !== null && t.boq[analysing] && (
+          <RateAnalysisModal
+            line={t.boq[analysing]}
+            resources={resources}
+            businessInfo={businessInfo}
+            onClose={()=>setAnalysing(null)}
+            onSave={(res)=>{ set('boq', t.boq.map((x,j)=> j===analysing ? { ...x, rate: Math.round(res.selling*100)/100, analysis: res } : x)); setAnalysing(null); }}
+          />
+        )}
+        {showCat && (
+          <div style={styles.modalOverlay} onClick={()=>setShowCat(false)}>
+            <div style={{ background:'#fff', borderRadius:14, padding:22, width:'94%', maxWidth:620, maxHeight:'88vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.3)' }} onClick={e=>e.stopPropagation()}>
+              <h3 className="serif" style={{ margin:'0 0 4px', color:'#1E2A4A' }}>Add from Service Catalogue</h3>
+              <div style={{ fontSize:12, color:'#888', marginBottom:14 }}>Pick catalogue items, enter qty — rate &amp; build-up come across automatically.</div>
+              {(scopeOfWork||[]).length===0 ? (
+                <div style={styles.emptyBox}>No catalogue items yet. Build them in Service Catalogue (with rate build-up).</div>
+              ) : (
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr>{['Item','Unit','Rate','Qty',''].map((h,i)=><th key={i} style={{ textAlign: ['Rate'].includes(h)?'right':'left', fontSize:11, color:'#888', textTransform:'uppercase', padding:'6px 8px', borderBottom:'2px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {scopeOfWork.map(sc => <CatalogueAddRow key={sc.id} item={sc} businessInfo={businessInfo} onAdd={(item,qy)=>{ set('boq', [...(t.boq||[]), { id:crypto.randomUUID(), description:item.name, unit:item.unit||'', clientQty:qy, qty:qy, approvedQty:0, actualQty:0, rate:parseFloat(item.rate)||0, analysis:item.analysis||null }]); }} />)}
+                  </tbody>
+                </table>
+              )}
+              <div style={{ display:'flex', justifyContent:'flex-end', marginTop:16 }}><button style={styles.primaryBtn} onClick={()=>setShowCat(false)}>Done</button></div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -20034,6 +20311,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
                         <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
+                        <button onClick={()=>setQuoteDoc(t)} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
                         <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
@@ -20068,37 +20346,54 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           </div>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, marginBottom:16 }}>
             <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
-              {['#','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Qty'||h==='Rate'||h==='Amount'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
+              {['#','Item Code','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'8px 10px', textAlign:h==='#'||h==='Qty'||h==='Rate'||h==='Amount'?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {(t.boq||[]).map((l,i)=>(
-                <tr key={l.id} style={{ background:i%2===0?'#fff':'#F8F7F4', borderBottom:'1px solid #eee' }}>
-                  <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{i+1}</td>
-                  <td style={{ padding:'7px 10px' }}>{l.description}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'center' }}>{l.unit||'—'}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(l.qty||0).toLocaleString()}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+parseFloat(l.rate||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-                  <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-                </tr>
-              ))}
+              {(() => {
+                const groups = {}; const order = [];
+                (t.boq||[]).forEach(l => { const key=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[key]){groups[key]=[];order.push(key);} groups[key].push(l); });
+                let sl = 0;
+                return order.map(key => {
+                  const parts = key.split('||'); const cat = parts[0]; const sub = parts[1];
+                  const lines = groups[key];
+                  const gt = lines.reduce((s,l)=>s+lineTotal(l),0);
+                  return (
+                    <React.Fragment key={key}>
+                      <tr style={{ background:'#EEF1F6' }}><td colSpan={7} style={{ padding:'6px 10px', fontWeight:700, color:'#1E2A4A', fontSize:12 }}>{cat}{sub && sub!=='—' ? ' › '+sub : ''}</td></tr>
+                      {lines.map(l => { sl++; return (
+                        <tr key={l.id} style={{ borderBottom:'1px solid #eee' }}>
+                          <td style={{ padding:'7px 10px', textAlign:'right', color:'#888' }}>{sl}</td>
+                          <td style={{ padding:'7px 10px', fontFamily:'monospace', fontSize:11.5 }}>{l.itemCode||''}</td>
+                          <td style={{ padding:'7px 10px' }}>{l.description}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'center' }}>{l.unit||'—'}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right' }}>{parseFloat(l.tenderQty||0).toLocaleString()}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right' }}>{(cc.currency||'')+sellRate(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                          <td style={{ padding:'7px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                        </tr>
+                      );})}
+                      <tr><td colSpan={6} style={{ padding:'5px 10px', textAlign:'right', fontStyle:'italic', color:'#555' }}>Subtotal — {cat}{sub && sub!=='—' ? ' › '+sub : ''}</td><td style={{ padding:'5px 10px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+gt.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </tbody>
             <tfoot>
               <tr style={{ borderTop:'2px solid #1E2A4A' }}>
-                <td colSpan={5} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>Subtotal</td>
+                <td colSpan={6} style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>Subtotal</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>
               {tax && tax.cgst>0 && <>
-                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
-                <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>CGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.cgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>SGST ({(t.taxRate||0)/2}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.sgst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
               </>}
-              {tax && tax.igst>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
-              {tax && tax.vat>0 && <tr><td colSpan={5} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.igst>0 && <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>IGST ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.igst.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {tax && tax.vat>0 && <tr><td colSpan={6} style={{ padding:'4px 10px', textAlign:'right', color:'#555' }}>{cc.taxLabel||'Tax'} ({t.taxRate||0}%)</td><td style={{ padding:'4px 10px', textAlign:'right' }}>{(cc.currency||'')+tax.vat.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
               {tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
-                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td>
+                <td colSpan={6} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td>
                 <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+tax.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>}
               {!tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}>
-                <td colSpan={5} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td>
+                <td colSpan={6} style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td>
                 <td style={{ padding:'10px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               </tr>}
             </tfoot>
@@ -20108,6 +20403,73 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             {['Prepared By','Authorised Signatory'].map(s=>(
               <div key={s} style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
             ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
+    {quoteDoc && (()=>{
+      const t = quoteDoc;
+      const client = customers.find(c=>c.id===t.customerId);
+      const sub = boqSubtotal(t);
+      const tax = cc.hasTax ? calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState) : null;
+      const grand = tax ? tax.grandTotal : sub;
+      const quoteNo = 'QTN-' + (String(t.number||'').replace(/\D/g,'') || '001');
+      const today = new Date().toLocaleDateString('en-GB');
+      const groups={}, order=[];
+      (t.boq||[]).forEach(l=>{const k=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(l);});
+      let sl=0;
+      return (
+        <DocPrintOverlay onClose={()=>setQuoteDoc(null)} filename={`Quotation-${quoteNo}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:22 }}>
+            <div style={{ fontSize:24, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>QUOTATION</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{quoteNo} &nbsp;|&nbsp; Date: {today}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:18 }}>
+            {[['To (Client)', client?.name||'—'], ['Project / Scope', t.title||'—'], ['Quotation No', quoteNo], ['Valid Until', t.validUntil||'90 days']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}><span style={{ color:'#888', minWidth:120 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span></div>
+            ))}
+          </div>
+          {t.coveringNote && <div style={{ fontSize:13, lineHeight:1.6, color:'#333', marginBottom:18, whiteSpace:'pre-wrap' }}>{t.coveringNote}</div>}
+          <div style={{ background:'#1E2A4A', color:'#fff', borderRadius:8, padding:'14px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <span style={{ fontSize:15, fontWeight:600 }}>Total Quotation Value{tax?' (incl. tax)':''}</span>
+            <span style={{ fontSize:20, fontWeight:800 }}>{(cc.currency||'')+grand.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+          </div>
+          <div style={{ fontSize:12, color:'#888', marginBottom:26 }}>Detailed Bill of Quantities enclosed as Annexure A.</div>
+
+          <div style={{ pageBreakBefore:'always', fontSize:16, fontWeight:700, color:'#1E2A4A', marginBottom:12, borderBottom:'2px solid #1E2A4A', paddingBottom:6 }}>ANNEXURE A — BILL OF QUANTITIES</div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, marginBottom:16 }}>
+            <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Item Code','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'7px 9px', textAlign:['#','Qty','Rate','Amount'].includes(h)?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {order.map(key=>{ const parts=key.split('||'); const cat=parts[0]; const scv=parts[1]; const lines=groups[key]; const gt=lines.reduce((a,l)=>a+lineTotal(l),0); return (
+                <React.Fragment key={key}>
+                  <tr style={{ background:'#EEF1F6' }}><td colSpan={7} style={{ padding:'5px 9px', fontWeight:700, color:'#1E2A4A', fontSize:12 }}>{cat}{scv&&scv!=='—'?' › '+scv:''}</td></tr>
+                  {lines.map(l=>{ sl++; return (<tr key={l.id} style={{ borderBottom:'1px solid #eee' }}>
+                    <td style={{ padding:'6px 9px', textAlign:'right', color:'#888' }}>{sl}</td>
+                    <td style={{ padding:'6px 9px', fontFamily:'monospace', fontSize:11 }}>{l.itemCode||''}</td>
+                    <td style={{ padding:'6px 9px' }}>{l.description}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'center' }}>{l.unit||'—'}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right' }}>{parseFloat(l.tenderQty||0).toLocaleString()}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right' }}>{(cc.currency||'')+sellRate(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                  </tr>);})}
+                  <tr><td colSpan={6} style={{ padding:'4px 9px', textAlign:'right', fontStyle:'italic', color:'#555' }}>Subtotal — {cat}{scv&&scv!=='—'?' › '+scv:''}</td><td style={{ padding:'4px 9px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+gt.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                </React.Fragment>
+              );})}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:'2px solid #1E2A4A' }}><td colSpan={6} style={{ padding:'8px 9px', textAlign:'right', fontWeight:700 }}>Subtotal</td><td style={{ padding:'8px 9px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+              {tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}><td colSpan={6} style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td><td style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+tax.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {!tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}><td colSpan={6} style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td><td style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+            </tfoot>
+          </table>
+
+          {t.terms && <div style={{ marginTop:22 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:'#1E2A4A', marginBottom:8 }}>TERMS &amp; CONDITIONS</div>
+            <div style={{ fontSize:12.5, color:'#333', whiteSpace:'pre-wrap', lineHeight:1.6 }}>{t.terms}</div>
+          </div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:46 }}>
+            <div style={{ borderTop:'1px solid #999', paddingTop:6, textAlign:'center', fontSize:12, color:'#555' }}>Prepared By</div>
+            <div style={{ borderTop:'1px solid #999', paddingTop:6, textAlign:'center', fontSize:12, color:'#555' }}>For {businessInfo?.name||'Company'}</div>
           </div>
         </DocPrintOverlay>
       );
@@ -23301,6 +23663,8 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            resources={resources}
+            scopeOfWork={scopeOfWork}
           />
         );
       case 'rabilling':
@@ -23372,6 +23736,8 @@ export default function App() {
             scopeOfWork={scopeOfWork}
             setScopeOfWork={setScopeOfWork}
             userRole={userRole}
+            resources={resources}
+            businessInfo={businessInfo}
           />
         );
       case 'mepbom':
