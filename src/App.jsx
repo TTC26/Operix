@@ -19963,6 +19963,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const [printDoc, setPrintDoc] = useState(null);
   const [analysing, setAnalysing] = useState(null);
   const [showCat, setShowCat] = useState(false);
+  const [quoteDoc, setQuoteDoc] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -20223,10 +20224,17 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               </div>
             );
           })()}
-          <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
-          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
-            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
-            <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Covering Note (quotation cover page)</label><textarea value={t.coveringNote||''} onChange={e=>set('coveringNote',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='We are pleased to submit our quotation for the above works...'/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Terms &amp; Conditions (quotation)</label><textarea value={t.terms||''} onChange={e=>set('terms',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='1. Prices valid for 90 days.&#10;2. Payment: 30% advance...&#10;3. Delivery: as agreed.'/></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Notes (internal)</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
+          <div style={{ display:'flex', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+            <button onClick={()=>{ save(t); setQuoteDoc(t); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+              <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
+            </div>
           </div>
         </div>
         {analysing !== null && t.boq[analysing] && (
@@ -20303,6 +20311,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
                         <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
+                        <button onClick={()=>setQuoteDoc(t)} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
                         <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
@@ -20394,6 +20403,73 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
             {['Prepared By','Authorised Signatory'].map(s=>(
               <div key={s} style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
             ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
+    {quoteDoc && (()=>{
+      const t = quoteDoc;
+      const client = customers.find(c=>c.id===t.customerId);
+      const sub = boqSubtotal(t);
+      const tax = cc.hasTax ? calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState) : null;
+      const grand = tax ? tax.grandTotal : sub;
+      const quoteNo = 'QTN-' + (String(t.number||'').replace(/\D/g,'') || '001');
+      const today = new Date().toLocaleDateString('en-GB');
+      const groups={}, order=[];
+      (t.boq||[]).forEach(l=>{const k=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(l);});
+      let sl=0;
+      return (
+        <DocPrintOverlay onClose={()=>setQuoteDoc(null)} filename={`Quotation-${quoteNo}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:22 }}>
+            <div style={{ fontSize:24, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>QUOTATION</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{quoteNo} &nbsp;|&nbsp; Date: {today}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:18 }}>
+            {[['To (Client)', client?.name||'—'], ['Project / Scope', t.title||'—'], ['Quotation No', quoteNo], ['Valid Until', t.validUntil||'90 days']].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}><span style={{ color:'#888', minWidth:120 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span></div>
+            ))}
+          </div>
+          {t.coveringNote && <div style={{ fontSize:13, lineHeight:1.6, color:'#333', marginBottom:18, whiteSpace:'pre-wrap' }}>{t.coveringNote}</div>}
+          <div style={{ background:'#1E2A4A', color:'#fff', borderRadius:8, padding:'14px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <span style={{ fontSize:15, fontWeight:600 }}>Total Quotation Value{tax?' (incl. tax)':''}</span>
+            <span style={{ fontSize:20, fontWeight:800 }}>{(cc.currency||'')+grand.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+          </div>
+          <div style={{ fontSize:12, color:'#888', marginBottom:26 }}>Detailed Bill of Quantities enclosed as Annexure A.</div>
+
+          <div style={{ pageBreakBefore:'always', fontSize:16, fontWeight:700, color:'#1E2A4A', marginBottom:12, borderBottom:'2px solid #1E2A4A', paddingBottom:6 }}>ANNEXURE A — BILL OF QUANTITIES</div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, marginBottom:16 }}>
+            <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Item Code','Description','Unit','Qty','Rate','Amount'].map(h=><th key={h} style={{ padding:'7px 9px', textAlign:['#','Qty','Rate','Amount'].includes(h)?'right':'left', fontSize:11, fontWeight:700 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {order.map(key=>{ const parts=key.split('||'); const cat=parts[0]; const scv=parts[1]; const lines=groups[key]; const gt=lines.reduce((a,l)=>a+lineTotal(l),0); return (
+                <React.Fragment key={key}>
+                  <tr style={{ background:'#EEF1F6' }}><td colSpan={7} style={{ padding:'5px 9px', fontWeight:700, color:'#1E2A4A', fontSize:12 }}>{cat}{scv&&scv!=='—'?' › '+scv:''}</td></tr>
+                  {lines.map(l=>{ sl++; return (<tr key={l.id} style={{ borderBottom:'1px solid #eee' }}>
+                    <td style={{ padding:'6px 9px', textAlign:'right', color:'#888' }}>{sl}</td>
+                    <td style={{ padding:'6px 9px', fontFamily:'monospace', fontSize:11 }}>{l.itemCode||''}</td>
+                    <td style={{ padding:'6px 9px' }}>{l.description}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'center' }}>{l.unit||'—'}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right' }}>{parseFloat(l.tenderQty||0).toLocaleString()}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right' }}>{(cc.currency||'')+sellRate(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'6px 9px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+lineTotal(l).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                  </tr>);})}
+                  <tr><td colSpan={6} style={{ padding:'4px 9px', textAlign:'right', fontStyle:'italic', color:'#555' }}>Subtotal — {cat}{scv&&scv!=='—'?' › '+scv:''}</td><td style={{ padding:'4px 9px', textAlign:'right', fontWeight:600 }}>{(cc.currency||'')+gt.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+                </React.Fragment>
+              );})}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:'2px solid #1E2A4A' }}><td colSpan={6} style={{ padding:'8px 9px', textAlign:'right', fontWeight:700 }}>Subtotal</td><td style={{ padding:'8px 9px', textAlign:'right', fontWeight:700 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>
+              {tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}><td colSpan={6} style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>Grand Total</td><td style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+tax.grandTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+              {!tax && <tr style={{ background:'#1E2A4A', color:'#fff' }}><td colSpan={6} style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>Total</td><td style={{ padding:'9px', textAlign:'right', fontWeight:700, fontSize:14 }}>{(cc.currency||'')+sub.toLocaleString(undefined,{minimumFractionDigits:2})}</td></tr>}
+            </tfoot>
+          </table>
+
+          {t.terms && <div style={{ marginTop:22 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:'#1E2A4A', marginBottom:8 }}>TERMS &amp; CONDITIONS</div>
+            <div style={{ fontSize:12.5, color:'#333', whiteSpace:'pre-wrap', lineHeight:1.6 }}>{t.terms}</div>
+          </div>}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:46 }}>
+            <div style={{ borderTop:'1px solid #999', paddingTop:6, textAlign:'center', fontSize:12, color:'#555' }}>Prepared By</div>
+            <div style={{ borderTop:'1px solid #999', paddingTop:6, textAlign:'center', fontSize:12, color:'#555' }}>For {businessInfo?.name||'Company'}</div>
           </div>
         </DocPrintOverlay>
       );
