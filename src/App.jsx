@@ -15504,6 +15504,23 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
     alert('Activity created in Activity Planner!');
   }
 
+  function pushAllToActivities(bom) {
+    if (!bom.projectId) return alert('Select a project first.');
+    const toPush = (editing.items||[]).filter(i => !i.activityId && (i.description||'').trim());
+    if (!toPush.length) return alert('No unlinked items to push (add descriptions first).');
+    if (!confirm('Create ' + toPush.length + ' activities in Activity Planner (batch)?')) return;
+    const newActs = toPush.map(item => ({
+      id: crypto.randomUUID(), projectId: bom.projectId, bomItemId: item.id,
+      name: item.description, discipline: item.discipline,
+      startDate: item.plannedStart, endDate: item.plannedEnd,
+      status: 'not-started', weight: 5, bom: [], bomLocked: false, createdAt: Date.now(),
+    }));
+    const idByItem = {}; newActs.forEach(a => { idByItem[a.bomItemId] = a.id; });
+    setSiteActivities(prev => [...prev, ...newActs]);
+    setEditing(prev => ({ ...prev, items: prev.items.map(i => idByItem[i.id] ? { ...i, activityId: idByItem[i.id] } : i) }));
+    alert(newActs.length + ' activities created in Activity Planner (batch).');
+  }
+
   function importFromCatalogue(catItem) {
     const seq = (editing.items.length || 0) + 1;
     const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'Nos', rate: catItem.rate||'', catalogueRef: catItem.id };
@@ -15611,6 +15628,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
         </div>
         <div style={{display:'flex',gap:8}}>
           <button onClick={()=>setShowTender(s=>!s)} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}>📄 Import from Tender</button>
+          {canEdit && <button onClick={()=>pushAllToActivities(editing)} style={{ ...styles.ghostBtn, color:'#1E7A9A', borderColor:'#1E7A9A' }} title="Create activities for all unlinked BOM items">→ All to Activities</button>}
           <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
           {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><CheckCircle size={14}/> Save BOM</button>}
         </div>
