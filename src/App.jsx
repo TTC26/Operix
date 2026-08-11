@@ -4116,7 +4116,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_planning" label="Planning & Progress">
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
-              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
               <NavBtn id="manpower"        label="Manpower"         icon={Users} />
             </Section>
@@ -11553,7 +11552,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   );
 }
 
-function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, businessInfo }) {
+function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, manpowerLogs = [], businessInfo }) {
   const fmt = makeFmt(businessInfo);
   const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
   const raTotal = (rb) => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
@@ -11567,7 +11566,9 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
     const matCost  = (mepBoms || []).filter(b => String(b.projectId) === String(p.id)).reduce((s, b) => s + (b.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
     const procCost = (purchaseReqs || []).filter(pr => pr.type === 'project' && String(pr.linkId) === String(p.id)).reduce((s, pr) => s + (pr.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
     const subCost  = (subcontractors || []).reduce((s, sc) => s + (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).reduce((t, w) => t + (parseFloat(w.value) || 0), 0), 0);
-    const labCost  = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const pcLab    = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const mpLab    = (manpowerLogs || []).filter(l => String(l.projectId) === String(p.id)).reduce((s, l) => s + ((parseFloat(l.workers)||0)*((parseFloat(l.hours)||0)+(parseFloat(l.otHours)||0)))*(parseFloat(l.rate)||0), 0);
+    const labCost  = pcLab + mpLab;
     const totalCost = matCost + procCost + subCost + labCost;
     const profitRA = raBilled - totalCost;
     const profitEarned = earned - totalCost;
@@ -11684,7 +11685,7 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
         </div>
       )}
       <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 10, lineHeight: 1.6 }}>
-        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + petty cash tagged to project. Tag petty cash entries to a project to populate Labour.
+        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + Manpower labour (man-hours × rate) + petty cash tagged to project. Log manpower with a rate to populate Labour cost.
       </div>
     </div>
   );
@@ -16616,12 +16617,13 @@ function MEPProjectForm({ project, employees, onSave, onClose }) {
 
 // ── Activity Planner (WBS + BOM) ────────────────────────────────────────────────
 // ─── MEP Gantt Chart + Activity Planner ──────────────────────────────────────
-function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [] }) {
+function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [editing, setEditing] = useState(null);
   const [expandedBOM, setExpandedBOM] = useState({});
   const [viewMode, setViewMode] = useState('gantt'); // 'gantt' | 'table'
   const [updateModal, setUpdateModal] = useState(null); // activityId
+  const [printActs, setPrintActs] = useState(false);
   const [ganttStart, setGanttStart] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10);
   });
@@ -16648,6 +16650,23 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     const logs = progressUpdates.filter(u => u.activityId === actId);
     if (!logs.length) return 0;
     return Math.max(...logs.map(u => parseFloat(u.cumProgress)||0));
+  }
+
+  async function exportActsXlsx() {
+    const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
+    const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
+    const aoa = [['#','Discipline','Unit','Activity','Start','End','Duration (days)','Weight %','Progress %','Status'],
+      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.startDate||'', a.endDate||'', dur(a.startDate,a.endDate), a.weight||'', getProgress(a.id), a.status||''])];
+    try {
+      const XLSX = await loadXLSX();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Activities');
+      XLSX.writeFile(wb, 'Activity-Planner-'+(project?.name||'Project')+'.xlsx');
+    } catch(err) {
+      const csv = aoa.map(r=>r.map(c=>{const v=String(c==null?'':c); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+      const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}));
+      const el=document.createElement('a'); el.href=url; el.download='Activity-Planner.csv'; el.click(); URL.revokeObjectURL(url);
+    }
   }
 
   // Gantt helpers
@@ -16698,6 +16717,8 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           <select value={selProject} onChange={e=>setSelProject(e.target.value)} style={{ ...styles.input, width:200 }}>
             {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {acts.length>0 && <button onClick={exportActsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+          {acts.length>0 && <button onClick={()=>setPrintActs(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
             {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
@@ -16889,6 +16910,39 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           onClose={()=>setUpdateModal(null)}
         />
       )}
+      {printActs && (()=>{
+        const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
+        const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
+        const totW = acts.reduce((s,a)=>s+(parseFloat(a.weight)||0),0);
+        const overall = totW ? Math.round(acts.reduce((s,a)=>s+(parseFloat(a.weight)||0)*getProgress(a.id),0)/totW) : 0;
+        return (
+          <DocPrintOverlay onClose={()=>setPrintActs(false)} filename={`Activity-Schedule-${project?.name||'Project'}.pdf`} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:16 }}>
+              <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PROJECT ACTIVITY SCHEDULE</div>
+              <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{project?.name} &nbsp;|&nbsp; Overall Progress: {overall}% &nbsp;|&nbsp; {acts.length} activities</div>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Discipline','Unit','Activity','Start','End','Days','Wt%','Progress','Status'].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['#','Days','Wt%','Progress'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {acts.map((a,i)=>{ const pr=getProgress(a.id); return (
+                  <tr key={a.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                    <td style={{ padding:'5px 8px' }}>{a.discipline}</td>
+                    <td style={{ padding:'5px 8px' }}>{vName(a.villaId)||'—'}</td>
+                    <td style={{ padding:'5px 8px' }}>{a.name}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.startDate||'—'}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.endDate||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.startDate,a.endDate)}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{a.weight||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:600, color:pr>=100?'#1a6b30':'#1E2A4A' }}>{pr}%</td>
+                    <td style={{ padding:'5px 8px' }}>{a.status||''}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -16957,34 +17011,12 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
           <label style={styles.label}>Cumulative Progress % <span style={{ color:'#C9A24B' }}>(was {lastPct}%)</span></label>
           <input type="number" min={lastPct} max={100} value={form.cumProgress} onChange={e=>set('cumProgress',Math.min(100,Math.max(lastPct,+e.target.value)))} style={styles.input} />
         </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Manpower on site (headcount)</label>
-          <input type="number" min={0} value={form.mpCount} onChange={e=>set('mpCount',e.target.value)} style={styles.input} placeholder="e.g. 5" />
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Total Manhours today</label>
-          <input type="number" min={0} step="0.5" value={form.totalManhours} onChange={e=>set('totalManhours',e.target.value)} style={styles.input} placeholder="e.g. 40" />
-        </div>
       </div>
 
-      {/* Per-employee hours */}
-      {employees.length > 0 && (
-        <div style={{ marginBottom:12 }}>
-          <div style={{ ...styles.label, marginBottom:6 }}>Employee-wise hours</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:140, overflowY:'auto' }}>
-            {employees.map(emp => {
-              const eh = form.empHours.find(e=>e.empId===emp.id);
-              return (
-                <div key={emp.id} style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <span style={{ fontSize:12, flex:1, color:'#555' }}>{emp.name}</span>
-                  <input type="number" min={0} step="0.5" value={eh?.hours||''} onChange={e=>setEmpHour(emp.id,e.target.value)}
-                    style={{ ...styles.input, width:80, padding:'4px 8px', fontSize:12 }} placeholder="hrs" />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Manpower moved to dedicated Manpower module */}
+      <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:8, padding:'9px 12px', marginBottom:12, fontSize:12, color:'#1A7A3E' }}>
+        👷 Manpower &amp; man-hours are now logged in the <b>Manpower module</b> (Planning &amp; Progress → Manpower). Keep this update for progress % &amp; site notes only.
+      </div>
 
       {/* Material consumed */}
       <div style={{ marginBottom:12 }}>
@@ -17026,7 +17058,7 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
 
 
 // ─── MEP Reports View ─────────────────────────────────────────────────────────
-function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employees, businessInfo }) {
+function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employees, businessInfo, manpowerLogs = [] }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [reportType, setReportType] = useState('manhour_summary'); // manhour_summary | emp_report | material_report
   const [fromDate, setFromDate] = useState(() => { const d=new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
@@ -17041,16 +17073,20 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
   const filteredUpdates = progressUpdates.filter(u =>
     u.projectId === selProject && u.date >= fromDate && u.date <= toDate
   );
+  const filteredMP = (manpowerLogs || []).filter(m =>
+    String(m.projectId) === String(selProject) && (m.date || '') >= fromDate && (m.date || '') <= toDate
+  );
 
   // Manhour summary: per activity — date, mp count, manhours, progress
   const manhourRows = acts.map(act => {
     const logs = filteredUpdates.filter(u => u.activityId === act.id);
-    const totalMH = logs.reduce((s,u) => s + (parseFloat(u.totalManhours)||0), 0);
-    const totalMP = logs.reduce((s,u) => s + (parseFloat(u.mpCount)||0), 0);
+    const mpLogs = filteredMP.filter(m => String(m.activityId) === String(act.id));
+    const totalMH = mpLogs.reduce((s,m) => s + (parseFloat(m.workers)||0)*((parseFloat(m.hours)||0)+(parseFloat(m.otHours)||0)), 0);
+    const totalMP = mpLogs.reduce((s,m) => s + (parseFloat(m.workers)||0), 0);
     const latestPct = logs.length ? Math.max(...logs.map(u=>parseFloat(u.cumProgress)||0)) : 0;
     const villa = (project?.villas||[]).find(v=>v.id===act.villaId);
     return { act, logs, totalMH, totalMP, latestPct, villa };
-  }).filter(r => r.logs.length > 0);
+  }).filter(r => r.logs.length > 0 || r.totalMH > 0);
 
   // Employee report: all logs for selected employee
   const empLogs = filteredUpdates.filter(u =>
@@ -17905,14 +17941,17 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
   const DISC = ['Electrical', 'Plumbing', 'HVAC', 'Firefighting', 'Civil', 'ELV', 'General'];
   const scoped = isMultiBiz ? manpowerLogs.filter(l => (l.bizType || 'trading') === currentBizType) : manpowerLogs;
   const list = scoped.filter(l => projFilter === 'all' || String(l.projectId) === String(projFilter)).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
-  const mh = l => (parseFloat(l.workers) || 0) * (parseFloat(l.hours) || 0);
+  const mh = l => (parseFloat(l.workers) || 0) * ((parseFloat(l.hours) || 0) + (parseFloat(l.otHours) || 0));
   const totWorkers = list.reduce((s, l) => s + (parseFloat(l.workers) || 0), 0);
   const totMH = list.reduce((s, l) => s + mh(l), 0);
+  const cost = l => mh(l) * (parseFloat(l.rate) || 0);
+  const totCost = list.reduce((s, l) => s + cost(l), 0);
+  const fmt = makeFmt(businessInfo);
   const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
 
   function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setManpowerLogs(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
   function del(id) { if (!window.confirm('Delete this entry?')) return; setManpowerLogs(prev => prev.filter(x => x.id !== id)); }
-  function blank() { return { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), projectId: projFilter !== 'all' ? projFilter : '', discipline: 'Electrical', trade: 'Electrician', workers: 1, hours: 8, activityId: '', remarks: '' }; }
+  function blank() { return { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), projectId: projFilter !== 'all' ? projFilter : '', discipline: 'Electrical', trade: 'Electrician', workers: 1, hours: 8, otHours: 0, rate: 0, activityId: '', remarks: '' }; }
 
   const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
   const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
@@ -17935,6 +17974,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
         </select>
         <span style={{ fontSize: 13, color: '#1E2A4A' }}>Workers (man-days): <b>{totWorkers.toLocaleString()}</b></span>
         <span style={{ fontSize: 13, color: '#1E2A4A' }}>Total Man-hours: <b>{totMH.toLocaleString()}</b></span>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Labour Cost: <b>{fmt(totCost)}</b></span>
       </div>
 
       {list.length === 0 ? (
@@ -17942,7 +17982,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
       ) : (
         <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
-            <thead><tr>{['Date', 'Project', 'Discipline', 'Trade', 'Workers', 'Hrs', 'Man-hrs', 'Activity', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Workers', 'Hrs', 'Man-hrs'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Date', 'Project', 'Discipline', 'Trade', 'Workers', 'Hrs', 'OT', 'Man-hrs', 'Rate', 'Cost', 'Activity', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Workers', 'Hrs', 'OT', 'Man-hrs', 'Rate', 'Cost'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
             <tbody>
               {list.map(l => (
                 <tr key={l.id}>
@@ -17952,7 +17992,10 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
                   <td style={td}>{l.trade}{l.remarks && <div style={{ fontSize: 11, color: '#999' }}>{l.remarks}</div>}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{l.workers}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{l.hours}</td>
+                  <td style={{ ...td, textAlign: 'right', color: (parseFloat(l.otHours)||0)?'#C9752A':'#bbb' }}>{l.otHours || 0}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{mh(l).toLocaleString()}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.rate ? fmt(l.rate) : '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{cost(l) ? fmt(cost(l)) : '—'}</td>
                   <td style={td}>{(siteActivities.find(a => a.id === l.activityId) || {}).name || '—'}</td>
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {canEdit && <button onClick={() => setEditing(l)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
@@ -17979,11 +18022,13 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
                 <div style={{ marginBottom: 12 }}><label style={lbl}>Discipline</label><select style={styles.input} value={editing.discipline} onChange={e => set('discipline', e.target.value)}>{DISC.map(d => <option key={d}>{d}</option>)}</select></div>
                 <div style={{ marginBottom: 12 }}><label style={lbl}>Trade</label><select style={styles.input} value={editing.trade} onChange={e => set('trade', e.target.value)}>{TRADES.map(tr => <option key={tr}>{tr}</option>)}</select></div>
                 <div style={{ marginBottom: 12 }}><label style={lbl}>No. of Workers</label><input type="number" style={styles.input} value={editing.workers} onChange={e => set('workers', e.target.value)} /></div>
-                <div style={{ marginBottom: 12 }}><label style={lbl}>Hours / worker</label><input type="number" style={styles.input} value={editing.hours} onChange={e => set('hours', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Normal Hrs / worker</label><input type="number" style={styles.input} value={editing.hours} onChange={e => set('hours', e.target.value)} placeholder="8" /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>OT Hrs / worker</label><input type="number" style={styles.input} value={editing.otHours ?? 0} onChange={e => set('otHours', e.target.value)} placeholder="0" /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Rate (per man-hour, optional)</label><input type="number" style={styles.input} value={editing.rate ?? 0} onChange={e => set('rate', e.target.value)} placeholder="0" /></div>
               </div>
               <div style={{ marginBottom: 12 }}><label style={lbl}>Activity (optional)</label><select style={styles.input} value={editing.activityId} onChange={e => set('activityId', e.target.value)}><option value="">—</option>{projActs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
               <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
-              <div style={{ fontSize: 12.5, color: '#1A7A3E', marginBottom: 14 }}>Man-hours: <b>{((parseFloat(editing.workers)||0)*(parseFloat(editing.hours)||0)).toLocaleString()}</b></div>
+              <div style={{ fontSize: 12.5, color: '#1A7A3E', marginBottom: 14 }}>Total Man-hours = {editing.workers||0} workers × ({editing.hours||0} + {editing.otHours||0} OT) = <b>{((parseFloat(editing.workers)||0)*((parseFloat(editing.hours)||0)+(parseFloat(editing.otHours)||0))).toLocaleString()}</b></div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } save(editing); }}>Save</button>
@@ -23841,6 +23886,7 @@ export default function App() {
             progressUpdates={progressUpdates}
             setProgressUpdates={setProgressUpdates}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'dailyupdates':
@@ -23968,6 +24014,7 @@ export default function App() {
             progressUpdates={progressUpdates}
             employees={employees}
             businessInfo={businessInfo}
+            manpowerLogs={manpowerLogs}
           />
         );
       case 'scopeofwork':
@@ -24005,6 +24052,7 @@ export default function App() {
             purchaseReqs={purchaseReqs}
             subcontractors={subcontractors}
             pettyCash={pettyCash}
+            manpowerLogs={manpowerLogs}
             businessInfo={businessInfo}
           />
         );
