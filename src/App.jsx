@@ -15444,10 +15444,11 @@ function BomMaterialsView(props) {
   );
 }
 
-function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
+function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo, tenders = [] }) {
   const [subView, setSubView]     = useState('list');   // 'list' | 'edit'
   const [editing, setEditing]     = useState(null);
   const [showCatalogue, setShowCatalogue] = useState(false);
+  const [showTender, setShowTender] = useState(false);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
@@ -15462,8 +15463,8 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
   }
   function blankItem(seq) {
     return {
-      id: crypto.randomUUID(), seq, description: '', discipline: MEP_DISCIPLINES[0],
-      unit: 'Nos', qty: '', rate: '', plannedStart: '', plannedEnd: '',
+      id: crypto.randomUUID(), seq, itemCode: '', description: '', discipline: MEP_DISCIPLINES[0],
+      unit: 'Nos', qty: '', actualQty: '', variationReason: '', rate: '', plannedStart: '', plannedEnd: '',
       status: 'Pending', activityId: '', catalogueRef: '',
     };
   }
@@ -15508,6 +15509,18 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
     const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'Nos', rate: catItem.rate||'', catalogueRef: catItem.id };
     setEditing(prev => ({...prev, items: [...prev.items, newItem]}));
   }
+  function importFromTender(tender) {
+    const start = editing.items.length || 0;
+    const rows = (tender.boq||[]).map((l,i)=>{
+      const mk = ((parseFloat(l.siteOH)||0)+(parseFloat(l.hoOH)||0)+(parseFloat(l.contingency)||0)+(parseFloat(l.profit)||0))/100;
+      const sell = (parseFloat(l.rate)||0) * (1 + mk);
+      return { ...blankItem(start+i+1), itemCode: l.itemCode||'', description: l.description||'', discipline: MEP_DISCIPLINES.includes(l.subcategory) ? l.subcategory : 'Other', unit: l.unit||'Nos', qty: (parseFloat(l.finalisedQty)||parseFloat(l.tenderQty)||0), actualQty: '', rate: sell };
+    });
+    if (!rows.length) { alert('This tender has no BOQ lines.'); return; }
+    setEditing(prev => ({...prev, items: [...prev.items, ...rows], sourceTenderNo: tender.number, contractRef: prev.contractRef || tender.quoteNo || tender.number }));
+    setShowTender(false);
+    alert(rows.length + ' BOQ line(s) imported as Approved BOM from tender ' + (tender.number||''));
+  }
 
   function updateItem(itemId, field, val) {
     setEditing(prev => ({...prev, items: prev.items.map(i => i.id===itemId ? {...i, [field]: val} : i)}));
@@ -15520,7 +15533,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
     setEditing(prev=>({...prev, items: prev.items.filter(i=>i.id!==itemId).map((i,idx)=>({...i,seq:idx+1}))}));
   }
 
-  const currency = businessInfo?.currency || 'AED';
+  const currency = (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency;
   const totalAmt = (editing?.items||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
 
   const ST_COLOR = { draft:{bg:'#F5F5F5',color:'#888'}, approved:{bg:'#D4EDDA',color:'#1a6b30'} };
@@ -15597,6 +15610,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           </h2>
         </div>
         <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>setShowTender(s=>!s)} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}>📄 Import from Tender</button>
           <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
           {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><CheckCircle size={14}/> Save BOM</button>}
         </div>
@@ -15618,6 +15632,21 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
         </div>
       </div>
 
+      {/* Tender Import Panel */}
+      {showTender && (
+        <div style={{background:'#F4FAF5',border:'1px solid #DCE8D6',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#1A7A3E'}}>Import Approved BOM from a Tender (finalised BOQ → approved qty, sell rate)</div>
+          {(tenders||[]).length===0 && <div style={{fontSize:12,color:'#888'}}>No tenders yet. Create one in Tender & Estimation.</div>}
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {(tenders||[]).map(tn=>(
+              <button key={tn.id} onClick={()=>importFromTender(tn)} style={{...styles.ghostBtn,fontSize:12,padding:'4px 10px'}}>
+                + {tn.number} · {tn.title||'—'} ({(tn.boq||[]).length} lines · {tn.status})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Catalogue Import Panel */}
       {showCatalogue && (
         <div style={{background:'#EEF7FA',border:'1px solid #B2D8E8',borderRadius:10,padding:14,marginBottom:16}}>
@@ -15638,7 +15667,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
           <thead>
             <tr style={{background:'#F0EDE8'}}>
-              {['#','Description','Discipline','Qty','Unit','Rate','Amount','Plan Start','Plan End','Status','Activity',''].map(h=>(
+              {['#','Item Code','Description','Discipline','Appr Qty','Actual','Var','Var Reason','Unit','Rate','Amount','Plan Start','Plan End','Status','Activity',''].map(h=>(
                 <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:700,fontSize:11,color:'#555',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr>
@@ -15646,10 +15675,12 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           <tbody>
             {editing.items.map((item,idx)=>{
               const amt = (parseFloat(item.qty)||0)*(parseFloat(item.rate)||0);
+              const varv = (parseFloat(item.actualQty)||0) - (parseFloat(item.qty)||0);
               const linkedAct = siteActivities.find(a=>a.id===item.activityId);
               return (
                 <tr key={item.id} style={{borderBottom:'1px solid #EAE6DB'}}>
                   <td style={{padding:'6px 10px',color:'#888',width:30}}>{item.seq}</td>
+                  <td style={{padding:'4px 6px',width:96}}><input value={item.itemCode||''} onChange={e=>updateItem(item.id,'itemCode',e.target.value)} style={{...styles.input,padding:'4px 8px',fontSize:11,fontFamily:'monospace',width:88}}/></td>
                   <td style={{padding:'4px 6px',minWidth:180}}>
                     <input value={item.description} onChange={e=>updateItem(item.id,'description',e.target.value)}
                       style={{...styles.input,padding:'4px 8px',fontSize:12}} placeholder="Work description"/>
@@ -15662,6 +15693,15 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
                   <td style={{padding:'4px 6px',width:70}}>
                     <input type="number" value={item.qty} onChange={e=>updateItem(item.id,'qty',e.target.value)}
                       style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:70}}>
+                    <input type="number" value={item.actualQty} onChange={e=>updateItem(item.id,'actualQty',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:'6px 8px',fontWeight:600,width:50,textAlign:'right',color:varv===0?'#888':(varv>0?'#1a6b30':'#B5453A')}}>{varv?varv.toLocaleString():'—'}</td>
+                  <td style={{padding:'4px 6px',minWidth:130}}>
+                    <input value={item.variationReason||''} onChange={e=>updateItem(item.id,'variationReason',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:11}} placeholder="variation reason"/>
                   </td>
                   <td style={{padding:'4px 6px',width:70}}>
                     <input value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)}
@@ -23756,6 +23796,7 @@ export default function App() {
             setSiteActivities={setSiteActivities}
             userRole={userRole}
             businessInfo={businessInfo}
+            tenders={tenders}
           />
         );
       case 'projectpnl':
