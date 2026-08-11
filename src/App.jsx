@@ -3796,7 +3796,6 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  matrequests: 'Material Requests', procurement: 'Procurement',
   variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
@@ -24195,6 +24194,8 @@ export default function App() {
           />
         );
       case 'purchasereq':
+      case 'matrequests':
+      case 'procurement':
         return (
           <PurchaseRequisitionView
             purchaseReqs={purchaseReqs}
