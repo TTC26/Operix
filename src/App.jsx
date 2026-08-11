@@ -20026,6 +20026,10 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     setTenders(prev => prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
     setEditing(null);
   }
+  function nextQuoteNo() {
+    const nums = (tenders||[]).map(x => parseInt(String(x.quoteNo||'').replace(/\D/g,''))||0);
+    return 'QTN-' + String((nums.length?Math.max(...nums):0)+1).padStart(3,'0');
+  }
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
   }
@@ -20224,13 +20228,14 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               </div>
             );
           })()}
+          <div style={styles.formGroup}><label style={styles.label}>Quotation No. <span style={{ fontWeight:400, color:'#aaa' }}>(custom — then auto-ascending)</span></label><input value={t.quoteNo||''} onChange={e=>set('quoteNo',e.target.value)} style={{ ...styles.input, maxWidth:220 }} placeholder={nextQuoteNo()}/></div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <div style={styles.formGroup}><label style={styles.label}>Covering Note (quotation cover page)</label><textarea value={t.coveringNote||''} onChange={e=>set('coveringNote',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='We are pleased to submit our quotation for the above works...'/></div>
             <div style={styles.formGroup}><label style={styles.label}>Terms &amp; Conditions (quotation)</label><textarea value={t.terms||''} onChange={e=>set('terms',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='1. Prices valid for 90 days.&#10;2. Payment: 30% advance...&#10;3. Delivery: as agreed.'/></div>
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes (internal)</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
           <div style={{ display:'flex', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
-            <button onClick={()=>{ save(t); setQuoteDoc(t); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
+            <button onClick={()=>{ const withNo = t.quoteNo ? t : { ...t, quoteNo: nextQuoteNo() }; if (!t.quoteNo) set('quoteNo', withNo.quoteNo); save(withNo); setQuoteDoc(withNo); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
             <div style={{ display:'flex', gap:10 }}>
               <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
               <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
@@ -20311,7 +20316,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
                         <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
-                        <button onClick={()=>setQuoteDoc(t)} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
+                        <button onClick={()=>{ const withNo = t.quoteNo ? t : { ...t, quoteNo: nextQuoteNo() }; if (!t.quoteNo) save(withNo); setQuoteDoc(withNo); }} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
                         <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
@@ -20413,7 +20418,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       const sub = boqSubtotal(t);
       const tax = cc.hasTax ? calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState) : null;
       const grand = tax ? tax.grandTotal : sub;
-      const quoteNo = 'QTN-' + (String(t.number||'').replace(/\D/g,'') || '001');
+      const quoteNo = t.quoteNo || 'QTN-001';
       const today = new Date().toLocaleDateString('en-GB');
       const groups={}, order=[];
       (t.boq||[]).forEach(l=>{const k=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(l);});
