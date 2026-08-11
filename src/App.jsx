@@ -3796,7 +3796,7 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  matrequests: 'Material Requests', procurement: 'Procurement', manpower: 'Manpower',
+  matrequests: 'Material Requests', procurement: 'Procurement',
   variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
@@ -17896,6 +17896,106 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], siteActivities = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
+  const [projFilter, setProjFilter] = React.useState('all');
+  const [editing, setEditing] = React.useState(null);
+  const canEdit = ['admin', 'manager', 'engineer', 'staff'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const TRADES = ['Foreman', 'Supervisor', 'Electrician', 'Helper', 'Plumber', 'HVAC Technician', 'Mason', 'Carpenter', 'Fabricator', 'Welder', 'Painter', 'Labour', 'Other'];
+  const DISC = ['Electrical', 'Plumbing', 'HVAC', 'Firefighting', 'Civil', 'ELV', 'General'];
+  const scoped = isMultiBiz ? manpowerLogs.filter(l => (l.bizType || 'trading') === currentBizType) : manpowerLogs;
+  const list = scoped.filter(l => projFilter === 'all' || String(l.projectId) === String(projFilter)).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+  const mh = l => (parseFloat(l.workers) || 0) * (parseFloat(l.hours) || 0);
+  const totWorkers = list.reduce((s, l) => s + (parseFloat(l.workers) || 0), 0);
+  const totMH = list.reduce((s, l) => s + mh(l), 0);
+  const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
+
+  function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setManpowerLogs(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
+  function del(id) { if (!window.confirm('Delete this entry?')) return; setManpowerLogs(prev => prev.filter(x => x.id !== id)); }
+  function blank() { return { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), projectId: projFilter !== 'all' ? projFilter : '', discipline: 'Electrical', trade: 'Electrician', workers: 1, hours: 8, activityId: '', remarks: '' }; }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  const projActs = siteActivities.filter(a => !editing || !editing.projectId || String(a.projectId) === String(editing.projectId));
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Manpower</h2>
+          <p style={styles.muted}>Daily manpower deployment &amp; man-hours per project</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> Log Manpower</button>}
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={projFilter} onChange={e => setProjFilter(e.target.value)} style={{ ...styles.input, maxWidth: 260 }}>
+          <option value="all">All projects</option>
+          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Workers (man-days): <b>{totWorkers.toLocaleString()}</b></span>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Total Man-hours: <b>{totMH.toLocaleString()}</b></span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No manpower entries yet. Click "Log Manpower".</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+            <thead><tr>{['Date', 'Project', 'Discipline', 'Trade', 'Workers', 'Hrs', 'Man-hrs', 'Activity', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Workers', 'Hrs', 'Man-hrs'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(l => (
+                <tr key={l.id}>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{l.date}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(l.projectId)}</td>
+                  <td style={td}>{l.discipline}</td>
+                  <td style={td}>{l.trade}{l.remarks && <div style={{ fontSize: 11, color: '#999' }}>{l.remarks}</div>}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.workers}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.hours}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{mh(l).toLocaleString()}</td>
+                  <td style={td}>{(siteActivities.find(a => a.id === l.activityId) || {}).name || '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(l)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(l.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (() => {
+        const set = (k, v) => setEditing(p => ({ ...p, [k]: v }));
+        const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+        const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+        return (
+          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+            <div style={modalCard} onClick={e => e.stopPropagation()}>
+              <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.remarks || editing.workers ? 'Edit' : 'New'} Manpower Entry</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Date</label><input type="date" style={styles.input} value={editing.date} onChange={e => set('date', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Project</label><select style={styles.input} value={editing.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Discipline</label><select style={styles.input} value={editing.discipline} onChange={e => set('discipline', e.target.value)}>{DISC.map(d => <option key={d}>{d}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Trade</label><select style={styles.input} value={editing.trade} onChange={e => set('trade', e.target.value)}>{TRADES.map(tr => <option key={tr}>{tr}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>No. of Workers</label><input type="number" style={styles.input} value={editing.workers} onChange={e => set('workers', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Hours / worker</label><input type="number" style={styles.input} value={editing.hours} onChange={e => set('hours', e.target.value)} /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Activity (optional)</label><select style={styles.input} value={editing.activityId} onChange={e => set('activityId', e.target.value)}><option value="">—</option>{projActs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+              <div style={{ fontSize: 12.5, color: '#1A7A3E', marginBottom: 14 }}>Man-hours: <b>{((parseFloat(editing.workers)||0)*(parseFloat(editing.hours)||0)).toLocaleString()}</b></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+                <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } save(editing); }}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [catFilter, setCatFilter]   = React.useState('all');
@@ -22550,6 +22650,7 @@ export default function App() {
   const [clientMaterials,  _setCM]     = useState([]);
   const [projectDocuments, _setPDocs]  = useState([]);
   const [resources,        _setRes]    = useState([]);
+  const [manpowerLogs,     _setMPL]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -22736,6 +22837,7 @@ export default function App() {
       _setCM(data.clientMaterials || []);
       _setPDocs(data.projectDocuments || []);
       _setRes(data.resources || []);
+      _setMPL(data.manpowerLogs || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
@@ -22831,6 +22933,7 @@ export default function App() {
   const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
   const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
   const setResources        = mkSet(_setRes,   'resources');
+  const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -23009,7 +23112,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -23058,6 +23161,7 @@ export default function App() {
     if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
     if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
     if (backup.resources) setResources(backup.resources);
+    if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -23254,6 +23358,18 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'manpower') return (
+      <ManpowerView
+        manpowerLogs={manpowerLogs}
+        setManpowerLogs={setManpowerLogs}
+        siteProjects={siteProjects}
+        siteActivities={siteActivities}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+      />
+    );
     if (view === 'resourcemaster') return (
       <ResourceMasterView
         resources={resources}
