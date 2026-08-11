@@ -4108,8 +4108,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_bom" label="BOM & Materials">
               <NavBtn id="mepbom"          label="Project BOM"      icon={ClipboardList} />
-              <NavBtn id="matrequests"     label="Material Requests" icon={FileText} />
-              <NavBtn id="procurement"     label="Procurement"      icon={Truck} />
               <NavBtn id="clientmaterials" label="Client Materials" icon={Package} />
             </Section>
 
@@ -10955,7 +10953,7 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
   const today = new Date().toISOString().slice(0, 10);
-  const blankItem = () => ({ itemId: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
+  const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
   const blank = () => ({
     type: 'project', linkId: '', linkName: '',
     date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
@@ -11027,6 +11025,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
       const m = (items || []).find(x => String(x.id) === String(it.itemId));
       return {
         itemId: it.itemId || '',
+        itemCode: it.itemCode || '',
         name: it.name || it.itemName || it.description || it.material || it.materialName || '',
         uom: it.unit || it.uom || '',
         qty: ((parseFloat(it.qty) || 0) * mult) || '',
@@ -11138,25 +11137,26 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
 
           <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
-            <label style={lbl}>Auto-fill items from BOM (optional)</label>
+            <label style={lbl}>Request via Project BOM  <span style={{ fontWeight: 400, color: '#999' }}>— or leave blank &amp; add items manually (non-BOM)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
-              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select BOM —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
+              <div><select style={inp} value={e.bomRef} onChange={ev => upd({ bomRef: ev.target.value })}><option value="">— Select Project BOM (via BOM) —</option>{allBoms.map(b => <option key={b.ref} value={b.ref}>{b.label}</option>)}</select></div>
               <div><input type="number" min="1" style={inp} value={e.bomMult} onChange={ev => upd({ bomMult: ev.target.value })} placeholder="× Qty" title="Multiplier" /></div>
               <button style={{ ...styles.secondaryBtn, whiteSpace: 'nowrap' }} onClick={loadFromBom}>Load items ↓</button>
             </div>
-            {allBoms.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>No BOMs found yet.</div>}
+            <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>{allBoms.length === 0 ? 'No Project BOMs yet — add items manually below (non-BOM).' : 'Via BOM: pick a Project BOM to auto-load its items. Non-BOM: skip this and add items manually below.'}</div>
           </div>
 
           <div style={card}>
             <label style={lbl}>Items required</label>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['#', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <thead><tr>{['#', 'Item Code', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
               <tbody>
                 {(e.items || []).map((it, i) => {
                   const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
                   return (
                   <tr key={i}>
                     <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><input style={{ ...inp, width: 96, fontFamily: 'monospace', fontSize: 11 }} value={it.itemCode || ''} onChange={ev => setRow(i, 'itemCode', ev.target.value)} placeholder="code" /></td>
                     <td style={td}><select style={inp} value={it.itemId} onChange={ev => pickItem(i, ev.target.value)}><option value="">— pick —</option>{(items || []).map(x => <option key={x.id} value={String(x.id)}>{x.name}</option>)}</select></td>
                     <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Item / material" /></td>
                     <td style={td}><input style={{ ...inp, width: 90 }} value={it.hsn || ''} onChange={ev => setRow(i, 'hsn', ev.target.value)} placeholder="HSN" /></td>
@@ -11172,7 +11172,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={7} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Total</td>
+                  <td colSpan={8} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Total</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{(e.items || []).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td colSpan={2}></td>
                 </tr>
