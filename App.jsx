@@ -3796,7 +3796,7 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
+  subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
   dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
@@ -17931,6 +17931,117 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function VariationsView({ variations = [], setVariations, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
+  const [projFilter, setProjFilter] = React.useState('all');
+  const [editing, setEditing] = React.useState(null);
+  const canEdit = ['admin', 'manager', 'engineer', 'staff'].includes(userRole);
+  const canApprove = ['admin', 'manager'].includes(userRole);
+  const fmt = makeFmt(businessInfo);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const STATUSES = ['Draft', 'Submitted', 'Approved', 'Rejected'];
+  const stColor = st => ({ Approved: '#1A7A3E', Submitted: '#2C6FB5', Rejected: '#B5453A', Draft: '#B0AC9F' }[st] || '#888');
+  const scoped = isMultiBiz ? variations.filter(v => (v.bizType || 'trading') === currentBizType) : variations;
+  const list = scoped.filter(v => projFilter === 'all' || String(v.projectId) === String(projFilter)).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+  const signed = v => (v.type === 'Omission' ? -1 : 1) * (parseFloat(v.amount) || 0);
+  const approvedAdd = list.filter(v => v.status === 'Approved' && v.type !== 'Omission').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const approvedOmit = list.filter(v => v.status === 'Approved' && v.type === 'Omission').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const net = approvedAdd - approvedOmit;
+  const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
+  function nextNo() { const nums = scoped.map(v => parseInt(String(v.voNo || '').replace(/\D/g, '')) || 0); return 'VO-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0'); }
+  function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setVariations(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
+  function del(id) { if (!window.confirm('Delete this VO?')) return; setVariations(prev => prev.filter(x => x.id !== id)); }
+  function setStatus(id, status) { setVariations(prev => prev.map(x => x.id === id ? { ...x, status } : x)); }
+  function blank() { return { id: crypto.randomUUID(), voNo: nextNo(), projectId: projFilter !== 'all' ? projFilter : '', date: new Date().toISOString().slice(0, 10), title: '', type: 'Addition', amount: 0, status: 'Draft', reason: '', remarks: '' }; }
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Variations (VO)</h2>
+          <p style={styles.muted}>Variation Orders — additions / omissions to the contract</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New VO</button>}
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={projFilter} onChange={e => setProjFilter(e.target.value)} style={{ ...styles.input, maxWidth: 240 }}>
+          <option value="all">All projects</option>
+          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: '#1a6b30' }}>Approved Additions: <b>{fmt(approvedAdd)}</b></span>
+        <span style={{ fontSize: 13, color: '#B5453A' }}>Omissions: <b>{fmt(approvedOmit)}</b></span>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Net Variation: <b style={{ color: net >= 0 ? '#1a6b30' : '#B5453A' }}>{fmt(net)}</b></span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No variation orders yet. Click "New VO".</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+            <thead><tr>{['VO No', 'Project', 'Date', 'Description', 'Type', 'Amount', 'Status', 'Workflow', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: h === 'Amount' ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(v => (
+                <tr key={v.id}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{v.voNo}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(v.projectId)}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{v.date}</td>
+                  <td style={td}>{v.title}{v.reason && <div style={{ fontSize: 11, color: '#999' }}>{v.reason}</div>}</td>
+                  <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: v.type === 'Omission' ? '#B5453A' : '#1a6b30' }}>{v.type}</span></td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600, color: v.type === 'Omission' ? '#B5453A' : '#1E2A4A' }}>{v.type === 'Omission' ? '− ' : '+ '}{fmt(v.amount)}</td>
+                  <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: stColor(v.status), padding: '2px 8px', borderRadius: 20 }}>{v.status}</span></td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                    {canEdit && v.status === 'Draft' && <button onClick={() => setStatus(v.id, 'Submitted')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#2C6FB5' }}>Submit</button>}
+                    {canApprove && v.status === 'Submitted' && <>
+                      <button onClick={() => setStatus(v.id, 'Approved')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#1A7A3E' }}>Approve</button>
+                      <button onClick={() => setStatus(v.id, 'Rejected')} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>Reject</button>
+                    </>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(v)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(v.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (() => {
+        const set = (k, v) => setEditing(p => ({ ...p, [k]: v }));
+        const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+        const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+        return (
+          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+            <div style={modalCard} onClick={e => e.stopPropagation()}>
+              <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.title ? 'Edit' : 'New'} Variation Order — {editing.voNo}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>VO No.</label><input style={styles.input} value={editing.voNo} onChange={e => set('voNo', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Date</label><input type="date" style={styles.input} value={editing.date} onChange={e => set('date', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Project</label><select style={styles.input} value={editing.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Type</label><select style={styles.input} value={editing.type} onChange={e => set('type', e.target.value)}><option>Addition</option><option>Omission</option></select></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Description</label><input style={styles.input} value={editing.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Additional 12 light points in lobby" /></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Amount ({(COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency})</label><input type="number" style={styles.input} value={editing.amount} onChange={e => set('amount', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Status</label><select style={styles.input} value={editing.status} onChange={e => set('status', e.target.value)}>{STATUSES.map(s => <option key={s}>{s}</option>)}</select></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Reason / Justification</label><input style={styles.input} value={editing.reason} onChange={e => set('reason', e.target.value)} /></div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+                <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } if (!editing.title) { alert('Enter a description'); return; } save(editing); }}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], siteActivities = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [editing, setEditing] = React.useState(null);
@@ -22695,6 +22806,7 @@ export default function App() {
   const [projectDocuments, _setPDocs]  = useState([]);
   const [resources,        _setRes]    = useState([]);
   const [manpowerLogs,     _setMPL]    = useState([]);
+  const [variations,       _setVAR]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -22882,6 +22994,7 @@ export default function App() {
       _setPDocs(data.projectDocuments || []);
       _setRes(data.resources || []);
       _setMPL(data.manpowerLogs || []);
+      _setVAR(data.variations || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
@@ -22978,6 +23091,7 @@ export default function App() {
   const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
   const setResources        = mkSet(_setRes,   'resources');
   const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
+  const setVariations       = mkSet(_setVAR,   'variations');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -23156,7 +23270,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -23206,6 +23320,7 @@ export default function App() {
     if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
     if (backup.resources) setResources(backup.resources);
     if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
+    if (backup.variations) setVariations(backup.variations);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -23402,6 +23517,17 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'variations') return (
+      <VariationsView
+        variations={variations}
+        setVariations={setVariations}
+        siteProjects={siteProjects}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+      />
+    );
     if (view === 'manpower') return (
       <ManpowerView
         manpowerLogs={manpowerLogs}
