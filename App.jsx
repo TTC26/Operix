@@ -3796,7 +3796,6 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  matrequests: 'Material Requests', procurement: 'Procurement', manpower: 'Manpower',
   variations: 'Variations', subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
@@ -4116,7 +4115,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_planning" label="Planning & Progress">
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
-              <NavBtn id="dailyupdates"    label="Daily Updates"    icon={Pencil} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
               <NavBtn id="manpower"        label="Manpower"         icon={Users} />
             </Section>
@@ -11553,7 +11551,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   );
 }
 
-function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, businessInfo }) {
+function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [], progressUpdates = [], mepBoms = [], purchaseReqs = [], subcontractors = [], pettyCash = {}, manpowerLogs = [], businessInfo }) {
   const fmt = makeFmt(businessInfo);
   const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
   const raTotal = (rb) => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
@@ -11567,7 +11565,9 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
     const matCost  = (mepBoms || []).filter(b => String(b.projectId) === String(p.id)).reduce((s, b) => s + (b.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
     const procCost = (purchaseReqs || []).filter(pr => pr.type === 'project' && String(pr.linkId) === String(p.id)).reduce((s, pr) => s + (pr.items || []).reduce((t, i) => t + (parseFloat(i.qty) || 0) * (parseFloat(i.rate) || 0), 0), 0);
     const subCost  = (subcontractors || []).reduce((s, sc) => s + (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).reduce((t, w) => t + (parseFloat(w.value) || 0), 0), 0);
-    const labCost  = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const pcLab    = pcEntries.filter(e => String(e.projectId) === String(p.id)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const mpLab    = (manpowerLogs || []).filter(l => String(l.projectId) === String(p.id)).reduce((s, l) => s + ((parseFloat(l.workers)||0)*((parseFloat(l.hours)||0)+(parseFloat(l.otHours)||0)))*(parseFloat(l.rate)||0), 0);
+    const labCost  = pcLab + mpLab;
     const totalCost = matCost + procCost + subCost + labCost;
     const profitRA = raBilled - totalCost;
     const profitEarned = earned - totalCost;
@@ -11684,7 +11684,7 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
         </div>
       )}
       <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 10, lineHeight: 1.6 }}>
-        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + petty cash tagged to project. Tag petty cash entries to a project to populate Labour.
+        RA Billed = approved RA bills · Earned = contract value × activity % complete · Costs = Project BOM materials + project-linked purchase requisitions + subcontractor work orders + Manpower labour (man-hours × rate) + petty cash tagged to project. Log manpower with a rate to populate Labour cost.
       </div>
     </div>
   );
@@ -15444,10 +15444,12 @@ function BomMaterialsView(props) {
   );
 }
 
-function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo }) {
+function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivities, setSiteActivities, userRole, businessInfo, tenders = [] }) {
   const [subView, setSubView]     = useState('list');   // 'list' | 'edit'
   const [editing, setEditing]     = useState(null);
   const [showCatalogue, setShowCatalogue] = useState(false);
+  const [showTender, setShowTender] = useState(false);
+  const [reportBom, setReportBom] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   const MEP_DISCIPLINES = ['Civil','Electrical','Plumbing','HVAC','Firefighting','ELV','Landscaping','Other'];
@@ -15462,8 +15464,8 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
   }
   function blankItem(seq) {
     return {
-      id: crypto.randomUUID(), seq, description: '', discipline: MEP_DISCIPLINES[0],
-      unit: 'Nos', qty: '', rate: '', plannedStart: '', plannedEnd: '',
+      id: crypto.randomUUID(), seq, itemCode: '', description: '', discipline: MEP_DISCIPLINES[0],
+      unit: 'Nos', qty: '', actualQty: '', variationReason: '', rate: '', plannedStart: '', plannedEnd: '',
       status: 'Pending', activityId: '', catalogueRef: '',
     };
   }
@@ -15503,10 +15505,39 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
     alert('Activity created in Activity Planner!');
   }
 
+  function pushAllToActivities(bom) {
+    if (!bom.projectId) return alert('Select a project first.');
+    const toPush = (editing.items||[]).filter(i => !i.activityId && (i.description||'').trim());
+    if (!toPush.length) return alert('No unlinked items to push (add descriptions first).');
+    if (!confirm('Create ' + toPush.length + ' activities in Activity Planner (batch)?')) return;
+    const newActs = toPush.map(item => ({
+      id: crypto.randomUUID(), projectId: bom.projectId, bomItemId: item.id,
+      name: item.description, discipline: item.discipline,
+      startDate: item.plannedStart, endDate: item.plannedEnd,
+      status: 'not-started', weight: 5, bom: [], bomLocked: false, createdAt: Date.now(),
+    }));
+    const idByItem = {}; newActs.forEach(a => { idByItem[a.bomItemId] = a.id; });
+    setSiteActivities(prev => [...prev, ...newActs]);
+    setEditing(prev => ({ ...prev, items: prev.items.map(i => idByItem[i.id] ? { ...i, activityId: idByItem[i.id] } : i) }));
+    alert(newActs.length + ' activities created in Activity Planner (batch).');
+  }
+
   function importFromCatalogue(catItem) {
     const seq = (editing.items.length || 0) + 1;
     const newItem = { ...blankItem(seq), description: catItem.name, discipline: 'Other', unit: catItem.unit||'Nos', rate: catItem.rate||'', catalogueRef: catItem.id };
     setEditing(prev => ({...prev, items: [...prev.items, newItem]}));
+  }
+  function importFromTender(tender) {
+    const start = editing.items.length || 0;
+    const rows = (tender.boq||[]).map((l,i)=>{
+      const mk = ((parseFloat(l.siteOH)||0)+(parseFloat(l.hoOH)||0)+(parseFloat(l.contingency)||0)+(parseFloat(l.profit)||0))/100;
+      const sell = (parseFloat(l.rate)||0) * (1 + mk);
+      return { ...blankItem(start+i+1), itemCode: l.itemCode||'', description: l.description||'', discipline: MEP_DISCIPLINES.includes(l.subcategory) ? l.subcategory : 'Other', unit: l.unit||'Nos', qty: (parseFloat(l.finalisedQty)||parseFloat(l.tenderQty)||0), actualQty: '', rate: sell };
+    });
+    if (!rows.length) { alert('This tender has no BOQ lines.'); return; }
+    setEditing(prev => ({...prev, items: [...prev.items, ...rows], sourceTenderNo: tender.number, contractRef: prev.contractRef || tender.quoteNo || tender.number }));
+    setShowTender(false);
+    alert(rows.length + ' BOQ line(s) imported as Approved BOM from tender ' + (tender.number||''));
   }
 
   function updateItem(itemId, field, val) {
@@ -15520,7 +15551,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
     setEditing(prev=>({...prev, items: prev.items.filter(i=>i.id!==itemId).map((i,idx)=>({...i,seq:idx+1}))}));
   }
 
-  const currency = businessInfo?.currency || 'AED';
+  const currency = (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency;
   const totalAmt = (editing?.items||[]).reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
 
   const ST_COLOR = { draft:{bg:'#F5F5F5',color:'#888'}, approved:{bg:'#D4EDDA',color:'#1a6b30'} };
@@ -15597,7 +15628,10 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           </h2>
         </div>
         <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>setShowTender(s=>!s)} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}>📄 Import from Tender</button>
+          {canEdit && <button onClick={()=>pushAllToActivities(editing)} style={{ ...styles.ghostBtn, color:'#1E7A9A', borderColor:'#1E7A9A' }} title="Create activities for all unlinked BOM items">→ All to Activities</button>}
           <button onClick={()=>setShowCatalogue(s=>!s)} style={styles.ghostBtn}>📋 Import from Catalogue</button>
+          <button onClick={()=>setReportBom(editing)} style={{ ...styles.ghostBtn, color:'#6B5BAE', borderColor:'#6B5BAE' }}>📊 Variation Report</button>
           {canEdit && <button onClick={()=>saveBom(editing)} style={styles.primaryBtn}><CheckCircle size={14}/> Save BOM</button>}
         </div>
       </div>
@@ -15617,6 +15651,21 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           <input type="date" value={editing.date||''} onChange={e=>setEditing(p=>({...p,date:e.target.value}))} style={styles.input}/>
         </div>
       </div>
+
+      {/* Tender Import Panel */}
+      {showTender && (
+        <div style={{background:'#F4FAF5',border:'1px solid #DCE8D6',borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#1A7A3E'}}>Import Approved BOM from a Tender (finalised BOQ → approved qty, sell rate)</div>
+          {(tenders||[]).length===0 && <div style={{fontSize:12,color:'#888'}}>No tenders yet. Create one in Tender & Estimation.</div>}
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {(tenders||[]).map(tn=>(
+              <button key={tn.id} onClick={()=>importFromTender(tn)} style={{...styles.ghostBtn,fontSize:12,padding:'4px 10px'}}>
+                + {tn.number} · {tn.title||'—'} ({(tn.boq||[]).length} lines · {tn.status})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Catalogue Import Panel */}
       {showCatalogue && (
@@ -15638,7 +15687,7 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
           <thead>
             <tr style={{background:'#F0EDE8'}}>
-              {['#','Description','Discipline','Qty','Unit','Rate','Amount','Plan Start','Plan End','Status','Activity',''].map(h=>(
+              {['#','Item Code','Description','Discipline','Appr Qty','Actual','Var','Var Reason','Unit','Rate','Amount','Plan Start','Plan End','Status','Activity',''].map(h=>(
                 <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:700,fontSize:11,color:'#555',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr>
@@ -15646,10 +15695,12 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           <tbody>
             {editing.items.map((item,idx)=>{
               const amt = (parseFloat(item.qty)||0)*(parseFloat(item.rate)||0);
+              const varv = (parseFloat(item.actualQty)||0) - (parseFloat(item.qty)||0);
               const linkedAct = siteActivities.find(a=>a.id===item.activityId);
               return (
                 <tr key={item.id} style={{borderBottom:'1px solid #EAE6DB'}}>
                   <td style={{padding:'6px 10px',color:'#888',width:30}}>{item.seq}</td>
+                  <td style={{padding:'4px 6px',width:96}}><input value={item.itemCode||''} onChange={e=>updateItem(item.id,'itemCode',e.target.value)} style={{...styles.input,padding:'4px 8px',fontSize:11,fontFamily:'monospace',width:88}}/></td>
                   <td style={{padding:'4px 6px',minWidth:180}}>
                     <input value={item.description} onChange={e=>updateItem(item.id,'description',e.target.value)}
                       style={{...styles.input,padding:'4px 8px',fontSize:12}} placeholder="Work description"/>
@@ -15662,6 +15713,15 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
                   <td style={{padding:'4px 6px',width:70}}>
                     <input type="number" value={item.qty} onChange={e=>updateItem(item.id,'qty',e.target.value)}
                       style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:'4px 6px',width:70}}>
+                    <input type="number" value={item.actualQty} onChange={e=>updateItem(item.id,'actualQty',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:12,width:60}} placeholder="0"/>
+                  </td>
+                  <td style={{padding:'6px 8px',fontWeight:600,width:50,textAlign:'right',color:varv===0?'#888':(varv>0?'#1a6b30':'#B5453A')}}>{varv?varv.toLocaleString():'—'}</td>
+                  <td style={{padding:'4px 6px',minWidth:130}}>
+                    <input value={item.variationReason||''} onChange={e=>updateItem(item.id,'variationReason',e.target.value)}
+                      style={{...styles.input,padding:'4px 8px',fontSize:11}} placeholder="variation reason"/>
                   </td>
                   <td style={{padding:'4px 6px',width:70}}>
                     <input value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)}
@@ -15726,6 +15786,64 @@ function MepBomView({ mepBoms, setMepBoms, siteProjects, scopeOfWork, siteActivi
           </button>
         ))}
       </div>
+
+      {reportBom && (()=>{
+        const b = reportBom;
+        const proj = siteProjects.find(p=>p.id===b.projectId);
+        const rows = (b.items||[]);
+        let tAppr=0, tAct=0, tApprAmt=0, tActAmt=0;
+        rows.forEach(it=>{ const ap=parseFloat(it.qty)||0, ac=parseFloat(it.actualQty)||0, r=parseFloat(it.rate)||0; tAppr+=ap; tAct+=ac; tApprAmt+=ap*r; tActAmt+=ac*r; });
+        const tVarAmt = tActAmt - tApprAmt;
+        const money = (v)=> currency + ' ' + (v||0).toLocaleString('en',{minimumFractionDigits:2});
+        return (
+          <DocPrintOverlay onClose={()=>setReportBom(null)} filename={`Variation-Report-${b.ref||proj?.name||'BOM'}.pdf`} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:18 }}>
+              <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>BOM VARIATION REPORT</div>
+              <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{proj?.name||'Project'} &nbsp;|&nbsp; {b.ref||'BOM'} &nbsp;|&nbsp; {b.date||''}</div>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, marginBottom:14 }}>
+              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Item Code','Description','Disc.','Unit','Appr Qty','Actual Qty','Var Qty','Rate','Appr Amt','Actual Amt','Var Amt','Reason'].map(h=><th key={h} style={{ padding:'6px 7px', textAlign:['Appr Qty','Actual Qty','Var Qty','Rate','Appr Amt','Actual Amt','Var Amt','#'].includes(h)?'right':'left', fontSize:10, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((it,i)=>{ const ap=parseFloat(it.qty)||0, ac=parseFloat(it.actualQty)||0, r=parseFloat(it.rate)||0; const vq=ac-ap; const va=ac*r-ap*r; return (
+                  <tr key={it.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+                    <td style={{ padding:'5px 7px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                    <td style={{ padding:'5px 7px', fontFamily:'monospace', fontSize:10.5 }}>{it.itemCode||''}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.description}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.discipline}</td>
+                    <td style={{ padding:'5px 7px' }}>{it.unit}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{ap.toLocaleString()}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{ac.toLocaleString()}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right', fontWeight:600, color:vq===0?'#888':(vq>0?'#1a6b30':'#B5453A') }}>{vq?vq.toLocaleString():'—'}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{r.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{(ap*r).toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right' }}>{(ac*r).toLocaleString('en',{minimumFractionDigits:2})}</td>
+                    <td style={{ padding:'5px 7px', textAlign:'right', fontWeight:600, color:va===0?'#888':(va>0?'#1a6b30':'#B5453A') }}>{va?va.toLocaleString('en',{minimumFractionDigits:2}):'—'}</td>
+                    <td style={{ padding:'5px 7px', fontSize:11, color:'#555' }}>{it.variationReason||''}</td>
+                  </tr>
+                );})}
+              </tbody>
+              <tfoot>
+                <tr style={{ background:'#1E2A4A', color:'#fff', fontWeight:700 }}>
+                  <td colSpan={5} style={{ padding:'7px', textAlign:'right' }}>TOTAL</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tAppr.toLocaleString()}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tAct.toLocaleString()}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{(tAct-tAppr).toLocaleString()}</td>
+                  <td></td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tApprAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tActAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td style={{ padding:'7px', textAlign:'right' }}>{tVarAmt.toLocaleString('en',{minimumFractionDigits:2})}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+            <div style={{ display:'flex', gap:24, fontSize:13, marginTop:6 }}>
+              <div>Approved Value: <b>{money(tApprAmt)}</b></div>
+              <div>Actual Value: <b>{money(tActAmt)}</b></div>
+              <div>Net Variation: <b style={{ color:tVarAmt>=0?'#1a6b30':'#B5453A' }}>{money(tVarAmt)}</b></div>
+            </div>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -16498,12 +16616,13 @@ function MEPProjectForm({ project, employees, onSave, onClose }) {
 
 // ── Activity Planner (WBS + BOM) ────────────────────────────────────────────────
 // ─── MEP Gantt Chart + Activity Planner ──────────────────────────────────────
-function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [] }) {
+function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [editing, setEditing] = useState(null);
   const [expandedBOM, setExpandedBOM] = useState({});
   const [viewMode, setViewMode] = useState('gantt'); // 'gantt' | 'table'
   const [updateModal, setUpdateModal] = useState(null); // activityId
+  const [printActs, setPrintActs] = useState(false);
   const [ganttStart, setGanttStart] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10);
   });
@@ -16530,6 +16649,23 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     const logs = progressUpdates.filter(u => u.activityId === actId);
     if (!logs.length) return 0;
     return Math.max(...logs.map(u => parseFloat(u.cumProgress)||0));
+  }
+
+  async function exportActsXlsx() {
+    const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
+    const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
+    const aoa = [['#','Discipline','Unit','Activity','Start','End','Duration (days)','Weight %','Progress %','Status'],
+      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.startDate||'', a.endDate||'', dur(a.startDate,a.endDate), a.weight||'', getProgress(a.id), a.status||''])];
+    try {
+      const XLSX = await loadXLSX();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Activities');
+      XLSX.writeFile(wb, 'Activity-Planner-'+(project?.name||'Project')+'.xlsx');
+    } catch(err) {
+      const csv = aoa.map(r=>r.map(c=>{const v=String(c==null?'':c); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+      const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}));
+      const el=document.createElement('a'); el.href=url; el.download='Activity-Planner.csv'; el.click(); URL.revokeObjectURL(url);
+    }
   }
 
   // Gantt helpers
@@ -16580,6 +16716,8 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           <select value={selProject} onChange={e=>setSelProject(e.target.value)} style={{ ...styles.input, width:200 }}>
             {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {acts.length>0 && <button onClick={exportActsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+          {acts.length>0 && <button onClick={()=>setPrintActs(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
             {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
@@ -16771,6 +16909,39 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           onClose={()=>setUpdateModal(null)}
         />
       )}
+      {printActs && (()=>{
+        const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
+        const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
+        const totW = acts.reduce((s,a)=>s+(parseFloat(a.weight)||0),0);
+        const overall = totW ? Math.round(acts.reduce((s,a)=>s+(parseFloat(a.weight)||0)*getProgress(a.id),0)/totW) : 0;
+        return (
+          <DocPrintOverlay onClose={()=>setPrintActs(false)} filename={`Activity-Schedule-${project?.name||'Project'}.pdf`} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:16 }}>
+              <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PROJECT ACTIVITY SCHEDULE</div>
+              <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{project?.name} &nbsp;|&nbsp; Overall Progress: {overall}% &nbsp;|&nbsp; {acts.length} activities</div>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Discipline','Unit','Activity','Start','End','Days','Wt%','Progress','Status'].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['#','Days','Wt%','Progress'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {acts.map((a,i)=>{ const pr=getProgress(a.id); return (
+                  <tr key={a.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#888' }}>{i+1}</td>
+                    <td style={{ padding:'5px 8px' }}>{a.discipline}</td>
+                    <td style={{ padding:'5px 8px' }}>{vName(a.villaId)||'—'}</td>
+                    <td style={{ padding:'5px 8px' }}>{a.name}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.startDate||'—'}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.endDate||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.startDate,a.endDate)}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{a.weight||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:600, color:pr>=100?'#1a6b30':'#1E2A4A' }}>{pr}%</td>
+                    <td style={{ padding:'5px 8px' }}>{a.status||''}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -16839,34 +17010,12 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
           <label style={styles.label}>Cumulative Progress % <span style={{ color:'#C9A24B' }}>(was {lastPct}%)</span></label>
           <input type="number" min={lastPct} max={100} value={form.cumProgress} onChange={e=>set('cumProgress',Math.min(100,Math.max(lastPct,+e.target.value)))} style={styles.input} />
         </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Manpower on site (headcount)</label>
-          <input type="number" min={0} value={form.mpCount} onChange={e=>set('mpCount',e.target.value)} style={styles.input} placeholder="e.g. 5" />
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Total Manhours today</label>
-          <input type="number" min={0} step="0.5" value={form.totalManhours} onChange={e=>set('totalManhours',e.target.value)} style={styles.input} placeholder="e.g. 40" />
-        </div>
       </div>
 
-      {/* Per-employee hours */}
-      {employees.length > 0 && (
-        <div style={{ marginBottom:12 }}>
-          <div style={{ ...styles.label, marginBottom:6 }}>Employee-wise hours</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:140, overflowY:'auto' }}>
-            {employees.map(emp => {
-              const eh = form.empHours.find(e=>e.empId===emp.id);
-              return (
-                <div key={emp.id} style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <span style={{ fontSize:12, flex:1, color:'#555' }}>{emp.name}</span>
-                  <input type="number" min={0} step="0.5" value={eh?.hours||''} onChange={e=>setEmpHour(emp.id,e.target.value)}
-                    style={{ ...styles.input, width:80, padding:'4px 8px', fontSize:12 }} placeholder="hrs" />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Manpower moved to dedicated Manpower module */}
+      <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:8, padding:'9px 12px', marginBottom:12, fontSize:12, color:'#1A7A3E' }}>
+        👷 Manpower &amp; man-hours are now logged in the <b>Manpower module</b> (Planning &amp; Progress → Manpower). Keep this update for progress % &amp; site notes only.
+      </div>
 
       {/* Material consumed */}
       <div style={{ marginBottom:12 }}>
@@ -16908,7 +17057,7 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
 
 
 // ─── MEP Reports View ─────────────────────────────────────────────────────────
-function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employees, businessInfo }) {
+function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employees, businessInfo, manpowerLogs = [] }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [reportType, setReportType] = useState('manhour_summary'); // manhour_summary | emp_report | material_report
   const [fromDate, setFromDate] = useState(() => { const d=new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
@@ -16923,16 +17072,20 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
   const filteredUpdates = progressUpdates.filter(u =>
     u.projectId === selProject && u.date >= fromDate && u.date <= toDate
   );
+  const filteredMP = (manpowerLogs || []).filter(m =>
+    String(m.projectId) === String(selProject) && (m.date || '') >= fromDate && (m.date || '') <= toDate
+  );
 
   // Manhour summary: per activity — date, mp count, manhours, progress
   const manhourRows = acts.map(act => {
     const logs = filteredUpdates.filter(u => u.activityId === act.id);
-    const totalMH = logs.reduce((s,u) => s + (parseFloat(u.totalManhours)||0), 0);
-    const totalMP = logs.reduce((s,u) => s + (parseFloat(u.mpCount)||0), 0);
+    const mpLogs = filteredMP.filter(m => String(m.activityId) === String(act.id));
+    const totalMH = mpLogs.reduce((s,m) => s + (parseFloat(m.workers)||0)*((parseFloat(m.hours)||0)+(parseFloat(m.otHours)||0)), 0);
+    const totalMP = mpLogs.reduce((s,m) => s + (parseFloat(m.workers)||0), 0);
     const latestPct = logs.length ? Math.max(...logs.map(u=>parseFloat(u.cumProgress)||0)) : 0;
     const villa = (project?.villas||[]).find(v=>v.id===act.villaId);
     return { act, logs, totalMH, totalMP, latestPct, villa };
-  }).filter(r => r.logs.length > 0);
+  }).filter(r => r.logs.length > 0 || r.totalMH > 0);
 
   // Employee report: all logs for selected employee
   const empLogs = filteredUpdates.filter(u =>
@@ -17778,6 +17931,115 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], siteActivities = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
+  const [projFilter, setProjFilter] = React.useState('all');
+  const [editing, setEditing] = React.useState(null);
+  const canEdit = ['admin', 'manager', 'engineer', 'staff'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const TRADES = ['Foreman', 'Supervisor', 'Electrician', 'Helper', 'Plumber', 'HVAC Technician', 'Mason', 'Carpenter', 'Fabricator', 'Welder', 'Painter', 'Labour', 'Other'];
+  const DISC = ['Electrical', 'Plumbing', 'HVAC', 'Firefighting', 'Civil', 'ELV', 'General'];
+  const scoped = isMultiBiz ? manpowerLogs.filter(l => (l.bizType || 'trading') === currentBizType) : manpowerLogs;
+  const list = scoped.filter(l => projFilter === 'all' || String(l.projectId) === String(projFilter)).sort((a, b) => ((a.date || '') < (b.date || '') ? 1 : -1));
+  const mh = l => (parseFloat(l.workers) || 0) * ((parseFloat(l.hours) || 0) + (parseFloat(l.otHours) || 0));
+  const totWorkers = list.reduce((s, l) => s + (parseFloat(l.workers) || 0), 0);
+  const totMH = list.reduce((s, l) => s + mh(l), 0);
+  const cost = l => mh(l) * (parseFloat(l.rate) || 0);
+  const totCost = list.reduce((s, l) => s + cost(l), 0);
+  const fmt = makeFmt(businessInfo);
+  const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
+
+  function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setManpowerLogs(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
+  function del(id) { if (!window.confirm('Delete this entry?')) return; setManpowerLogs(prev => prev.filter(x => x.id !== id)); }
+  function blank() { return { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), projectId: projFilter !== 'all' ? projFilter : '', discipline: 'Electrical', trade: 'Electrician', workers: 1, hours: 8, otHours: 0, rate: 0, activityId: '', remarks: '' }; }
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6' };
+  const projActs = siteActivities.filter(a => !editing || !editing.projectId || String(a.projectId) === String(editing.projectId));
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Manpower</h2>
+          <p style={styles.muted}>Daily manpower deployment &amp; man-hours per project</p>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> Log Manpower</button>}
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={projFilter} onChange={e => setProjFilter(e.target.value)} style={{ ...styles.input, maxWidth: 260 }}>
+          <option value="all">All projects</option>
+          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Workers (man-days): <b>{totWorkers.toLocaleString()}</b></span>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Total Man-hours: <b>{totMH.toLocaleString()}</b></span>
+        <span style={{ fontSize: 13, color: '#1E2A4A' }}>Labour Cost: <b>{fmt(totCost)}</b></span>
+      </div>
+
+      {list.length === 0 ? (
+        <div style={styles.emptyBox}>No manpower entries yet. Click "Log Manpower".</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+            <thead><tr>{['Date', 'Project', 'Discipline', 'Trade', 'Workers', 'Hrs', 'OT', 'Man-hrs', 'Rate', 'Cost', 'Activity', ''].map((h, i) => <th key={i} style={{ ...th, textAlign: ['Workers', 'Hrs', 'OT', 'Man-hrs', 'Rate', 'Cost'].includes(h) ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(l => (
+                <tr key={l.id}>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{l.date}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(l.projectId)}</td>
+                  <td style={td}>{l.discipline}</td>
+                  <td style={td}>{l.trade}{l.remarks && <div style={{ fontSize: 11, color: '#999' }}>{l.remarks}</div>}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.workers}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.hours}</td>
+                  <td style={{ ...td, textAlign: 'right', color: (parseFloat(l.otHours)||0)?'#C9752A':'#bbb' }}>{l.otHours || 0}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{mh(l).toLocaleString()}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{l.rate ? fmt(l.rate) : '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{cost(l) ? fmt(cost(l)) : '—'}</td>
+                  <td style={td}>{(siteActivities.find(a => a.id === l.activityId) || {}).name || '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {canEdit && <button onClick={() => setEditing(l)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }}>Edit</button>}
+                    {canEdit && <button onClick={() => del(l.id)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B5453A' }}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (() => {
+        const set = (k, v) => setEditing(p => ({ ...p, [k]: v }));
+        const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
+        const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+        return (
+          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+            <div style={modalCard} onClick={e => e.stopPropagation()}>
+              <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.remarks || editing.workers ? 'Edit' : 'New'} Manpower Entry</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Date</label><input type="date" style={styles.input} value={editing.date} onChange={e => set('date', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Project</label><select style={styles.input} value={editing.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Discipline</label><select style={styles.input} value={editing.discipline} onChange={e => set('discipline', e.target.value)}>{DISC.map(d => <option key={d}>{d}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Trade</label><select style={styles.input} value={editing.trade} onChange={e => set('trade', e.target.value)}>{TRADES.map(tr => <option key={tr}>{tr}</option>)}</select></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>No. of Workers</label><input type="number" style={styles.input} value={editing.workers} onChange={e => set('workers', e.target.value)} /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Normal Hrs / worker</label><input type="number" style={styles.input} value={editing.hours} onChange={e => set('hours', e.target.value)} placeholder="8" /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>OT Hrs / worker</label><input type="number" style={styles.input} value={editing.otHours ?? 0} onChange={e => set('otHours', e.target.value)} placeholder="0" /></div>
+                <div style={{ marginBottom: 12 }}><label style={lbl}>Rate (per man-hour, optional)</label><input type="number" style={styles.input} value={editing.rate ?? 0} onChange={e => set('rate', e.target.value)} placeholder="0" /></div>
+              </div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Activity (optional)</label><select style={styles.input} value={editing.activityId} onChange={e => set('activityId', e.target.value)}><option value="">—</option>{projActs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+              <div style={{ marginBottom: 12 }}><label style={lbl}>Remarks</label><input style={styles.input} value={editing.remarks} onChange={e => set('remarks', e.target.value)} /></div>
+              <div style={{ fontSize: 12.5, color: '#1A7A3E', marginBottom: 14 }}>Total Man-hours = {editing.workers||0} workers × ({editing.hours||0} + {editing.otHours||0} OT) = <b>{((parseFloat(editing.workers)||0)*((parseFloat(editing.hours)||0)+(parseFloat(editing.otHours)||0))).toLocaleString()}</b></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+                <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } save(editing); }}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [catFilter, setCatFilter]   = React.useState('all');
@@ -20026,6 +20288,10 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     setTenders(prev => prev.find(x=>x.id===rec.id)?prev.map(x=>x.id===rec.id?rec:x):[...prev,rec]);
     setEditing(null);
   }
+  function nextQuoteNo() {
+    const nums = (tenders||[]).map(x => parseInt(String(x.quoteNo||'').replace(/\D/g,''))||0);
+    return 'QTN-' + String((nums.length?Math.max(...nums):0)+1).padStart(3,'0');
+  }
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
   }
@@ -20224,13 +20490,14 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               </div>
             );
           })()}
+          <div style={styles.formGroup}><label style={styles.label}>Quotation No. <span style={{ fontWeight:400, color:'#aaa' }}>(custom — then auto-ascending)</span></label><input value={t.quoteNo||''} onChange={e=>set('quoteNo',e.target.value)} style={{ ...styles.input, maxWidth:220 }} placeholder={nextQuoteNo()}/></div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <div style={styles.formGroup}><label style={styles.label}>Covering Note (quotation cover page)</label><textarea value={t.coveringNote||''} onChange={e=>set('coveringNote',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='We are pleased to submit our quotation for the above works...'/></div>
             <div style={styles.formGroup}><label style={styles.label}>Terms &amp; Conditions (quotation)</label><textarea value={t.terms||''} onChange={e=>set('terms',e.target.value)} style={{ ...styles.input, height:70 }} placeholder='1. Prices valid for 90 days.&#10;2. Payment: 30% advance...&#10;3. Delivery: as agreed.'/></div>
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes (internal)</label><textarea value={t.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
           <div style={{ display:'flex', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
-            <button onClick={()=>{ save(t); setQuoteDoc(t); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
+            <button onClick={()=>{ const withNo = t.quoteNo ? t : { ...t, quoteNo: nextQuoteNo() }; if (!t.quoteNo) set('quoteNo', withNo.quoteNo); save(withNo); setQuoteDoc(withNo); }} style={{ ...styles.ghostBtn, color:'#1A7A3E', borderColor:'#1A7A3E' }}><FileText size={14}/> Generate Quotation</button>
             <div style={{ display:'flex', gap:10 }}>
               <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
               <button onClick={()=>save(t)} style={styles.primaryBtn}>Save Tender</button>
@@ -20311,7 +20578,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                         <StatusBadge status={t.approvalStatus||'draft'} />
                         <ApprovalActions item={{ status:t.approvalStatus||'draft', rejectionNote:t.approvalNote||'' }} onUpdate={(patch)=>updateApproval(t.id,patch)} userRole={userRole} compact />
                         <button onClick={()=>setPrintDoc(t)} style={styles.iconBtn} title="Export PDF / Print"><Printer size={14}/></button>
-                        <button onClick={()=>setQuoteDoc(t)} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
+                        <button onClick={()=>{ const withNo = t.quoteNo ? t : { ...t, quoteNo: nextQuoteNo() }; if (!t.quoteNo) save(withNo); setQuoteDoc(withNo); }} style={styles.iconBtn} title="Quotation (cover + BOQ + T&C)"><FileText size={14} color="#1A7A3E"/></button>
                         <button onClick={()=>exportTenderXlsx(t)} style={styles.iconBtn} title="Export Excel (.xlsx)"><span style={{ fontSize:10, fontWeight:800, letterSpacing:0.5 }}>XLS</span></button>
                         {canEdit && t.approvalStatus!=='submitted' && <><button onClick={()=>setEditing(t)} style={styles.iconBtn}><Pencil size={14}/></button>
                         <button onClick={()=>{if(window.confirm('Delete?'))setTenders(prev=>prev.filter(x=>x.id!==t.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button></>}
@@ -20413,7 +20680,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
       const sub = boqSubtotal(t);
       const tax = cc.hasTax ? calcModuleTax(sub, t.taxRate||0, cc, t.placeOfSupply, sellerState) : null;
       const grand = tax ? tax.grandTotal : sub;
-      const quoteNo = 'QTN-' + (String(t.number||'').replace(/\D/g,'') || '001');
+      const quoteNo = t.quoteNo || 'QTN-001';
       const today = new Date().toLocaleDateString('en-GB');
       const groups={}, order=[];
       (t.boq||[]).forEach(l=>{const k=(l.category||'—')+'||'+(l.subcategory||'—'); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(l);});
@@ -22427,6 +22694,7 @@ export default function App() {
   const [clientMaterials,  _setCM]     = useState([]);
   const [projectDocuments, _setPDocs]  = useState([]);
   const [resources,        _setRes]    = useState([]);
+  const [manpowerLogs,     _setMPL]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -22613,6 +22881,8 @@ export default function App() {
       _setCM(data.clientMaterials || []);
       _setPDocs(data.projectDocuments || []);
       _setRes(data.resources || []);
+      _setMPL(data.manpowerLogs || []);
+      _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
@@ -22707,6 +22977,7 @@ export default function App() {
   const setClientMaterials  = mkSet(_setCM,    'clientMaterials');
   const setProjectDocuments = mkSet(_setPDocs, 'projectDocuments');
   const setResources        = mkSet(_setRes,   'resources');
+  const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -22885,7 +23156,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -22934,6 +23205,7 @@ export default function App() {
     if (backup.clientMaterials) setClientMaterials(backup.clientMaterials);
     if (backup.projectDocuments) setProjectDocuments(backup.projectDocuments);
     if (backup.resources) setResources(backup.resources);
+    if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -23130,6 +23402,18 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'manpower') return (
+      <ManpowerView
+        manpowerLogs={manpowerLogs}
+        setManpowerLogs={setManpowerLogs}
+        siteProjects={siteProjects}
+        siteActivities={siteActivities}
+        userRole={userRole}
+        businessInfo={businessInfo}
+        currentBizType={effectiveBizContext}
+        isMultiBiz={isMultiBiz}
+      />
+    );
     if (view === 'resourcemaster') return (
       <ResourceMasterView
         resources={resources}
@@ -23601,6 +23885,7 @@ export default function App() {
             progressUpdates={progressUpdates}
             setProgressUpdates={setProgressUpdates}
             userRole={userRole}
+            businessInfo={businessInfo}
           />
         );
       case 'dailyupdates':
@@ -23728,6 +24013,7 @@ export default function App() {
             progressUpdates={progressUpdates}
             employees={employees}
             businessInfo={businessInfo}
+            manpowerLogs={manpowerLogs}
           />
         );
       case 'scopeofwork':
@@ -23751,6 +24037,7 @@ export default function App() {
             setSiteActivities={setSiteActivities}
             userRole={userRole}
             businessInfo={businessInfo}
+            tenders={tenders}
           />
         );
       case 'projectpnl':
@@ -23764,6 +24051,7 @@ export default function App() {
             purchaseReqs={purchaseReqs}
             subcontractors={subcontractors}
             pettyCash={pettyCash}
+            manpowerLogs={manpowerLogs}
             businessInfo={businessInfo}
           />
         );
@@ -23906,6 +24194,8 @@ export default function App() {
           />
         );
       case 'purchasereq':
+      case 'matrequests':
+      case 'procurement':
         return (
           <PurchaseRequisitionView
             purchaseReqs={purchaseReqs}
