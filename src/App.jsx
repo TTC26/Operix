@@ -17928,6 +17928,7 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 // ── Client Materials Received ───────────────────────────────────────────────────
 function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBillings = [], subcontractors = [], setSiteProjects, businessInfo, userRole }) {
   const [tab, setTab] = useState('billing');
+  const [printPT, setPrintPT] = useState(false);
   const fmt = makeFmt(businessInfo);
   const canEdit = ['admin','manager','accounts'].includes(userRole);
   const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 0, marginBottom: 12, overflowX: 'auto' };
@@ -17971,16 +17972,40 @@ function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBilling
 
   const sum = keys => rows.reduce((a, r) => { keys.forEach(k => a[k] = (a[k] || 0) + r[k]); return a; }, {});
   const setAdvance = (projId, val) => { if (setSiteProjects) setSiteProjects(prev => prev.map(p => p.id === projId ? { ...p, clientAdvance: val } : p)); };
+  async function exportPTXlsx() {
+    const billing = [['Project','Contract','Claimed','Certified','Net Certified','Received','Outstanding','Subcon Value','Subcon Paid','Subcon Balance'],
+      ...rows.map(r=>[r.p.name||'', r.contractVal, r.claimed, r.certified, r.netCert, r.received, r.outstanding, r.subVal, r.subPaid, r.subBal])];
+    const retention = [['Project','Held by Client (receivable)','Held from Subcon (payable)','Net Exposure'],
+      ...rows.map(r=>[r.p.name||'', r.clientRetention, r.subRetention, r.clientRetention-r.subRetention])];
+    const advances = [['Project','Advance from Client','Recovered','Balance','Advance to Subcon'],
+      ...rows.map(r=>[r.p.name||'', r.clientAdvance, r.advRecovered, r.advBalance, r.subAdvance])];
+    try {
+      const XLSX = await loadXLSX();
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(billing), 'Billing');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(retention), 'Retention');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(advances), 'Advances');
+      XLSX.writeFile(wb, 'Payment-Tracking.xlsx');
+    } catch(err) {
+      const csv = billing.map(r=>r.map(c=>{const v=String(c==null?'':c); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+      const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}));
+      const el=document.createElement('a'); el.href=url; el.download='Payment-Tracking.csv'; el.click(); URL.revokeObjectURL(url);
+    }
+  }
 
   const TABS = [['billing', 'Billing & Payment'], ['retention', 'Retention'], ['advances', 'Advances']];
 
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}>
+      <div style={{ ...styles.pageHeader, display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
         <div>
           <h2 className="serif" style={styles.pageTitle}>Payment Tracking</h2>
           <p style={styles.muted}>Client receivable + subcontractor payable + retention & advances — the full money loop, per project</p>
         </div>
+        {rows.length>0 && <div style={{ display:'flex', gap:8 }}>
+          <button onClick={exportPTXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>
+          <button onClick={()=>setPrintPT(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>
+        </div>}
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {TABS.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...styles.ghostBtn, background: tab === k ? '#1E2A4A' : 'transparent', color: tab === k ? '#fff' : '#555', fontSize: 12 }}>{l}</button>)}
@@ -18104,6 +18129,26 @@ function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBilling
           </div>
         );
       })()}
+      {printPT && (
+        <DocPrintOverlay onClose={()=>setPrintPT(false)} filename="Payment-Tracking.pdf" businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:16 }}>
+            <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PAYMENT TRACKING</div>
+            <div style={{ fontSize:12, color:'#888', marginTop:3 }}>Client receivable · Subcontractor payable · Retention · Advances</div>
+          </div>
+          {[['Billing & Payment', ['Project','Contract','Claimed','Certified','Net Cert','Received','Outstanding'], rows.map(r=>[r.p.name||'', r.contractVal, r.claimed, r.certified, r.netCert, r.received, r.outstanding])],
+            ['Retention', ['Project','Client (recv)','Subcon (pay)','Net'], rows.map(r=>[r.p.name||'', r.clientRetention, r.subRetention, r.clientRetention-r.subRetention])],
+            ['Advances', ['Project','From Client','Recovered','Balance','To Subcon'], rows.map(r=>[r.p.name||'', r.clientAdvance, r.advRecovered, r.advBalance, r.subAdvance])]
+          ].map(([title,heads,data],bi)=>(
+            <div key={bi} style={{ marginBottom:18 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>{title}</div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+                <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{heads.map((h,i)=><th key={h} style={{ padding:'5px 7px', textAlign:i===0?'left':'right', fontWeight:700 }}>{h}</th>)}</tr></thead>
+                <tbody>{data.map((row,ri)=><tr key={ri} style={{ borderBottom:'1px solid #eee', background:ri%2?'#F8F7F4':'#fff' }}>{row.map((cell,ci)=><td key={ci} style={{ padding:'5px 7px', textAlign:ci===0?'left':'right' }}>{ci===0?cell:fmt(cell)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          ))}
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
@@ -21099,6 +21144,26 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
   function updateCertApproval(certId, subId, patch) {
     setSubcontractors(prev=>prev.map(s=>s.id!==subId?s:{...s, certificates:(s.certificates||[]).map(c=>c.id===certId?{...c,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:c)}));
   }
+  async function exportSubXlsx() {
+    const projName = id => siteProjects.find(p=>p.id===id)?.name||'';
+    let aoa, name;
+    if (tab==='register') {
+      aoa=[['Name','Trade','Contact','Phone','Email','Work Orders'], ...subcontractors.map(x=>[x.name||'',x.trade||'',x.contact||'',x.phone||'',x.email||'',(x.workOrders||[]).length])];
+      name='Subcontractors';
+    } else if (tab==='workorders') {
+      aoa=[['Subcontractor','Project','Scope','Value','Advance','Progress','Retention','Final','Balance','Status'], ...allWOs.map(w=>[w.subName||'',projName(w.projectId),w.scope||'',parseFloat(w.value)||0,parseFloat(w.advancePaid)||0,parseFloat(w.progressPaid)||0,parseFloat(w.retentionHeld)||0,parseFloat(w.finalPaid)||0,balance(w),w.status||''])];
+      name='Work-Orders';
+    } else if (tab==='progress') {
+      aoa=[['Subcontractor','Project','Scope','Value','% Complete','Stage','Earned','Paid','Variance','Remarks'], ...allWOs.map(w=>{const val=parseFloat(w.value||0);const pct=Math.max(0,Math.min(100,parseFloat(w.progressPct||0)));const earned=val*pct/100;const paid=parseFloat(w.advancePaid||0)+parseFloat(w.progressPaid||0)+parseFloat(w.finalPaid||0);return [w.subName||'',projName(w.projectId),w.scope||'',val,pct,w.stage||'',earned,paid,paid-earned,w.progressRemarks||''];})];
+      name='Subcontractor-Progress';
+    } else {
+      aoa=[['Cert No','Type','Subcontractor','Amount','Retention Released','Status','Date','Notes'], ...allCerts.map(c=>[c.number||'',c.type||'',c.subName||'',parseFloat(c.amount)||0,parseFloat(c.retentionReleased)||0,c.approvalStatus||'draft',c.date||'',c.note||''])];
+      name='Certificates';
+    }
+    try {
+      const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31)); XLSX.writeFile(wb,name+'.xlsx');
+    } catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download=name+'.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
 
   const TABS = [['register','Register'],['workorders','Work Orders'],['progress','Progress'],['certification','Certification']];
 
@@ -21220,9 +21285,12 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     <div style={{ padding:'24px 32px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <h2 className="serif" style={styles.pageTitle}>Subcontractor Management</h2>
-        {canEdit && tab==='register' && <button onClick={()=>setEditing(blankSub())} style={styles.primaryBtn}><Plus size={15}/> Add Subcontractor</button>}
-        {canEdit && tab==='workorders' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingWO(blankWO(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Work Order</button>}
-        {canEdit && tab==='certification' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingCert(blankCert(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Certificate</button>}
+        <div style={{ display:'flex', gap:8 }}>
+          {subcontractors.length>0 && <button onClick={exportSubXlsx} style={styles.ghostBtn} title="Export current tab to Excel (.xlsx)">⭳ Excel</button>}
+          {canEdit && tab==='register' && <button onClick={()=>setEditing(blankSub())} style={styles.primaryBtn}><Plus size={15}/> Add Subcontractor</button>}
+          {canEdit && tab==='workorders' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingWO(blankWO(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Work Order</button>}
+          {canEdit && tab==='certification' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingCert(blankCert(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Certificate</button>}
+        </div>
       </div>
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{l}</button>)}
