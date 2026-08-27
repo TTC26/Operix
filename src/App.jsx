@@ -4124,8 +4124,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_subcon" label="Subcontractors">
               <NavBtn id="subcontractors"   label="Subcontractor Master" icon={Truck} />
-              <NavBtn id="subprogress"      label="Progress"             icon={BarChart2} />
-              <NavBtn id="subcertification" label="Certification"        icon={CheckSquare} />
             </Section>
 
             <Section sectionKey="mep_hse" label="HSE">
@@ -17928,84 +17926,184 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
-function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBillings = [], subcontractors = [], businessInfo }) {
+function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBillings = [], subcontractors = [], setSiteProjects, businessInfo, userRole }) {
+  const [tab, setTab] = useState('billing');
   const fmt = makeFmt(businessInfo);
-  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
-  const raTotal = rb => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
-  const rows = (siteProjects || []).map(p => {
-    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
-    const contractVal = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
-    const bills = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id));
-    const billed = bills.reduce((s, rb) => s + raTotal(rb), 0);
-    const received = bills.filter(rb => rb.status === 'paid').reduce((s, rb) => s + raTotal(rb), 0);
-    const outstanding = billed - received;
-    let subVal = 0, subPaid = 0;
-    (subcontractors || []).forEach(sc => (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).forEach(w => {
-      subVal += parseFloat(w.value) || 0;
-      subPaid += (parseFloat(w.advancePaid) || 0) + (parseFloat(w.progressPaid) || 0) + (parseFloat(w.finalPaid) || 0);
-    }));
-    const subBal = subVal - subPaid;
-    return { p, contractVal, billed, received, outstanding, subVal, subPaid, subBal };
-  }).filter(r => r.contractVal || r.billed || r.subVal);
-  const tot = rows.reduce((a, r) => ({ contractVal: a.contractVal + r.contractVal, billed: a.billed + r.billed, received: a.received + r.received, outstanding: a.outstanding + r.outstanding, subVal: a.subVal + r.subVal, subPaid: a.subPaid + r.subPaid, subBal: a.subBal + r.subBal }), { contractVal: 0, billed: 0, received: 0, outstanding: 0, subVal: 0, subPaid: 0, subBal: 0 });
+  const canEdit = ['admin','manager','accounts'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 0, marginBottom: 12, overflowX: 'auto' };
   const th = { textAlign: 'right', fontSize: 11, color: '#888780', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
   const thL = { ...th, textAlign: 'left' };
   const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', textAlign: 'right', whiteSpace: 'nowrap' };
   const tdL = { ...td, textAlign: 'left', fontWeight: 600, color: '#1E2A4A' };
+  const tfootTd = { ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 };
+
+  // ── Per-bill client-side certification maths ──
+  const billClaim = rb => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
+  const billCert = rb => (rb.certifiedAmount === '' || rb.certifiedAmount == null) ? billClaim(rb) : (parseFloat(rb.certifiedAmount) || 0);
+  const billRet = rb => billCert(rb) * (parseFloat(rb.retentionPct) || 0) / 100;
+  const billNet = rb => billCert(rb) - billRet(rb) - (parseFloat(rb.advanceRecovery) || 0) - (parseFloat(rb.otherDeductions) || 0);
+  const billRcv = rb => parseFloat(rb.receivedAmount) || 0;
+
+  const rows = (siteProjects || []).map(p => {
+    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
+    const contractVal = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
+    const bills = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id));
+    const claimed = bills.reduce((s, rb) => s + billClaim(rb), 0);
+    const certified = bills.reduce((s, rb) => s + billCert(rb), 0);
+    const clientRetention = bills.reduce((s, rb) => s + billRet(rb), 0);
+    const advRecovered = bills.reduce((s, rb) => s + (parseFloat(rb.advanceRecovery) || 0), 0);
+    const netCert = bills.reduce((s, rb) => s + billNet(rb), 0);
+    const received = bills.reduce((s, rb) => s + billRcv(rb), 0);
+    const outstanding = netCert - received;
+    const clientAdvance = parseFloat(p.clientAdvance) || 0;
+    const advBalance = clientAdvance - advRecovered;
+    // Subcontractor payable side
+    let subVal = 0, subPaid = 0, subRetention = 0, subAdvance = 0;
+    (subcontractors || []).forEach(sc => (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).forEach(w => {
+      subVal += parseFloat(w.value) || 0;
+      subPaid += (parseFloat(w.advancePaid) || 0) + (parseFloat(w.progressPaid) || 0) + (parseFloat(w.finalPaid) || 0);
+      subRetention += parseFloat(w.retentionHeld) || 0;
+      subAdvance += parseFloat(w.advancePaid) || 0;
+    }));
+    const subBal = subVal - subPaid - subRetention;
+    return { p, contractVal, claimed, certified, clientRetention, advRecovered, netCert, received, outstanding, clientAdvance, advBalance, subVal, subPaid, subRetention, subAdvance, subBal };
+  }).filter(r => r.contractVal || r.claimed || r.subVal || r.clientAdvance);
+
+  const sum = keys => rows.reduce((a, r) => { keys.forEach(k => a[k] = (a[k] || 0) + r[k]); return a; }, {});
+  const setAdvance = (projId, val) => { if (setSiteProjects) setSiteProjects(prev => prev.map(p => p.id === projId ? { ...p, clientAdvance: val } : p)); };
+
+  const TABS = [['billing', 'Billing & Payment'], ['retention', 'Retention'], ['advances', 'Advances']];
 
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <div>
           <h2 className="serif" style={styles.pageTitle}>Payment Tracking</h2>
-          <p style={styles.muted}>Client billing vs received (receivable) &amp; subcontractor payments (payable) — per project</p>
+          <p style={styles.muted}>Client receivable + subcontractor payable + retention & advances — the full money loop, per project</p>
         </div>
       </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {TABS.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...styles.ghostBtn, background: tab === k ? '#1E2A4A' : 'transparent', color: tab === k ? '#fff' : '#555', fontSize: 12 }}>{l}</button>)}
+      </div>
+
       {rows.length === 0 ? (
         <div style={styles.emptyBox}>No project billing yet. Raise RA Bills / subcontractor work orders to track payments.</div>
-      ) : (
-        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
-            <thead><tr>
-              <th style={thL}>Project</th>
-              <th style={th}>Contract</th>
-              <th style={th}>RA Billed</th>
-              <th style={th}>Received</th>
-              <th style={th}>Outstanding</th>
-              <th style={th}>Subcon Value</th>
-              <th style={th}>Subcon Paid</th>
-              <th style={th}>Subcon Balance</th>
-            </tr></thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.p.id}>
-                  <td style={tdL}>{r.p.name || 'Untitled'}</td>
-                  <td style={td}>{fmt(r.contractVal)}</td>
-                  <td style={td}>{fmt(r.billed)}</td>
-                  <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.received)}</td>
-                  <td style={{ ...td, fontWeight: 700, color: r.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.outstanding)}</td>
-                  <td style={td}>{fmt(r.subVal)}</td>
-                  <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.subPaid)}</td>
-                  <td style={{ ...td, fontWeight: 700, color: r.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(r.subBal)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td style={{ ...tdL, borderTop: '2px solid #1E2A4A' }}>TOTAL</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.contractVal)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.billed)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#1a6b30' }}>{fmt(tot.received)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: tot.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(tot.outstanding)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.subVal)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#1a6b30' }}>{fmt(tot.subPaid)}</td>
-                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: tot.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(tot.subBal)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
-      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 8 }}>Received = RA Bills marked "paid". Outstanding = Billed − Received (receivable from client). Subcon Balance = Work Order value − payments (payable to subcontractor).</div>
+      ) : tab === 'billing' ? (() => {
+        const t = sum(['contractVal', 'claimed', 'certified', 'netCert', 'received', 'outstanding', 'subVal', 'subPaid', 'subBal']);
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1040 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Contract</th>
+                <th style={th}>Claimed</th>
+                <th style={th}>Certified</th>
+                <th style={th}>Net Certified</th>
+                <th style={th}>Received</th>
+                <th style={th}>Outstanding</th>
+                <th style={th}>Subcon Value</th>
+                <th style={th}>Subcon Paid</th>
+                <th style={th}>Subcon Balance</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={td}>{fmt(r.contractVal)}</td>
+                    <td style={td}>{fmt(r.claimed)}</td>
+                    <td style={td}>{fmt(r.certified)}</td>
+                    <td style={td}>{fmt(r.netCert)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.received)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.outstanding)}</td>
+                    <td style={td}>{fmt(r.subVal)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.subPaid)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(r.subBal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={tfootTd}>{fmt(t.contractVal)}</td>
+                <td style={tfootTd}>{fmt(t.claimed)}</td>
+                <td style={tfootTd}>{fmt(t.certified)}</td>
+                <td style={tfootTd}>{fmt(t.netCert)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.received)}</td>
+                <td style={{ ...tfootTd, color: t.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(t.outstanding)}</td>
+                <td style={tfootTd}>{fmt(t.subVal)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.subPaid)}</td>
+                <td style={{ ...tfootTd, color: t.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(t.subBal)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Claimed = our RA claim. Certified = client-certified amount. Net Certified = certified − retention − advance recovery − deductions. Outstanding = Net Certified − Received.</div>
+          </div>
+        );
+      })() : tab === 'retention' ? (() => {
+        const t = sum(['clientRetention', 'subRetention']);
+        const netExposure = t.clientRetention - t.subRetention;
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Held by Client (receivable)</th>
+                <th style={th}>Held from Subcon (payable)</th>
+                <th style={th}>Net Retention Exposure</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={{ ...td, color: '#B5453A' }}>{fmt(r.clientRetention)}</td>
+                    <td style={{ ...td, color: '#C9752A' }}>{fmt(r.subRetention)}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>{fmt(r.clientRetention - r.subRetention)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={{ ...tfootTd, color: '#B5453A' }}>{fmt(t.clientRetention)}</td>
+                <td style={{ ...tfootTd, color: '#C9752A' }}>{fmt(t.subRetention)}</td>
+                <td style={{ ...tfootTd }}>{fmt(netExposure)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Client retention = money client holds back from our bills (we get it back at DLP). Subcon retention = money we hold from subcontractors (we release at their DLP). Net = our net retention position.</div>
+          </div>
+        );
+      })() : (() => {
+        const t = sum(['clientAdvance', 'advRecovered', 'advBalance', 'subAdvance']);
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Advance from Client</th>
+                <th style={th}>Recovered</th>
+                <th style={th}>Advance Balance</th>
+                <th style={th}>Advance to Subcon</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={td}>{canEdit ? <input type='number' value={r.clientAdvance || 0} onChange={e => setAdvance(r.p.id, parseFloat(e.target.value) || 0)} style={{ ...styles.input, width: 120, padding: '4px 6px', textAlign: 'right' }} /> : fmt(r.clientAdvance)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.advRecovered)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.advBalance > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.advBalance)}</td>
+                    <td style={{ ...td, color: '#C9752A' }}>{fmt(r.subAdvance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={tfootTd}>{fmt(t.clientAdvance)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.advRecovered)}</td>
+                <td style={{ ...tfootTd, color: t.advBalance > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(t.advBalance)}</td>
+                <td style={{ ...tfootTd, color: '#C9752A' }}>{fmt(t.subAdvance)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Enter the mobilization advance received from the client per project. Recovered = sum of advance recovery entered on RA Bills. Balance = still to be recovered from future bills.</div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -21711,7 +21809,7 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
   const sellerState = businessInfo?.state || '';
 
   function blank() {
-    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], taxRate:cc.defaultTaxRate||0, placeOfSupply:'', status:'draft', notes:'' };
+    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], taxRate:cc.defaultTaxRate||0, placeOfSupply:'', status:'draft', notes:'', certifiedAmount:'', retentionPct:0, advanceRecovery:0, otherDeductions:0, receivedAmount:0, receivedDate:'', certDate:'' };
   }
   function blankItem() { return { id:crypto.randomUUID(), description:'', contractValue:0, previousQty:0, thisQty:0, unit:'%' }; }
   function itemAmount(item, tender) {
@@ -21798,6 +21896,25 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
                 onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
               />
             )}
+          </div>
+          {/* ── Client Certification & Payment (IPC) ── */}
+          <div style={{ background:'#F4F1EA', borderRadius:8, padding:14, border:'1px solid #E7E1D4' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:10, textTransform:'uppercase' }}>Client Certification & Payment (IPC)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Certified Amount</label><input type='number' value={b.certifiedAmount??''} placeholder={subtotal.toFixed(0)} onChange={e=>set('certifiedAmount',e.target.value)} style={styles.input}/><span style={{ fontSize:10, color:'#999' }}>Blank = claimed ({(cc.currency||'')+subtotal.toLocaleString(undefined,{maximumFractionDigits:0})})</span></div>
+              <div style={styles.formGroup}><label style={styles.label}>Retention %</label><input type='number' value={b.retentionPct||0} onChange={e=>set('retentionPct',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Advance Recovery</label><input type='number' value={b.advanceRecovery||0} onChange={e=>set('advanceRecovery',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Other Deductions</label><input type='number' value={b.otherDeductions||0} onChange={e=>set('otherDeductions',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Received Amount</label><input type='number' value={b.receivedAmount||0} onChange={e=>set('receivedAmount',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Received Date</label><input type='date' value={b.receivedDate||''} onChange={e=>set('receivedDate',e.target.value)} style={styles.input}/></div>
+            </div>
+            {(()=>{ const cert=(b.certifiedAmount===''||b.certifiedAmount==null)?subtotal:(parseFloat(b.certifiedAmount)||0); const ret=cert*(parseFloat(b.retentionPct)||0)/100; const net=cert-ret-(parseFloat(b.advanceRecovery)||0)-(parseFloat(b.otherDeductions)||0); const rcv=parseFloat(b.receivedAmount)||0; return (
+              <div style={{ marginTop:10, fontSize:12.5, borderTop:'1px solid #E0DACB', paddingTop:8, display:'grid', gap:3 }}>
+                <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#666' }}>Retention held by client</span><span>{(cc.currency||'')+ret.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'#1E2A4A' }}><span>Net Certified (payable to us)</span><span>{(cc.currency||'')+net.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:(net-rcv)>0?'#B5453A':'#1a6b30' }}><span>Outstanding from client</span><span>{(cc.currency||'')+(net-rcv).toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+              </div>
+            ); })()}
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={b.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:56 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
@@ -23780,9 +23897,11 @@ export default function App() {
     if (view === 'paymenttracking') return (
       <PaymentTrackingView
         siteProjects={siteProjects}
+        setSiteProjects={setSiteProjects}
         siteActivities={siteActivities}
         raBillings={raBillings}
         subcontractors={subcontractors}
+        userRole={userRole}
         businessInfo={businessInfo}
       />
     );
