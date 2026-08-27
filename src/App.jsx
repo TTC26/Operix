@@ -3796,7 +3796,6 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
   dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
   projectreports: 'Project Reports',
@@ -4125,7 +4124,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_subcon" label="Subcontractors">
               <NavBtn id="subcontractors"   label="Subcontractor Master" icon={Truck} />
-              <NavBtn id="subworkorders"    label="Work Orders"          icon={FileSignature} />
               <NavBtn id="subprogress"      label="Progress"             icon={BarChart2} />
               <NavBtn id="subcertification" label="Certification"        icon={CheckSquare} />
             </Section>
@@ -20938,11 +20936,14 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
 }
 
 // ─── Subcontractor Management ─────────────────────────────────────────────────
-function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole, businessInfo }) {
-  const [tab, setTab] = useState('register');
+function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole, businessInfo, initialTab='register' }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(()=>{ setTab(initialTab); }, [initialTab]);
   const [editing, setEditing] = useState(null);
   const [editingWO, setEditingWO] = useState(null);
+  const [editingCert, setEditingCert] = useState(null);
   const [printWO, setPrintWO] = useState(null);
+  const [printCert, setPrintCert] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const country = businessInfo?.country || 'other';
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
@@ -20952,7 +20953,7 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
   const allWOs = subcontractors.flatMap(s=>(s.workOrders||[]).map(w=>({...w,subId:s.id,subName:s.name})));
 
   function blankSub() { return { id:'', name:'', trade:'', contact:'', email:'', phone:'', taxId:'', workOrders:[] }; }
-  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active' }; }
+  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active', progressPct:0, stage:'', progressRemarks:'' }; }
 
   function saveSub(sub) {
     const rec = { ...sub, id:sub.id||crypto.randomUUID() };
@@ -20978,7 +20979,30 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     return (parseFloat(wo.value)||0) - (parseFloat(wo.advancePaid)||0) - (parseFloat(wo.progressPaid)||0) - (parseFloat(wo.retentionHeld)||0) - (parseFloat(wo.finalPaid)||0);
   }
 
-  const TABS = [['register','Register'],['workorders','Work Orders']];
+  function patchWO(woId, subId, patch) {
+    setSubcontractors(prev=>prev.map(s=>s.id!==subId?s:{...s, workOrders:(s.workOrders||[]).map(w=>w.id===woId?{...w,...patch}:w)}));
+  }
+  const allCerts = subcontractors.flatMap(s=>(s.certificates||[]).map(c=>({...c,subId:s.id,subName:s.name})));
+  const CERT_TYPES = ['Work Completion','Payment Certificate','Retention Release'];
+  const STAGES = ['Not Started','Mobilization','30%','60%','90%','Completed','Handover'];
+  function blankCert(subId, woId) {
+    const n = allCerts.length+1;
+    return { id:'', subId:subId||(subcontractors[0]?.id||''), woId:woId||'', type:'Work Completion', number:`CERT-${String(n).padStart(3,'0')}`, date:new Date().toISOString().slice(0,10), amount:0, retentionReleased:0, note:'', status:'draft' };
+  }
+  function saveCert(cert) {
+    const rec = { ...cert, id:cert.id||crypto.randomUUID(), approvalStatus:cert.approvalStatus||'draft', approvalNote:cert.approvalNote||'' };
+    setSubcontractors(prev=>prev.map(s=>{
+      if(s.id!==rec.subId) return s;
+      const cs = s.certificates||[];
+      return { ...s, certificates: cs.find(c=>c.id===rec.id)?cs.map(c=>c.id===rec.id?rec:c):[...cs,rec] };
+    }));
+    setEditingCert(null);
+  }
+  function updateCertApproval(certId, subId, patch) {
+    setSubcontractors(prev=>prev.map(s=>s.id!==subId?s:{...s, certificates:(s.certificates||[]).map(c=>c.id===certId?{...c,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:c)}));
+  }
+
+  const TABS = [['register','Register'],['workorders','Work Orders'],['progress','Progress'],['certification','Certification']];
 
   if (editingWO) {
     const wo = editingWO;
@@ -21035,6 +21059,42 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     );
   }
 
+  if (editingCert) {
+    const c = editingCert;
+    const set = (k,v)=>setEditingCert(p=>({...p,[k]:v}));
+    const subWOs = allWOs.filter(w=>w.subId===c.subId);
+    return (
+      <div style={{ maxWidth:620, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditingCert(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{c.id?'Edit':'New'} Certificate</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Certificate No</label><input value={c.number||''} onChange={e=>set('number',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={c.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Type</label>
+              <select value={c.type} onChange={e=>set('type',e.target.value)} style={styles.input}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Subcontractor</label>
+              <select value={c.subId} onChange={e=>{ set('subId',e.target.value); set('woId',''); }} style={styles.input}>{subcontractors.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Work Order</label>
+              <select value={c.woId||''} onChange={e=>set('woId',e.target.value)} style={styles.input}><option value=''>—</option>{subWOs.map(w=>{const p=siteProjects.find(x=>x.id===w.projectId);return <option key={w.id} value={w.id}>{(p?.name||'WO')+' — '+(w.scope||'').slice(0,30)}</option>;})}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Certified Amount</label><input type='number' value={c.amount||0} onChange={e=>set('amount',e.target.value)} style={styles.input}/></div>
+            {c.type==='Retention Release' && <div style={styles.formGroup}><label style={styles.label}>Retention Released</label><input type='number' value={c.retentionReleased||0} onChange={e=>set('retentionReleased',e.target.value)} style={styles.input}/></div>}
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Notes / Remarks</label><textarea value={c.note||''} onChange={e=>set('note',e.target.value)} style={{ ...styles.input, height:70 }}/></div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditingCert(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>saveCert(c)} style={styles.primaryBtn}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (editing) {
     const s = editing;
     const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
@@ -21064,6 +21124,7 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
         <h2 className="serif" style={styles.pageTitle}>Subcontractor Management</h2>
         {canEdit && tab==='register' && <button onClick={()=>setEditing(blankSub())} style={styles.primaryBtn}><Plus size={15}/> Add Subcontractor</button>}
         {canEdit && tab==='workorders' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingWO(blankWO(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Work Order</button>}
+        {canEdit && tab==='certification' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingCert(blankCert(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Certificate</button>}
       </div>
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{l}</button>)}
@@ -21135,6 +21196,87 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
           </div>
         )
       )}
+      {tab==='progress' && (
+        allWOs.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No work orders to track.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:940 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Subcontractor','Project','Scope','Value','% Complete','Stage','Earned','Paid','Variance','Remarks'].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {allWOs.map(wo=>{
+                  const proj = siteProjects.find(p=>p.id===wo.projectId);
+                  const val = parseFloat(wo.value||0);
+                  const pct = Math.max(0,Math.min(100,parseFloat(wo.progressPct||0)));
+                  const earned = val*pct/100;
+                  const paid = parseFloat(wo.advancePaid||0)+parseFloat(wo.progressPaid||0)+parseFloat(wo.finalPaid||0);
+                  const variance = paid-earned;
+                  return (
+                    <tr key={wo.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600 }}>{wo.subName}</td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:'#333', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{wo.scope||'—'}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap' }}>{(cc.currency||'')+val.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', minWidth:120 }}>
+                        {canEdit ? <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                          <input type='number' min='0' max='100' value={wo.progressPct||0} onChange={e=>patchWO(wo.id,wo.subId,{progressPct:e.target.value})} style={{ ...styles.input, width:60, padding:'4px 6px' }}/><span style={{ fontSize:12 }}>%</span>
+                        </div> : <span>{pct}%</span>}
+                        <div style={{ height:5, background:'#EEE', borderRadius:3, marginTop:4, overflow:'hidden' }}><div style={{ width:pct+'%', height:'100%', background:pct>=100?'#1a6b30':'#C9A24B' }}/></div>
+                      </td>
+                      <td style={{ padding:'8px 12px' }}>
+                        {canEdit ? <select value={wo.stage||''} onChange={e=>patchWO(wo.id,wo.subId,{stage:e.target.value})} style={{ ...styles.input, padding:'4px 6px', minWidth:110 }}>
+                          <option value=''>—</option>
+                          {STAGES.map(st=><option key={st} value={st}>{st}</option>)}
+                        </select> : (wo.stage||'—')}
+                      </td>
+                      <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>{(cc.currency||'')+earned.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>{(cc.currency||'')+paid.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap', color:variance>0?'#B5453A':'#1a6b30' }}>{(variance>0?'+':'')+(cc.currency||'')+variance.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px' }}>{canEdit ? <input value={wo.progressRemarks||''} onChange={e=>patchWO(wo.id,wo.subId,{progressRemarks:e.target.value})} placeholder='Site note...' style={{ ...styles.input, padding:'4px 6px', minWidth:140 }}/> : (wo.progressRemarks||'—')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ fontSize:11, color:'#B0AC9F', padding:'8px 12px' }}>Earned = Value × % Complete. Variance = Paid − Earned (positive = over-paid vs progress).</div>
+          </div>
+        )
+      )}
+      {tab==='certification' && (
+        allCerts.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No certificates issued yet. Click “New Certificate” to add one.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:880 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Cert No','Type','Subcontractor','Project','Date','Amount','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {allCerts.map(c=>{
+                  const wo = allWOs.find(w=>w.id===c.woId);
+                  const proj = siteProjects.find(p=>p.id===(wo?.projectId));
+                  return (
+                    <tr key={c.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{c.number}</td>
+                      <td style={{ padding:'8px 12px' }}>{c.type}</td>
+                      <td style={{ padding:'8px 12px' }}>{c.subName}</td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{c.date||'—'}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap' }}>{(cc.currency||'')+parseFloat(c.amount||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px' }}><StatusBadge status={c.approvalStatus||'draft'} /></td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', justifyContent:'flex-end' }}>
+                          <ApprovalActions item={{ status:c.approvalStatus||'draft', rejectionNote:c.approvalNote||'' }} onUpdate={(patch)=>updateCertApproval(c.id,c.subId,patch)} userRole={userRole} compact />
+                          <button onClick={()=>setPrintCert(c)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                          {canEdit && c.approvalStatus!=='submitted' && <button onClick={()=>setEditingCert(c)} style={styles.iconBtn}><Pencil size={14}/></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
     </div>
     {/* ── Subcontractor WO Print Overlay ── */}
     {printWO && (()=>{
@@ -21195,6 +21337,43 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
             {['Subcontractor Signature','Authorised Signatory'].map(s=>(
               <div key={s}>
                 <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{s}</div>
+                <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Date: _______________</div>
+              </div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
+    {printCert && (()=>{
+      const c = printCert;
+      const sub = subcontractors.find(x=>x.id===c.subId);
+      const wo = (sub?.workOrders||[]).find(w=>w.id===c.woId);
+      const proj = siteProjects.find(p=>p.id===(wo?.projectId));
+      const amt = parseFloat(c.amount||0);
+      const TITLES = { 'Work Completion':'WORK COMPLETION CERTIFICATE', 'Payment Certificate':'PAYMENT CERTIFICATE', 'Retention Release':'RETENTION RELEASE CERTIFICATE' };
+      return (
+        <DocPrintOverlay onClose={()=>setPrintCert(null)} filename={`${c.type.replace(/\s/g,'')}-${c.number}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>{TITLES[c.type]||'CERTIFICATE'}</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{c.number}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:16 }}>
+            {[['Subcontractor', sub?.name||'—'],['Trade', sub?.trade||'—'],['Project', proj?.name||'—'],['Work Order Scope', wo?.scope||'—'],['Date', c.date||'—'],['Type', c.type]].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:130 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ background:'#F8F7F4', borderRadius:8, padding:'14px 18px', marginBottom:16, fontSize:14 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'#1E2A4A' }}><span>Certified Amount</span><span>{(cc.currency||'')+amt.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+            {c.type==='Retention Release' && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginTop:6 }}><span>Retention Released</span><span>{(cc.currency||'')+parseFloat(c.retentionReleased||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+          </div>
+          {c.note && <div style={{ marginBottom:16, fontSize:13 }}><b>Notes:</b><div style={{ color:'#555', marginTop:4, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{c.note}</div></div>}
+          <div style={{ fontSize:12.5, color:'#555', lineHeight:1.7, marginBottom:24 }}>This is to certify that the works described above have been {c.type==='Work Completion'?'satisfactorily completed':'assessed'} in accordance with the terms of the subcontract agreement, and the certified amount stated above is {c.type==='Retention Release'?'due for retention release':'due and payable'}.</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:40 }}>
+            {['Prepared By','Approved By'].map(x=>(
+              <div key={x}>
+                <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{x}</div>
                 <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Date: _______________</div>
               </div>
             ))}
@@ -24182,6 +24361,8 @@ export default function App() {
         );
       case 'subcontractors':
       case 'subcontractbilling':
+      case 'subprogress':
+      case 'subcertification':
         return (
           <SubcontractorView
             subcontractors={subcontractors}
@@ -24189,6 +24370,7 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            initialTab={view==='subprogress'?'progress':view==='subcertification'?'certification':'register'}
           />
         );
       case 'hse':
