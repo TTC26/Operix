@@ -3796,7 +3796,6 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
   subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
   hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
   dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
@@ -17931,6 +17930,88 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBillings = [], subcontractors = [], businessInfo }) {
+  const fmt = makeFmt(businessInfo);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, marginBottom: 12 };
+  const raTotal = rb => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
+  const rows = (siteProjects || []).map(p => {
+    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
+    const contractVal = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
+    const bills = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id));
+    const billed = bills.reduce((s, rb) => s + raTotal(rb), 0);
+    const received = bills.filter(rb => rb.status === 'paid').reduce((s, rb) => s + raTotal(rb), 0);
+    const outstanding = billed - received;
+    let subVal = 0, subPaid = 0;
+    (subcontractors || []).forEach(sc => (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).forEach(w => {
+      subVal += parseFloat(w.value) || 0;
+      subPaid += (parseFloat(w.advancePaid) || 0) + (parseFloat(w.progressPaid) || 0) + (parseFloat(w.finalPaid) || 0);
+    }));
+    const subBal = subVal - subPaid;
+    return { p, contractVal, billed, received, outstanding, subVal, subPaid, subBal };
+  }).filter(r => r.contractVal || r.billed || r.subVal);
+  const tot = rows.reduce((a, r) => ({ contractVal: a.contractVal + r.contractVal, billed: a.billed + r.billed, received: a.received + r.received, outstanding: a.outstanding + r.outstanding, subVal: a.subVal + r.subVal, subPaid: a.subPaid + r.subPaid, subBal: a.subBal + r.subBal }), { contractVal: 0, billed: 0, received: 0, outstanding: 0, subVal: 0, subPaid: 0, subBal: 0 });
+  const th = { textAlign: 'right', fontSize: 11, color: '#888780', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const thL = { ...th, textAlign: 'left' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', textAlign: 'right', whiteSpace: 'nowrap' };
+  const tdL = { ...td, textAlign: 'left', fontWeight: 600, color: '#1E2A4A' };
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Payment Tracking</h2>
+          <p style={styles.muted}>Client billing vs received (receivable) &amp; subcontractor payments (payable) — per project</p>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <div style={styles.emptyBox}>No project billing yet. Raise RA Bills / subcontractor work orders to track payments.</div>
+      ) : (
+        <div style={{ ...card, overflowX: 'auto', padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
+            <thead><tr>
+              <th style={thL}>Project</th>
+              <th style={th}>Contract</th>
+              <th style={th}>RA Billed</th>
+              <th style={th}>Received</th>
+              <th style={th}>Outstanding</th>
+              <th style={th}>Subcon Value</th>
+              <th style={th}>Subcon Paid</th>
+              <th style={th}>Subcon Balance</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.p.id}>
+                  <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                  <td style={td}>{fmt(r.contractVal)}</td>
+                  <td style={td}>{fmt(r.billed)}</td>
+                  <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.received)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: r.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.outstanding)}</td>
+                  <td style={td}>{fmt(r.subVal)}</td>
+                  <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.subPaid)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: r.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(r.subBal)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td style={{ ...tdL, borderTop: '2px solid #1E2A4A' }}>TOTAL</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.contractVal)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.billed)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#1a6b30' }}>{fmt(tot.received)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: tot.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(tot.outstanding)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 }}>{fmt(tot.subVal)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: '#1a6b30' }}>{fmt(tot.subPaid)}</td>
+                <td style={{ ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700, color: tot.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(tot.subBal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 8 }}>Received = RA Bills marked "paid". Outstanding = Billed − Received (receivable from client). Subcon Balance = Work Order value − payments (payable to subcontractor).</div>
+    </div>
+  );
+}
+
 function VariationsView({ variations = [], setVariations, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [editing, setEditing] = React.useState(null);
@@ -23517,6 +23598,15 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'paymenttracking') return (
+      <PaymentTrackingView
+        siteProjects={siteProjects}
+        siteActivities={siteActivities}
+        raBillings={raBillings}
+        subcontractors={subcontractors}
+        businessInfo={businessInfo}
+      />
+    );
     if (view === 'variations') return (
       <VariationsView
         variations={variations}
@@ -24091,6 +24181,7 @@ export default function App() {
           />
         );
       case 'subcontractors':
+      case 'subcontractbilling':
         return (
           <SubcontractorView
             subcontractors={subcontractors}
