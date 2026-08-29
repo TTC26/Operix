@@ -9449,35 +9449,11 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
     setActiveEmp(null);
   }
 
-  if (subView === 'edit') {
-    return (
-      <EmployeeHRForm
-        employee={activeEmp}
-        count={employees.length}
-        businessInfo={businessInfo}
-        isGulf={isGulf}
-        country={country}
-        onSave={saveEmployee}
-        onClose={() => setSubView(activeEmp ? 'detail' : 'list')}
-      />
-    );
-  }
-
-  if (subView === 'detail' && activeEmp) {
-    const fresh = employees.find(e => e.id === activeEmp.id) || activeEmp;
-    return (
-      <EmployeeDetailView
-        emp={fresh}
-        businessInfo={businessInfo}
-        isGulf={isGulf}
-        country={country}
-        canEdit={canEdit}
-        onEdit={() => { setActiveEmp(fresh); setSubView('edit'); }}
-        onDelete={() => deleteEmployee(fresh.id)}
-        onBack={() => setSubView('list')}
-      />
-    );
-  }
+  const scrollToPanel = () => setTimeout(() => { const el = document.getElementById('emp-detail-panel'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+  function openEmp(emp) { setActiveEmp(emp); setSubView('detail'); scrollToPanel(); }
+  function editEmp(emp) { setActiveEmp(emp); setSubView('edit'); scrollToPanel(); }
+  function addEmp() { setActiveEmp(null); setSubView('edit'); scrollToPanel(); }
+  function closePanel() { setSubView('list'); setActiveEmp(null); }
 
   return (
     <div style={styles.page}>
@@ -9492,7 +9468,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
               {allAlerts.slice(0, 10).map((a, i) => (
                 <span key={i}
                   style={{ fontSize: 11.5, background: a.status === 'expired' ? '#FEE2E2' : '#FEF9C3', color: a.status === 'expired' ? '#B91C1C' : '#92400E', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
-                  onClick={() => { setActiveEmp(a.emp); setSubView('detail'); }}>
+                  onClick={() => openEmp(a.emp)}>
                   <AlertTriangle size={10} />{a.emp.name} — {a.label} {a.days <= 0 ? 'EXPIRED' : `in ${a.days}d`}
                 </span>
               ))}
@@ -9508,7 +9484,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           <div style={styles.muted}>{employees.length} employee{employees.length !== 1 ? 's' : ''}</div>
         </div>
         {canEdit && (
-          <button style={styles.primaryBtn} onClick={() => { setActiveEmp(null); setSubView('edit'); }}>
+          <button style={styles.primaryBtn} onClick={addEmp}>
             <Plus size={15} /> Add Employee
           </button>
         )}
@@ -9530,8 +9506,8 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
               {[...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1).map(emp => {
                 const alerts = getEmpDocAlerts(emp, isGulf, country);
                 return (
-                  <tr key={emp.id} style={{ cursor: 'pointer', background: alerts.length > 0 ? '#FFFBEB' : undefined }}
-                    onClick={() => { setActiveEmp(emp); setSubView('detail'); }}>
+                  <tr key={emp.id} style={{ cursor: 'pointer', background: activeEmp?.id === emp.id ? '#EEF2FF' : alerts.length > 0 ? '#FFFBEB' : undefined }}
+                    onClick={() => openEmp(emp)}>
                     <td style={{ ...styles.td, fontFamily: 'monospace', fontWeight: 600 }}>{emp.empId}</td>
                     <td style={{ ...styles.td, fontWeight: 600 }}>{emp.name}</td>
                     <td style={styles.td}>{emp.designation}</td>
@@ -9557,7 +9533,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
                     <td style={styles.td} onClick={e => e.stopPropagation()}>
                       {canEdit && (
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button style={styles.iconBtn} onClick={() => { setActiveEmp(emp); setSubView('edit'); }}><Pencil size={14} /></button>
+                          <button style={styles.iconBtn} onClick={() => editEmp(emp)}><Pencil size={14} /></button>
                           <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteEmployee(emp.id)}><Trash2 size={14} /></button>
                         </div>
                       )}
@@ -9569,6 +9545,36 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           </table>
         </div>
       )}
+      {subView === 'edit' && (
+        <div id="emp-detail-panel" style={{ marginTop: 22, borderTop: '3px solid #C9A24B', borderRadius: 4 }}>
+          <EmployeeHRForm
+            employee={activeEmp}
+            count={employees.length}
+            businessInfo={businessInfo}
+            isGulf={isGulf}
+            country={country}
+            onSave={saveEmployee}
+            onClose={() => { if (activeEmp) { setSubView('detail'); } else { closePanel(); } }}
+          />
+        </div>
+      )}
+      {subView === 'detail' && activeEmp && (() => {
+        const fresh = employees.find(e => e.id === activeEmp.id) || activeEmp;
+        return (
+          <div id="emp-detail-panel" style={{ marginTop: 22, borderTop: '3px solid #C9A24B', borderRadius: 4 }}>
+            <EmployeeDetailView
+              emp={fresh}
+              businessInfo={businessInfo}
+              isGulf={isGulf}
+              country={country}
+              canEdit={canEdit}
+              onEdit={() => editEmp(fresh)}
+              onDelete={() => deleteEmployee(fresh.id)}
+              onBack={closePanel}
+            />
+          </div>
+        );
+      })()}
     </div>
   );
 }
