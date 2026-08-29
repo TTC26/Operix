@@ -3794,11 +3794,7 @@ function ComingSoon({ label = 'This module' }) {
     </div>
   );
 }
-const COMING_SOON = {
-  boq: 'BOQ', estimation: 'Estimation',
-  pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
-  projectreports: 'Project Reports',
-};
+const COMING_SOON = {};
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
@@ -18153,6 +18149,142 @@ function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBilling
   );
 }
 
+function ServiceHistoryView({ serviceHistory = [], setServiceHistory, siteProjects = [], assets = [], userRole, businessInfo }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProj, setFilterProj] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [printDoc, setPrintDoc] = useState(false);
+  const canEdit = ['admin','manager'].includes(userRole);
+  const today = new Date().toISOString().slice(0,10);
+  const TYPES = ['Preventive','Corrective','Breakdown','Inspection','Installation'];
+  const STATUSES = ['Completed','Pending','Follow-up'];
+
+  function blank() {
+    const n = serviceHistory.length+1;
+    return { id:'', serviceNo:`SVC-${String(n).padStart(3,'0')}`, date:today, projectId:'', assetId:'', serviceType:'Preventive', technician:'', description:'', findings:'', partsUsed:'', nextDueDate:'', status:'Completed' };
+  }
+  function save(rec){ const t={...rec,id:rec.id||crypto.randomUUID()}; setServiceHistory(prev=>prev.find(x=>x.id===t.id)?prev.map(x=>x.id===t.id?t:x):[...prev,t]); setEditing(null); }
+  function del(id){ if(window.confirm('Delete this service record?')) setServiceHistory(prev=>prev.filter(x=>x.id!==id)); }
+
+  const rows = serviceHistory.filter(r=>(!filterProj||String(r.projectId)===String(filterProj)) && (!filterType||r.serviceType===filterType));
+  const projName = id => siteProjects.find(p=>p.id===id)?.name||'—';
+  const assetName = id => { const a=assets.find(x=>x.id===id); return a?(a.name||a.tag||a.assetTag||'Asset'):'—'; };
+  const dueSoon = r => r.nextDueDate && r.nextDueDate>=today && (new Date(r.nextDueDate)-new Date(today))/86400000<=14;
+  const overdue = r => r.nextDueDate && r.nextDueDate<today;
+
+  async function exportXlsx() {
+    const aoa=[['Service No','Date','Project','Asset','Type','Technician','Description','Findings','Parts Used','Next Due','Status'],
+      ...rows.map(r=>[r.serviceNo||'',r.date||'',projName(r.projectId),assetName(r.assetId),r.serviceType||'',r.technician||'',r.description||'',r.findings||'',r.partsUsed||'',r.nextDueDate||'',r.status||''])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Service History'); XLSX.writeFile(wb,'Service-History.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Service-History.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+
+  if (editing) {
+    const d=editing; const set=(k,v)=>setEditing(p=>({...p,[k]:v}));
+    return (
+      <div style={{ maxWidth:640, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{d.id?'Edit':'New'} Service Record — {d.serviceNo}</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Service No</label><input value={d.serviceNo||''} onChange={e=>set('serviceNo',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={d.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={d.serviceType} onChange={e=>set('serviceType',e.target.value)} style={styles.input}>{TYPES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Asset</label><select value={d.assetId||''} onChange={e=>set('assetId',e.target.value)} style={styles.input}><option value=''>— (optional)</option>{assets.map(a=><option key={a.id} value={a.id}>{a.name||a.tag||a.assetTag||'Asset'}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Technician</label><input value={d.technician||''} onChange={e=>set('technician',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Status</label><select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{STATUSES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Work Description</label><textarea value={d.description||''} onChange={e=>set('description',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+          <div style={styles.formGroup}><label style={styles.label}>Findings / Observations</label><textarea value={d.findings||''} onChange={e=>set('findings',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Parts / Materials Used</label><input value={d.partsUsed||''} onChange={e=>set('partsUsed',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Next Service Due</label><input type='date' value={d.nextDueDate||''} onChange={e=>set('nextDueDate',e.target.value)} style={styles.input}/></div>
+          </div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>save(d)} style={styles.primaryBtn}>Save Record</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const TY_BG={Preventive:'#d4edda',Corrective:'#fff3cd',Breakdown:'#f8d7da',Inspection:'#e7f1ff',Installation:'#ede7f6'}, TY_C={Preventive:'#1a6b30',Corrective:'#856404',Breakdown:'#842029',Inspection:'#0a58ca',Installation:'#6b4fa0'};
+  const ST_BG={Completed:'#d4edda',Pending:'#fff3cd','Follow-up':'#e7f1ff'}, ST_C={Completed:'#1a6b30',Pending:'#856404','Follow-up':'#0a58ca'};
+  return (
+    <>
+    <div style={{ padding:'24px 32px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h2 className="serif" style={styles.pageTitle}>Service History</h2>
+        <div style={{ display:'flex', gap:8 }}>
+          {serviceHistory.length>0 && <button onClick={exportXlsx} style={styles.ghostBtn} title="Export to Excel">⭳ Excel</button>}
+          {serviceHistory.length>0 && <button onClick={()=>setPrintDoc(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New Service Record</button>}
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap' }}>
+        {[['Total',serviceHistory.length,''],['Preventive',serviceHistory.filter(r=>r.serviceType==='Preventive').length,'#1a6b30'],['Breakdown',serviceHistory.filter(r=>r.serviceType==='Breakdown').length,'#842029'],['Due / Overdue',serviceHistory.filter(r=>overdue(r)||dueSoon(r)).length,'#B5453A']].map(([l,v,c])=>(
+          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px' }}>
+            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <select value={filterProj} onChange={e=>setFilterProj(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:220 }}><option value=''>All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:180 }}><option value=''>All Types</option>{TYPES.map(x=><option key={x}>{x}</option>)}</select>
+      </div>
+      {rows.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No service records logged.</div> : (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:900 }}>
+            <thead><tr style={{ background:'#F8F7F4' }}>
+              {['Service No','Date','Project','Asset','Type','Technician','Next Due','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {[...rows].sort((a,b)=>b.date>a.date?1:-1).map(r=>{
+                const ov=overdue(r), ds=dueSoon(r);
+                return (
+                  <tr key={r.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                    <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{r.serviceNo}</td>
+                    <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{r.date||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{projName(r.projectId)}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{assetName(r.assetId)}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:TY_BG[r.serviceType], color:TY_C[r.serviceType], borderRadius:5, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{r.serviceType}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{r.technician||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:ov?'#B5453A':ds?'#856404':'#555', fontWeight:(ov||ds)?700:400, whiteSpace:'nowrap' }}>{r.nextDueDate||'—'}{ov?' ⚠':ds?' •':''}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:ST_BG[r.status], color:ST_C[r.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{r.status}</span></td>
+                    <td style={{ padding:'8px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setEditing(r)} style={styles.iconBtn}><Pencil size={14}/></button>
+                      <button onClick={()=>del(r.id)} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                    </div>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    {printDoc && (
+      <DocPrintOverlay onClose={()=>setPrintDoc(false)} filename="Service-History.pdf" businessInfo={businessInfo}>
+        <div style={{ textAlign:'center', marginBottom:16 }}><div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>SERVICE HISTORY</div><div style={{ fontSize:12, color:'#888', marginTop:3 }}>{filterProj?projName(filterProj):'All Projects'}</div></div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+          <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Service','Date','Project','Asset','Type','Technician','Next Due','Status'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left', fontWeight:700 }}>{h}</th>)}</tr></thead>
+          <tbody>{[...rows].sort((a,b)=>b.date>a.date?1:-1).map((r,i)=><tr key={r.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+            <td style={{ padding:'4px 6px' }}>{i+1}</td><td style={{ padding:'4px 6px' }}>{r.serviceNo}</td><td style={{ padding:'4px 6px' }}>{r.date||'—'}</td><td style={{ padding:'4px 6px' }}>{projName(r.projectId)}</td><td style={{ padding:'4px 6px' }}>{assetName(r.assetId)}</td><td style={{ padding:'4px 6px' }}>{r.serviceType}</td><td style={{ padding:'4px 6px' }}>{r.technician||'—'}</td><td style={{ padding:'4px 6px' }}>{r.nextDueDate||'—'}</td><td style={{ padding:'4px 6px' }}>{r.status}</td>
+          </tr>)}</tbody>
+        </table>
+      </DocPrintOverlay>
+    )}
+    </>
+  );
+}
+
 function DLPView({ dlpDefects = [], setDlpDefects, siteProjects = [], subcontractors = [], setSiteProjects, userRole, businessInfo }) {
   const [editing, setEditing] = useState(null);
   const [filterProj, setFilterProj] = useState('');
@@ -23487,6 +23619,7 @@ export default function App() {
   const [manpowerLogs,     _setMPL]    = useState([]);
   const [variations,       _setVAR]    = useState([]);
   const [dlpDefects,       _setDLP]    = useState([]);
+  const [serviceHistory,   _setSH]     = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -23676,6 +23809,7 @@ export default function App() {
       _setMPL(data.manpowerLogs || []);
       _setVAR(data.variations || []);
       _setDLP(data.dlpDefects || []);
+      _setSH(data.serviceHistory || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
@@ -23774,6 +23908,7 @@ export default function App() {
   const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
   const setVariations       = mkSet(_setVAR,   'variations');
   const setDlpDefects       = mkSet(_setDLP,   'dlpDefects');
+  const setServiceHistory   = mkSet(_setSH,    'serviceHistory');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -23952,7 +24087,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -24004,6 +24139,7 @@ export default function App() {
     if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
     if (backup.variations) setVariations(backup.variations);
     if (backup.dlpDefects) setDlpDefects(backup.dlpDefects);
+    if (backup.serviceHistory) setServiceHistory(backup.serviceHistory);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -24846,6 +24982,17 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'servicehistory':
+        return (
+          <ServiceHistoryView
+            serviceHistory={serviceHistory}
+            setServiceHistory={setServiceHistory}
+            siteProjects={siteProjects}
+            assets={assets}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       case 'mepreports':
         return (
           <MEPReportsView
@@ -24934,6 +25081,7 @@ export default function App() {
           />
         );
       case 'pmschedules':
+      case 'pmaintenance':
         return (
           <PMScheduleView
             pmSchedules={pmSchedules}
