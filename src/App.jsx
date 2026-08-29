@@ -9426,7 +9426,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
 
   const country = businessInfo?.country || 'india';
   const isGulf  = GULF_COUNTRIES_HR.includes(country);
-  const [printList, setPrintList] = useState(false);
+  const [printMode, setPrintMode] = useState(null); // null | 'ask' | 'all' | 'standard'
   const fmtEmp = makeFmt(businessInfo);
   const idLabel = country === 'uae' ? 'Emirates ID' : 'Civil ID';
   const docCols = isGulf
@@ -9501,7 +9501,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {employees.length > 0 && <button style={styles.ghostBtn} onClick={exportEmpXlsx} title="Export to Excel (.xlsx)">⭳ Excel</button>}
-          {employees.length > 0 && <button style={styles.ghostBtn} onClick={() => setPrintList(true)} title="Print list — landscape"><Printer size={14} /> Print</button>}
+          {employees.length > 0 && <button style={styles.ghostBtn} onClick={() => setPrintMode('ask')} title="Print list"><Printer size={14} /> Print</button>}
           {canEdit && (
             <button style={styles.primaryBtn} onClick={addEmp}>
               <Plus size={15} /> Add Employee
@@ -9595,41 +9595,63 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           </div>
         );
       })()}
-      {printList && (
-        <DocPrintOverlay onClose={() => setPrintList(false)} filename="Employees.pdf" businessInfo={businessInfo}>
-          <style>{`@media print { @page { size: A4 landscape; margin: 9mm; } }`}</style>
-          <div style={{ textAlign: 'center', marginBottom: 14 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>EMPLOYEE REGISTER</div>
-            <div style={{ fontSize: 11, color: '#888' }}>{employees.length} employee{employees.length !== 1 ? 's' : ''} &middot; {new Date().toLocaleDateString()}</div>
+      {printMode === 'ask' && (
+        <>
+          <div className="no-print" onClick={() => setPrintMode(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1200 }} />
+          <div className="no-print" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: '#fff', borderRadius: 12, padding: '22px 26px', zIndex: 1201, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>Print Employee List</div>
+            <div style={{ fontSize: 12.5, color: '#888', marginBottom: 16 }}>Choose how much detail to include.</div>
+            <button onClick={() => setPrintMode('all')} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginBottom: 10 }}>All Details &nbsp;·&nbsp; landscape</button>
+            <button onClick={() => setPrintMode('standard')} style={{ ...styles.ghostBtn, width: '100%', justifyContent: 'center' }}>Standard Details</button>
+            <button onClick={() => setPrintMode(null)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 12, marginTop: 12, width: '100%', cursor: 'pointer' }}>Cancel</button>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9.5, fontFamily: 'Arial, sans-serif' }}>
-            <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>
-              {['#', 'Emp ID', 'Name', 'Designation', 'Dept', 'Nationality', 'Phone', 'Joining', 'Status', ...docCols.map(c => c[0]), 'Basic', 'Gross'].map((h, i) => <th key={i} style={{ padding: '4px 5px', textAlign: i === 0 ? 'center' : 'left', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {[...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1).map((e, i) => {
-                const basic = parseFloat(e.basicSalary) || 0, gross = basic + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0);
-                return (
-                  <tr key={e.id} style={{ borderBottom: '1px solid #ddd', background: i % 2 ? '#F6F5F2' : '#fff' }}>
-                    <td style={{ padding: '4px 5px', textAlign: 'center' }}>{i + 1}</td>
-                    <td style={{ padding: '4px 5px', fontFamily: 'monospace' }}>{e.empId}</td>
-                    <td style={{ padding: '4px 5px', fontWeight: 600 }}>{e.name}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.designation || '—'}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.department || '—'}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.nationality || '—'}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.phone || '—'}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.joiningDate || '—'}</td>
-                    <td style={{ padding: '4px 5px' }}>{e.status || 'active'}</td>
-                    {docCols.map((c, ci) => { const no = c[1](e) || '—'; const exp = c[2] ? c[2](e) : null; return <td key={ci} style={{ padding: '4px 5px', whiteSpace: 'nowrap' }}>{no}{exp ? <div style={{ fontSize: 8, color: '#B5453A' }}>exp {exp}</div> : ''}</td>; })}
-                    <td style={{ padding: '4px 5px', textAlign: 'right' }}>{basic ? fmtEmp(basic) : '—'}</td>
-                    <td style={{ padding: '4px 5px', textAlign: 'right', fontWeight: 600 }}>{gross ? fmtEmp(gross) : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </DocPrintOverlay>
+        </>
       )}
+      {(printMode === 'all' || printMode === 'standard') && (() => {
+        const allMode = printMode === 'all';
+        const money = e => { const b = parseFloat(e.basicSalary) || 0; return b; };
+        const grossOf = e => { const b = parseFloat(e.basicSalary) || 0; return b + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0); };
+        const baseCols = [
+          ['#', (e, i) => i + 1, 'center'],
+          ['Emp ID', e => e.empId, 'left'],
+          ['Name', e => e.name, 'left'],
+          ['Designation', e => e.designation || '—', 'left'],
+          ['Dept', e => e.department || '—', 'left'],
+          ['Phone', e => e.phone || '—', 'left'],
+          ['Joining', e => e.joiningDate || '—', 'left'],
+          ['Status', e => e.status || 'active', 'left'],
+        ];
+        const cols = allMode ? [
+          ...baseCols.slice(0, 5),
+          ['Nationality', e => e.nationality || '—', 'left'],
+          ...baseCols.slice(5),
+          ...docCols.map(c => [c[0], e => { const no = c[1](e) || '—'; const exp = c[2] ? c[2](e) : null; return exp ? no + ' (exp ' + exp + ')' : no; }, 'left']),
+          ['Basic', e => money(e) ? fmtEmp(money(e)) : '—', 'right'],
+          ['Gross', e => grossOf(e) ? fmtEmp(grossOf(e)) : '—', 'right'],
+        ] : baseCols;
+        const rows = [...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1);
+        return (
+          <DocPrintOverlay onClose={() => setPrintMode(null)} filename="Employees.pdf" businessInfo={businessInfo}>
+            <style>{allMode ? `@media print { @page { size: A4 landscape; margin: 9mm; } }` : `@media print { @page { size: A4 portrait; margin: 12mm; } }`}</style>
+            <div style={{ textAlign: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>{allMode ? 'EMPLOYEE REGISTER' : 'EMPLOYEE LIST'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{employees.length} employee{employees.length !== 1 ? 's' : ''} &middot; {new Date().toLocaleDateString()}</div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: allMode ? 9.5 : 11, fontFamily: 'Arial, sans-serif' }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>
+                {cols.map((c, i) => <th key={i} style={{ padding: '4px 6px', textAlign: c[2], fontWeight: 700, whiteSpace: 'nowrap' }}>{c[0]}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map((e, i) => (
+                  <tr key={e.id} style={{ borderBottom: '1px solid #ddd', background: i % 2 ? '#F6F5F2' : '#fff' }}>
+                    {cols.map((c, ci) => <td key={ci} style={{ padding: '4px 6px', textAlign: c[2], whiteSpace: c[2] === 'right' ? 'nowrap' : 'normal', fontFamily: c[0] === 'Emp ID' ? 'monospace' : 'inherit', fontWeight: c[0] === 'Name' ? 600 : 400 }}>{c[1](e, i)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
