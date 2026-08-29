@@ -21033,9 +21033,60 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     function boqRowsToLines(rows) {
       const r2 = (rows||[]).filter(r => (r||[]).some(c => String(c||'').trim()));
       if (!r2.length) return [];
-      const f = (r2[0]||[]).join(' ').toLowerCase();
-      const start = (f.includes('categ') || f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
-      return r2.slice(start).map(cols => { const q = parseFloat(cols[4])||0; return { id: crypto.randomUUID(), category: String(cols[0]||'Materials').trim() || 'Materials', subcategory: String(cols[1]||'').trim(), description: String(cols[2]||'').trim(), unit: String(cols[3]||'').trim(), tenderQty: q, finalisedQty: 0, variationQty: 0, actualQty: 0, rate: parseFloat(cols[5])||0, siteOH: 0, hoOH: 0, contingency: 0, profit: 0 }; }).filter(x => x.description);
+      // Header-aware: match columns by NAME so order / extra columns don't matter.
+      const head = (r2[0]||[]).map(c => String(c||'').trim().toLowerCase());
+      const hasHeader = head.some(h => /categ|subcat|discipl|desc|item|particular|unit|uom|qty|quantit|rate|price/.test(h));
+      const find = (...keys) => head.findIndex(h => keys.some(k => h.includes(k)));
+      let idx, start;
+      if (hasHeader) {
+        start = 1;
+        idx = {
+          category:    find('categ'),
+          subcategory: find('subcat','sub cat','discipl'),
+          description: find('desc','item','particular','work'),
+          unit:        find('unit','uom'),
+          qty:         (find('tender qty')>=0 ? find('tender qty') : find('qty','quantit','nos')),
+          rate:        (find('base rate')>=0 ? find('base rate') : find('rate','price')),
+        };
+      } else {
+        start = 0;
+        idx = { category:0, subcategory:1, description:2, unit:3, qty:4, rate:5 };
+      }
+      const g = (cols, i) => (i>=0 && i<cols.length) ? cols[i] : '';
+      return r2.slice(start).map(cols => {
+        const cat = String(g(cols, idx.category)||'').trim();
+        return { id: crypto.randomUUID(), category: cat || 'Materials', subcategory: String(g(cols, idx.subcategory)||'').trim(), description: String(g(cols, idx.description)||'').trim(), unit: String(g(cols, idx.unit)||'').trim(), tenderQty: parseFloat(g(cols, idx.qty))||0, finalisedQty: 0, variationQty: 0, actualQty: 0, rate: parseFloat(g(cols, idx.rate))||0, siteOH: 0, hoOH: 0, contingency: 0, profit: 0 };
+      }).filter(x => x.description);
+    }
+    async function downloadBoqTemplate() {
+      const headers = ['Category','Subcategory','Description','Unit','Tender Qty','Base Rate'];
+      const sample = [
+        ['Materials','Electrical','Supply & install 1.5 sqmm FRLS copper cable','m',500,45],
+        ['Manhours','Electrical','Electrician — cable pulling & termination','hr',120,150],
+        ['Equipment','Mechanical','Mobile scaffolding hire','day',30,800],
+        ['Subcontract','HVAC','Ducting fabrication & installation (subcontract)','lot',1,250000],
+      ];
+      const aoa = [headers, ...sample];
+      try {
+        const XLSX = await loadXLSX();
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{wch:14},{wch:14},{wch:50},{wch:8},{wch:12},{wch:12}];
+        const guide = [['BOQ IMPORT TEMPLATE — how to use'],[''],
+          ['1. Fill the BOQ sheet. Keep the header row as-is.'],
+          ['2. Column order can change and extra columns are ignored — headers are matched by name.'],
+          ['3. Base Rate = direct cost only (no markup). Markup is added later via Cost Build-up.'],[''],
+          ['Valid Category values'], ...BUILDUP_CATS.map(c=>[c]), [''],
+          ['Valid Subcategory values'], ...BUILDUP_SUBCATS.map(c=>[c])];
+        const wsg = XLSX.utils.aoa_to_sheet(guide);
+        wsg['!cols'] = [{wch:60}];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
+        XLSX.utils.book_append_sheet(wb, wsg, 'Guide');
+        XLSX.writeFile(wb, 'BOQ-Import-Template.xlsx');
+      } catch (err) {
+        const csv = aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+        const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='BOQ-Import-Template.csv'; el.click(); URL.revokeObjectURL(url);
+      }
     }
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
@@ -21053,7 +21104,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
         }
         const parsed = boqRowsToLines(rows);
-        if (!parsed.length) { alert('No rows found. Use columns in order: Category, Subcategory, Description, Unit, Qty, Rate'); return; }
+        if (!parsed.length) { alert('No rows found. Download the Template (⬇) for the correct columns: Category, Subcategory, Description, Unit, Tender Qty, Base Rate.'); return; }
         set('boq', withItemCodes([...(t.boq||[]), ...parsed]));
         alert(parsed.length + ' line(s) imported.');
       } catch (err) {
@@ -21127,7 +21178,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={()=>set('boq',[...(t.boq||[]), {...blankLine(), itemCode: nextCodeFor('Materials','', t.boq, null)}])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
                 <button onClick={()=>set('boq', withItemCodes((t.boq||[]).map(l=>({...l, itemCode:''}))))} style={styles.ghostBtn} title="Regenerate all item codes by Category/Subcategory">⟳ Auto Item Codes</button>
-                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
+                <button onClick={downloadBoqTemplate} style={styles.ghostBtn} title="Download a ready-to-fill Excel template with the correct columns + a guide sheet">⬇ Template</button>
+                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV. Headers matched by name: Category, Subcategory, Description, Unit, Tender Qty, Base Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
               </div>
