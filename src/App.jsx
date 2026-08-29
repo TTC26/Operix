@@ -9426,6 +9426,22 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
 
   const country = businessInfo?.country || 'india';
   const isGulf  = GULF_COUNTRIES_HR.includes(country);
+  const [printList, setPrintList] = useState(false);
+  const fmtEmp = makeFmt(businessInfo);
+  const idLabel = country === 'uae' ? 'Emirates ID' : 'Civil ID';
+  const docCols = isGulf
+    ? [['Passport', e=>e.passportNo, e=>e.passportExpiry], ['Visa', e=>e.visaNo, e=>e.visaExpiry], [idLabel, e=>e.emiratesId, e=>e.emiratesIdExpiry], ['Labour Card', e=>e.labourCardNo, e=>e.labourCardExpiry]]
+    : [['Aadhaar', e=>e.aadharNo, null], ['PAN', e=>e.panNo, null]];
+  async function exportEmpXlsx() {
+    const head = ['Emp ID','Name','Designation','Department','Nationality','Phone','Email','DOB','Joining','Status', ...docCols.flatMap(c=>c[2]?[c[0],c[0]+' Expiry']:[c[0]]), 'Basic','HRA','DA','Other','Gross'];
+    const aoa = [head, ...[...employees].sort((a,b)=>(a.name||'')>(b.name||'')?1:-1).map(e=>{
+      const basic=parseFloat(e.basicSalary)||0,hra=parseFloat(e.hra)||0,da=parseFloat(e.da)||0,oth=parseFloat(e.otherAllowances)||0;
+      const docVals = docCols.flatMap(c=>c[2]?[c[1](e)||'',c[2](e)||'']:[c[1](e)||'']);
+      return [e.empId||'',e.name||'',e.designation||'',e.department||'',e.nationality||'',e.phone||'',e.email||'',e.dob||'',e.joiningDate||'',e.status||'', ...docVals, basic,hra,da,oth,basic+hra+da+oth];
+    })];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Employees'); XLSX.writeFile(wb,'Employees.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Employees.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
 
   const allAlerts = employees.flatMap(emp =>
     getEmpDocAlerts(emp, isGulf, country).map(a => ({ ...a, emp }))
@@ -9483,11 +9499,15 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           <h2 className="serif" style={styles.h1}>Employees</h2>
           <div style={styles.muted}>{employees.length} employee{employees.length !== 1 ? 's' : ''}</div>
         </div>
-        {canEdit && (
-          <button style={styles.primaryBtn} onClick={addEmp}>
-            <Plus size={15} /> Add Employee
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {employees.length > 0 && <button style={styles.ghostBtn} onClick={exportEmpXlsx} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+          {employees.length > 0 && <button style={styles.ghostBtn} onClick={() => setPrintList(true)} title="Print list — landscape"><Printer size={14} /> Print</button>}
+          {canEdit && (
+            <button style={styles.primaryBtn} onClick={addEmp}>
+              <Plus size={15} /> Add Employee
+            </button>
+          )}
+        </div>
       </div>
 
       {employees.length === 0 ? (
@@ -9575,6 +9595,41 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           </div>
         );
       })()}
+      {printList && (
+        <DocPrintOverlay onClose={() => setPrintList(false)} filename="Employees.pdf" businessInfo={businessInfo}>
+          <style>{`@media print { @page { size: A4 landscape; margin: 9mm; } }`}</style>
+          <div style={{ textAlign: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>EMPLOYEE REGISTER</div>
+            <div style={{ fontSize: 11, color: '#888' }}>{employees.length} employee{employees.length !== 1 ? 's' : ''} &middot; {new Date().toLocaleDateString()}</div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9.5, fontFamily: 'Arial, sans-serif' }}>
+            <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>
+              {['#', 'Emp ID', 'Name', 'Designation', 'Dept', 'Nationality', 'Phone', 'Joining', 'Status', ...docCols.map(c => c[0]), 'Basic', 'Gross'].map((h, i) => <th key={i} style={{ padding: '4px 5px', textAlign: i === 0 ? 'center' : 'left', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {[...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1).map((e, i) => {
+                const basic = parseFloat(e.basicSalary) || 0, gross = basic + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0);
+                return (
+                  <tr key={e.id} style={{ borderBottom: '1px solid #ddd', background: i % 2 ? '#F6F5F2' : '#fff' }}>
+                    <td style={{ padding: '4px 5px', textAlign: 'center' }}>{i + 1}</td>
+                    <td style={{ padding: '4px 5px', fontFamily: 'monospace' }}>{e.empId}</td>
+                    <td style={{ padding: '4px 5px', fontWeight: 600 }}>{e.name}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.designation || '—'}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.department || '—'}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.nationality || '—'}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.phone || '—'}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.joiningDate || '—'}</td>
+                    <td style={{ padding: '4px 5px' }}>{e.status || 'active'}</td>
+                    {docCols.map((c, ci) => { const no = c[1](e) || '—'; const exp = c[2] ? c[2](e) : null; return <td key={ci} style={{ padding: '4px 5px', whiteSpace: 'nowrap' }}>{no}{exp ? <div style={{ fontSize: 8, color: '#B5453A' }}>exp {exp}</div> : ''}</td>; })}
+                    <td style={{ padding: '4px 5px', textAlign: 'right' }}>{basic ? fmtEmp(basic) : '—'}</td>
+                    <td style={{ padding: '4px 5px', textAlign: 'right', fontWeight: 600 }}>{gross ? fmtEmp(gross) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
