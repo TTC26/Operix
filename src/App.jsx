@@ -3796,8 +3796,7 @@ function ComingSoon({ label = 'This module' }) {
 }
 const COMING_SOON = {
   boq: 'BOQ', estimation: 'Estimation',
-  hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
-  dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
+  pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
   projectreports: 'Project Reports',
 };
 
@@ -4127,10 +4126,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
 
             <Section sectionKey="mep_hse" label="HSE">
-              <NavBtn id="hseinspections" label="Inspections"    icon={CheckSquare} />
-              <NavBtn id="toolbox"        label="Toolbox Talks"  icon={BookOpen} />
-              <NavBtn id="incidents"      label="Incidents"      icon={AlertTriangle} />
-              <NavBtn id="hse"            label="Safety Reports" icon={Shield} />
+              <NavBtn id="hseinspections" label="Inspections"     icon={CheckSquare} />
+              <NavBtn id="toolbox"        label="Toolbox Talks"   icon={BookOpen} />
+              <NavBtn id="hsepermits"     label="Permits to Work" icon={FileText} />
+              <NavBtn id="incidents"      label="Incidents"       icon={AlertTriangle} />
+              <NavBtn id="hse"            label="Safety Reports"  icon={Shield} />
             </Section>
 
             <Section sectionKey="mep_handover" label="Handover & DLP">
@@ -7028,8 +7028,8 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
   }
 
   function printStock(){
-    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'\u2014')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'\u2014')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
-    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'—')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'—')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' — filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -7448,8 +7448,8 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
 
   const tabSt = t => ({ padding:'6px 16px', fontSize:12, fontWeight:activeTab===t?600:400, borderBottom:activeTab===t?'2px solid #2C3E6B':'2px solid transparent', color:activeTab===t?'#2C3E6B':'#888', cursor:'pointer', background:'none', border:'none' });
   function printRack(){
-    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'\u2014')+'</td></tr>';}).join('');
-    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'—')+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' — '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -18153,6 +18153,152 @@ function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBilling
   );
 }
 
+function DLPView({ dlpDefects = [], setDlpDefects, siteProjects = [], subcontractors = [], setSiteProjects, userRole, businessInfo }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProj, setFilterProj] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [printDoc, setPrintDoc] = useState(false);
+  const canEdit = ['admin','manager'].includes(userRole);
+  const today = new Date().toISOString().slice(0,10);
+  const SEV = ['Low','Medium','High'];
+  const STATUSES = ['Open','In Progress','Closed'];
+  const RESP = ['In-house','Subcontractor'];
+
+  function blankDefect() {
+    const n = dlpDefects.length+1;
+    return { id:'', defectNo:`DEF-${String(n).padStart(3,'0')}`, projectId:'', location:'', discipline:'', description:'', severity:'Medium', raisedDate:today, targetDate:'', closedDate:'', responsible:'In-house', responsibleName:'', status:'Open', remarks:'' };
+  }
+  function save(rec) {
+    const t = { ...rec, id:rec.id||crypto.randomUUID() };
+    setDlpDefects(prev=>prev.find(x=>x.id===t.id)?prev.map(x=>x.id===t.id?t:x):[...prev,t]);
+    setEditing(null);
+  }
+  function del(id){ if(window.confirm('Delete this defect?')) setDlpDefects(prev=>prev.filter(x=>x.id!==id)); }
+  const setDlp = (projId,val)=>{ if(setSiteProjects) setSiteProjects(prev=>prev.map(p=>p.id===projId?{...p,dlpEndDate:val}:p)); };
+
+  const rows = dlpDefects.filter(d=>(!filterProj||String(d.projectId)===String(filterProj)) && (!filterStatus||d.status===filterStatus));
+  const projName = id => siteProjects.find(p=>p.id===id)?.name||'—';
+  const isOverdue = d => d.status!=='Closed' && d.targetDate && d.targetDate<today;
+  const stat = { total:dlpDefects.length, open:dlpDefects.filter(d=>d.status==='Open').length, prog:dlpDefects.filter(d=>d.status==='In Progress').length, closed:dlpDefects.filter(d=>d.status==='Closed').length, overdue:dlpDefects.filter(isOverdue).length };
+
+  async function exportXlsx() {
+    const aoa=[['Defect No','Project','Location','Discipline','Description','Severity','Raised','Target','Closed','Status','Responsible','Party','Remarks'],
+      ...rows.map(d=>[d.defectNo||'',projName(d.projectId),d.location||'',d.discipline||'',d.description||'',d.severity||'',d.raisedDate||'',d.targetDate||'',d.closedDate||'',d.status||'',d.responsible||'',d.responsibleName||'',d.remarks||''])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Defects'); XLSX.writeFile(wb,'DLP-Defects.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='DLP-Defects.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+
+  if (editing) {
+    const d = editing; const set=(k,v)=>setEditing(p=>({...p,[k]:v}));
+    const subNames = subcontractors.map(sc=>sc.name);
+    return (
+      <div style={{ maxWidth:640, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{d.id?'Edit':'New'} Defect — {d.defectNo}</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Defect No</label><input value={d.defectNo||''} onChange={e=>set('defectNo',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Severity</label><select value={d.severity} onChange={e=>set('severity',e.target.value)} style={styles.input}>{SEV.map(x=><option key={x}>{x}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Status</label><select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{STATUSES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Location / Area</label><input value={d.location||''} onChange={e=>set('location',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Discipline</label><input value={d.discipline||''} onChange={e=>set('discipline',e.target.value)} style={styles.input} placeholder='Electrical / HVAC...'/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Responsible</label><select value={d.responsible} onChange={e=>set('responsible',e.target.value)} style={styles.input}>{RESP.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          {d.responsible==='Subcontractor' && <div style={styles.formGroup}><label style={styles.label}>Subcontractor</label><select value={d.responsibleName||''} onChange={e=>set('responsibleName',e.target.value)} style={styles.input}><option value=''>Select</option>{subNames.map(nm=><option key={nm} value={nm}>{nm}</option>)}</select></div>}
+          <div style={styles.formGroup}><label style={styles.label}>Description</label><textarea value={d.description||''} onChange={e=>set('description',e.target.value)} style={{ ...styles.input, height:70 }}/></div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Raised Date</label><input type='date' value={d.raisedDate||''} onChange={e=>set('raisedDate',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Target Close</label><input type='date' value={d.targetDate||''} onChange={e=>set('targetDate',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Closed Date</label><input type='date' value={d.closedDate||''} onChange={e=>set('closedDate',e.target.value)} style={styles.input}/></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Remarks</label><textarea value={d.remarks||''} onChange={e=>set('remarks',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>save(d)} style={styles.primaryBtn}>Save Defect</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const SEV_BG={Low:'#e7f1ff',Medium:'#fff3cd',High:'#f8d7da'}, SEV_C={Low:'#0a58ca',Medium:'#856404',High:'#842029'};
+  const ST_BG={Open:'#f8d7da','In Progress':'#fff3cd',Closed:'#d4edda'}, ST_C={Open:'#842029','In Progress':'#856404',Closed:'#1a6b30'};
+  return (
+    <>
+    <div style={{ padding:'24px 32px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h2 className="serif" style={styles.pageTitle}>DLP / Defects Liability</h2>
+        <div style={{ display:'flex', gap:8 }}>
+          {dlpDefects.length>0 && <button onClick={exportXlsx} style={styles.ghostBtn} title="Export to Excel">⭳ Excel</button>}
+          {dlpDefects.length>0 && <button onClick={()=>setPrintDoc(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setEditing(blankDefect())} style={styles.primaryBtn}><Plus size={15}/> New Defect</button>}
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap' }}>
+        {[['Total',stat.total,''],['Open',stat.open,'#842029'],['In Progress',stat.prog,'#856404'],['Closed',stat.closed,'#1a6b30'],['Overdue',stat.overdue,'#B5453A']].map(([l,v,c])=>(
+          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px' }}>
+            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+        <select value={filterProj} onChange={e=>setFilterProj(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:220 }}><option value=''>All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:180 }}><option value=''>All Status</option>{STATUSES.map(x=><option key={x}>{x}</option>)}</select>
+        {filterProj && <span style={{ fontSize:12, color:'#888' }}>DLP End Date: <input type='date' value={siteProjects.find(p=>p.id===filterProj)?.dlpEndDate||''} onChange={e=>setDlp(filterProj,e.target.value)} style={{ ...styles.input, margin:0, display:'inline-block', width:150 }} disabled={!canEdit}/></span>}
+      </div>
+      {rows.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No defects logged.</div> : (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:900 }}>
+            <thead><tr style={{ background:'#F8F7F4' }}>
+              {['Defect No','Project','Location','Description','Severity','Raised','Target','Status','Responsible',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map(d=>{
+                const ov=isOverdue(d);
+                return (
+                  <tr key={d.id} style={{ borderBottom:'1px solid #F0ECE5', background:ov?'#fff8f7':'#fff' }}>
+                    <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{d.defectNo}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{projName(d.projectId)}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{d.location||'—'}{d.discipline?' · '+d.discipline:''}</td>
+                    <td style={{ padding:'8px 12px', color:'#333', maxWidth:220 }}>{d.description||'—'}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:SEV_BG[d.severity], color:SEV_C[d.severity], borderRadius:5, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{d.severity}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{d.raisedDate||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:ov?'#B5453A':'#555', fontWeight:ov?700:400, whiteSpace:'nowrap' }}>{d.targetDate||'—'}{ov?' ⚠':''}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:ST_BG[d.status], color:ST_C[d.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{d.status}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555', fontSize:12 }}>{d.responsible==='Subcontractor'?(d.responsibleName||'Subcon'):'In-house'}</td>
+                    <td style={{ padding:'8px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setEditing(d)} style={styles.iconBtn}><Pencil size={14}/></button>
+                      <button onClick={()=>del(d.id)} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                    </div>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    {printDoc && (
+      <DocPrintOverlay onClose={()=>setPrintDoc(false)} filename="DLP-Defects.pdf" businessInfo={businessInfo}>
+        <div style={{ textAlign:'center', marginBottom:16 }}><div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>DEFECTS LIABILITY REGISTER</div><div style={{ fontSize:12, color:'#888', marginTop:3 }}>{filterProj?projName(filterProj):'All Projects'}</div></div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+          <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Defect','Project','Location','Description','Sev','Target','Status'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left', fontWeight:700 }}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map((d,i)=><tr key={d.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+            <td style={{ padding:'4px 6px' }}>{i+1}</td><td style={{ padding:'4px 6px' }}>{d.defectNo}</td><td style={{ padding:'4px 6px' }}>{projName(d.projectId)}</td><td style={{ padding:'4px 6px' }}>{d.location||'—'}</td><td style={{ padding:'4px 6px' }}>{d.description||'—'}</td><td style={{ padding:'4px 6px' }}>{d.severity}</td><td style={{ padding:'4px 6px' }}>{d.targetDate||'—'}</td><td style={{ padding:'4px 6px' }}>{d.status}</td>
+          </tr>)}</tbody>
+        </table>
+      </DocPrintOverlay>
+    )}
+    </>
+  );
+}
+
 function VariationsView({ variations = [], setVariations, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [editing, setEditing] = React.useState(null);
@@ -21552,8 +21698,9 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
 }
 
 // ─── HSE ──────────────────────────────────────────────────────────────────────
-function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessInfo }) {
-  const [tab, setTab] = useState('incidents');
+function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessInfo, initialTab='incidents' }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(()=>{ setTab(initialTab); }, [initialTab]);
   const [editing, setEditing] = useState(null);
   const [printPermit, setPrintPermit] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
@@ -21561,6 +21708,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   const incidents    = hseRecords.incidents    || [];
   const toolboxTalks = hseRecords.toolboxTalks || [];
   const permits      = hseRecords.permits      || [];
+  const inspections  = hseRecords.inspections  || [];
 
   function updateSection(key, fn) {
     setHseRecords(prev=>({ ...prev, [key]: fn(prev[key]||[]) }));
@@ -21569,7 +21717,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   const INCIDENT_TYPES = ['Near Miss','First Aid','Minor Injury','Major Injury','LTI','Property Damage','Environmental'];
   const PERMIT_TYPES   = ['Hot Work','Confined Space','Electrical Isolation','Working at Height','Excavation','General'];
 
-  const TABS = [['incidents',`Incidents (${incidents.length})`],['toolbox',`Toolbox Talks (${toolboxTalks.length})`],['permits',`Permits to Work (${permits.length})`]];
+  const TABS = [['incidents',`Incidents (${incidents.length})`],['toolbox',`Toolbox Talks (${toolboxTalks.length})`],['permits',`Permits to Work (${permits.length})`],['inspections',`Inspections (${inspections.length})`],['reports','Safety Reports']];
 
   // Stats
   const lti    = incidents.filter(i=>i.type==='LTI').length;
@@ -21579,6 +21727,8 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   function blankIncident() { return { id:'', date:new Date().toISOString().slice(0,10), time:'', projectId:'', location:'', type:'Near Miss', description:'', injuredPerson:'', rootCause:'', correctiveAction:'', status:'open', reportedBy:'' }; }
   function blankTalk()     { return { id:'', date:new Date().toISOString().slice(0,10), projectId:'', topic:'', conductedBy:'', attendeesCount:0, notes:'' }; }
   function blankPermit()   { return { id:'', number:`PTW-${String(permits.length+1).padStart(3,'0')}`, date:new Date().toISOString().slice(0,10), projectId:'', type:'Hot Work', location:'', description:'', validFrom:'', validUntil:'', issuedBy:'', receiver:'', status:'active' }; }
+  const INSPECTION_AREAS = ['Site General','Electrical','Mechanical','Plumbing','HVAC','Fire Fighting','Scaffolding','Housekeeping','PPE Compliance','Work at Height'];
+  function blankInspection() { return { id:'', date:new Date().toISOString().slice(0,10), projectId:'', area:'Site General', inspector:'', score:'', findings:'', correctiveAction:'', targetDate:'', status:'open' }; }
 
   function saveRecord(section, key, rec) {
     const data = { ...rec, id:rec.id||crypto.randomUUID(), approvalStatus: rec.approvalStatus||'draft', approvalNote: rec.approvalNote||'', updatedAt:Date.now() };
@@ -21600,7 +21750,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
       <div style={{ maxWidth:620, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
           <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
-          <h2 className="serif" style={styles.pageTitle}>{section==='incidents'?'Incident Report':section==='toolbox'?'Toolbox Talk':'Permit to Work'}</h2>
+          <h2 className="serif" style={styles.pageTitle}>{section==='incidents'?'Incident Report':section==='toolbox'?'Toolbox Talk':section==='inspections'?'Site Inspection':'Permit to Work'}</h2>
         </div>
         <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
           {section==='incidents' && (<>
@@ -21680,6 +21830,29 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
               </select>
             </div>
           </>)}
+          {section==='inspections' && (<>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={d.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Area / Type</label>
+                <select value={d.area} onChange={e=>set('area',e.target.value)} style={styles.input}>{INSPECTION_AREAS.map(t=><option key={t} value={t}>{t}</option>)}</select>
+              </div>
+              <div style={styles.formGroup}><label style={styles.label}>Score %</label><input type='number' min={0} max={100} value={d.score||''} onChange={e=>set('score',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Project</label>
+                <select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              </div>
+              <div style={styles.formGroup}><label style={styles.label}>Inspector</label><input value={d.inspector||''} onChange={e=>set('inspector',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Findings / Observations</label><textarea value={d.findings||''} onChange={e=>set('findings',e.target.value)} style={{ ...styles.input, height:72 }}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Corrective Action</label><textarea value={d.correctiveAction||''} onChange={e=>set('correctiveAction',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Target Close Date</label><input type='date' value={d.targetDate||''} onChange={e=>set('targetDate',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Status</label>
+                <select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{['open','closed'].map(x=><option key={x} value={x}>{x.charAt(0).toUpperCase()+x.slice(1)}</option>)}</select>
+              </div>
+            </div>
+          </>)}
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
             <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
             <button onClick={()=>saveRecord(section,section,d)} style={styles.primaryBtn}>Save</button>
@@ -21694,11 +21867,12 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
     <div style={{ padding:'24px 32px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <h2 className="serif" style={styles.pageTitle}>HSE — Health, Safety & Environment</h2>
-        {canEdit && <button onClick={()=>{
+        {canEdit && tab!=='reports' && <button onClick={()=>{
           if(tab==='incidents') setEditing({ section:'incidents', data:blankIncident() });
           else if(tab==='toolbox') setEditing({ section:'toolbox', data:blankTalk() });
+          else if(tab==='inspections') setEditing({ section:'inspections', data:blankInspection() });
           else setEditing({ section:'permits', data:blankPermit() });
-        }} style={styles.primaryBtn}><Plus size={15}/> New {tab==='incidents'?'Incident':tab==='toolbox'?'Talk':'Permit'}</button>}
+        }} style={styles.primaryBtn}><Plus size={15}/> New {tab==='incidents'?'Incident':tab==='toolbox'?'Talk':tab==='inspections'?'Inspection':'Permit'}</button>}
       </div>
       {/* KPIs */}
       <div style={{ display:'flex', gap:12, marginBottom:20 }}>
@@ -21804,6 +21978,66 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
           </div>
         )
       )}
+      {tab==='inspections' && (
+        inspections.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No inspections recorded.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Date','Area','Project','Inspector','Score','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {[...inspections].sort((a,b)=>b.date>a.date?1:-1).map(ins=>{
+                  const proj = siteProjects.find(p=>p.id===ins.projectId);
+                  const sc = parseFloat(ins.score);
+                  return (
+                    <tr key={ins.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'10px 12px' }}>{ins.date}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:600 }}>{ins.area||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#555' }}>{ins.inspector||'—'}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:700, color:isNaN(sc)?'#888':sc>=85?'#1a6b30':sc>=60?'#856404':'#B5453A' }}>{isNaN(sc)?'—':sc+'%'}</td>
+                      <td style={{ padding:'10px 12px' }}><span style={{ background:ins.status==='closed'?'#d4edda':'#fff3cd', color:ins.status==='closed'?'#1a6b30':'#856404', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(ins.status||'open').toUpperCase()}</span></td>
+                      <td style={{ padding:'10px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setEditing({ section:'inspections', data:ins })} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))updateSection('inspections',prev=>prev.filter(x=>x.id!==ins.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                      </div>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+      {tab==='reports' && (()=>{
+        const byType = INCIDENT_TYPES.map(t=>[t, incidents.filter(i=>i.type===t).length]).filter(([,n])=>n>0);
+        const closedInc = incidents.filter(i=>i.status==='closed').length;
+        const avgScore = inspections.length ? Math.round(inspections.reduce((s2,i)=>s2+(parseFloat(i.score)||0),0)/inspections.length) : 0;
+        const openInsp = inspections.filter(i=>i.status!=='closed').length;
+        const totalAtt = toolboxTalks.reduce((s2,t)=>s2+(parseInt(t.attendeesCount)||0),0);
+        const Row = ({l,v,c}) => <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid #F2EFE6', fontSize:13 }}><span style={{ color:'#555' }}>{l}</span><span style={{ fontWeight:700, color:c||'#1E2A4A' }}>{v}</span></div>;
+        return (
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+            <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'16px 20px' }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', marginBottom:8 }}>Incident Summary</div>
+              <Row l="Total Incidents" v={incidents.length}/>
+              <Row l="Lost Time Injuries (LTI)" v={lti} c={lti?'#B5453A':'#1a6b30'}/>
+              <Row l="Open / Investigating" v={open} c={open?'#856404':'#1a6b30'}/>
+              <Row l="Closed" v={closedInc} c="#1a6b30"/>
+              {byType.map(([t,n])=><Row key={t} l={'• '+t} v={n}/>)}
+            </div>
+            <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'16px 20px' }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', marginBottom:8 }}>Inspections & Toolbox</div>
+              <Row l="Inspections Done" v={inspections.length}/>
+              <Row l="Avg Inspection Score" v={avgScore+'%'} c={avgScore>=85?'#1a6b30':avgScore>=60?'#856404':'#B5453A'}/>
+              <Row l="Open Inspection Items" v={openInsp} c={openInsp?'#856404':'#1a6b30'}/>
+              <Row l="Toolbox Talks" v={toolboxTalks.length}/>
+              <Row l="Total Attendance" v={totalAtt}/>
+              <Row l="Active Permits" v={activeP} c="#0a58ca"/>
+            </div>
+          </div>
+        );
+      })()}
     </div>
     {/* ── HSE Permit to Work Print Overlay ── */}
     {printPermit && (()=>{
@@ -23252,6 +23486,7 @@ export default function App() {
   const [resources,        _setRes]    = useState([]);
   const [manpowerLogs,     _setMPL]    = useState([]);
   const [variations,       _setVAR]    = useState([]);
+  const [dlpDefects,       _setDLP]    = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
@@ -23440,6 +23675,7 @@ export default function App() {
       _setRes(data.resources || []);
       _setMPL(data.manpowerLogs || []);
       _setVAR(data.variations || []);
+      _setDLP(data.dlpDefects || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setEvls(data.evaluations || []);
@@ -23537,6 +23773,7 @@ export default function App() {
   const setResources        = mkSet(_setRes,   'resources');
   const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
   const setVariations       = mkSet(_setVAR,   'variations');
+  const setDlpDefects       = mkSet(_setDLP,   'dlpDefects');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
@@ -23715,7 +23952,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, variations, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, siteAttendance, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -23766,6 +24003,7 @@ export default function App() {
     if (backup.resources) setResources(backup.resources);
     if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
     if (backup.variations) setVariations(backup.variations);
+    if (backup.dlpDefects) setDlpDefects(backup.dlpDefects);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
@@ -24561,6 +24799,10 @@ export default function App() {
           />
         );
       case 'hse':
+      case 'hseinspections':
+      case 'toolbox':
+      case 'incidents':
+      case 'hsepermits':
         return (
           <HSEView
             hseRecords={hseRecords}
@@ -24568,6 +24810,7 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            initialTab={view==='hseinspections'?'inspections':view==='toolbox'?'toolbox':view==='incidents'?'incidents':view==='hsepermits'?'permits':'reports'}
           />
         );
       case 'tcommissioning':
@@ -24587,6 +24830,18 @@ export default function App() {
             setHandoverDocs={setHandoverDocs}
             siteProjects={siteProjects}
             customers={customers}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'dlpdefects':
+        return (
+          <DLPView
+            dlpDefects={dlpDefects}
+            setDlpDefects={setDlpDefects}
+            siteProjects={siteProjects}
+            setSiteProjects={setSiteProjects}
+            subcontractors={subcontractors}
             userRole={userRole}
             businessInfo={businessInfo}
           />
