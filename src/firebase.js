@@ -3,6 +3,8 @@ import { initializeFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, 
 import { getStorage, ref, uploadBytes, uploadString, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import {
   getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -34,7 +36,19 @@ export const db = initializeFirestore(app, {
 }, 'default'); // <-- IMPORTANT: this project's Firestore database is named 'default'
               //     (not the standard '(default)'). Without this the app talked to a
               //     non-existent database, so no data ever reached the server.
-export const auth = getAuth(app);
+// PWA-safe durable session: prefer IndexedDB (survives standalone PWA restarts),
+// fall back to localStorage, then session. initializeAuth sets this at startup so
+// a previously signed-in user is restored on reload without re-entering password.
+let _auth;
+try {
+  _auth = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+  });
+} catch (e) {
+  // Already initialized (hot reload) or unsupported — fall back to getAuth.
+  _auth = getAuth(app);
+}
+export const auth = _auth;
 export const storage = getStorage(app);
 
 // Secondary app removed — staff accounts are now created via REST API (no SDK,
@@ -63,7 +77,12 @@ export async function refreshUser(user) {
 }
 
 export async function signIn(email, password, keepLoggedIn = true) {
-  await setPersistence(auth, keepLoggedIn ? browserLocalPersistence : browserSessionPersistence);
+  try {
+    await setPersistence(auth, keepLoggedIn ? indexedDBLocalPersistence : browserSessionPersistence);
+  } catch (e) {
+    // Storage blocked (private mode / PWA quirk) — fall back to localStorage, then session.
+    try { await setPersistence(auth, keepLoggedIn ? browserLocalPersistence : browserSessionPersistence); } catch (e2) {}
+  }
   const cred = await signInWithEmailAndPassword(auth, email, password);
   return cred.user;
 }
