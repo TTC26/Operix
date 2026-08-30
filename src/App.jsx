@@ -19272,41 +19272,54 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
 
       {printSheet && (() => {
         const { ym, dim, rows } = salaryData();
+        const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
         const days = Array.from({length:dim},(_,i)=>i+1);
-        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, ot:a.ot+r.ot, earned:a.earned+r.earned }), {present:0,ot:0,earned:0});
+        const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dowOf = d => new Date(yy, mm-1, d).getDay();
+        const holidays = days.filter(d=>dowOf(d)===5).length;
+        const monthName = new Date(yy, mm-1, 1).toLocaleString('default',{month:'long', year:'numeric'});
+        const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+        const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+        const calc = r => { const payable = r.present + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
+        const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
+        const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
           <DocPrintOverlay onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
-            <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
-            <div style={{ textAlign:'center', marginBottom:12 }}>
-              <div style={{ fontSize:18, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>ATTENDANCE & SALARY SHEET</div>
-              <div style={{ fontSize:11, color:'#888' }}>{ym}{filterProject?' · '+(siteProjects.find(p=>p.id===filterProject)?.name||''):''}</div>
+            <style>{`@media print { @page { size: A4 landscape; margin: 6mm; } }`}</style>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:'#1E2A4A' }}>Attendance &amp; Salary Sheet</div>
+              <div style={{ fontSize:12, fontWeight:700, background:'#FFF3B0', padding:'2px 10px', borderRadius:4 }}>{monthName}</div>
             </div>
-            <table style={{ borderCollapse:'collapse', fontSize:8, width:'100%', fontFamily:'Arial, sans-serif' }}>
-              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
-                <th style={{ padding:'3px 4px', textAlign:'left' }}>Employee</th>
-                {days.map(d=><th key={d} style={{ padding:'2px', textAlign:'center' }}>{d}</th>)}
-                {['P','A','OT','Earned'].map(h=><th key={h} style={{ padding:'3px 4px', textAlign:'right' }}>{h}</th>)}
-              </tr></thead>
+            <div style={{ display:'flex', gap:24, fontSize:10, marginBottom:8 }}><span>From: <b>{fromD}</b></span><span>To: <b style={{ background:'#FFF3B0', padding:'0 4px' }}>{toD}</b></span></div>
+            <table style={{ borderCollapse:'collapse', width:'100%', fontFamily:'Arial, sans-serif' }}>
+              <thead>
+                <tr>
+                  {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===5?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
+                </tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===5?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+              </thead>
               <tbody>
-                {rows.map((r,ri)=>(
-                  <tr key={r.emp.id} style={{ background:ri%2?'#F6F5F2':'#fff', borderBottom:'1px solid #eee' }}>
-                    <td style={{ padding:'2px 4px', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
-                    {days.map(d=><td key={d} style={{ padding:'1px', textAlign:'center' }}>{r.byDay[d]||''}</td>)}
-                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.present}</td>
-                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.absent}</td>
-                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.ot||''}</td>
-                    <td style={{ padding:'2px 4px', textAlign:'right', fontWeight:700 }}>{r.earned?Math.round(r.earned).toLocaleString():''}</td>
+                {rows.map((r,ri)=>{ const c=calc(r); return (
+                  <tr key={r.emp.id}>
+                    <td style={td}>{ri+1}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=dowOf(d)===5; return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
+                    <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
+                    <td style={td}>{holidays}</td>
+                    <td style={td}>{dim}</td>
+                    <td style={{ ...td, background:'#D6F0DD', fontWeight:700 }}>{c.payable}</td>
+                    <td style={{ ...td, textAlign:'right' }}>{r.basic?Math.round(r.basic).toLocaleString():''}</td>
+                    <td style={{ ...td, textAlign:'right', fontWeight:700 }}>{Math.round(c.inHand).toLocaleString()}</td>
                   </tr>
-                ))}
+                ); })}
               </tbody>
-              <tfoot><tr style={{ borderTop:'2px solid #1E2A4A', fontWeight:700 }}>
-                <td style={{ padding:'3px 4px' }}>TOTAL</td><td colSpan={dim}></td>
-                <td style={{ padding:'3px 4px', textAlign:'right' }}>{tot.present}</td><td></td>
-                <td style={{ padding:'3px 4px', textAlign:'right' }}>{tot.ot||''}</td>
-                <td style={{ padding:'3px 4px', textAlign:'right' }}>{Math.round(tot.earned).toLocaleString()}</td>
-              </tr></tfoot>
             </table>
-            <div style={{ fontSize:9, color:'#666', marginTop:8 }}>P=Present, A=Absent, H=Half, L=Leave. Earned = (Basic÷30)×(Present+½Half) + OT×(day-rate÷8)×1.25.</div>
+            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · Fridays = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
           </DocPrintOverlay>
         );
       })()}
