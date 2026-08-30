@@ -2755,6 +2755,7 @@ function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = 
     { value: 'inventory', label: 'Inventory / Stores',desc: 'Items, stock, GRN, store issue, bin card.' },
     { value: 'accounts',  label: 'Accounts',          desc: 'Petty cash, vouchers, tax reports.' },
     { value: 'hr',        label: 'HR / Payroll',       desc: 'Employees, payroll, attendance.' },
+    { value: 'foreman',   label: 'Foreman / Site Eng.', desc: 'Marks attendance for their own labour group(s) only.' },
     { value: 'viewer',    label: 'Viewer (read-only)', desc: 'Can view all documents but cannot create or edit.' },
   ];
 
@@ -19028,157 +19029,222 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, siteProjects, employees, userRole }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, employees, userRole, user }) {
+  const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [markGroupId, setMarkGroupId] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
-  const canEdit = userRole === 'admin' || userRole === 'manager';
-  const sorted = [...siteAttendance]
-    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  function save(form) {
-    const rec = { ...form, id: form.id || crypto.randomUUID() };
+
+  const isForeman = userRole === 'foreman';
+  const canManageGroups = ['admin','manager','hr'].includes(userRole);
+  const myEmp = employees.find(e => e.email && user?.email && String(e.email).toLowerCase() === String(user.email).toLowerCase());
+  const visibleGroups = isForeman ? labourGroups.filter(g => g.leaderId && g.leaderId === myEmp?.id) : labourGroups;
+  const canEditGroupAtt = g => ['admin','manager','hr'].includes(userRole) || (isForeman && g && g.leaderId === myEmp?.id);
+  const empName = id => employees.find(e=>e.id===id)?.name || '—';
+  const projName = id => siteProjects.find(p=>p.id===id)?.name || '—';
+
+  function saveAtt(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID(), updatedBy: user?.email||'' };
     setSiteAttendance(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
     setEditing(null);
   }
-  function del(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
+  function delAtt(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
+  function saveGroup(g) {
+    const rec = { ...g, id: g.id || crypto.randomUUID() };
+    setLabourGroups(prev => prev.find(x=>x.id===rec.id) ? prev.map(x=>x.id===rec.id?rec:x) : [...prev, rec]);
+    setEditingGroup(null);
+  }
+  function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
+
   const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵' };
-  const empSummary = employees.reduce((acc, emp) => {
+  const sorted = [...siteAttendance]
+    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
+    .filter(r => !isForeman || visibleGroups.some(g=>g.id===r.groupId))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const scopeEmpIds = isForeman ? new Set(visibleGroups.flatMap(g=>g.memberIds||[])) : null;
+  const scopeEmps = scopeEmpIds ? employees.filter(e=>scopeEmpIds.has(e.id)) : employees;
+  const empSummary = scopeEmps.reduce((acc, emp) => {
     const records = sorted.flatMap(r => (r.records || []).filter(x => x.employeeId === emp.id));
     acc[emp.id] = {
       present: records.filter(x => x.status === 'present').length,
       halfDay: records.filter(x => x.status === 'half_day').length,
       absent: records.filter(x => x.status === 'absent').length,
       leave: records.filter(x => x.status === 'leave').length,
+      ot: records.reduce((s,x)=>s+(parseFloat(x.otHours)||0),0),
       total: records.length,
     };
     return acc;
   }, {});
+
+  function startMark() {
+    const g = labourGroups.find(x=>x.id===markGroupId);
+    if (!g) { alert('Select a group first.'); return; }
+    const mem = employees.filter(e => (g.memberIds||[]).includes(e.id));
+    setEditing({ _isNew:true, date:new Date().toISOString().slice(0,10), groupId:g.id, projectId:g.projectId||'', records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) });
+  }
+
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{siteAttendance.length} daily records</p></div>
-        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0, 10), records: [] })}>+ Mark Attendance</button>}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
+        <div style={{ display:'flex', gap:8 }}>
+          {['mark', ...(canManageGroups?['groups']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':'Labour Groups'}</button>)}
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ ...styles.input, width: 220 }}>
-          <option value="">All Projects</option>
-          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ ...styles.input, width: 160 }} />
-        <button style={styles.ghostBtn} onClick={() => setFilterMonth('')}>All months</button>
-      </div>
-      {employees.length > 0 && (
-        <>
-          <div style={styles.dashSection}>Monthly Summary — {filterMonth || 'All time'}</div>
-          <div style={{ overflowX: 'auto', marginBottom: 20 }}>
-            <table style={styles.table}>
-              <thead><tr style={{ background: '#F5F3EE' }}>{['Employee','Days Logged','Present','Half Day','Absent','Leave','Attendance %'].map(h=><th key={h} style={{ ...styles.th, textAlign: h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
-              <tbody>
-                {employees.map(emp => {
-                  const s = empSummary[emp.id] || {};
-                  const pct = s.total ? Math.round(((s.present + (s.halfDay||0) * 0.5) / s.total) * 100) : 0;
-                  return (
-                    <tr key={emp.id} style={{ borderTop: '1px solid #EAE6DB' }}>
-                      <td style={styles.td}>{emp.name}</td>
-                      <td style={{ ...styles.td, textAlign:'center' }}>{s.total||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{s.present||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{s.halfDay||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{s.absent||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{s.leave||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center' }}><span style={{ fontWeight:700, color: pct>=80?'#1A7A3E':pct>=60?'#C9A24B':'#B5453A' }}>{s.total?`${pct}%`:'—'}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+      {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
+
+      {tab === 'groups' && canManageGroups && (
+        <div>
+          <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:12 }}>
+            <button style={styles.primaryBtn} onClick={()=>setEditingGroup({ _isNew:true, name:'', leaderId:'', projectId:'', type:'site', memberIds:[] })}><Plus size={15}/> New Group</button>
           </div>
-        </>
-      )}
-      <div style={styles.dashSection}>Daily Records</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {sorted.map(r => {
-          const proj = siteProjects.find(p => p.id === r.projectId);
-          const presentCount = (r.records || []).filter(x => x.status === 'present').length;
-          return (
-            <div key={r.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '12px 16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{r.date}</span>
-                  <span style={{ fontSize: 12, color: '#888', marginLeft: 10 }}>{proj?.name || '—'}</span>
-                  <span style={{ fontSize: 12, color: '#1A7A3E', marginLeft: 10 }}>{presentCount}/{(r.records||[]).length} present</span>
+          {labourGroups.length===0 ? <div style={styles.emptyBox}>No labour groups yet. Create a group, set its foreman/leader, and add members.</div> : (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px,1fr))', gap:14 }}>
+              {labourGroups.map(g=>(
+                <div key={g.id} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'14px 16px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight:700, color:'#1E2A4A', fontSize:15 }}>{g.name||'Untitled'}</div>
+                      <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{g.type==='office'?'Office / General':projName(g.projectId)}</div>
+                    </div>
+                    <span style={{ fontSize:10.5, fontWeight:700, background:g.type==='office'?'#EEF2FF':'#E6F5EC', color:g.type==='office'?'#3D52A0':'#1A7A3E', borderRadius:5, padding:'2px 8px' }}>{g.type==='office'?'OFFICE':'SITE'}</span>
+                  </div>
+                  <div style={{ fontSize:12.5, color:'#555', marginTop:8 }}>Leader: <b>{empName(g.leaderId)}</b></div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:4 }}>{(g.memberIds||[]).length} member{(g.memberIds||[]).length!==1?'s':''}</div>
+                  <div style={{ display:'flex', gap:6, marginTop:10 }}>
+                    <button style={{ ...styles.ghostBtn, fontSize:12 }} onClick={()=>setEditingGroup(g)}><Pencil size={13}/> Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize:12, color:'#B5453A' }} onClick={()=>delGroup(g.id)}><Trash2 size={13}/></button>
+                  </div>
                 </div>
-                {canEdit && <div style={{ display:'flex', gap:6 }}>
-                  <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(r)}>Edit</button>
-                  <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(r.id)}>×</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'mark' && (<>
+        <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
+          <select value={markGroupId} onChange={e=>setMarkGroupId(e.target.value)} style={{ ...styles.input, width:240, margin:0 }}>
+            <option value="">— Select group to mark —</option>
+            {visibleGroups.map(g=><option key={g.id} value={g.id}>{g.name} ({g.type==='office'?'Office':projName(g.projectId)})</option>)}
+          </select>
+          <button style={styles.primaryBtn} disabled={!markGroupId} onClick={startMark}>+ Mark Attendance</button>
+          <span style={{ flex:1 }}/>
+          <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
+        </div>
+
+        {scopeEmps.length>0 && (
+          <>
+            <div style={styles.dashSection}>Monthly Summary — {filterMonth||'All time'}</div>
+            <div style={{ overflowX:'auto', marginBottom:20 }}>
+              <table style={styles.table}>
+                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.halfDay||0)*0.5)/su.total)*100):0; return (
+                    <tr key={emp.id} style={{ borderTop:'1px solid #EAE6DB' }}>
+                      <td style={styles.td}>{emp.name}</td>
+                      <td style={{ ...styles.td, textAlign:'center' }}>{su.total||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{su.present||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{su.halfDay||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{su.absent||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{su.leave||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', fontWeight:600 }}>{su.ot?su.ot:'—'}</td>
+                      <td style={{ ...styles.td, textAlign:'center' }}><span style={{ fontWeight:700, color:pct>=80?'#1A7A3E':pct>=60?'#C9A24B':'#B5453A' }}>{su.total?pct+'%':'—'}</span></td>
+                    </tr>
+                  ); })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div style={styles.dashSection}>Daily Records</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {sorted.map(r=>{ const g=labourGroups.find(x=>x.id===r.groupId); const presentCount=(r.records||[]).filter(x=>x.status==='present').length; const editable=canEditGroupAtt(g) || (!g && ['admin','manager','hr'].includes(userRole)); return (
+            <div key={r.id} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:12, padding:'12px 16px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                <div>
+                  <span style={{ fontWeight:600, fontSize:14, color:'#1E2A4A' }}>{r.date}</span>
+                  <span style={{ fontSize:12, color:'#888', marginLeft:10 }}>{g?.name||projName(r.projectId)}</span>
+                  <span style={{ fontSize:12, color:'#1A7A3E', marginLeft:10 }}>{presentCount}/{(r.records||[]).length} present</span>
+                </div>
+                {editable && <div style={{ display:'flex', gap:6 }}>
+                  <button style={{ ...styles.ghostBtn, fontSize:12 }} onClick={()=>setEditing(r)}>Edit</button>
+                  <button style={{ ...styles.ghostBtn, fontSize:12, color:'#B5453A' }} onClick={()=>delAtt(r.id)}>×</button>
                 </div>}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {(r.records || []).map((rec, i) => {
-                  const emp = employees.find(e => e.id === rec.employeeId);
-                  return <span key={i} style={{ fontSize: 12, background: '#F5F3EE', borderRadius: 8, padding: '3px 10px' }}>{STATUS_ICON[rec.status]||'?'} {emp?.name||'?'}</span>;
-                })}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                {(r.records||[]).map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return <span key={i} style={{ fontSize:12, background:'#F5F3EE', borderRadius:8, padding:'3px 10px' }}>{STATUS_ICON[rec.status]||'?'} {emp?.name||'?'}{rec.otHours>0?' +'+rec.otHours+'h':''}</span>; })}
               </div>
             </div>
-          );
-        })}
-        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No attendance records for this period.</div>}
-      </div>
-      {editing && <AttendanceSheet sheet={editing} siteProjects={siteProjects} employees={employees} onSave={save} onClose={() => setEditing(null)} />}
+          ); })}
+          {sorted.length===0 && <div style={{ color:'#aaa', padding:24 }}>No attendance records for this period.</div>}
+        </div>
+      </>)}
+
+      {editing && <AttendanceSheet sheet={editing} group={labourGroups.find(g=>g.id===editing.groupId)} siteProjects={siteProjects} employees={employees} onSave={saveAtt} onClose={()=>setEditing(null)} />}
+      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
     </div>
   );
 }
 
-function AttendanceSheet({ sheet, siteProjects, employees, onSave, onClose }) {
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10), projectId: '',
-    records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })),
-    ...sheet,
-  });
-  useEffect(() => {
-    if (form.records.length === 0 && employees.length > 0) {
-      setForm(f => ({ ...f, records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })) }));
-    }
-  }, []);
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
-  function setRecord(i, k, v) { const recs = [...form.records]; recs[i] = { ...recs[i], [k]: v }; set('records', recs); }
-  const STATUSES = [{ value:'present',label:'P',color:'#1A7A3E' },{ value:'absent',label:'A',color:'#B5453A' },{ value:'half_day',label:'½',color:'#C9A24B' },{ value:'leave',label:'L',color:'#6B5BAE' }];
-  const proj = siteProjects.find(p => p.id === form.projectId);
-  const relevantEmps = proj?.teamIds?.length ? employees.filter(e => proj.teamIds.includes(e.id)) : employees;
-  const displayRecords = form.records.filter(r => relevantEmps.some(e => e.id === r.employeeId));
+function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
+  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type:'site', memberIds:[], ...group });
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const toggle=id=>setForm(f=>({ ...f, memberIds: (f.memberIds||[]).includes(id) ? f.memberIds.filter(x=>x!==id) : [...(f.memberIds||[]), id] }));
   return (
-    <Modal title="Mark Attendance" onClose={onClose} width={560}>
+    <Modal title={form.id?'Edit Group':'New Labour Group'} onClose={onClose} width={560}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+        <div style={styles.formGroup}><label style={styles.label}>Group Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder="e.g. Electrical Gang A"/></div>
+        <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>
+        <div style={styles.formGroup}><label style={styles.label}>Leader / Foreman</label><select value={form.leaderId} onChange={e=>set('leaderId',e.target.value)} style={styles.input}><option value="">— Select —</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
+        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+      </div>
+      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({(form.memberIds||[]).length})</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:280, overflowY:'auto', border:'1px solid #EAE6DB', borderRadius:8, padding:8 }}>
+        {employees.length===0 && <div style={{ color:'#aaa', fontSize:13, padding:8 }}>No employees. Add employees first.</div>}
+        {employees.map(e=>(
+          <label key={e.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 8px', borderRadius:6, cursor:'pointer', background:(form.memberIds||[]).includes(e.id)?'#F4FAF5':'transparent' }}>
+            <input type="checkbox" checked={(form.memberIds||[]).includes(e.id)} onChange={()=>toggle(e.id)} />
+            <span style={{ fontSize:13 }}>{e.name}</span><span style={{ fontSize:11, color:'#999' }}>{e.designation||''}</span>
+          </label>
+        ))}
+      </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:16 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={()=>{ if(!form.name.trim()) return alert('Group name required'); onSave(form); }}>Save Group</button>
+      </div>
+    </Modal>
+  );
+}
+
+function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose }) {
+  const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), projectId:'', records:[], ...sheet });
+  useEffect(()=>{ if((form.records||[]).length===0){ const mem = group ? employees.filter(e=>(group.memberIds||[]).includes(e.id)) : employees; setForm(f=>({ ...f, records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) })); } }, []);
+  function set(k,v){ setForm(f=>({...f,[k]:v})); }
+  function setRecord(i,k,v){ const recs=[...form.records]; recs[i]={...recs[i],[k]:v}; set('records',recs); }
+  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'}];
+  return (
+    <Modal title={'Mark Attendance'+(group?' — '+group.name:'')} onClose={onClose} width={620}>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
         <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Project</label>
-          <select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}>
-            <option value="">— All / General —</option>
-            {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
+        <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
       </div>
-      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Employees ({relevantEmps.length})</div>
-      <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:340, overflowY:'auto' }}>
-        {displayRecords.map((rec) => {
-          const emp = employees.find(e => e.id === rec.employeeId);
-          const allIdx = form.records.findIndex(r => r.employeeId === rec.employeeId);
-          return (
-            <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 3fr', gap:10, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
-              <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
-              <div style={{ display:'flex', gap:4 }}>
-                {STATUSES.map(s=>(
-                  <button key={s.value} onClick={()=>setRecord(allIdx,'status',s.value)}
-                    style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===s.value?s.color:'#EAE6DB', color:rec.status===s.value?'#fff':'#666', fontWeight:700 }}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-              <input value={rec.note||''} onChange={e=>setRecord(allIdx,'note',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 8px' }} placeholder="Note (optional)" />
-            </div>
-          );
-        })}
-        {displayRecords.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No employees. Add team in project settings.</div>}
+      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
+        {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
+          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'2fr auto 90px', gap:10, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
+            <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
+            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
+            <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 8px', margin:0 }} placeholder="OT hrs" title="Overtime hours" />
+          </div>
+        ); })}
+        {form.records.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No members in this group. Add members in Labour Groups.</div>}
       </div>
       <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:16 }}>
         <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
@@ -23937,6 +24003,7 @@ export default function App() {
   const [dlpDefects,       _setDLP]    = useState([]);
   const [serviceHistory,   _setSH]     = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
+  const [labourGroups,     _setLG]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
   const [internalAudits,   _setAudits] = useState([]);
@@ -24128,6 +24195,7 @@ export default function App() {
       _setSH(data.serviceHistory || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
+      _setLG(data.labourGroups || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
       _setAudits(data.internalAudits || []);
@@ -24226,6 +24294,7 @@ export default function App() {
   const setDlpDefects       = mkSet(_setDLP,   'dlpDefects');
   const setServiceHistory   = mkSet(_setSH,    'serviceHistory');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
+  const setLabourGroups     = mkSet(_setLG,    'labourGroups');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
   const setInternalAudits   = mkSet(_setAudits,'internalAudits');
@@ -24403,7 +24472,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -24457,6 +24526,7 @@ export default function App() {
     if (backup.dlpDefects) setDlpDefects(backup.dlpDefects);
     if (backup.serviceHistory) setServiceHistory(backup.serviceHistory);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
+    if (backup.labourGroups) setLabourGroups(backup.labourGroups);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
     if (backup.internalAudits)  setInternalAudits(backup.internalAudits);
@@ -25194,9 +25264,12 @@ export default function App() {
           <SiteAttendanceView
             siteAttendance={siteAttendance}
             setSiteAttendance={setSiteAttendance}
+            labourGroups={labourGroups}
+            setLabourGroups={setLabourGroups}
             siteProjects={siteProjects}
             employees={employees}
             userRole={userRole}
+            user={user}
           />
         );
       case 'evaluation':
