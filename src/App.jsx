@@ -21173,10 +21173,11 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     async function importPriceCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       const nm = (file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
       try {
         let rows = [];
         if (nm.endsWith('.xlsx')||nm.endsWith('.xls')) { const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
-        else { const text=await file.text(); rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        else { const text=await file.text(); if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
         const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
         const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
         const hasHeader=head.some(h=>/activ|desc|price|rate|unit|villa|qty/.test(h));
@@ -21200,12 +21201,13 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     async function importMpCsv(e) {
       const file=e.target.files&&e.target.files[0]; if(!file) return;
       const nm=(file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
       const areaKey=str=>{ const u=String(str||'').toUpperCase(); if(u.includes('GROUND')) return 'Ground Floor'; if(u.includes('FIRST FLOOR')) return 'First Floor'; if(u.includes('LOWER ROOF')) return 'Lower Roof'; if(u.includes('UPPER ROOF')) return 'Upper Roof'; if(u.includes('DB DRESS')) return 'DB Dressing'; if(u.includes('EXTERN')) return 'External'; return null; };
       const stageGuess = nm.includes('final')?'Final Fix':nm.includes('second')?'Second Fix':'First Fix';
       try {
         let rows=[];
         if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
-        else { const text=await file.text(); rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        else { const text=await file.text(); if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
         const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
         const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
         const hasHeader=head.some(h=>/activ|tech|helper|day|stage|area|floor/.test(h));
@@ -21243,6 +21245,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       const nm = (file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
       try {
         let rows = [];
         if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
@@ -21253,6 +21256,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
         } else {
           const text = await file.text();
+          if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; }
           rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
         }
         const parsed = boqRowsToLines(rows);
