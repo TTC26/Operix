@@ -19562,7 +19562,13 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         );
       })()}
 
-      {editing && <AttendanceSheet sheet={editing} group={labourGroups.find(g=>g.id===editing.groupId)} siteProjects={siteProjects} employees={employees} onSave={saveAtt} onClose={()=>setEditing(null)} />}
+      {editing && (() => {
+        const g = labourGroups.find(x=>x.id===editing.groupId);
+        const proj = g && siteProjects.find(p=>p.id===g.projectId);
+        const woDay = proj ? (proj.weekOff!=null?proj.weekOff:weekOff) : weekOff;
+        const holDates = (holidayCalendar||[]).filter(h=>!h.projectId || (g && h.projectId===g.projectId)).map(h=>h.date);
+        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
+      })()}
       {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
     </div>
   );
@@ -19604,8 +19610,13 @@ function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
   );
 }
 
-function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose }) {
+function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
   const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), projectId:'', records:[], ...sheet });
+  const [bypass, setBypass] = useState(false);
+  const _DOWN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const _holSet = new Set(holidayDates||[]);
+  const offInfo = (() => { if(!form.date) return null; if(_holSet.has(form.date)) return 'Holiday'; if(new Date(form.date).getDay()===weekOffDay) return 'Weekly off ('+_DOWN[weekOffDay]+')'; return null; })();
+  const canBypass = ['admin','manager'].includes(userRole);
   useEffect(()=>{ if((form.records||[]).length===0){ const mem = group ? employees.filter(e=>(group.memberIds||[]).includes(e.id)) : employees; setForm(f=>({ ...f, records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) })); } }, []);
   function set(k,v){ setForm(f=>({...f,[k]:v})); }
   function setRecord(i,k,v){ const recs=[...form.records]; recs[i]={...recs[i],[k]:v}; set('records',recs); }
@@ -19616,6 +19627,12 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
         <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
       </div>
+      {offInfo && (
+        <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12.5, color:'#92400E' }}>
+          <b>⚠ {offInfo}</b> on {form.date}. Normally no attendance is marked. {canBypass ? '' : 'Only a manager/admin can record work on an off-day/holiday.'}
+          {canBypass && <label style={{ display:'flex', alignItems:'center', gap:7, marginTop:8, cursor:'pointer', fontWeight:600 }}><input type='checkbox' checked={bypass} onChange={e=>setBypass(e.target.checked)} /> Confirm they worked on this off-day — proceed</label>}
+        </div>
+      )}
       <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
         {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
@@ -19630,7 +19647,7 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
       </div>
       <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:16 }}>
         <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
-        <button style={styles.primaryBtn} onClick={()=>{ if(!form.date) return alert('Date required'); onSave(form); }}>Save Attendance</button>
+        <button style={styles.primaryBtn} onClick={()=>{ if(!form.date) return alert('Date required'); if(offInfo && !bypass){ if(canBypass){ alert('This date is a '+offInfo+'. Tick "Confirm they worked on this off-day" to proceed.'); } else { alert('This date is a '+offInfo+'. Only a manager/admin can mark attendance on an off-day / holiday.'); } return; } onSave(form); }}>Save Attendance</button>
       </div>
     </Modal>
   );
