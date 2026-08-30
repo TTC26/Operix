@@ -547,7 +547,7 @@ function sendNotificationEmail(businessInfo, type, vars = {}) {
   } else { doSend(); }
   function doSend() {
     const params = {
-      company_name: businessInfo.name || 'Operix',
+      company_name: businessInfo.name || 'Oryqen',
       doc_ref: vars.docRef || '',
       party: vars.party || '',
       submitter: vars.submitter || '',
@@ -820,7 +820,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontWeight: 700, fontFamily: 'Georgia, serif', fontSize: 24, color: '#1E2A4A',
             }}>O</div>
-            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 24, color: '#fff', letterSpacing: '-0.3px' }}>Operix</div>
+            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 24, color: '#fff', letterSpacing: '-0.3px' }}>Oryqen</div>
           </div>
           <div style={{ fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 10, lineHeight: 1.2 }}>
             What does your business do?
@@ -940,7 +940,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
           }}
         >
           {selected.length && companyName.trim()
-            ? `Enter Operix →`
+            ? `Enter Oryqen →`
             : selected.length ? 'Enter your company name to continue' : 'Select an activity to continue'}
         </button>
 
@@ -977,7 +977,7 @@ function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
       <div style={{ textAlign: 'center', marginBottom: 44 }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div style={{ width: 44, height: 44, borderRadius: 13, background: '#C9A24B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#1E2A4A' }}>O</div>
-          <div style={{ fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#fff' }}>Operix</div>
+          <div style={{ fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#fff' }}>Oryqen</div>
         </div>
         {businessInfo?.name && (
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 10 }}>{businessInfo.name}</div>
@@ -1104,12 +1104,12 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
           <>
             <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#1E2A4A', marginBottom: 10 }}>Your free trial has ended</div>
             <div style={{ fontSize: 14, color: '#666', lineHeight: 1.6, marginBottom: 28 }}>
-              Subscribe to keep your data and continue using Operix.
+              Subscribe to keep your data and continue using Oryqen.
             </div>
 
             {/* Plan card */}
             <div style={{ background: '#1E2A4A', borderRadius: 14, padding: '24px 28px', marginBottom: 24, textAlign: 'left' }}>
-              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Operix Pro</div>
+              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Oryqen Pro</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 16 }}>
                 <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹999</span>
                 <span style={{ color: '#9BABB8', fontSize: 13, marginBottom: 8 }}>/month</span>
@@ -1248,7 +1248,7 @@ function AuthScreen() {
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" />
       <div style={styles.loginCard}>
         <div style={styles.brandMark}>O</div>
-        <div className="serif" style={styles.loginTitle}>Operix</div>
+        <div className="serif" style={styles.loginTitle}>Oryqen</div>
         <div style={styles.muted}>A complete business management platform.</div>
 
         {mode !== 'forgot' && (
@@ -1545,7 +1545,7 @@ function printAllCustomers(customers, businessInfo) {
   </thead>
   <tbody>${rows}</tbody>
 </table>
-<div class="footer">Operix · ${date}</div>
+<div class="footer">Oryqen · ${date}</div>
 </div></body></html>`;
   printHTML(html);
 }
@@ -2523,7 +2523,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                       const file = ev.target.files && ev.target.files[0];
                       if (!file) return;
                       const rdr = new FileReader();
-                      rdr.onload = () => { try { const bk = JSON.parse(rdr.result); if (window.confirm('Restore all data from this backup file? This re-saves every record to the server.')) onRestoreBackup(bk); } catch (e) { alert('That file is not a valid Operix backup.'); } };
+                      rdr.onload = () => { try { const bk = JSON.parse(rdr.result); if (window.confirm('Restore all data from this backup file? This re-saves every record to the server.')) onRestoreBackup(bk); } catch (e) { alert('That file is not a valid Oryqen backup.'); } };
                       rdr.readAsText(file);
                       ev.target.value = '';
                     }} />
@@ -2628,7 +2628,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                 <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '16px 20px' }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: '#B91C1C', marginBottom: 4 }}>Delete Account</div>
                   <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
-                    Permanently delete your Operix account and all associated data. This cannot be undone.
+                    Permanently delete your Oryqen account and all associated data. This cannot be undone.
                   </div>
                   <button
                     onClick={() => onRequestDelete && onRequestDelete()}
@@ -3846,7 +3846,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
         <div style={styles.brandMark}>O</div>
         <div style={{ flex: 1 }}>
-          <div className="serif" style={styles.brandName}>Operix</div>
+          <div className="serif" style={styles.brandName}>Oryqen</div>
           <div style={styles.brandSub}>Business Suite</div>
         </div>
         {/* Settings icon — admin only */}
@@ -11981,7 +11981,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
       </tr>
     </table>
     ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
-    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Operix</div>
+    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Oryqen</div>
     </body></html>`);
     w.document.close();
     setTimeout(() => { w.print(); }, 400);
@@ -12655,7 +12655,7 @@ function VATReport({ documents, customers, businessInfo }) {
       )}
 
       <div style={{ marginTop: 28, fontSize: 11, color:'#888', borderTop:'1px solid #ddd', paddingTop: 8 }}>
-        Generated by Operix · {new Date().toLocaleDateString()}
+        Generated by Oryqen · {new Date().toLocaleDateString()}
       </div>
     </div>
   );
@@ -26193,7 +26193,7 @@ export default function App() {
           pointerEvents: 'none',
         }}>
           <span style={{ opacity: 0.55 }}>Powered by</span>
-          <strong style={{ marginLeft: 3 }}>Operix</strong>
+          <strong style={{ marginLeft: 3 }}>Oryqen</strong>
         </div>
       )}
 
