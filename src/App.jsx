@@ -280,9 +280,25 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
+  const [autoWide, setAutoWide] = React.useState(false);
+  React.useEffect(() => {
+    // Auto-detect if content overflows an A4 portrait width -> switch print to landscape.
+    const t = setTimeout(() => {
+      const body = document.querySelector('.doc-print-area .pa-body');
+      if (!body) return;
+      const pw = body.style.width, pm = body.style.maxWidth;
+      body.style.width = '760px'; body.style.maxWidth = '760px';
+      let wide = body.scrollWidth > 768;
+      body.querySelectorAll('table').forEach(tb => { if (tb.scrollWidth > tb.clientWidth + 2) wide = true; });
+      body.style.width = pw; body.style.maxWidth = pm;
+      setAutoWide(wide);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [useLH]);
   const cur = (cc) => (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency || '';
   return (
     <>
+      {autoWide && <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
       <div className="no-print" onClick={onClose}
         style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:998 }}/>
       <div className="no-print" style={{ position:'fixed', top:16, right:24, zIndex:1001, display:'flex', gap:8 }}>
@@ -299,7 +315,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         {useLH && <LetterheadHeader bi={businessInfo} />}
-        <div style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
+        <div className="pa-body" style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
           {!useLH && businessInfo && (
             <div style={{ marginBottom:24, borderBottom:'2px solid #1E2A4A', paddingBottom:16 }}>
               <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A' }}>{businessInfo.name||'Company Name'}</div>
@@ -10466,6 +10482,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
   const period = `${MONTHS.find(m=>m[0]===run?.month)?.[1] || run?.month} ${run?.year}`;
   return (
     <div>
+      <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
       <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
@@ -19110,7 +19127,19 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   function delAtt(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
   function saveGroup(g) {
     const rec = { ...g, id: g.id || crypto.randomUUID() };
-    setLabourGroups(prev => prev.find(x=>x.id===rec.id) ? prev.map(x=>x.id===rec.id?rec:x) : [...prev, rec]);
+    const eff = rec.effectiveFrom || new Date().toISOString().slice(0,10);
+    delete rec.effectiveFrom;
+    setLabourGroups(prev => {
+      const old = prev.find(x=>x.id===rec.id);
+      const hist = rec.siteHistory || (old && old.siteHistory) || [];
+      if (old) {
+        if (old.projectId !== rec.projectId) { rec.siteHistory = [...hist, { projectId: rec.projectId, fromDate: eff }]; }
+        else { rec.siteHistory = hist; }
+      } else if (rec.projectId) {
+        rec.siteHistory = [{ projectId: rec.projectId, fromDate: eff }];
+      }
+      return old ? prev.map(x=>x.id===rec.id?rec:x) : [...prev, rec];
+    });
     setEditingGroup(null);
   }
   function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
@@ -19235,7 +19264,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                     <div>
                       <div style={{ fontWeight:700, color:'#1E2A4A', fontSize:15 }}>{g.name||'Untitled'}</div>
-                      <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{g.type==='office'?'Office / General':projName(g.projectId)}</div>
+                      <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{g.type==='office'?'Office / General':projName(g.projectId)}{(g.siteHistory&&g.siteHistory.length)?' · since '+g.siteHistory[g.siteHistory.length-1].fromDate:''}</div>
                     </div>
                     <span style={{ fontSize:10.5, fontWeight:700, background:g.type==='office'?'#EEF2FF':'#E6F5EC', color:g.type==='office'?'#3D52A0':'#1A7A3E', borderRadius:5, padding:'2px 8px' }}>{g.type==='office'?'OFFICE':'SITE'}</span>
                   </div>
@@ -19509,8 +19538,14 @@ function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
         <div style={styles.formGroup}><label style={styles.label}>Group Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder="e.g. Electrical Gang A"/></div>
         <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>
         <div style={styles.formGroup}><label style={styles.label}>Leader / Foreman</label><select value={form.leaderId} onChange={e=>set('leaderId',e.target.value)} style={styles.input}><option value="">— Select —</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
-        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+        {form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
       </div>
+      {form.type!=='office' && (form.siteHistory||[]).length>0 && (
+        <div style={{ background:'#F8F7F4', border:'1px solid #EAE6DB', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:11.5, color:'#666' }}>
+          <b style={{ color:'#1E2A4A' }}>Site history:</b> {(form.siteHistory||[]).map((h,i)=>(siteProjects.find(p=>p.id===h.projectId)?.name||'—')+' (from '+h.fromDate+')').join('  →  ')}
+        </div>
+      )}
       <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({(form.memberIds||[]).length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:280, overflowY:'auto', border:'1px solid #EAE6DB', borderRadius:8, padding:8 }}>
         {employees.length===0 && <div style={{ color:'#aaa', fontSize:13, padding:8 }}>No employees. Add employees first.</div>}
