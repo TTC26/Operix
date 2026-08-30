@@ -9434,6 +9434,37 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
   const docCols = isGulf
     ? [['Passport', e=>e.passportNo, e=>e.passportExpiry], ['Visa', e=>e.visaNo, e=>e.visaExpiry], [idLabel, e=>e.emiratesId, e=>e.emiratesIdExpiry], ['Labour Card', e=>e.labourCardNo, e=>e.labourCardExpiry]]
     : [['Aadhaar', e=>e.aadharNo, null], ['PAN', e=>e.panNo, null]];
+  async function downloadEmpTemplate() {
+    const aoa=[['Emp ID','Name','Designation','Department','Phone','Email','Nationality','Joining Date','Basic Salary'],
+      ['','RAJESH KUMAR','Electrician','Electrical','','','Indian','2026-07-01',1500],
+      ['','MOHAMMED ALI','Helper','Electrical','','','Indian','2026-07-01',1000]];
+    try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:10},{wch:24},{wch:16},{wch:14},{wch:14},{wch:20},{wch:12},{wch:12},{wch:12}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Employees'); XLSX.writeFile(wb,'Employees-Import-Template.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Employees-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importEmpXlsx(e) {
+    const file=e.target.files&&e.target.files[0]; if(!file) return;
+    const nm=(file.name||'').toLowerCase();
+    if(!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)){ alert('Please import an Excel (.xlsx) or CSV file. A PDF/image cannot be read — download the ⬇ Template, fill it, and import that.'); e.target.value=''; return; }
+    try {
+      let rows=[];
+      if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+      else { const text=await file.text(); if(text.slice(0,5)==='%PDF-'||text.slice(0,2)==='PK'){ alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+      const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+      const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+      const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+      const hasHeader=head.some(h=>/name|design|depart|phone|email|nation|salary|basic|emp/.test(h));
+      let idx,start;
+      if(hasHeader){ start=1; idx={ empId:find('emp id','empid','emp no','id'), name:find('name'), designation:find('design','desig','role','trade','category'), department:find('depart','dept','discipl'), phone:find('phone','mobile','contact'), email:find('email','mail'), nationality:find('nation'), joining:find('join','doj'), basic:find('basic','salary','wage') }; }
+      else { start=0; idx={empId:-1,name:0,designation:1,department:-1,phone:-1,email:-1,nationality:-1,joining:-1,basic:-1}; }
+      const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
+      let count = employees.length;
+      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||('EMP-'+String(count).padStart(4,'0')), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
+      if(!added.length){ alert('No rows with a Name found. Check the Name column.'); e.target.value=''; return; }
+      setEmployees(prev=>[...prev, ...added]);
+      alert(added.length+' employee(s) added. Click each row to fill full details (documents, bank, salary breakup).');
+    } catch(err){ alert('Import failed: '+err.message); }
+    e.target.value='';
+  }
   async function exportEmpXlsx() {
     const head = ['Emp ID','Name','Designation','Department','Nationality','Phone','Email','DOB','Joining','Status', ...docCols.flatMap(c=>c[2]?[c[0],c[0]+' Expiry']:[c[0]]), 'Basic','HRA','DA','Other','Gross'];
     const aoa = [head, ...[...employees].sort((a,b)=>(a.name||'')>(b.name||'')?1:-1).map(e=>{
@@ -9504,6 +9535,8 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
         <div style={{ display: 'flex', gap: 8 }}>
           {employees.length > 0 && <button style={styles.ghostBtn} onClick={exportEmpXlsx} title="Export to Excel (.xlsx)">⭳ Excel</button>}
           {employees.length > 0 && <button style={styles.ghostBtn} onClick={() => setPrintMode('ask')} title="Print list"><Printer size={14} /> Print</button>}
+          {canEdit && <button style={styles.ghostBtn} onClick={downloadEmpTemplate} title="Download employee import template (Excel)">⬇ Template</button>}
+          {canEdit && <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Bulk-add employees from Excel/CSV — Name, Designation, etc.">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importEmpXlsx} /></label>}
           {canEdit && (
             <button style={styles.primaryBtn} onClick={addEmp}>
               <Plus size={15} /> Add Employee
@@ -19030,7 +19063,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, employees, userRole, user, businessInfo }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -19038,6 +19071,8 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const [filterProject, setFilterProject] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [printSheet, setPrintSheet] = useState(false);
+  const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
+  const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const fmt = makeFmt(businessInfo);
 
   const isForeman = userRole === 'foreman';
@@ -19082,6 +19117,12 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     return acc;
   }, {});
 
+  const absentAlerts = (['admin','manager','hr'].includes(userRole) ? scopeEmps : []).map(emp => {
+    const absentDays = new Set();
+    siteAttendance.filter(r => (r.date||'').startsWith(filterMonth) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId))).forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id && x.status==='absent'); if(rec) absentDays.add(parseInt((r.date||'').slice(8,10),10)); });
+    let maxRun=0, run=0; for(let d=1; d<=31; d++){ if(absentDays.has(d)){ run++; if(run>maxRun)maxRun=run; } else run=0; }
+    return { emp, maxRun };
+  }).filter(a => a.maxRun >= 3);
   function startMark() {
     const g = labourGroups.find(x=>x.id===markGroupId);
     if (!g) { alert('Select a group first.'); return; }
@@ -19093,22 +19134,27 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const ym = filterMonth || new Date().toISOString().slice(0,7);
     const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
     const dim = new Date(yy, mm, 0).getDate() || 30;
-    const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!filterProject || r.projectId===filterProject) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
+    const days = Array.from({length:dim},(_,i)=>i+1);
+    const selProj = siteProjects.find(p=>p.id===filterProject);
+    const effWeek = (selProj && selProj.weekOff!=null) ? selProj.weekOff : weekOff;
+    const holidays = days.filter(d => new Date(yy, mm-1, d).getDay() === effWeek).length;
+    const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
     const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
     const rows = scopeEmps.map(emp => {
       const byDay = {}; let present=0, half=0, absent=0, leave=0, ot=0;
-      recs.forEach(r => { const d = parseInt((r.date||'').slice(8,10),10); const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(rec){ byDay[d]=STMAP[rec.status]||''; if(rec.status==='present')present++; else if(rec.status==='half_day')half++; else if(rec.status==='absent')absent++; else if(rec.status==='leave')leave++; ot+=parseFloat(rec.otHours)||0; } });
-      const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/WORK_DAYS;
-      const earned = dayRate*(present + 0.5*half) + ot*(dayRate/8)*OT_MULT;
-      return { emp, byDay, present, half, absent, leave, ot, basic, earned };
+      recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; if(rec.status==='present')present++; else if(rec.status==='half_day')half++; else if(rec.status==='absent')absent++; else if(rec.status==='leave')leave++; ot+=parseFloat(rec.otHours)||0; });
+      const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/dim;
+      const payable = present + 0.5*half + holidays;
+      const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
+      return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
     });
-    return { ym, dim, rows };
+    return { ym, yy, mm, dim, holidays, effWeek, rows };
   }
   async function exportSalaryXlsx() {
-    const { ym, dim, rows } = salaryData();
+    const { ym, dim, holidays, rows } = salaryData();
     const days = Array.from({length:dim},(_,i)=>i+1);
-    const head = ['Employee', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Basic','Earned'];
-    const aoa = [head, ...rows.map(r=>[r.emp.name||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, r.basic, Math.round(r.earned)])];
+    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
+    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
     try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
     catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
   }
@@ -19123,6 +19169,8 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       </div>
 
       {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
+
+      {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row in {filterMonth}: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d)').join(', ')}. Please review.</div>}
 
       {tab === 'groups' && canManageGroups && (
         <div>
@@ -19215,39 +19263,47 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       </>)}
 
       {tab === 'sheet' && canManageGroups && (() => {
-        const { ym, dim, rows } = salaryData();
+        const { ym, yy, mm, dim, holidays, effWeek, rows } = salaryData();
         const days = Array.from({length:dim},(_,i)=>i+1);
+        const isOff = d => new Date(yy, mm-1, d).getDay() === effWeek;
+        const selProjObj = siteProjects.find(p=>p.id===filterProject);
         const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
-        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, earned:a.earned+r.earned }), {present:0,half:0,absent:0,leave:0,ot:0,earned:0});
+        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, payable:a.payable+r.payable, inHand:a.inHand+r.inHand }), {present:0,half:0,absent:0,leave:0,ot:0,payable:0,inHand:0});
         return (
           <div>
             <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
               <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
-              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              <label style={{ fontSize:12, color:'#888', display:'flex', alignItems:'center', gap:6 }}>Week off
+                <select value={effWeek} onChange={e=>{ const v=Number(e.target.value); if(selProjObj && setSiteProjects){ setSiteProjects(prev=>prev.map(p=>p.id===selProjObj.id?{...p,weekOff:v}:p)); } else setWeekOff(v); }} style={{ ...styles.input, width:120, margin:0 }}>{DOW_NAMES.map((n,i)=><option key={i} value={i}>{n}</option>)}</select>
+                <span style={{ fontSize:10.5, color:'#B0AC9F' }}>{selProjObj?'saved to '+(selProjObj.name||'site'):'(select a project to save per-site)'}</span>
+              </label>
               <span style={{ flex:1 }}/>
               {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
               {rows.length>0 && <button style={styles.ghostBtn} onClick={()=>setPrintSheet(true)} title="Print (landscape)"><Printer size={14}/> Print</button>}
             </div>
             {rows.length===0 ? <div style={styles.emptyBox}>No employees in scope for {ym}.</div> : (
               <div style={{ overflowX:'auto', border:'1px solid #EAE6DB', borderRadius:8 }}>
-                <table style={{ borderCollapse:'collapse', fontSize:11, minWidth:900 }}>
+                <table style={{ borderCollapse:'collapse', fontSize:11, minWidth:960 }}>
                   <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
                     <th style={{ padding:'5px 8px', textAlign:'left', position:'sticky', left:0, background:'#1E2A4A', whiteSpace:'nowrap' }}>Employee</th>
-                    {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center' }}>{d}</th>)}
-                    {['P','H','A','L','OT','Basic','Earned'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
+                    {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center', background:isOff(d)?'#B5453A':'#1E2A4A' }}>{d}</th>)}
+                    {['P','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {rows.map((r,ri)=>(
                       <tr key={r.emp.id} style={{ background:ri%2?'#F6F5F2':'#fff', borderBottom:'1px solid #eee' }}>
                         <td style={{ padding:'4px 8px', fontWeight:600, position:'sticky', left:0, background:ri%2?'#F6F5F2':'#fff', whiteSpace:'nowrap' }}>{r.emp.name}</td>
-                        {days.map(d=>{ const v=r.byDay[d]||''; return <td key={d} style={{ padding:'3px 2px', textAlign:'center', color:STC[v]||'#ccc', fontWeight:700 }}>{v||'·'}</td>; })}
+                        {days.map(d=>{ const v=r.byDay[d]||''; const off=isOff(d); return <td key={d} style={{ padding:'3px 2px', textAlign:'center', background:off?'#FBE4E4':'transparent', color:STC[v]||'#ccc', fontWeight:700 }}>{v||(off?'':'·')}</td>; })}
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#1A7A3E' }}>{r.present}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#C9A24B' }}>{r.half}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#B5453A' }}>{r.absent}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#6B5BAE' }}>{r.leave}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.ot||''}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#888' }}>{holidays}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:700, background:'#EAF7EE', color:'#1A7A3E' }}>{r.payable}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.basic?fmt(r.basic):'—'}</td>
-                        <td style={{ padding:'4px 8px', textAlign:'right', fontWeight:700, color:'#1E2A4A' }}>{r.earned?fmt(Math.round(r.earned)):'—'}</td>
+                        <td style={{ padding:'4px 8px', textAlign:'right', fontWeight:700, color:'#1E2A4A' }}>{r.inHand?fmt(Math.round(r.inHand)):'—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -19260,23 +19316,24 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                     <td style={{ padding:'5px 6px', textAlign:'right', color:'#6B5BAE' }}>{tot.leave}</td>
                     <td style={{ padding:'5px 6px', textAlign:'right' }}>{tot.ot||''}</td>
                     <td></td>
-                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#1E2A4A' }}>{fmt(Math.round(tot.earned))}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#1A7A3E' }}>{tot.payable}</td>
+                    <td></td>
+                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#1E2A4A' }}>{fmt(Math.round(tot.inHand))}</td>
                   </tr></tfoot>
                 </table>
               </div>
             )}
-            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>P=Present · H=Half · A=Absent · L=Leave. Earned = (Basic ÷ 30) × (Present + ½·Half) + OT hrs × (day-rate ÷ 8) × 1.25.</div>
+            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>Week off = {DOW_NAMES[weekOff]} ({holidays}/month, paid). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT × 1.25.</div>
           </div>
         );
       })()}
 
       {printSheet && (() => {
-        const { ym, dim, rows } = salaryData();
+        const { ym, dim, holidays, effWeek, rows } = salaryData();
         const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
         const days = Array.from({length:dim},(_,i)=>i+1);
         const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const dowOf = d => new Date(yy, mm-1, d).getDay();
-        const holidays = days.filter(d=>dowOf(d)===5).length;
         const monthName = new Date(yy, mm-1, 1).toLocaleString('default',{month:'long', year:'numeric'});
         const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
         const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
@@ -19295,10 +19352,10 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
               <thead>
                 <tr>
                   {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===5?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===effWeek?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
                   {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
                 </tr>
-                <tr>{days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===5?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===effWeek?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r,ri)=>{ const c=calc(r); return (
@@ -19307,7 +19364,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
                     <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
-                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=dowOf(d)===5; return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=dowOf(d)===effWeek; return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
                     <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
                     <td style={td}>{holidays}</td>
@@ -19319,7 +19376,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                 ); })}
               </tbody>
             </table>
-            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · Fridays = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
+            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
           </DocPrintOverlay>
         );
       })()}
@@ -19375,10 +19432,11 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
       <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
         {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
-          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'2fr auto 90px', gap:10, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
+          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'1.5fr auto 66px 130px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
             <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
             <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
-            <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 8px', margin:0 }} placeholder="OT hrs" title="Overtime hours" />
+            <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 6px', margin:0 }} placeholder="OT" title="Overtime hours" />
+            <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
           </div>
         ); })}
         {form.records.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No members in this group. Add members in Labour Groups.</div>}
@@ -25408,7 +25466,8 @@ export default function App() {
             labourGroups={labourGroups}
             setLabourGroups={setLabourGroups}
             siteProjects={siteProjects}
-            employees={employees}
+            setSiteProjects={setSiteProjects}
+            employees={sessionEmployees}
             userRole={userRole}
             user={user}
             businessInfo={businessInfo}
