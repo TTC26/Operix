@@ -19098,7 +19098,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -19107,6 +19107,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [printSheet, setPrintSheet] = useState(false);
   const [printAbsent, setPrintAbsent] = useState(false);
+  const [holForm, setHolForm] = useState({date:'',name:'',type:'govt',projectId:''});
   const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
   const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const fmt = makeFmt(businessInfo);
@@ -19187,7 +19188,10 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const days = Array.from({length:dim},(_,i)=>i+1);
     const selProj = siteProjects.find(p=>p.id===filterProject);
     const effWeek = (selProj && selProj.weekOff!=null) ? selProj.weekOff : weekOff;
-    const holidays = days.filter(d => new Date(yy, mm-1, d).getDay() === effWeek).length;
+    const holDays = new Set();
+    days.forEach(d => { if (new Date(yy, mm-1, d).getDay() === effWeek) holDays.add(d); });
+    (holidayCalendar||[]).forEach(h => { if ((h.date||'').startsWith(ym) && (!h.projectId || !filterProject || h.projectId===filterProject)) { const dd=parseInt((h.date||'').slice(8,10),10); if(dd>=1&&dd<=dim) holDays.add(dd); } });
+    const holidays = holDays.size;
     const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
     const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
     const rows = scopeEmps.map(emp => {
@@ -19198,7 +19202,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
       return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
     });
-    return { ym, yy, mm, dim, holidays, effWeek, rows };
+    return { ym, yy, mm, dim, holidays, holDays, effWeek, rows };
   }
   async function exportSalaryXlsx() {
     const { ym, dim, holidays, rows } = salaryData();
@@ -19244,7 +19248,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
         <div style={{ display:'flex', gap:8 }}>
-          {['mark', ...(canManageGroups?['groups','sheet']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':'Monthly Sheet'}</button>)}
+          {['mark', ...(canManageGroups?['groups','sheet','holidays']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':k==='sheet'?'Monthly Sheet':'Holidays'}</button>)}
         </div>
       </div>
 
@@ -19287,6 +19291,11 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
             <option value="">— Select group to mark —</option>
             {visibleGroups.map(g=><option key={g.id} value={g.id}>{g.name} ({g.type==='office'?'Office':projName(g.projectId)})</option>)}
           </select>
+          {(()=>{ const mg=labourGroups.find(g=>g.id===markGroupId); const proj=mg&&siteProjects.find(p=>p.id===mg.projectId); const cur=proj?(proj.weekOff!=null?proj.weekOff:5):weekOff; return (
+            <label style={{ fontSize:12, color:'#888', display:'flex', alignItems:'center', gap:5 }}>Week off
+              <select value={cur} onChange={e=>{ const v=Number(e.target.value); if(proj&&setSiteProjects){ setSiteProjects(prev=>prev.map(p=>p.id===proj.id?{...p,weekOff:v}:p)); } else setWeekOff(v); }} style={{ ...styles.input, width:110, margin:0 }} title={proj?('Weekly off for '+(proj.name||'site')):'Pick a group with a site to save per-site'}>{DOW_NAMES.map((n,i)=><option key={i} value={i}>{n}</option>)}</select>
+            </label>
+          ); })()}
           <button style={styles.primaryBtn} disabled={!markGroupId} onClick={startMark}>+ Mark Attendance</button>
           <span style={{ flex:1 }}/>
           <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -19344,9 +19353,9 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       </>)}
 
       {tab === 'sheet' && canManageGroups && (() => {
-        const { ym, yy, mm, dim, holidays, effWeek, rows } = salaryData();
+        const { ym, yy, mm, dim, holidays, holDays, effWeek, rows } = salaryData();
         const days = Array.from({length:dim},(_,i)=>i+1);
-        const isOff = d => new Date(yy, mm-1, d).getDay() === effWeek;
+        const isOff = d => holDays.has(d);
         const selProjObj = siteProjects.find(p=>p.id===filterProject);
         const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
         const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, payable:a.payable+r.payable, inHand:a.inHand+r.inHand }), {present:0,half:0,absent:0,leave:0,ot:0,payable:0,inHand:0});
@@ -19355,10 +19364,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
             <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
               <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
               <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
-              <label style={{ fontSize:12, color:'#888', display:'flex', alignItems:'center', gap:6 }}>Week off
-                <select value={effWeek} onChange={e=>{ const v=Number(e.target.value); if(selProjObj && setSiteProjects){ setSiteProjects(prev=>prev.map(p=>p.id===selProjObj.id?{...p,weekOff:v}:p)); } else setWeekOff(v); }} style={{ ...styles.input, width:120, margin:0 }}>{DOW_NAMES.map((n,i)=><option key={i} value={i}>{n}</option>)}</select>
-                <span style={{ fontSize:10.5, color:'#B0AC9F' }}>{selProjObj?'saved to '+(selProjObj.name||'site'):'(select a project to save per-site)'}</span>
-              </label>
+              <span style={{ fontSize:11.5, color:'#B0AC9F' }}>Week off: <b style={{ color:'#666' }}>{DOW_NAMES[effWeek]}</b>{selProjObj?' ('+(selProjObj.name||'site')+')':''} — set it in the Attendance tab</span>
               <span style={{ flex:1 }}/>
               {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
               {rows.length>0 && <button style={styles.ghostBtn} onClick={()=>setPrintSheet(true)} title="Print (landscape)"><Printer size={14}/> Print</button>}
@@ -19410,8 +19416,42 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         );
       })()}
 
+      {tab === 'holidays' && canManageGroups && (
+        <div>
+          <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:10 }}>Add Holiday (Government / Company)</div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'flex-end' }}>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Date</div><input type='date' value={holForm.date} onChange={e=>setHolForm(fm=>({...fm,date:e.target.value}))} style={{ ...styles.input, margin:0 }}/></div>
+              <div style={{ flex:1, minWidth:180 }}><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Name</div><input value={holForm.name} onChange={e=>setHolForm(fm=>({...fm,name:e.target.value}))} style={{ ...styles.input, margin:0 }} placeholder='e.g. UAE National Day'/></div>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Type</div><select value={holForm.type} onChange={e=>setHolForm(fm=>({...fm,type:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value='govt'>Government</option><option value='company'>Company</option></select></div>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              <button style={styles.primaryBtn} onClick={()=>{ if(!holForm.date){alert('Pick a date');return;} setHolidayCalendar(prev=>[...prev,{ id:crypto.randomUUID(), ...holForm }]); setHolForm({date:'',name:'',type:'govt',projectId:''}); }}><Plus size={14}/> Add</button>
+            </div>
+          </div>
+          {(holidayCalendar||[]).length===0 ? <div style={styles.emptyBox}>No holidays added. Add government / company holidays — they count as paid holidays in the salary sheet & payable days.</div> : (
+            <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                <thead><tr style={{ background:'#F8F7F4' }}>{['Date','Name','Type','Site',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {[...holidayCalendar].sort((a,b)=>(a.date||'')<(b.date||'')?1:-1).map(h=>(
+                    <tr key={h.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600 }}>{h.date}</td>
+                      <td style={{ padding:'8px 12px' }}>{h.name||'—'}</td>
+                      <td style={{ padding:'8px 12px' }}><span style={{ background:h.type==='company'?'#EEF2FF':'#E6F5EC', color:h.type==='company'?'#3D52A0':'#1A7A3E', borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{h.type==='company'?'Company':'Govt'}</span></td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{h.projectId?(siteProjects.find(p=>p.id===h.projectId)?.name||'—'):'All sites'}</td>
+                      <td style={{ padding:'8px 12px' }}><button style={{ ...styles.iconBtn, color:'#B5453A' }} onClick={()=>setHolidayCalendar(prev=>prev.filter(x=>x.id!==h.id))}><Trash2 size={14}/></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>Holidays are counted as paid days (added to Payable Days) and tinted in the Monthly Sheet. Weekly-off day is set per site in the Attendance tab.</div>
+        </div>
+      )}
+
       {printSheet && (() => {
-        const { ym, dim, holidays, effWeek, rows } = salaryData();
+        const { ym, dim, holidays, holDays, effWeek, rows } = salaryData();
         const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
         const days = Array.from({length:dim},(_,i)=>i+1);
         const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -19435,10 +19475,10 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
               <thead>
                 <tr>
                   {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===effWeek?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
                   {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
                 </tr>
-                <tr>{days.map(d=><th key={d} style={{ ...th, background:dowOf(d)===effWeek?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r,ri)=>{ const c=calc(r); return (
@@ -19447,7 +19487,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
                     <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
-                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=dowOf(d)===effWeek; return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
                     <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
                     <td style={td}>{holidays}</td>
@@ -24350,6 +24390,7 @@ export default function App() {
   const [serviceHistory,   _setSH]     = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
   const [labourGroups,     _setLG]     = useState([]);
+  const [holidayCalendar,  _setHC]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
   const [internalAudits,   _setAudits] = useState([]);
@@ -24542,6 +24583,7 @@ export default function App() {
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
       _setLG(data.labourGroups || []);
+      _setHC(data.holidayCalendar || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
       _setAudits(data.internalAudits || []);
@@ -24641,6 +24683,7 @@ export default function App() {
   const setServiceHistory   = mkSet(_setSH,    'serviceHistory');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
   const setLabourGroups     = mkSet(_setLG,    'labourGroups');
+  const setHolidayCalendar  = mkSet(_setHC,    'holidayCalendar');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
   const setInternalAudits   = mkSet(_setAudits,'internalAudits');
@@ -24818,7 +24861,7 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
       handoverDocs, auditDocs, rackStore, mepBoms,
@@ -24873,6 +24916,7 @@ export default function App() {
     if (backup.serviceHistory) setServiceHistory(backup.serviceHistory);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
     if (backup.labourGroups) setLabourGroups(backup.labourGroups);
+    if (backup.holidayCalendar) setHolidayCalendar(backup.holidayCalendar);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
     if (backup.internalAudits)  setInternalAudits(backup.internalAudits);
@@ -25623,6 +25667,8 @@ export default function App() {
             businessInfo={businessInfo}
             payrollRuns={payrollRuns}
             setPayrollRuns={setPayrollRuns}
+            holidayCalendar={holidayCalendar}
+            setHolidayCalendar={setHolidayCalendar}
           />
         );
       case 'evaluation':
