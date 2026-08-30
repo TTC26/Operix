@@ -19063,7 +19063,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -19160,6 +19160,36 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
     try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
     catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  function processToPayroll() {
+    if (!setPayrollRuns) { alert('Payroll module not available.'); return; }
+    const { ym, dim, rows } = salaryData();
+    const mm = ym.slice(5,7), yy = ym.slice(0,4);
+    if (!rows.length) { alert('No employees / attendance for '+ym+'.'); return; }
+    if (payrollRuns.find(r => r.period===ym || (r.month===mm && r.year===yy))) { alert('A payroll run for '+ym+' already exists. Delete it in HR → Payroll to re-generate.'); return; }
+    if (!window.confirm('Generate a payroll run for '+ym+' from this attendance sheet? ('+rows.length+' employees). You can review & adjust it in HR → Payroll before approving.')) return;
+    const lines = rows.map(r => {
+      const e = r.emp;
+      const basic=parseFloat(e.basicSalary)||0, hra=parseFloat(e.hra)||0, da=parseFloat(e.da)||0, other0=parseFloat(e.otherAllowances)||0;
+      const otAmt = r.ot * ((basic/dim)/8) * 1.25;
+      const other = other0 + otAmt;
+      const gross = basic+hra+da+other;
+      const pf = basic*(parseFloat(e.pf)||0)/100, esi=(basic+hra+da+other0)*(parseFloat(e.esi)||0)/100, tds=parseFloat(e.tds)||0;
+      const lopDays = Math.max(0, +(dim - r.payable).toFixed(2));
+      const fixedDaily = (basic+hra+da+other0)/dim;
+      const lopAmt = +(fixedDaily*lopDays).toFixed(2);
+      const totalDeductions = +(pf+esi+tds+lopAmt).toFixed(2);
+      const net = Math.max(0, +(gross-totalDeductions).toFixed(2));
+      return { empId:e.empId, name:e.name, designation:e.designation, department:e.department||'', bankAccount:e.bankAccount||'', bankName:e.bankName||'', ifsc:e.ifsc||'',
+        basic, hra, da, other:+other.toFixed(2), gross:+gross.toFixed(2),
+        workingDays:dim, paidDays:+r.payable.toFixed(2),
+        pf:+pf.toFixed(2), esi:+esi.toFixed(2), tds,
+        lopDays, lopAmt, advance:0, otHours:r.ot||0, otAmount:+otAmt.toFixed(2),
+        otherDeductAmt:0, otherDeductNote: r.ot?('incl. OT '+r.ot+'h'):'',
+        totalDeductions, net };
+    });
+    setPayrollRuns(prev => [...prev, { id:crypto.randomUUID(), month:mm, year:yy, period:ym, lines, status:'draft', source:'attendance', createdAt:Date.now() }]);
+    alert('Payroll run for '+ym+' generated from attendance — '+lines.length+' employees. Go to HR → Payroll to review, adjust & approve.');
   }
 
   return (
@@ -19285,6 +19315,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
               <span style={{ flex:1 }}/>
               {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
               {rows.length>0 && <button style={styles.ghostBtn} onClick={()=>setPrintSheet(true)} title="Print (landscape)"><Printer size={14}/> Print</button>}
+              {rows.length>0 && ['admin','manager','accounts','hr'].includes(userRole) && <button style={styles.primaryBtn} onClick={processToPayroll} title="Generate payroll run from this attendance sheet"><FileText size={14}/> Process to Payroll</button>}
             </div>
             {rows.length===0 ? <div style={styles.emptyBox}>No employees in scope for {ym}.</div> : (
               <div style={{ overflowX:'auto', border:'1px solid #EAE6DB', borderRadius:8 }}>
@@ -25534,6 +25565,8 @@ export default function App() {
             userRole={userRole}
             user={user}
             businessInfo={businessInfo}
+            payrollRuns={payrollRuns}
+            setPayrollRuns={setPayrollRuns}
           />
         );
       case 'evaluation':
