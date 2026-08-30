@@ -2960,7 +2960,14 @@ function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, v
   );
 }
 
-function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [] }) {
+function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [], employees = [], labourGroups = [], userRole = '' }) {
+  const _absAlerts = (['admin','manager','hr'].includes(userRole) ? employees : []).map(emp => {
+    const dset = new Set();
+    (siteAttendance||[]).forEach(r => { if(r.date && (r.records||[]).some(x=>x.employeeId===emp.id && x.status==='absent')) dset.add(r.date); });
+    const uniq=[...dset].sort(); let mr=0, run=0, prev=null, endD='';
+    uniq.forEach(ds=>{ const d=new Date(ds); if(prev && Math.round((d-prev)/86400000)===1) run++; else run=1; if(run>=mr){ mr=run; endD=ds; } prev=d; });
+    return { emp, mr, endD };
+  }).filter(a=>a.mr>=3);
   const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
@@ -2992,6 +2999,17 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
         <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
         <p style={styles.muted}>{isMultiBiz ? `${activeTypes.length} business activities running` : `Here's what's happening across your business.`}</p>
       </div>
+
+      {_absAlerts.length > 0 && (
+        <div onClick={()=>setView('siteattendance')} style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:10, padding:'12px 16px', marginBottom:16, cursor:'pointer', display:'flex', alignItems:'flex-start', gap:10 }}>
+          <AlertTriangle size={18} style={{ color:'#B91C1C', marginTop:1, flexShrink:0 }} />
+          <div>
+            <div style={{ fontWeight:700, color:'#B91C1C', fontSize:13.5, marginBottom:4 }}>Continuous Absence Alert ({_absAlerts.length})</div>
+            <div style={{ fontSize:12.5, color:'#991B1B' }}>{_absAlerts.map(a=>a.emp.name+' ('+a.mr+' days'+(a.endD?', to '+a.endD:'')+')').join(' · ')}</div>
+            <div style={{ fontSize:11, color:'#B91C1C', marginTop:3, textDecoration:'underline' }}>Open Site Attendance →</div>
+          </div>
+        </div>
+      )}
 
       {/* ── Payment Due Alerts ───────────────────────────────────────────────── */}
       {allAlerts.length > 0 && (
@@ -10225,8 +10243,8 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
                             ✓ Mark Paid
                           </button>
                         )}
-                        {r.status !== 'paid' && r.status !== 'submitted' && (
-                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
+                        {(userRole === 'admin' || (r.status !== 'paid' && r.status !== 'submitted')) && (
+                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} title="Delete payroll run" onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
                         )}
                       </div>
                     </td>
@@ -25100,6 +25118,9 @@ export default function App() {
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
+            employees={sessionEmployees}
+            labourGroups={labourGroups}
+            userRole={userRole}
           />
         );
       case 'enquiries':
@@ -25928,6 +25949,9 @@ export default function App() {
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
+            employees={sessionEmployees}
+            labourGroups={labourGroups}
+            userRole={userRole}
           />
         );
     }
