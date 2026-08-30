@@ -405,7 +405,7 @@ const styles = {
   app: { display: 'flex', minHeight: '100vh', background: '#F3F7F2', color: '#3A3F4B', fontSize: 14 },
   sidebar: { width: 220, background: '#234F3A', color: '#DCEAE0', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
-  brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
+  brandMark: { width: 34, height: 34, borderRadius: 8, background: '#3D7A5C', color: '#C9A24B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
   brandName: { fontSize: 17, fontWeight: 600, color: '#FFFFFF' },
   brandSub: { fontSize: 11, color: '#9FBCAC', letterSpacing: '0.04em' },
   navGroup: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 },
@@ -20920,6 +20920,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const [analysing, setAnalysing] = useState(null);
   const [showCat, setShowCat] = useState(false);
   const [quoteDoc, setQuoteDoc] = useState(null);
+  const [boqTab, setBoqTab] = useState('boq'); // 'boq' | 'price' | 'manpower'
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -21088,6 +21089,21 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
         const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='BOQ-Import-Template.csv'; el.click(); URL.revokeObjectURL(url);
       }
     }
+    const villaCount = parseFloat(t.noUnits) || 1;
+    const techRate = parseFloat(t.techRate) || 0;
+    const helperRate = parseFloat(t.helperRate) || 0;
+    const MP_STAGES = ['First Fix','Final Fix','Second Fix','Testing & Commissioning','General'];
+    const MP_AREAS = ['Ground Floor','First Floor','Lower Roof','Upper Roof','DB Dressing','External','General'];
+    function blankPriceLine() { return { id: crypto.randomUUID(), activity:'', unit:'villa', rate:0, units: villaCount }; }
+    const priceAmt = l => (parseFloat(l.rate)||0) * (parseFloat(l.units)||0);
+    const priceTotal = () => (t.priceDetail||[]).reduce((sm,l)=>sm+priceAmt(l),0);
+    function blankMpLine() { return { id: crypto.randomUUID(), stage:'First Fix', area:'Ground Floor', activity:'', tech:0, helper:0, days:1, perVilla:true }; }
+    const mpMult = l => (l.perVilla!==false) ? villaCount : 1;
+    const mpTechDays = l => (parseFloat(l.tech)||0) * (parseFloat(l.days)||0) * mpMult(l);
+    const mpHelperDays = l => (parseFloat(l.helper)||0) * (parseFloat(l.days)||0) * mpMult(l);
+    const mpManDays = l => mpTechDays(l) + mpHelperDays(l);
+    const mpCost = l => mpTechDays(l)*techRate + mpHelperDays(l)*helperRate;
+    const mpTotal = () => (t.manpower||[]).reduce((a,l)=>({ tech:a.tech+mpTechDays(l), helper:a.helper+mpHelperDays(l), md:a.md+mpManDays(l), cost:a.cost+mpCost(l) }), {tech:0,helper:0,md:0,cost:0});
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       const nm = (file.name||'').toLowerCase();
@@ -21140,7 +21156,11 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           <div style={styles.formGroup}><label style={styles.label}>Tender Title / Scope</label><input value={t.title||''} onChange={e=>set('title',e.target.value)} style={styles.input} placeholder='e.g. MEP Works for Villa Block A'/></div>
           {/* BOQ */}
           <div>
-            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Bill of Quantities (BOQ)</div>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>BOQ / Estimation</div>
+            <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+              {[['boq','BOQ (Material)'],['price','Price Detail'],['manpower','Manpower']].map(([k,l])=><button key={k} type="button" onClick={()=>setBoqTab(k)} style={{ ...styles.ghostBtn, fontSize:12, background: boqTab===k?'#1E2A4A':'transparent', color: boqTab===k?'#fff':'#555' }}>{l}</button>)}
+            </div>
+            {boqTab === 'boq' && (<>
             <BuildupPanel cats={BUILDUP_CATS} subcats={BUILDUP_SUBCATS} boq={t.boq||[]} onApply={(cat,sub,mk)=>set('boq',(t.boq||[]).map(l=>(l.category===cat && (!sub || l.subcategory===sub)) ? { ...l, siteOH:mk.siteOH, hoOH:mk.hoOH, contingency:mk.contingency, profit:mk.profit } : l))} />
             <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:1040 }}>
@@ -21192,6 +21212,89 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                 onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
               />
             )}
+            </>)}
+
+            {boqTab === 'price' && (
+              <div>
+                <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:10, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:12, color:'#888' }}>No. of Villas / Units <input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{ ...styles.input, margin:0, width:70, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:11, color:'#B0AC9F' }}>Amount = Rate/Unit × Units. Matches your client Price Detail sheet.</span>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:640 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>{['S.No','Activity','Unit','Rate / Unit','Units','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['Rate / Unit','Units','Amount'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(t.priceDetail||[]).map((l,i)=>{ const upd=(k,v)=>set('priceDetail',t.priceDetail.map((x,j)=>j===i?{...x,[k]:v}:x)); return (
+                      <tr key={l.id}>
+                        <td style={{ padding:'3px 8px', color:'#888', width:40 }}>{i+1}</td>
+                        <td style={{ padding:'3px 3px', minWidth:220 }}><input value={l.activity} onChange={e=>upd('activity',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }} placeholder='e.g. WIRING'/></td>
+                        <td style={{ padding:'3px 3px', width:70 }}><input value={l.unit} onChange={e=>upd('unit',e.target.value)} style={{ ...styles.input, margin:0 }} placeholder='villa'/></td>
+                        <td style={{ padding:'3px 3px', width:100 }}><input type='number' value={l.rate} onChange={e=>upd('rate',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:70 }}><input type='number' value={l.units} onChange={e=>upd('units',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 8px', fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{priceAmt(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                        <td style={{ padding:'3px 3px', width:26 }}><button onClick={()=>set('priceDetail',t.priceDetail.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                      </tr>
+                    );})}
+                  </tbody>
+                </table>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8 }}>
+                  <button onClick={()=>set('priceDetail',[...(t.priceDetail||[]), blankPriceLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Activity</button>
+                  <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Price Total: {fmt(priceTotal())}</div>
+                </div>
+              </div>
+            )}
+
+            {boqTab === 'manpower' && (() => {
+              const tot = mpTotal();
+              return (
+              <div>
+                <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:10, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:12, color:'#888' }}>Villas <input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{ ...styles.input, margin:0, width:60, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:12, color:'#888' }}>Tech rate/day <input type='number' value={t.techRate||''} onChange={e=>set('techRate',e.target.value)} style={{ ...styles.input, margin:0, width:80, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:12, color:'#888' }}>Helper rate/day <input type='number' value={t.helperRate||''} onChange={e=>set('helperRate',e.target.value)} style={{ ...styles.input, margin:0, width:80, display:'inline-block' }}/></span>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:940 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>{['Stage','Area / Floor','Activity','Tech','Helper','Days','/Villa','Man-days','Cost',''].map(h=><th key={h} style={{ padding:'6px 6px', textAlign:['Tech','Helper','Days','Man-days','Cost'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(t.manpower||[]).map((l,i)=>{ const upd=(k,v)=>set('manpower',t.manpower.map((x,j)=>j===i?{...x,[k]:v}:x)); return (
+                      <tr key={l.id}>
+                        <td style={{ padding:'3px 3px', width:110 }}><select value={l.stage} onChange={e=>upd('stage',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{MP_STAGES.map(c=><option key={c}>{c}</option>)}</select></td>
+                        <td style={{ padding:'3px 3px', width:120 }}><select value={l.area} onChange={e=>upd('area',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{MP_AREAS.map(c=><option key={c}>{c}</option>)}</select></td>
+                        <td style={{ padding:'3px 3px', minWidth:160 }}><input value={l.activity} onChange={e=>upd('activity',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }} placeholder='e.g. GI BOX FIXING'/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.tech} onChange={e=>upd('tech',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.helper} onChange={e=>upd('helper',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.days} onChange={e=>upd('days',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:44, textAlign:'center' }}><input type='checkbox' checked={l.perVilla!==false} onChange={e=>upd('perVilla',e.target.checked)} title='Multiply by villa count'/></td>
+                        <td style={{ padding:'3px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{mpManDays(l).toLocaleString(undefined,{maximumFractionDigits:1})}</td>
+                        <td style={{ padding:'3px 6px', fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{mpCost(l)?fmt(mpCost(l)):'—'}</td>
+                        <td style={{ padding:'3px 3px', width:26 }}><button onClick={()=>set('manpower',t.manpower.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                      </tr>
+                    );})}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop:'2px solid #1E2A4A' }}>
+                    <td colSpan={7} style={{ padding:'6px 6px', fontWeight:700, textAlign:'right' }}>TOTAL</td>
+                    <td style={{ padding:'6px 6px', fontWeight:700, textAlign:'right' }}>{tot.md.toLocaleString(undefined,{maximumFractionDigits:1})}</td>
+                    <td style={{ padding:'6px 6px', fontWeight:700, textAlign:'right', color:'#1A7A3E' }}>{fmt(tot.cost)}</td>
+                    <td></td>
+                  </tr></tfoot>
+                </table>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+                  <button onClick={()=>set('manpower',[...(t.manpower||[]), blankMpLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Manpower Line</button>
+                  <div style={{ fontSize:12.5, color:'#555' }}>Tech-days: <b>{tot.tech.toFixed(0)}</b> · Helper-days: <b>{tot.helper.toFixed(0)}</b> · Labour Cost: <b style={{ color:'#1A7A3E' }}>{fmt(tot.cost)}</b></div>
+                </div>
+                <div style={{ marginTop:12, background:'#F4FAF5', border:'1px solid #CDE9D5', borderRadius:8, padding:'12px 16px', display:'flex', gap:24, flexWrap:'wrap', fontSize:13 }}>
+                  <span>Revenue (Price Detail): <b>{fmt(priceTotal())}</b></span>
+                  <span>Labour Cost: <b style={{ color:'#B5453A' }}>{fmt(tot.cost)}</b></span>
+                  <span>Gross Profit: <b style={{ color:'#1A7A3E' }}>{fmt(priceTotal()-tot.cost)}</b></span>
+                  <span>Margin: <b>{priceTotal()>0?((priceTotal()-tot.cost)/priceTotal()*100).toFixed(1):'0'}%</b></span>
+                  <span style={{ color:'#888' }}>Material: client-supplied</span>
+                </div>
+              </div>
+              );
+            })()}
           </div>
           {(() => {
             const est = computeEstimation(t);
