@@ -19195,10 +19195,13 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
     const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
     const rows = scopeEmps.map(emp => {
-      const byDay = {}; let present=0, half=0, absent=0, leave=0, ot=0;
-      recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; if(rec.status==='present')present++; else if(rec.status==='half_day')half++; else if(rec.status==='absent')absent++; else if(rec.status==='leave')leave++; ot+=parseFloat(rec.otHours)||0; });
+      const byDay = {}; let ot=0;
+      recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; ot+=parseFloat(rec.otHours)||0; });
+      // Classify each calendar day ONCE: holiday days are never double-counted as present.
+      let present=0, half=0, absent=0, leave=0;
+      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
       const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/dim;
-      const payable = present + 0.5*half + holidays;
+      const payable = Math.min(dim, present + 0.5*half + holidays);
       const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
       return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
     });
