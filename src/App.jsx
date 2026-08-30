@@ -19071,6 +19071,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const [filterProject, setFilterProject] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [printSheet, setPrintSheet] = useState(false);
+  const [printAbsent, setPrintAbsent] = useState(false);
   const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
   const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const fmt = makeFmt(businessInfo);
@@ -19118,10 +19119,12 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   }, {});
 
   const absentAlerts = (['admin','manager','hr'].includes(userRole) ? scopeEmps : []).map(emp => {
-    const absentDays = new Set();
-    siteAttendance.filter(r => (r.date||'').startsWith(filterMonth) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId))).forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id && x.status==='absent'); if(rec) absentDays.add(parseInt((r.date||'').slice(8,10),10)); });
-    let maxRun=0, run=0; for(let d=1; d<=31; d++){ if(absentDays.has(d)){ run++; if(run>maxRun)maxRun=run; } else run=0; }
-    return { emp, maxRun };
+    const dset = new Set();
+    siteAttendance.filter(r => (!isForeman || visibleGroups.some(g=>g.id===r.groupId))).forEach(r => { if(r.date && (r.records||[]).some(x=>x.employeeId===emp.id && x.status==='absent')) dset.add(r.date); });
+    const uniq = [...dset].sort();
+    let maxRun=0, run=0, prev=null, endD='';
+    uniq.forEach(ds => { const d=new Date(ds); if(prev && Math.round((d-prev)/86400000)===1){ run++; } else { run=1; } if(run>=maxRun){ maxRun=run; endD=ds; } prev=d; });
+    return { emp, maxRun, endD };
   }).filter(a => a.maxRun >= 3);
   function startMark() {
     const g = labourGroups.find(x=>x.id===markGroupId);
@@ -19170,7 +19173,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
 
       {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
 
-      {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row in {filterMonth}: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d)').join(', ')}. Please review.</div>}
+      {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d'+(a.endD?', to '+a.endD:'')+')').join(', ')}. Please review.</div>}
 
       {tab === 'groups' && canManageGroups && (
         <div>
@@ -19211,6 +19214,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
           <span style={{ flex:1 }}/>
           <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
           <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
+          {['admin','manager','hr'].includes(userRole) && <button style={styles.ghostBtn} onClick={()=>setPrintAbsent(true)} title="Absent report — grouped by site & foreman"><Printer size={13}/> Absent Report</button>}
         </div>
 
         {scopeEmps.length>0 && (
@@ -19338,6 +19342,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
         const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
         const calc = r => { const payable = r.present + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
+        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present, absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
         const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
         const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
@@ -19375,8 +19380,66 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                   </tr>
                 ); })}
               </tbody>
+              <tfoot>
+                <tr style={{ background:'#EDEBE4', fontWeight:700 }}>
+                  <td colSpan={4} style={{ ...td, textAlign:'right', fontWeight:700 }}>TOTAL</td>
+                  <td colSpan={dim} style={td}></td>
+                  <td style={{ ...td, background:'#FFF3B0' }}>{gtot.present}</td>
+                  <td style={{ ...td, color:'#B5453A' }}>{gtot.absent}</td>
+                  <td style={td}></td>
+                  <td style={td}></td>
+                  <td style={{ ...td, background:'#D6F0DD' }}>{gtot.payable}</td>
+                  <td style={{ ...td, textAlign:'right' }}>{Math.round(gtot.basic).toLocaleString()}</td>
+                  <td style={{ ...td, textAlign:'right' }}>{Math.round(gtot.inHand).toLocaleString()}</td>
+                </tr>
+              </tfoot>
             </table>
             <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
+          </DocPrintOverlay>
+        );
+      })()}
+
+      {printAbsent && (() => {
+        const ym = filterMonth || new Date().toISOString().slice(0,7);
+        const grpList = (visibleGroups.length?visibleGroups:labourGroups).filter(g=>!filterProject || g.projectId===filterProject).map(g => {
+          const proj = siteProjects.find(p=>p.id===g.projectId);
+          const foreman = employees.find(e=>e.id===g.leaderId);
+          const members = employees.filter(e=>(g.memberIds||[]).includes(e.id)).map(emp => {
+            const dates=[];
+            siteAttendance.filter(r=>r.groupId===g.id && (r.date||'').startsWith(ym)).forEach(r=>{ const rec=(r.records||[]).find(x=>x.employeeId===emp.id && x.status==='absent'); if(rec) dates.push((r.date||'').slice(8,10)); });
+            return { emp, dates:dates.sort() };
+          }).filter(m=>m.dates.length>0);
+          return { g, proj, foreman, members };
+        }).filter(x=>x.members.length>0);
+        const totalAbs = grpList.reduce((s,x)=>s+x.members.reduce((a,m)=>a+m.dates.length,0),0);
+        return (
+          <DocPrintOverlay onClose={()=>setPrintAbsent(false)} filename={'Absent-Report-'+ym+'.pdf'} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:14 }}>
+              <div style={{ fontSize:18, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>ABSENT REPORT</div>
+              <div style={{ fontSize:11, color:'#888' }}>{ym}{filterProject?' · '+(siteProjects.find(p=>p.id===filterProject)?.name||''):''} · {totalAbs} absence(s)</div>
+            </div>
+            {grpList.length===0 ? <div style={{ textAlign:'center', color:'#888', padding:30 }}>No absences recorded for {ym}.</div> : grpList.map(x=>(
+              <div key={x.g.id} style={{ marginBottom:18, border:'1px solid #EAE6DB', borderRadius:6, overflow:'hidden' }}>
+                <div style={{ background:'#1E2A4A', color:'#fff', padding:'6px 12px', fontSize:12.5, display:'flex', justifyContent:'space-between' }}>
+                  <span><b>{x.g.name||'Group'}</b> &nbsp;·&nbsp; Site: {x.g.type==='office'?'Office / General':(x.proj?.name||'—')}</span>
+                  <span>Foreman: {x.foreman?.name||'—'}</span>
+                </div>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+                  <thead><tr style={{ background:'#F5F3EE' }}>{['#','Employee','Designation','Absent Days','Dates'].map(h=><th key={h} style={{ padding:'4px 8px', textAlign:h==='Absent Days'?'center':'left', fontSize:10.5, fontWeight:700, color:'#888' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {x.members.map((m,i)=>(
+                      <tr key={m.emp.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                        <td style={{ padding:'4px 8px' }}>{i+1}</td>
+                        <td style={{ padding:'4px 8px', fontWeight:600 }}>{m.emp.name}</td>
+                        <td style={{ padding:'4px 8px', color:'#555' }}>{m.emp.designation||'—'}</td>
+                        <td style={{ padding:'4px 8px', textAlign:'center', fontWeight:700, color:'#B5453A' }}>{m.dates.length}</td>
+                        <td style={{ padding:'4px 8px', color:'#555' }}>{m.dates.join(', ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </DocPrintOverlay>
         );
       })()}
