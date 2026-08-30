@@ -4109,6 +4109,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
               <NavBtn id="manpower"        label="Manpower"         icon={Users} />
+              <NavBtn id="siteattendance"  label="Attendance & Salary" icon={Users} />
             </Section>
 
             <Section sectionKey="mep_billing" label="Billing & Commercial">
@@ -19029,13 +19030,15 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, employees, userRole, user }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, employees, userRole, user, businessInfo }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
   const [markGroupId, setMarkGroupId] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [printSheet, setPrintSheet] = useState(false);
+  const fmt = makeFmt(businessInfo);
 
   const isForeman = userRole === 'foreman';
   const canManageGroups = ['admin','manager','hr'].includes(userRole);
@@ -19085,13 +19088,37 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const mem = employees.filter(e => (g.memberIds||[]).includes(e.id));
     setEditing({ _isNew:true, date:new Date().toISOString().slice(0,10), groupId:g.id, projectId:g.projectId||'', records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) });
   }
+  const OT_MULT = 1.25, WORK_DAYS = 30;
+  function salaryData() {
+    const ym = filterMonth || new Date().toISOString().slice(0,7);
+    const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
+    const dim = new Date(yy, mm, 0).getDate() || 30;
+    const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!filterProject || r.projectId===filterProject) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
+    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
+    const rows = scopeEmps.map(emp => {
+      const byDay = {}; let present=0, half=0, absent=0, leave=0, ot=0;
+      recs.forEach(r => { const d = parseInt((r.date||'').slice(8,10),10); const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(rec){ byDay[d]=STMAP[rec.status]||''; if(rec.status==='present')present++; else if(rec.status==='half_day')half++; else if(rec.status==='absent')absent++; else if(rec.status==='leave')leave++; ot+=parseFloat(rec.otHours)||0; } });
+      const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/WORK_DAYS;
+      const earned = dayRate*(present + 0.5*half) + ot*(dayRate/8)*OT_MULT;
+      return { emp, byDay, present, half, absent, leave, ot, basic, earned };
+    });
+    return { ym, dim, rows };
+  }
+  async function exportSalaryXlsx() {
+    const { ym, dim, rows } = salaryData();
+    const days = Array.from({length:dim},(_,i)=>i+1);
+    const head = ['Employee', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Basic','Earned'];
+    const aoa = [head, ...rows.map(r=>[r.emp.name||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, r.basic, Math.round(r.earned)])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
 
   return (
     <div style={styles.page}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
         <div style={{ display:'flex', gap:8 }}>
-          {['mark', ...(canManageGroups?['groups']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':'Labour Groups'}</button>)}
+          {['mark', ...(canManageGroups?['groups','sheet']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':'Monthly Sheet'}</button>)}
         </div>
       </div>
 
@@ -19186,6 +19213,103 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
           {sorted.length===0 && <div style={{ color:'#aaa', padding:24 }}>No attendance records for this period.</div>}
         </div>
       </>)}
+
+      {tab === 'sheet' && canManageGroups && (() => {
+        const { ym, dim, rows } = salaryData();
+        const days = Array.from({length:dim},(_,i)=>i+1);
+        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
+        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, earned:a.earned+r.earned }), {present:0,half:0,absent:0,leave:0,ot:0,earned:0});
+        return (
+          <div>
+            <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+              <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
+              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              <span style={{ flex:1 }}/>
+              {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
+              {rows.length>0 && <button style={styles.ghostBtn} onClick={()=>setPrintSheet(true)} title="Print (landscape)"><Printer size={14}/> Print</button>}
+            </div>
+            {rows.length===0 ? <div style={styles.emptyBox}>No employees in scope for {ym}.</div> : (
+              <div style={{ overflowX:'auto', border:'1px solid #EAE6DB', borderRadius:8 }}>
+                <table style={{ borderCollapse:'collapse', fontSize:11, minWidth:900 }}>
+                  <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                    <th style={{ padding:'5px 8px', textAlign:'left', position:'sticky', left:0, background:'#1E2A4A', whiteSpace:'nowrap' }}>Employee</th>
+                    {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center' }}>{d}</th>)}
+                    {['P','H','A','L','OT','Basic','Earned'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r,ri)=>(
+                      <tr key={r.emp.id} style={{ background:ri%2?'#F6F5F2':'#fff', borderBottom:'1px solid #eee' }}>
+                        <td style={{ padding:'4px 8px', fontWeight:600, position:'sticky', left:0, background:ri%2?'#F6F5F2':'#fff', whiteSpace:'nowrap' }}>{r.emp.name}</td>
+                        {days.map(d=>{ const v=r.byDay[d]||''; return <td key={d} style={{ padding:'3px 2px', textAlign:'center', color:STC[v]||'#ccc', fontWeight:700 }}>{v||'·'}</td>; })}
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#1A7A3E' }}>{r.present}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#C9A24B' }}>{r.half}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#B5453A' }}>{r.absent}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#6B5BAE' }}>{r.leave}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.ot||''}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.basic?fmt(r.basic):'—'}</td>
+                        <td style={{ padding:'4px 8px', textAlign:'right', fontWeight:700, color:'#1E2A4A' }}>{r.earned?fmt(Math.round(r.earned)):'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop:'2px solid #1E2A4A', fontWeight:700 }}>
+                    <td style={{ padding:'5px 8px', position:'sticky', left:0, background:'#fff' }}>TOTAL</td>
+                    <td colSpan={dim}></td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#1A7A3E' }}>{tot.present}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#C9A24B' }}>{tot.half}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#B5453A' }}>{tot.absent}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#6B5BAE' }}>{tot.leave}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right' }}>{tot.ot||''}</td>
+                    <td></td>
+                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#1E2A4A' }}>{fmt(Math.round(tot.earned))}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            )}
+            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>P=Present · H=Half · A=Absent · L=Leave. Earned = (Basic ÷ 30) × (Present + ½·Half) + OT hrs × (day-rate ÷ 8) × 1.25.</div>
+          </div>
+        );
+      })()}
+
+      {printSheet && (() => {
+        const { ym, dim, rows } = salaryData();
+        const days = Array.from({length:dim},(_,i)=>i+1);
+        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, ot:a.ot+r.ot, earned:a.earned+r.earned }), {present:0,ot:0,earned:0});
+        return (
+          <DocPrintOverlay onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
+            <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
+            <div style={{ textAlign:'center', marginBottom:12 }}>
+              <div style={{ fontSize:18, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>ATTENDANCE & SALARY SHEET</div>
+              <div style={{ fontSize:11, color:'#888' }}>{ym}{filterProject?' · '+(siteProjects.find(p=>p.id===filterProject)?.name||''):''}</div>
+            </div>
+            <table style={{ borderCollapse:'collapse', fontSize:8, width:'100%', fontFamily:'Arial, sans-serif' }}>
+              <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                <th style={{ padding:'3px 4px', textAlign:'left' }}>Employee</th>
+                {days.map(d=><th key={d} style={{ padding:'2px', textAlign:'center' }}>{d}</th>)}
+                {['P','A','OT','Earned'].map(h=><th key={h} style={{ padding:'3px 4px', textAlign:'right' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map((r,ri)=>(
+                  <tr key={r.emp.id} style={{ background:ri%2?'#F6F5F2':'#fff', borderBottom:'1px solid #eee' }}>
+                    <td style={{ padding:'2px 4px', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
+                    {days.map(d=><td key={d} style={{ padding:'1px', textAlign:'center' }}>{r.byDay[d]||''}</td>)}
+                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.present}</td>
+                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.absent}</td>
+                    <td style={{ padding:'2px 4px', textAlign:'right' }}>{r.ot||''}</td>
+                    <td style={{ padding:'2px 4px', textAlign:'right', fontWeight:700 }}>{r.earned?Math.round(r.earned).toLocaleString():''}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr style={{ borderTop:'2px solid #1E2A4A', fontWeight:700 }}>
+                <td style={{ padding:'3px 4px' }}>TOTAL</td><td colSpan={dim}></td>
+                <td style={{ padding:'3px 4px', textAlign:'right' }}>{tot.present}</td><td></td>
+                <td style={{ padding:'3px 4px', textAlign:'right' }}>{tot.ot||''}</td>
+                <td style={{ padding:'3px 4px', textAlign:'right' }}>{Math.round(tot.earned).toLocaleString()}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize:9, color:'#666', marginTop:8 }}>P=Present, A=Absent, H=Half, L=Leave. Earned = (Basic÷30)×(Present+½Half) + OT×(day-rate÷8)×1.25.</div>
+          </DocPrintOverlay>
+        );
+      })()}
 
       {editing && <AttendanceSheet sheet={editing} group={labourGroups.find(g=>g.id===editing.groupId)} siteProjects={siteProjects} employees={employees} onSave={saveAtt} onClose={()=>setEditing(null)} />}
       {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
@@ -25274,6 +25398,7 @@ export default function App() {
             employees={employees}
             userRole={userRole}
             user={user}
+            businessInfo={businessInfo}
           />
         );
       case 'evaluation':
