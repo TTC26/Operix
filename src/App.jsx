@@ -21104,6 +21104,76 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     const mpManDays = l => mpTechDays(l) + mpHelperDays(l);
     const mpCost = l => mpTechDays(l)*techRate + mpHelperDays(l)*helperRate;
     const mpTotal = () => (t.manpower||[]).reduce((a,l)=>({ tech:a.tech+mpTechDays(l), helper:a.helper+mpHelperDays(l), md:a.md+mpManDays(l), cost:a.cost+mpCost(l) }), {tech:0,helper:0,md:0,cost:0});
+    async function importPriceCsv(e) {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      const nm = (file.name||'').toLowerCase();
+      try {
+        let rows = [];
+        if (nm.endsWith('.xlsx')||nm.endsWith('.xls')) { const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+        else { const text=await file.text(); rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+        const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+        const hasHeader=head.some(h=>/activ|desc|price|rate|unit|villa|qty/.test(h));
+        const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+        let idx,start;
+        if(hasHeader){ start=1; idx={ activity:find('activ','desc','item','particular','work'), unit:find('unit','uom'), rate:(find('rate')>=0?find('rate'):find('price','amount')), units:find('units','villa','qty','nos') }; }
+        else { start=0; idx={activity:0,unit:-1,rate:1,units:-1}; }
+        const g=(c,i)=>(i>=0&&i<c.length)?c[i]:'';
+        const parsed=r2.slice(start).map(c=>({ id:crypto.randomUUID(), activity:String(g(c,idx.activity)||'').trim(), unit:String(g(c,idx.unit)||'').trim()||'villa', rate:parseFloat(String(g(c,idx.rate)).replace(/[^0-9.\-]/g,''))||0, units:parseFloat(g(c,idx.units))||villaCount })).filter(x=>x.activity && !/^total$/i.test(x.activity));
+        if(!parsed.length){alert('No rows. Columns: Activity, Rate/Price, (Unit), (Units).');return;}
+        set('priceDetail',[...(t.priceDetail||[]),...parsed]);
+        alert(parsed.length+' activity line(s) imported.');
+      } catch(err){ alert('Import failed: '+err.message); }
+      e.target.value='';
+    }
+    async function downloadPriceTemplate() {
+      const aoa=[['Activity','Unit','Rate','Units'],['Slab Works Full Villa','villa',2480,7],['Box Fixing','villa',1550,7],['Wiring','villa',6200,7],['Testing & Commissioning','villa',1550,7]];
+      try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:30},{wch:8},{wch:10},{wch:8}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Price Detail'); XLSX.writeFile(wb,'Price-Detail-Template.xlsx'); }
+      catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Price-Detail-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+    }
+    async function importMpCsv(e) {
+      const file=e.target.files&&e.target.files[0]; if(!file) return;
+      const nm=(file.name||'').toLowerCase();
+      const areaKey=str=>{ const u=String(str||'').toUpperCase(); if(u.includes('GROUND')) return 'Ground Floor'; if(u.includes('FIRST FLOOR')) return 'First Floor'; if(u.includes('LOWER ROOF')) return 'Lower Roof'; if(u.includes('UPPER ROOF')) return 'Upper Roof'; if(u.includes('DB DRESS')) return 'DB Dressing'; if(u.includes('EXTERN')) return 'External'; return null; };
+      const stageGuess = nm.includes('final')?'Final Fix':nm.includes('second')?'Second Fix':'First Fix';
+      try {
+        let rows=[];
+        if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+        else { const text=await file.text(); rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+        const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+        const hasHeader=head.some(h=>/activ|tech|helper|day|stage|area|floor/.test(h));
+        const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+        let idx,start;
+        if(hasHeader){ start=1; idx={ stage:find('stage'), area:find('area','floor','location'), activity:find('activ','desc','item','work'), tech:find('tech'), helper:find('helper'), days:find('day') }; }
+        else { start=0; idx={stage:-1,area:-1,activity:1,tech:2,helper:3,days:4}; }
+        const g=(c,i)=>(i>=0&&i<c.length)?c[i]:'';
+        let curArea='Ground Floor'; const out=[];
+        for(const c of r2.slice(start)){
+          const act=String(g(c,idx.activity)||'').trim();
+          const tech=String(g(c,idx.tech)||'').trim(), helper=String(g(c,idx.helper)||'').trim(), days=String(g(c,idx.days)||'').trim();
+          const joined=(c||[]).map(x=>String(x||'').trim()).filter(Boolean).join(' ');
+          const ak=areaKey(act||joined);
+          if(ak && !tech && !helper && !days){ curArea=ak; continue; }
+          if(/total/i.test(joined) && !parseFloat(tech) && !parseFloat(helper)) { if(/^total/i.test(act)||!act) continue; }
+          if(!act) continue;
+          const areaCol = idx.area>=0 ? (areaKey(g(c,idx.area))||String(g(c,idx.area)||'').trim()||curArea) : curArea;
+          const stageCol = idx.stage>=0 ? (String(g(c,idx.stage)||'').trim()||stageGuess) : stageGuess;
+          out.push({ id:crypto.randomUUID(), stage:stageCol, area:areaCol, activity:act, tech:parseFloat(tech)||0, helper:parseFloat(helper)||0, days:parseFloat(days)||1, perVilla:true });
+        }
+        if(!out.length){alert('No manpower rows. Columns: (Stage), Area/Floor, Activity, Tech, Helper, Days. Floor section-headers are auto-detected.');return;}
+        set('manpower',[...(t.manpower||[]),...out]);
+        alert(out.length+' manpower line(s) imported. Stage = "'+stageGuess+'" (from file name) — adjust per line if needed.');
+      } catch(err){ alert('Import failed: '+err.message); }
+      e.target.value='';
+    }
+    async function downloadMpTemplate() {
+      const aoa=[['Stage','Area','Activity','Tech','Helper','Days'],['First Fix','Ground Floor','GI Box Fixing',2,1,1],['First Fix','Ground Floor','L/L Wiring',3,3,1],['First Fix','First Floor','H/L Wiring Light & Power',3,3,1],['Final Fix','Ground Floor','Light Fixing',4,2,1.5]];
+      try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:14},{wch:34},{wch:7},{wch:7},{wch:7}];
+        const gd=[['MANPOWER IMPORT — how to use'],[''],['1. Fill Stage, Area, Activity, Tech, Helper, Days.'],['2. Headers matched by name; column order can vary.'],['3. You can also import your existing First/Final Fix sheet where the FLOOR is a section-header row (e.g. GROUND FLOOR) — it is auto-detected and applied to the rows below it.'],['4. File name containing "final"/"first" sets the default Stage.'],[''],['Valid Stage'],['First Fix'],['Final Fix'],['Second Fix'],['Testing & Commissioning'],['General'],[''],['Valid Area'],['Ground Floor'],['First Floor'],['Lower Roof'],['Upper Roof'],['DB Dressing'],['External']];
+        const wsg=XLSX.utils.aoa_to_sheet(gd); wsg['!cols']=[{wch:72}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Manpower'); XLSX.utils.book_append_sheet(wb,wsg,'Guide'); XLSX.writeFile(wb,'Manpower-Import-Template.xlsx'); }
+      catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Manpower-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+    }
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       const nm = (file.name||'').toLowerCase();
@@ -21238,8 +21308,12 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                   </tbody>
                 </table>
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8 }}>
-                  <button onClick={()=>set('priceDetail',[...(t.priceDetail||[]), blankPriceLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Activity</button>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <button onClick={()=>set('priceDetail',[...(t.priceDetail||[]), blankPriceLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Activity</button>
+                    <button onClick={downloadPriceTemplate} style={styles.ghostBtn} title="Download Price Detail template">⬇ Template</button>
+                    <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import — columns: Activity, Rate/Price, (Unit), (Units)">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importPriceCsv} /></label>
+                  </div>
                   <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Price Total: {fmt(priceTotal())}</div>
                 </div>
               </div>
@@ -21282,7 +21356,11 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                 </table>
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
-                  <button onClick={()=>set('manpower',[...(t.manpower||[]), blankMpLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Manpower Line</button>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <button onClick={()=>set('manpower',[...(t.manpower||[]), blankMpLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Manpower Line</button>
+                    <button onClick={downloadMpTemplate} style={styles.ghostBtn} title="Download Manpower template + guide">⬇ Template</button>
+                    <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import your First/Final Fix sheet — floor section-headers auto-detected">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importMpCsv} /></label>
+                  </div>
                   <div style={{ fontSize:12.5, color:'#555' }}>Tech-days: <b>{tot.tech.toFixed(0)}</b> · Helper-days: <b>{tot.helper.toFixed(0)}</b> · Labour Cost: <b style={{ color:'#1A7A3E' }}>{fmt(tot.cost)}</b></div>
                 </div>
                 <div style={{ marginTop:12, background:'#F4FAF5', border:'1px solid #CDE9D5', borderRadius:8, padding:'12px 16px', display:'flex', gap:24, flexWrap:'wrap', fontSize:13 }}>
