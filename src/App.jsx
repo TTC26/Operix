@@ -16964,7 +16964,12 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
                       </div>
                       <div style={{ padding:'6px 8px', fontSize:11 }}>
                         <div style={{ fontWeight:600, color:'#1E2A4A', lineHeight:1.3 }}>{act.name}</div>
-                        <div style={{ fontSize:10, color:'#aaa' }}>{act.phase}</div>
+                        <div style={{ fontSize:10, color:'#aaa', display:'flex', alignItems:'center', gap:4, marginTop:2 }}>
+                          <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{act.phase}</span>
+                          <button onClick={()=>setUpdateModal(act.id)} style={{ ...styles.iconBtn, padding:'1px 4px' }} title="Log update">📝</button>
+                          {canEdit && <button onClick={()=>setEditing(act)} style={{ ...styles.iconBtn, padding:'1px 4px' }} title="Edit activity"><Pencil size={12}/></button>}
+                          {canEdit && <button onClick={()=>del(act.id)} style={{ ...styles.iconBtn, padding:'1px 4px', color:'#B5453A' }} title="Delete activity"><Trash2 size={12}/></button>}
+                        </div>
                       </div>
                     </div>
                   );
