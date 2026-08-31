@@ -2976,7 +2976,13 @@ function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, v
   );
 }
 
-function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [], employees = [], labourGroups = [], userRole = '' }) {
+function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [], employees = [], labourGroups = [], userRole = '', raBillings = [], siteActivities = [] }) {
+  const _fmtD = makeFmt(businessInfo);
+  const _raTot = rb => (rb.items||[]).reduce((s,i)=>s+((parseFloat(i.contractValue)||0)*((parseFloat(i.thisQty)||0)-(parseFloat(i.previousQty)||0))/100),0);
+  const _billed = (raBillings||[]).reduce((s,rb)=>s+_raTot(rb),0);
+  const _received = (raBillings||[]).filter(rb=>rb.status==='paid').reduce((s,rb)=>s+_raTot(rb),0);
+  const _outstanding = _billed - _received;
+  const _showBilling = (activeTypes.includes('service')||activeTypes.includes('fmamc')) && (raBillings||[]).length>0;
   const _absAlerts = (['admin','manager','hr'].includes(userRole) ? employees : []).map(emp => {
     const dset = new Set();
     (siteAttendance||[]).forEach(r => { if(r.date && (r.records||[]).some(x=>x.employeeId===emp.id && x.status==='absent')) dset.add(r.date); });
@@ -3024,6 +3030,17 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             <div style={{ fontSize:12.5, color:'#991B1B' }}>{_absAlerts.map(a=>a.emp.name+' ('+a.mr+' days'+(a.endD?', to '+a.endD:'')+')').join(' · ')}</div>
             <div style={{ fontSize:11, color:'#B91C1C', marginTop:3, textDecoration:'underline' }}>Open Site Attendance →</div>
           </div>
+        </div>
+      )}
+
+      {_showBilling && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px,1fr))', gap:12, marginBottom:18 }}>
+          {[['Project Billed', _billed, '#1E2A4A', 'rabilling'],['Received', _received, '#1A7A3E', 'paymenttracking'],['Outstanding', _outstanding, _outstanding>0?'#B5453A':'#1A7A3E', 'paymenttracking']].map(([l,v,c,go])=>(
+            <div key={l} onClick={()=>setView(go)} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'14px 16px', cursor:'pointer' }}>
+              <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+              <div style={{ fontSize:22, fontWeight:700, color:c, marginTop:2 }}>{_fmtD(Math.round(v))}</div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -16760,7 +16777,7 @@ function MEPProjectForm({ project, employees, onSave, onClose }) {
 
 // ── Activity Planner (WBS + BOM) ────────────────────────────────────────────────
 // ─── MEP Gantt Chart + Activity Planner ──────────────────────────────────────
-function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo, tenders = [] }) {
+function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo, tenders = [], raBillings = [], setRaBillings, customers = [], setView }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [editing, setEditing] = useState(null);
   const [expandedBOM, setExpandedBOM] = useState({});
@@ -16832,6 +16849,26 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
       alert(added.length+' activities imported.');
     }catch(err){ alert('Import failed: '+err.message); }
     e.target.value='';
+  }
+  function createInvoiceFromActivities() {
+    if (!setRaBillings) { alert('Billing module not available.'); return; }
+    const billable = acts.filter(a => (parseFloat(a.contractValue)||0) > 0);
+    if (!billable.length) { alert('No activities with a Contract Value to bill. Set Contract Value on activities first (Edit activity).'); return; }
+    const priorItems = (raBillings||[]).filter(b => String(b.projectId)===String(selProject)).flatMap(b => (b.items||[]));
+    const prevPctOf = actId => { const vals = priorItems.filter(it => it.activityId===actId).map(it => parseFloat(it.thisQty)||0); return vals.length ? Math.max(...vals) : 0; };
+    const items = billable.map(a => {
+      const prev = prevPctOf(a.id);
+      const cur = getProgress(a.id);
+      return { id: crypto.randomUUID(), description: a.name, contractValue: parseFloat(a.contractValue)||0, previousQty: prev, thisQty: Math.max(prev, cur), unit:'%', activityId: a.id };
+    }).filter(it => (it.thisQty - it.previousQty) > 0.001);
+    if (!items.length) { alert('Nothing new to bill — all activities already billed up to their current progress.'); return; }
+    const amt = items.reduce((s,i)=> s + (i.contractValue*(i.thisQty-i.previousQty)/100), 0);
+    if (!window.confirm('Create a progress invoice (RA Bill) for '+items.length+' activit'+(items.length===1?'y':'ies')+' — value '+Math.round(amt).toLocaleString()+'? Review & print it in Billing → RA Billing.')) return;
+    const num = 'RAB-'+String((raBillings.length||0)+1).padStart(3,'0');
+    const ym = new Date().toISOString().slice(0,7);
+    const bill = { id: crypto.randomUUID(), billNumber:num, projectId:selProject, customerId:(project?.customerId||''), tenderId:'', periodFrom:ym+'-01', periodTo:new Date().toISOString().slice(0,10), date:new Date().toISOString().slice(0,10), items, taxRate:0, placeOfSupply:'', status:'draft', approvalStatus:'draft', notes:'Auto-generated from Activity Planner progress.', source:'activity', updatedAt:Date.now() };
+    setRaBillings(prev => [...prev, bill]);
+    if (window.confirm('Progress invoice '+num+' created. Go to RA Billing now to review & print?')) { if (setView) setView('rabilling'); }
   }
   function lockBOM(id) { setSiteActivities(prev=>prev.map(a=>a.id===id?{...a,bomLocked:true}:a)); }
   function toggleBOM(id) { setExpandedBOM(p=>({...p,[id]:!p[id]})); }
@@ -16912,6 +16949,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           {canEdit && <button onClick={()=>setTenderPick(true)} style={styles.ghostBtn} title="Import activities from a tender's Price Detail / BOQ">↳ From Tender</button>}
           {canEdit && <button onClick={downloadActTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>}
           {canEdit && <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import activities from Excel/CSV">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importActsCsv} /></label>}
+          {canEdit && acts.some(a=>(parseFloat(a.contractValue)||0)>0) && <button onClick={createInvoiceFromActivities} style={{ ...styles.ghostBtn, color:'#1a6b30', borderColor:'#bfe3c9', background:'#F1FAF3' }} title="Create a progress invoice (RA Bill) from completed work %"><FileText size={14}/> Create Invoice</button>}
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
             {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
@@ -25337,6 +25375,8 @@ export default function App() {
             employees={sessionEmployees}
             labourGroups={labourGroups}
             userRole={userRole}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
           />
         );
       case 'enquiries':
@@ -25759,6 +25799,10 @@ export default function App() {
             userRole={userRole}
             businessInfo={businessInfo}
             tenders={tenders}
+            raBillings={raBillings}
+            setRaBillings={setRaBillings}
+            customers={customers}
+            setView={setView}
           />
         );
       case 'dailyupdates':
@@ -26171,6 +26215,8 @@ export default function App() {
             employees={sessionEmployees}
             labourGroups={labourGroups}
             userRole={userRole}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
           />
         );
     }
