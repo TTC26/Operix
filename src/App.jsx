@@ -16760,13 +16760,14 @@ function MEPProjectForm({ project, employees, onSave, onClose }) {
 
 // ── Activity Planner (WBS + BOM) ────────────────────────────────────────────────
 // ─── MEP Gantt Chart + Activity Planner ──────────────────────────────────────
-function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo }) {
+function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo, tenders = [] }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [editing, setEditing] = useState(null);
   const [expandedBOM, setExpandedBOM] = useState({});
   const [viewMode, setViewMode] = useState('gantt'); // 'gantt' | 'table'
   const [updateModal, setUpdateModal] = useState(null); // activityId
   const [printActs, setPrintActs] = useState(false);
+  const [tenderPick, setTenderPick] = useState(false);
   const [ganttStart, setGanttStart] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10);
   });
@@ -16786,6 +16787,52 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     setEditing(null);
   }
   function del(id) { if (confirm('Delete activity?')) setSiteActivities(prev=>prev.filter(a=>a.id!==id)); }
+  const buildupPct = l => (parseFloat(l.siteOH)||0)+(parseFloat(l.hoOH)||0)+(parseFloat(l.contingency)||0)+(parseFloat(l.profit)||0);
+  function importFromTender(t) {
+    const src = (t.priceDetail && t.priceDetail.length)
+      ? t.priceDetail.map(l => ({ name:(l.activity||'').trim(), contractValue:(parseFloat(l.rate)||0)*(parseFloat(l.units)||0), unit:l.unit||'%', disc:'' }))
+      : (t.boq||[]).map(l => ({ name:(l.description||'').trim(), contractValue:(parseFloat(l.tenderQty)||0)*(parseFloat(l.rate)||0)*(1+buildupPct(l)/100), unit:l.unit||'%', disc:l.subcategory||'' }));
+    const valid = src.filter(l=>l.name);
+    if(!valid.length){ alert('This tender has no Price Detail / BOQ activities.'); return; }
+    const wt = +(100/valid.length).toFixed(2);
+    const discs = project?.disciplines||MEP_DISCIPLINES;
+    const newActs = valid.map((l,i)=>({ id:crypto.randomUUID(), projectId:selProject, villaId:'', discipline:(discs.includes(l.disc)?l.disc:discs[0]), phase:MEP_PHASES[0], name:l.name, weight:wt, contractValue:l.contractValue, unit:l.unit, plannedStart:'', plannedEnd:'', bom:[], bomLocked:false, seq:i }));
+    setSiteActivities(prev=>[...prev, ...newActs]);
+    setTenderPick(false);
+    alert(valid.length+' activities imported from tender '+(t.number||'')+'. Assign villa & dates as needed.');
+  }
+  async function downloadActTemplate() {
+    const aoa=[['Villa/Unit','Discipline','Phase','Activity','Planned Start','Planned End','Weight %','Contract Value'],
+      ['','Electrical','First Fix','Box Fixing','2026-08-01','2026-08-05',10,1550],
+      ['','Electrical','First Fix','Wiring','2026-08-06','2026-08-12',15,6200]];
+    try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:14},{wch:14},{wch:30},{wch:14},{wch:14},{wch:9},{wch:14}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Activities'); XLSX.writeFile(wb,'Activities-Import-Template.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Activities-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importActsCsv(e) {
+    const file=e.target.files&&e.target.files[0]; if(!file) return;
+    const nm=(file.name||'').toLowerCase();
+    if(!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)){ alert('Please import an Excel (.xlsx) or CSV file. Use the Template.'); e.target.value=''; return; }
+    try{
+      let rows=[];
+      if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+      else { const text=await file.text(); if(text.slice(0,5)==='%PDF-'||text.slice(0,2)==='PK'){ alert('Not a CSV/Excel — use the Template.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+      const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+      const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+      const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+      const hasHeader=head.some(h=>/activ|discipl|phase|villa|unit|start|end|weight|contract/.test(h));
+      let idx,start;
+      if(hasHeader){ start=1; idx={ villa:find('villa','unit'), disc:find('discipl'), phase:find('phase'), name:find('activ','desc','work'), ps:find('start'), pe:find('end'), wt:find('weight','wt'), cv:find('contract','value') }; }
+      else { start=0; idx={villa:0,disc:1,phase:2,name:3,ps:4,pe:5,wt:6,cv:7}; }
+      const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
+      const villas=project?.villas||[]; const discs=project?.disciplines||MEP_DISCIPLINES;
+      const findVilla=nm2=>{ const v=villas.find(x=>(x.name||'').toLowerCase()===nm2.toLowerCase()); return v?v.id:''; };
+      const added=r2.slice(start).map((c,i)=>{ const name=g(c,idx.name); if(!name||/^activity$/i.test(name)) return null; const d=g(c,idx.disc); return { id:crypto.randomUUID(), projectId:selProject, villaId:findVilla(g(c,idx.villa)), discipline:(discs.includes(d)?d:discs[0]), phase:g(c,idx.phase)||MEP_PHASES[0], name, plannedStart:g(c,idx.ps), plannedEnd:g(c,idx.pe), weight:parseFloat(g(c,idx.wt))||5, contractValue:parseFloat(g(c,idx.cv).replace(/[^0-9.]/g,''))||0, unit:'%', bom:[], bomLocked:false, seq:i }; }).filter(Boolean);
+      if(!added.length){ alert('No activities found (need an Activity column).'); e.target.value=''; return; }
+      setSiteActivities(prev=>[...prev, ...added]);
+      alert(added.length+' activities imported.');
+    }catch(err){ alert('Import failed: '+err.message); }
+    e.target.value='';
+  }
   function lockBOM(id) { setSiteActivities(prev=>prev.map(a=>a.id===id?{...a,bomLocked:true}:a)); }
   function toggleBOM(id) { setExpandedBOM(p=>({...p,[id]:!p[id]})); }
 
@@ -16799,7 +16846,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
     const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
     const aoa = [['#','Discipline','Unit','Activity','Start','End','Duration (days)','Weight %','Progress %','Status'],
-      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.startDate||'', a.endDate||'', dur(a.startDate,a.endDate), a.weight||'', getProgress(a.id), a.status||''])];
+      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.plannedStart||'', a.plannedEnd||'', dur(a.plannedStart,a.plannedEnd), a.weight||'', getProgress(a.id), a.status||''])];
     try {
       const XLSX = await loadXLSX();
       const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -16862,6 +16909,9 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           </select>
           {acts.length>0 && <button onClick={exportActsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
           {acts.length>0 && <button onClick={()=>setPrintActs(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setTenderPick(true)} style={styles.ghostBtn} title="Import activities from a tender's Price Detail / BOQ">↳ From Tender</button>}
+          {canEdit && <button onClick={downloadActTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>}
+          {canEdit && <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import activities from Excel/CSV">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importActsCsv} /></label>}
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
             {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
@@ -17049,9 +17099,31 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           project={project}
           progressUpdates={progressUpdates}
           setProgressUpdates={setProgressUpdates}
+          setSiteActivities={setSiteActivities}
+          canEdit={canEdit}
           employees={employees}
           onClose={()=>setUpdateModal(null)}
         />
+      )}
+      {tenderPick && (
+        <>
+          <div className="no-print" onClick={()=>setTenderPick(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1200 }} />
+          <div className="no-print" style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#fff', borderRadius:12, padding:'20px 22px', zIndex:1201, width:460, maxHeight:'80vh', overflowY:'auto', boxShadow:'0 10px 40px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontSize:16, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>Import Activities from Tender</div>
+            <div style={{ fontSize:12, color:'#888', marginBottom:14 }}>Pulls the tender's Price Detail activities (or BOQ) into <b>{project?.name||'this project'}</b>. You can then set villa &amp; dates.</div>
+            {tenders.length===0 ? <div style={{ color:'#aaa', padding:20, textAlign:'center' }}>No tenders found.</div> : (
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {tenders.map(t=>{ const cnt=((t.priceDetail&&t.priceDetail.length)||(t.boq&&t.boq.length)||0); return (
+                  <button key={t.id} onClick={()=>importFromTender(t)} disabled={!cnt} style={{ textAlign:'left', background:cnt?'#F8F7F4':'#f3f3f3', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 12px', cursor:cnt?'pointer':'not-allowed', opacity:cnt?1:0.6 }}>
+                    <div style={{ fontWeight:600, color:'#1E2A4A' }}>{t.number||'Tender'} — {t.title||'(no title)'}</div>
+                    <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{cnt} activit{cnt===1?'y':'ies'} · {t.status||'draft'}</div>
+                  </button>
+                ); })}
+              </div>
+            )}
+            <button onClick={()=>setTenderPick(false)} style={{ background:'none', border:'none', color:'#888', fontSize:12, marginTop:14, width:'100%', cursor:'pointer' }}>Cancel</button>
+          </div>
+        </>
       )}
       {printActs && (()=>{
         const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
@@ -17064,6 +17136,32 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
               <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PROJECT ACTIVITY SCHEDULE</div>
               <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{project?.name} &nbsp;|&nbsp; Overall Progress: {overall}% &nbsp;|&nbsp; {acts.length} activities</div>
             </div>
+            {(()=>{ const PDW=16; const totalW=ganttDays*PDW; return (
+              <div style={{ marginBottom:22 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:8 }}>Gantt Chart</div>
+                <div style={{ display:'flex', borderBottom:'2px solid #1E2A4A' }}>
+                  <div style={{ width:168, flexShrink:0, fontWeight:700, fontSize:9, padding:'2px 4px' }}>Activity</div>
+                  <div style={{ position:'relative', display:'flex', width:totalW }}>
+                    {Array.from({length:ganttDays}).map((_,i)=>{ const d=new Date(gStart); d.setDate(d.getDate()+i); const we=d.getDay()===0||d.getDay()===6; return <div key={i} style={{ width:PDW, textAlign:'center', fontSize:7.5, color:we?'#B5453A':'#999', borderLeft:'1px solid #F0EDE6', paddingTop:2 }}>{d.getDate()}</div>; })}
+                  </div>
+                </div>
+                {acts.map(a=>{ const so=dayOffset(a.plannedStart); const eo=dayOffset(a.plannedEnd); const pr=getProgress(a.id); const has=so!=null&&eo!=null; const bl=has?so*PDW:0; const bw=has?Math.max(PDW,(eo-so+1)*PDW):0; return (
+                  <div key={a.id} style={{ display:'flex', alignItems:'center', height:17, borderBottom:'1px solid #F5F3EE' }}>
+                    <div style={{ width:168, flexShrink:0, fontSize:8.5, padding:'0 4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{a.name}</div>
+                    <div style={{ position:'relative', height:'100%', width:totalW }}>
+                      {Array.from({length:ganttDays}).map((_,i)=>{ const d=new Date(gStart); d.setDate(d.getDate()+i); return (d.getDay()===0||d.getDay()===6)?<div key={i} style={{ position:'absolute', left:i*PDW, width:PDW, top:0, bottom:0, background:'rgba(201,162,75,0.10)' }} />:null; })}
+                      {has && <div style={{ position:'absolute', left:bl, width:bw, top:3, height:11, borderRadius:3, background:'#DDD8CE', overflow:'hidden' }}>
+                        <div style={{ width:pr+'%', height:'100%', background:pr>=100?'#1A7A3E':'#1E7A9A' }} />
+                        <span style={{ position:'absolute', left:3, top:-1, fontSize:7.5, fontWeight:700, color:'#fff', whiteSpace:'nowrap' }}>{pr>0?pr+'%':''}</span>
+                      </div>}
+                      {!has && <span style={{ position:'absolute', left:4, top:2, fontSize:7.5, color:'#ccc', fontStyle:'italic' }}>no dates</span>}
+                    </div>
+                  </div>
+                ); })}
+                <div style={{ fontSize:8, color:'#999', marginTop:6 }}>Weekend shaded. Bar = planned duration; filled = progress (blue in-progress, green complete).</div>
+              </div>
+            ); })()}
+            <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', margin:'6px 0 8px' }}>Activity Table</div>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
               <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Discipline','Unit','Activity','Start','End','Days','Wt%','Progress','Status'].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['#','Days','Wt%','Progress'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -17073,9 +17171,9 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
                     <td style={{ padding:'5px 8px' }}>{a.discipline}</td>
                     <td style={{ padding:'5px 8px' }}>{vName(a.villaId)||'—'}</td>
                     <td style={{ padding:'5px 8px' }}>{a.name}</td>
-                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.startDate||'—'}</td>
-                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.endDate||'—'}</td>
-                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.startDate,a.endDate)}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.plannedStart||'—'}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.plannedEnd||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.plannedStart,a.plannedEnd)}</td>
                     <td style={{ padding:'5px 8px', textAlign:'right' }}>{a.weight||'—'}</td>
                     <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:600, color:pr>=100?'#1a6b30':'#1E2A4A' }}>{pr}%</td>
                     <td style={{ padding:'5px 8px' }}>{a.status||''}</td>
@@ -17091,7 +17189,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
 }
 
 // ─── Daily Update Modal (from Gantt click) ───────────────────────────────────
-function DailyUpdateModal({ activityId, activity, project, progressUpdates, setProgressUpdates, employees, onClose }) {
+function DailyUpdateModal({ activityId, activity, project, progressUpdates, setProgressUpdates, setSiteActivities, canEdit=true, employees, onClose }) {
   const today = new Date().toISOString().slice(0,10);
   const lastLog = progressUpdates.filter(u=>u.activityId===activityId).sort((a,b)=>b.date.localeCompare(a.date))[0];
   const lastPct = lastLog ? parseFloat(lastLog.cumProgress)||0 : 0;
@@ -17105,6 +17203,8 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
     materialConsumed: [],
     notes: '',
   });
+  const [pStart, setPStart] = useState(activity?.plannedStart||'');
+  const [pEnd, setPEnd] = useState(activity?.plannedEnd||'');
   const [saved, setSaved] = useState(false);
   const set = (k,v) => setForm(p=>({...p,[k]:v}));
 
@@ -17130,6 +17230,9 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
       totalManhours: Number(form.totalManhours) || 0,
     };
     setProgressUpdates(prev => [...prev, rec]);
+    if (setSiteActivities && (pStart!==(activity?.plannedStart||'') || pEnd!==(activity?.plannedEnd||''))) {
+      setSiteActivities(prev => prev.map(a => a.id===activityId ? { ...a, plannedStart:pStart, plannedEnd:pEnd } : a));
+    }
     setSaved(true);
     setTimeout(() => { if (typeof onClose === 'function') onClose(); }, 900);
   }
@@ -17155,6 +17258,15 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
           <input type="number" min={lastPct} max={100} value={form.cumProgress} onChange={e=>set('cumProgress',Math.min(100,Math.max(lastPct,+e.target.value)))} style={styles.input} />
         </div>
       </div>
+      {canEdit && (
+        <div style={{ background:'#F4F7FB', border:'1px solid #D8E2F0', borderRadius:8, padding:'10px 12px', marginBottom:12 }}>
+          <div style={{ fontSize:11.5, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>Planned Schedule {(!activity?.plannedStart||!activity?.plannedEnd)?'— set dates to show the Gantt bar':''}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Planned Start</label><input type="date" value={pStart} onChange={e=>setPStart(e.target.value)} style={styles.input} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Planned End</label><input type="date" value={pEnd} onChange={e=>setPEnd(e.target.value)} style={styles.input} /></div>
+          </div>
+        </div>
+      )}
 
       {/* Manpower moved to dedicated Manpower module */}
       <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:8, padding:'9px 12px', marginBottom:12, fontSize:12, color:'#1A7A3E' }}>
@@ -25641,6 +25753,7 @@ export default function App() {
             setProgressUpdates={setProgressUpdates}
             userRole={userRole}
             businessInfo={businessInfo}
+            tenders={tenders}
           />
         );
       case 'dailyupdates':
