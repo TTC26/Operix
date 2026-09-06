@@ -10180,7 +10180,8 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
 
 
 // ─── Payroll ──────────────────────────────────────────────────────────────────
-function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole }) {
+function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
+  const runs = isMultiBiz ? (payrollRuns||[]).filter(r => (r.bizType || 'trading') === currentBizType) : (payrollRuns||[]);
   const [showModal, setShowModal] = useState(false);
   const [printRun, setPrintRun] = useState(null);
   const [printMode, setPrintMode] = useState(null); // 'summary' | 'individual'
@@ -10218,14 +10219,14 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 className="serif" style={styles.h1}>Payroll</h2>
-          <div style={styles.muted}>{payrollRuns.length} payroll run{payrollRuns.length !== 1 ? 's' : ''}</div>
+          <div style={styles.muted}>{runs.length} payroll run{runs.length !== 1 ? 's' : ''}</div>
         </div>
         {(userRole === 'admin' || userRole === 'accounts') && (
           <button style={styles.primaryBtn} onClick={() => setShowModal(true)}><Plus size={15}/> Process Payroll</button>
         )}
       </div>
 
-      {payrollRuns.length === 0 ? (
+      {runs.length === 0 ? (
         <div style={styles.emptyBox}>No payroll processed yet. Click "Process Payroll" to run monthly payroll.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
@@ -10234,7 +10235,7 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
               <tr>{['Period','Employees','Gross','Deductions','Net Payable','Status',''].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {[...payrollRuns].sort((a,b)=>a.period<b.period?1:-1).map(r => {
+              {[...runs].sort((a,b)=>a.period<b.period?1:-1).map(r => {
                 const sb = STATUS_BADGE[r.status] || STATUS_BADGE.draft;
                 return (
                   <tr key={r.id}>
@@ -10292,8 +10293,10 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
         <PayrollModal
           employees={activeEmp}
           payrollRuns={payrollRuns}
+          currentBizType={currentBizType}
+          isMultiBiz={isMultiBiz}
           businessInfo={businessInfo}
-          onSave={(run) => { setPayrollRuns(prev => [...prev, run]); setShowModal(false); }}
+          onSave={(run) => { setPayrollRuns(prev => [...prev, { ...run, bizType: currentBizType }]); setShowModal(false); }}
           onClose={() => setShowModal(false)}
         />
       )}
@@ -10301,7 +10304,7 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
   );
 }
 
-function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose }) {
+function PayrollModal({ employees, payrollRuns, currentBizType = 'trading', isMultiBiz = false, businessInfo, onSave, onClose }) {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
   const [year, setYear]   = useState(String(now.getFullYear()));
@@ -10350,7 +10353,7 @@ function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose })
     });
   }
 
-  const existingRun = payrollRuns.find(r => r.month === month && r.year === year);
+  const existingRun = (payrollRuns||[]).find(r => r.month === month && r.year === year && (!isMultiBiz || (r.bizType||'trading')===currentBizType));
   const totalNet    = lines.reduce((s,l)=>s+(l.net||0), 0);
   const totalGross  = lines.reduce((s,l)=>s+(l.gross||0), 0);
   const totalDed    = lines.reduce((s,l)=>s+(l.totalDeductions||0), 0);
@@ -19253,7 +19256,7 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -19375,7 +19378,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     const { ym, dim, rows } = salaryData();
     const mm = ym.slice(5,7), yy = ym.slice(0,4);
     if (!rows.length) { alert('No employees / attendance for '+ym+'.'); return; }
-    if (payrollRuns.find(r => r.period===ym || (r.month===mm && r.year===yy))) { alert('A payroll run for '+ym+' already exists. Delete it in HR → Payroll to re-generate.'); return; }
+    if (payrollRuns.find(r => (r.period===ym || (r.month===mm && r.year===yy)) && (!isMultiBiz || (r.bizType||'trading')===currentBizType))) { alert('A payroll run for '+ym+' already exists. Delete it in HR → Payroll to re-generate.'); return; }
     if (!window.confirm('Generate a payroll run for '+ym+' from this attendance sheet? ('+rows.length+' employees). You can review & adjust it in HR → Payroll before approving.')) return;
     const lines = rows.map(r => {
       const e = r.emp;
@@ -19397,7 +19400,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         otherDeductAmt:0, otherDeductNote: r.ot?('incl. OT '+r.ot+'h'):'',
         totalDeductions, net };
     });
-    setPayrollRuns(prev => [...prev, { id:crypto.randomUUID(), month:mm, year:yy, period:ym, lines, status:'draft', source:'attendance', createdAt:Date.now() }]);
+    setPayrollRuns(prev => [...prev, { id:crypto.randomUUID(), month:mm, year:yy, period:ym, lines, status:'draft', source:'attendance', bizType:currentBizType, createdAt:Date.now() }]);
     alert('Payroll run for '+ym+' generated from attendance — '+lines.length+' employees. Go to HR → Payroll to review, adjust & approve.');
   }
 
@@ -25764,6 +25767,8 @@ export default function App() {
             setPayrollRuns={setPayrollRuns}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={sessionIsMultiBiz}
           />
         );
       case 'serviceorders':
@@ -25851,6 +25856,8 @@ export default function App() {
             setPayrollRuns={setPayrollRuns}
             holidayCalendar={holidayCalendar}
             setHolidayCalendar={setHolidayCalendar}
+            currentBizType={effectiveBizContext}
+            isMultiBiz={sessionIsMultiBiz}
           />
         );
       case 'evaluation':
