@@ -25704,7 +25704,7 @@ export default function App() {
             items={items}
             grns={grns}
             storeIssues={storeIssues}
-            employees={employees}
+            employees={sessionEmployees}
             siteProjects={siteProjects}
             productionOrders={productionOrders}
             setStockLedger={setStockLedger}
@@ -25787,7 +25787,7 @@ export default function App() {
           <MEPProjectsView
             siteProjects={siteProjects}
             setSiteProjects={setSiteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             siteActivities={siteActivities}
             progressUpdates={progressUpdates}
             userRole={userRole}
@@ -25817,7 +25817,7 @@ export default function App() {
             setProgressUpdates={setProgressUpdates}
             siteActivities={siteActivities}
             siteProjects={siteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
           />
         );
@@ -25835,7 +25835,7 @@ export default function App() {
             clientMaterials={clientMaterials}
             setClientMaterials={setClientMaterials}
             siteProjects={siteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
           />
         );
@@ -25865,7 +25865,7 @@ export default function App() {
           <QuarterlyEvalView
             evaluations={evaluations}
             setEvaluations={setEvaluations}
-            employees={employees}
+            employees={sessionEmployees}
             siteAttendance={siteAttendance}
             progressUpdates={progressUpdates}
             siteProjects={siteProjects}
@@ -25976,7 +25976,7 @@ export default function App() {
             siteProjects={siteProjects}
             siteActivities={siteActivities}
             progressUpdates={progressUpdates}
-            employees={employees}
+            employees={sessionEmployees}
             businessInfo={businessInfo}
             manpowerLogs={manpowerLogs}
           />
@@ -26032,7 +26032,7 @@ export default function App() {
             documents={documents}
             stockLedger={stockLedger}
             items={items}
-            employees={employees}
+            employees={sessionEmployees}
             businessInfo={businessInfo}
           />
         );
@@ -26156,7 +26156,7 @@ export default function App() {
             isMultiBiz={isMultiBiz}
             moms={moms}
             setMoms={setMoms}
-            employees={employees}
+            employees={sessionEmployees}
           />
         );
       case 'purchasereq':
