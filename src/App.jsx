@@ -24929,7 +24929,7 @@ export default function App() {
   // bizType MUST be a string — passing an object is a bug; we type-guard defensively
   function startNewDoc(type, bizType, prefill = {}) {
     const today = new Date().toISOString().slice(0, 10);
-    const bType = (typeof bizType === 'string' ? bizType : null) || activeTypes[0] || 'trading';
+    const bType = (typeof bizType === 'string' ? bizType : null) || sessionContext || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(type, businessInfo),
       ...prefill,
@@ -24947,7 +24947,7 @@ export default function App() {
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
-    const bType = srcDoc.bizType || activeTypes[0] || 'trading';
+    const bType = srcDoc.bizType || sessionContext || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(newType, businessInfo),
       bizType: bType,
@@ -25155,11 +25155,15 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
-    // Scope every figure to the currently-selected business division (dashboard isolation)
+    // Scope every figure to the currently-selected business division (dashboard isolation).
+    // Only filter when the account actually runs multiple activities — a single-biz
+    // account shows all its data (matches the Vouchers / Petty Cash module behaviour,
+    // so the dashboard totals always agree with what the modules list).
     const _bizDef = activeTypes.length === 1 ? activeTypes[0] : 'trading';
-    const _docs   = sessionContext ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
+    const _scoped = !!sessionContext && activeTypes.length > 1;
+    const _docs   = _scoped ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
     const _vlist  = Array.isArray(vouchers) ? vouchers : [];
-    const _vouch  = sessionContext ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
+    const _vouch  = _scoped ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
     // Only approved invoices count toward receivables
     const totalRevenue   = _docs.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const totalPurchases = _docs.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
@@ -25249,16 +25253,19 @@ export default function App() {
   const sessionActiveTypes = sessionContext ? [sessionContext] : activeTypes;
   const sessionCompanyType = sessionContext || companyType;
   const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
-  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
+  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all).
+  // Only scope when the account actually runs multiple activities — a single-activity
+  // account shows all its data, so every module and the dashboard stay in agreement.
   const bizDefault  = activeTypes.length === 1 ? activeTypes[0] : 'trading';
-  const sessionDocs = sessionContext
+  const _sessScoped = !!sessionContext && isMultiBiz;
+  const sessionDocs = _sessScoped
     ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
   // Session-scoped accounts data (vouchers + petty cash) for reports & audit isolation
-  const sessionVouchers = sessionContext
+  const sessionVouchers = _sessScoped
     ? (Array.isArray(vouchers) ? vouchers : []).filter(v => (v.bizType || bizDefault) === sessionContext)
     : vouchers;
-  const sessionEmployees = sessionContext
+  const sessionEmployees = _sessScoped
     ? (Array.isArray(employees) ? employees : []).filter(e => (e.bizType || bizDefault) === sessionContext)
     : employees;
   const sessionPettyCash = (sessionContext && isMultiBiz)
@@ -25326,7 +25333,7 @@ export default function App() {
         siteProjects={siteProjects}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -25338,7 +25345,7 @@ export default function App() {
         siteActivities={siteActivities}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -25348,7 +25355,7 @@ export default function App() {
         setResources={setResources}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -25359,7 +25366,7 @@ export default function App() {
         siteProjects={siteProjects}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
         currentUserName={user?.displayName || user?.email || ''}
         tcChecklists={tcChecklists}
@@ -25407,7 +25414,7 @@ export default function App() {
             setEnquiries={setEnquiries}
             customers={customers}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             onConvertToQuotation={(enq) => {
               const cust = customers.find(c => c.id === enq.customerId);
@@ -25567,7 +25574,7 @@ export default function App() {
             termsLibrary={termsLibrary}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25632,7 +25639,7 @@ export default function App() {
             setPettyCash={setPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             currentUserName={user?.displayName || user?.email || ''}
           />
@@ -25647,7 +25654,7 @@ export default function App() {
             documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25662,7 +25669,7 @@ export default function App() {
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25678,7 +25685,7 @@ export default function App() {
             businessInfo={businessInfo}
             setNotifications={setNotifications}
             user={user}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25690,7 +25697,7 @@ export default function App() {
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25710,7 +25717,7 @@ export default function App() {
             stockLedger={stockLedger}
             businessInfo={businessInfo}
             storeIssues={storeIssues}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -25728,7 +25735,7 @@ export default function App() {
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             currentUserName={user?.displayName || user?.email || ''}
           />
@@ -25742,7 +25749,7 @@ export default function App() {
             userRole={userRole}
             ownerUid={ownerUid}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
           />
         );
             case 'offerletter':
@@ -25785,7 +25792,7 @@ export default function App() {
             setPayrollRuns={setPayrollRuns}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={sessionIsMultiBiz}
           />
         );
@@ -25874,7 +25881,7 @@ export default function App() {
             setPayrollRuns={setPayrollRuns}
             holidayCalendar={holidayCalendar}
             setHolidayCalendar={setHolidayCalendar}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={sessionIsMultiBiz}
           />
         );
@@ -26159,7 +26166,7 @@ export default function App() {
             pettyCash={sessionPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             auditDocs={auditDocs}
             setAuditDocs={setAuditDocs}
@@ -26170,7 +26177,7 @@ export default function App() {
           <MoMView
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             moms={moms}
             setMoms={setMoms}
@@ -26192,7 +26199,7 @@ export default function App() {
             mepBoms={mepBoms}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             onConvertToPO={(pr) => {
               const its = (pr.items || []).filter(it => it.name).map(it => {
