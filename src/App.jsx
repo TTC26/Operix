@@ -51,7 +51,8 @@ const ROLE_MODULES = {
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
 // Emails that bypass all plan gates (dev / owner accounts)
-const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com'];
+const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'elcabwiresindustry@outlook.com'];
+const isTestEmail = (e) => !!e && TEST_EMAILS.includes(String(e).toLowerCase().trim());
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
 const PLAN_MODULES = {
@@ -1075,8 +1076,15 @@ function TrialBanner({ daysLeft, onUpgrade }) {
 }
 
 // ─── Paywall Screen ───────────────────────────────────────────────────────────
-function PaywallScreen({ businessInfo, onLogout, isStaff }) {
+const PLAN_PRICES = { trading: 1000, manufacturing: 20000, service: 15000, fmamc: 15000, all: 25000 };
+const PLAN_LABELS = { trading: 'Trading', manufacturing: 'Manufacturing', service: 'MEP / Service', fmamc: 'FM / AMC', all: 'All Modules' };
+function PaywallScreen({ businessInfo, onLogout, isStaff, activeTypes = [] }) {
   const [showContact, setShowContact] = React.useState(false);
+  const _types = (activeTypes && activeTypes.length) ? activeTypes : (businessInfo?.types || []);
+  const _isAll = _types.length > 1;
+  const _planKey = _isAll ? 'all' : (_types[0] || 'all');
+  const _price = _isAll ? PLAN_PRICES.all : (PLAN_PRICES[_planKey] || PLAN_PRICES.all);
+  const _planName = _isAll ? 'All Modules' : (PLAN_LABELS[_planKey] || 'All Modules');
 
   const panelStyle = {
     width: '100%', maxWidth: 480, background: '#FAF8F4', borderRadius: 20,
@@ -1109,13 +1117,13 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
 
             {/* Plan card */}
             <div style={{ background: '#1E2A4A', borderRadius: 14, padding: '24px 28px', marginBottom: 24, textAlign: 'left' }}>
-              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Oryqen Pro</div>
+              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Oryqen — {_planName}</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 16 }}>
-                <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹999</span>
+                <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹{_price.toLocaleString('en-IN')}</span>
                 <span style={{ color: '#9BABB8', fontSize: 13, marginBottom: 8 }}>/month</span>
               </div>
               {[
-                'All modules — Trading, Manufacturing, Services',
+                (_isAll ? 'All modules — Trading, Manufacturing, MEP & FM' : _planName + ' module — full access'),
                 'Unlimited documents & storage',
                 'Staff accounts & role management',
                 'Letterpad printing & contracts',
@@ -1127,18 +1135,28 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
               ))}
             </div>
 
+            {/* All plans reference */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20, textAlign: 'left' }}>
+              {[['trading','Trading'],['manufacturing','Manufacturing'],['service','MEP / Service'],['fmamc','FM / AMC'],['all','All Modules']].map(([k,l]) => (
+                <div key={k} style={{ background: k===_planKey?'#EEF2FF':'#F1EFE9', border: k===_planKey?'1px solid #C9A24B':'1px solid #EAE6DB', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
+                  <div style={{ color: '#666', fontWeight: 600 }}>{l}</div>
+                  <div style={{ color: '#1E2A4A', fontWeight: 700 }}>₹{PLAN_PRICES[k].toLocaleString('en-IN')}<span style={{ fontSize: 10, color: '#999', fontWeight: 400 }}>/mo</span></div>
+                </div>
+              ))}
+            </div>
+
             {/* Subscribe button — wire Razorpay here later */}
             <button
               onClick={() => setShowContact(true)}
               style={{ width: '100%', padding: '14px', background: '#C9A24B', color: '#1E2A4A', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}
             >
-              Subscribe — ₹999/month
+              Subscribe — ₹{_price.toLocaleString('en-IN')}/month
             </button>
 
             {showContact && (
               <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '14px 16px', marginBottom: 12, fontSize: 13, color: '#1E40AF', textAlign: 'left' }}>
                 📩 Payment gateway coming soon! To activate your subscription now, contact us at{' '}
-                <strong>support@operix.in</strong> with your business name and we'll activate manually.
+                <strong>support@oryqen.in</strong> with your business name and we'll activate manually.
               </div>
             )}
           </>
@@ -2036,7 +2054,7 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
 
   async function execute() {
     // Block test accounts from self-deleting
-    if (TEST_EMAILS.includes(user?.email)) {
+    if (isTestEmail(user?.email)) {
       setError('Test accounts cannot be deleted through this flow.');
       return;
     }
@@ -2400,7 +2418,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             { id:'fmamc',         label:'🏢 FM / AMC',             desc:'Facility management — assets, PM schedules, work orders, SLA contracts' },
           ];
           const cur = form.activeTypes || [form.companyType || 'trading'];
-          const typeLocked = !TEST_EMAILS.includes(userEmail) && cur.length > 0;
+          const typeLocked = !isTestEmail(userEmail) && cur.length > 0;
           if (typeLocked) {
             return (
               <div style={styles.formGroup}>
@@ -24609,8 +24627,8 @@ export default function App() {
           // Check membership FIRST — staff accounts don't go through email verification
           // 3-second timeout: admin accounts have no membership doc, avoid 30s+ network wait
           // TEST_EMAILS always bypass membership so ownerUid is consistent across all devices
-          const isTestEmail = TEST_EMAILS.includes(firebaseUser.email);
-          const membership = isTestEmail ? null : await Promise.race([
+          const isTestAcct = TEST_EMAILS.includes(String(firebaseUser.email || '').toLowerCase().trim());
+          const membership = isTestAcct ? null : await Promise.race([
             getMembership(firebaseUser.uid),
             new Promise(resolve => setTimeout(() => resolve(null), 3000)),
           ]);
@@ -25196,7 +25214,7 @@ export default function App() {
   const trialDaysLeft  = _trialDaysUsed !== null ? Math.max(0, TRIAL_DAYS - _trialDaysUsed) : null;
   const trialExpired   = _trialDaysUsed !== null && _trialDaysUsed >= TRIAL_DAYS;
   const isSubscribed   = !!businessInfo.subscriptionActive;
-  const isTestAccount  = TEST_EMAILS.includes(user?.email);
+  const isTestAccount  = isTestEmail(user?.email);
 
   // Once data is loaded and user hasn't chosen a session workspace yet,
   // always route to setup or home screen — never fall through to main app.
@@ -25224,7 +25242,7 @@ export default function App() {
   }
 
   if (biReady && trialExpired && !isSubscribed && !isTestAccount) {
-    return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
+    return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} activeTypes={activeTypes} />;
   }
 
   // Session-scoped: when a workspace is chosen, scope all views to that activity
