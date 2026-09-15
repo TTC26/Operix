@@ -2223,7 +2223,7 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete, onRepairTags, isMultiBiz = false }) {
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   const [cloudBackups, setCloudBackups] = useState(null);
@@ -2584,6 +2584,21 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                 setCloudBusy(false);
               }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
+            </div>
+            )}
+
+            {/* ── Data health / division tag repair ── */}
+            {userRole === 'admin' && onRepairTags && (
+            <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>🩺 Data health — division tags</div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 1.6 }}>
+                {isMultiBiz
+                  ? 'Scan your records and show how they are tagged across your business activities, and flag any tagged to a division your account no longer uses.'
+                  : 'Make sure every record is tagged to your business so nothing is hidden from the dashboard or lists. Safe to run any time.'}
+              </div>
+              <button onClick={() => onRepairTags()} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                🩺 {isMultiBiz ? 'Scan division tags' : 'Check & repair tags'}
+              </button>
             </div>
             )}
 
@@ -25143,6 +25158,50 @@ export default function App() {
     return [ct];
   })();
   const isMultiBiz = activeTypes.length > 1;
+
+  // One-time cleanup for legacy/mis-tagged records. Single-activity accounts are
+  // auto-repaired (every record forced to the one activity). Multi-activity accounts
+  // get a read-only diagnostic — automatic moves are disabled there so isolation
+  // between businesses can never be corrupted by a guess.
+  function repairBizTags() {
+    const valid = activeTypes;
+    const validSet = new Set(valid);
+    const only = valid.length === 1 ? valid[0] : null;
+    const cols = [
+      ['Documents', documents, setDocuments],
+      ['Vouchers', vouchers, setVouchers],
+      ['Employees', employees, setEmployees],
+      ['Customers', customers, setCustomers],
+      ['Vendors', vendors, setVendors],
+      ['Items', items, setItems],
+      ['Payroll runs', payrollRuns, setPayrollRuns],
+    ];
+    if (only) {
+      let fixed = 0; const lines = [];
+      cols.forEach(([label, arr, setter]) => {
+        if (!Array.isArray(arr) || !arr.length) return;
+        const need = arr.filter(r => r.bizType !== only);
+        if (need.length) { setter(arr.map(r => r.bizType === only ? r : { ...r, bizType: only })); fixed += need.length; lines.push('\u2022 ' + label + ': ' + need.length); }
+      });
+      const pcE = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+      const pcNeed = pcE.filter(e => e.bizType !== only);
+      if (pcNeed.length) { setPettyCash({ ...pettyCash, entries: pcE.map(e => e.bizType === only ? e : { ...e, bizType: only }) }); fixed += pcNeed.length; lines.push('\u2022 Petty cash: ' + pcNeed.length); }
+      alert(fixed ? ('\u2705 Re-tagged ' + fixed + ' record(s) to \u201C' + only + '\u201D:\n\n' + lines.join('\n') + '\n\nEverything now shows under your business.') : '\u2705 All records are already tagged correctly. Nothing to repair.');
+      return;
+    }
+    const report = []; let orphanTotal = 0;
+    const allCols = cols.concat([['Petty cash', (pettyCash?.entries || []), null]]);
+    allCols.forEach(([label, arr]) => {
+      if (!Array.isArray(arr) || !arr.length) return;
+      const dist = {};
+      arr.forEach(r => { const k = r.bizType || '(untagged)'; dist[k] = (dist[k] || 0) + 1; });
+      Object.keys(dist).forEach(k => { if (k !== '(untagged)' && !validSet.has(k)) orphanTotal += dist[k]; });
+      const parts = Object.entries(dist).map(([k, n]) => k + ((k !== '(untagged)' && !validSet.has(k)) ? '\u26A0' : '') + ': ' + n);
+      report.push(label + ' \u2014 ' + parts.join(', '));
+    });
+    alert('Your activities: ' + valid.join(', ') + '\n\nTag distribution:\n' + report.join('\n') + '\n\n' + (orphanTotal ? ('\u26A0 = tagged to a division not in your account (' + orphanTotal + ' record(s)) \u2014 these are hidden everywhere.') : 'No orphaned tags found.') + '\n\nTo move a record shown under the wrong (but valid) division: open it in the correct workspace and re-save. Automatic moves are disabled for multi-business accounts to protect isolation.');
+  }
+
   // Resolves which division the user is currently working in (falls back to first type)
   const effectiveBizContext = (activeBizContext && activeTypes.includes(activeBizContext))
     ? activeBizContext
@@ -25631,7 +25690,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} onRepairTags={repairBizTags} isMultiBiz={isMultiBiz} />;
       case 'pettycash':
         return (
           <PettyCashList
