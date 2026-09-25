@@ -69,7 +69,7 @@ const PLAN_MODULES = {
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis',
+    'pdv','internalaudit','capa','vendoreval','mis','investors',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -3718,7 +3718,7 @@ const SECTION_VIEWS = {
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
-  admin:       ['staff', 'contracts', 'termslibrary', 'mom'],
+  admin:       ['staff', 'contracts', 'termslibrary', 'mom', 'investors'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
   shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
 };
@@ -3726,11 +3726,11 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
-  admin:         ['staff','contracts','termslibrary','mom','assetregister'],
+  admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
 
 const BizTypeCtx = React.createContext(null);
@@ -4426,6 +4426,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
           <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+          {showProduction && <NavBtn id="investors" label="Investors & Shares" icon={Briefcase} />}
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
@@ -4434,6 +4435,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
           <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+          {showProduction && <NavBtn id="investors" label="Investors & Shares" icon={Briefcase} />}
         </Section>
       ))}
 
@@ -11434,6 +11436,441 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Investors & Profit-Share (Manufacturing / Admin) ─────────────────────────
+function InvestorShareView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, investors, setInvestors, profitShares, setProfitShares, documents = [], vouchers = [], pettyCash = {}, payrollRuns = [] }) {
+  const canEdit = userRole === 'admin';
+  const country = businessInfo?.country || 'india';
+  const fmt = makeFmt(businessInfo);
+  const today = new Date().toISOString().slice(0, 10);
+  const [tab, setTab] = React.useState('investors');
+  const [editInv, setEditInv] = React.useState(null);
+  const [editDist, setEditDist] = React.useState(null);
+  const [printAgr, setPrintAgr] = React.useState(null);   // investor for agreement print
+  const [printRcpt, setPrintRcpt] = React.useState(null); // { dist, alloc } payout receipt
+  const [printStmt, setPrintStmt] = React.useState(null); // distribution statement
+  const [stmtWho, setStmtWho] = React.useState('all');     // 'all' | investorId for statement print
+
+  const invList = (Array.isArray(investors) ? investors : [])
+    .filter(i => !isMultiBiz || (i.bizType || 'trading') === currentBizType);
+  const distList = (Array.isArray(profitShares) ? profitShares : [])
+    .filter(d => !isMultiBiz || (d.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  // ── Investor CRUD ──
+  const blankInv = () => ({ id: Date.now().toString(), name: '', contact: '', phone: '', email: '', address: '', investedAmount: '', shareMode: 'fixed', sharePct: '', joinDate: today, agreementDate: today, status: 'active', notes: '', terms: '' });
+  function saveInv() {
+    if (!editInv.name.trim()) { alert('Please enter the investor name.'); return; }
+    const rec = { ...editInv, bizType: currentBizType, updatedAt: new Date().toISOString(), createdAt: editInv.createdAt || new Date().toISOString() };
+    setInvestors(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditInv(null);
+  }
+  function delInv(id) { if (!window.confirm('Delete this investor? Past profit-share records are kept.')) return; setInvestors(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const totalCapital = invList.filter(i => i.status !== 'exited').reduce((s, i) => s + (parseFloat(i.investedAmount) || 0), 0);
+  const proRataCap = invList.filter(i => i.status !== 'exited' && i.shareMode === 'prorata').reduce((s, i) => s + (parseFloat(i.investedAmount) || 0), 0);
+  const sumFixedPct = invList.filter(i => i.status !== 'exited' && i.shareMode === 'fixed').reduce((s, i) => s + (parseFloat(i.sharePct) || 0), 0);
+
+  function effPctOf(inv, poolPct) {
+    if (inv.status === 'exited') return 0;
+    if (inv.shareMode === 'fixed') return parseFloat(inv.sharePct) || 0;
+    return proRataCap > 0 ? ((parseFloat(inv.investedAmount) || 0) / proRataCap) * (poolPct != null ? poolPct : Math.max(0, 100 - sumFixedPct)) : 0;
+  }
+
+  // ── Period helpers + auto profit ──
+  const PERIOD_OPTS = { quarterly: ['Q1', 'Q2', 'Q3', 'Q4'], halfyearly: ['H1', 'H2'], yearly: ['FY'], custom: [] };
+  function periodMonths(periodType, period) {
+    if (periodType === 'quarterly') return ({ Q1: [0, 2], Q2: [3, 5], Q3: [6, 8], Q4: [9, 11] })[period] || [0, 2];
+    if (periodType === 'halfyearly') return ({ H1: [0, 5], H2: [6, 11] })[period] || [0, 5];
+    return [0, 11]; // yearly
+  }
+  function periodDates(year, periodType, period) {
+    const m = periodMonths(periodType, period);
+    const iso = d => d.toISOString().slice(0, 10);
+    return { from: iso(new Date(year, m[0], 1)), to: iso(new Date(year, m[1] + 1, 0)) };
+  }
+  function distLabel(d) {
+    if (d.periodType === 'custom') return (d.periodFrom || '') + ' → ' + (d.periodTo || '');
+    if (d.periodType === 'yearly') return d.year + ' · Full Year';
+    if (d.periodType === 'halfyearly') return d.year + ' · ' + (d.period === 'H2' ? 'H2 (Jul–Dec)' : 'H1 (Jan–Jun)');
+    return d.year + ' · ' + (d.period || d.quarter || 'Q1');
+  }
+  function computeProfit(from, to) {
+    const inR = d => d && d >= from && d <= to;
+    const docs = Array.isArray(documents) ? documents : [];
+    const rev = docs.filter(d => d.type === 'invoice' && d.status === 'approved' && inR(d.date)).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const pur = docs.filter(d => d.type === 'purchasebill' && d.status === 'approved' && inR(d.date)).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const pcE = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+    const exp = pcE.filter(e => inR(e.date)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const pay = (Array.isArray(payrollRuns) ? payrollRuns : [])
+      .filter(r => (!isMultiBiz || (r.bizType || 'trading') === currentBizType))
+      .filter(r => { const dt = r.payDate || r.date || (r.month ? r.month + '-01' : ''); return inR(dt); })
+      .reduce((s, r) => s + (parseFloat(r.netPay != null ? r.netPay : (r.totalNet != null ? r.totalNet : r.total)) || 0), 0);
+    return { rev, pur, exp, pay, net: rev - pur - exp - pay };
+  }
+
+  // ── Distribution create/edit ──
+  function newDist() {
+    const yr = new Date().getFullYear();
+    const q = 'Q' + (Math.floor(new Date().getMonth() / 3) + 1);
+    const { from, to } = periodDates(yr, 'quarterly', q);
+    const b = computeProfit(from, to);
+    setEditDist({ id: Date.now().toString(), year: yr, periodType: 'quarterly', period: q, periodFrom: from, periodTo: to, netProfit: Math.round(b.net), proRataPoolPct: Math.max(0, 100 - sumFixedPct), breakdown: b, note: '' });
+  }
+  function recalcDist(patch) {
+    setEditDist(d => {
+      const next = { ...d, ...patch };
+      // When switching period type, snap the sub-period to a valid value
+      if (patch.periodType != null) { const opts = PERIOD_OPTS[patch.periodType] || []; next.period = opts.length ? opts[0] : ''; }
+      const structural = patch.year != null || patch.periodType != null || patch.period != null;
+      if (structural && next.periodType !== 'custom') { const qd = periodDates(next.year, next.periodType, next.period); next.periodFrom = qd.from; next.periodTo = qd.to; }
+      if (structural || patch.periodFrom != null || patch.periodTo != null) { const b = computeProfit(next.periodFrom, next.periodTo); next.breakdown = b; next.netProfit = Math.round(b.net); }
+      return next;
+    });
+  }
+  function saveDist() {
+    const net = parseFloat(editDist.netProfit) || 0;
+    const pool = parseFloat(editDist.proRataPoolPct) || 0;
+    const active = invList.filter(i => i.status !== 'exited');
+    if (!active.length) { alert('Add at least one active investor first.'); return; }
+    const allocations = active.map(i => { const ep = effPctOf(i, pool); return { investorId: i.id, name: i.name, mode: i.shareMode, effPct: Math.round(ep * 1000) / 1000, amount: Math.round(net * ep / 100), status: 'pending', paidDate: '' }; });
+    const rec = { ...editDist, netProfit: net, proRataPoolPct: pool, bizType: currentBizType, allocations, createdAt: editDist.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setProfitShares(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditDist(null);
+  }
+  function delDist(id) { if (!window.confirm('Delete this quarterly distribution?')) return; setProfitShares(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+  function togglePaid(distId, invId) {
+    setProfitShares(prev => (Array.isArray(prev) ? prev : []).map(d => d.id !== distId ? d : { ...d, allocations: (d.allocations || []).map(a => a.investorId !== invId ? a : (a.status === 'paid' ? { ...a, status: 'pending', paidDate: '' } : { ...a, status: 'paid', paidDate: today })) }));
+  }
+
+  function agreementTerms(inv) {
+    if (inv.terms && inv.terms.trim()) return inv.terms.split('\n').filter(x => x.trim());
+    const co = businessInfo?.name || 'the Company';
+    const share = inv.shareMode === 'fixed' ? ((inv.sharePct || 0) + '% of quarterly net profit') : 'a pro-rata share of quarterly net profit in proportion to invested capital';
+    return [
+      'Investment: ' + inv.name + ' ("the Investor") has invested ' + fmt(inv.investedAmount || 0) + ' in the Manufacturing division of ' + co + ' ("the Company").',
+      'Profit Share: The Investor is entitled to ' + share + ', payable every quarter.',
+      'Profit Calculation: Net profit = total approved sales revenue less purchases, payroll and operating expenses for the quarter, as recorded in the Company books.',
+      'Payout: The profit share shall be paid within 30 days of the close of each quarter, subject to available funds.',
+      'Losses: If a quarter results in a loss, no profit share is payable for that quarter; losses are not passed to the Investor unless separately agreed in writing.',
+      'Term & Exit: This agreement stays in force until the Investor exits. On exit, all dues are settled up to the exit date.',
+      'Books & Audit: The Investor may review quarterly profit statements. The Company books of account are final for computation.',
+      'Governing Law: This agreement is governed by the laws of India and subject to the jurisdiction of the local courts.',
+    ];
+  }
+
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>Investors &amp; Profit-Share</h2>
+          <div style={styles.muted}>Manufacturing division · investor agreements &amp; quarterly profit sharing</div>
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Active investors</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{invList.filter(i => i.status !== 'exited').length}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Total capital invested</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#1A7A3E' }}>{fmt(totalCapital)}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Profit committed to investors</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#C9A24B' }}>{Math.min(100, Math.round((sumFixedPct + (proRataCap > 0 ? Math.max(0, 100 - sumFixedPct) : 0)) * 10) / 10)}%</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '2px solid #EAE6DB' }}>
+        {[['investors', 'Investors'], ['distributions', 'Quarterly Profit-Share']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: tab === k ? 700 : 500, color: tab === k ? '#1E2A4A' : '#888', borderBottom: tab === k ? '2px solid #C9A24B' : '2px solid transparent', marginBottom: -2 }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── INVESTORS TAB ── */}
+      {tab === 'investors' && (<>
+        {canEdit && !editInv && <button style={{ ...styles.primaryBtn, marginBottom: 14 }} onClick={() => setEditInv(blankInv())}><Plus size={15} /> Add Investor</button>}
+
+        {editInv && (
+          <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 20, marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 14 }}>{investors.some(x => x.id === editInv.id) ? 'Edit' : 'New'} Investor</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+              <div><label style={lbl}>Investor name *</label><input style={inp} value={editInv.name} onChange={e => setEditInv({ ...editInv, name: e.target.value })} /></div>
+              <div><label style={lbl}>Contact person</label><input style={inp} value={editInv.contact} onChange={e => setEditInv({ ...editInv, contact: e.target.value })} /></div>
+              <div><label style={lbl}>Phone</label><input style={inp} value={editInv.phone} onChange={e => setEditInv({ ...editInv, phone: e.target.value })} /></div>
+              <div><label style={lbl}>Email</label><input style={inp} value={editInv.email} onChange={e => setEditInv({ ...editInv, email: e.target.value })} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Address</label><input style={inp} value={editInv.address} onChange={e => setEditInv({ ...editInv, address: e.target.value })} /></div>
+              <div><label style={lbl}>Invested amount</label><input style={inp} type="number" value={editInv.investedAmount} onChange={e => setEditInv({ ...editInv, investedAmount: e.target.value })} /></div>
+              <div><label style={lbl}>Share mode</label>
+                <select style={inp} value={editInv.shareMode} onChange={e => setEditInv({ ...editInv, shareMode: e.target.value })}>
+                  <option value="fixed">Fixed % of profit</option>
+                  <option value="prorata">Pro-rata by capital</option>
+                </select>
+              </div>
+              {editInv.shareMode === 'fixed'
+                ? <div><label style={lbl}>Fixed share %</label><input style={inp} type="number" value={editInv.sharePct} onChange={e => setEditInv({ ...editInv, sharePct: e.target.value })} /></div>
+                : <div><label style={lbl}>Share basis</label><input style={{ ...inp, background: '#F1EFE9' }} value="Auto from invested capital" disabled /></div>}
+              <div><label style={lbl}>Join date</label><input style={inp} type="date" value={editInv.joinDate} onChange={e => setEditInv({ ...editInv, joinDate: e.target.value })} /></div>
+              <div><label style={lbl}>Agreement date</label><input style={inp} type="date" value={editInv.agreementDate} onChange={e => setEditInv({ ...editInv, agreementDate: e.target.value })} /></div>
+              <div><label style={lbl}>Status</label>
+                <select style={inp} value={editInv.status} onChange={e => setEditInv({ ...editInv, status: e.target.value })}>
+                  <option value="active">Active</option>
+                  <option value="exited">Exited</option>
+                </select>
+              </div>
+              {editInv.status === 'exited' && <div><label style={lbl}>Exit date</label><input style={inp} type="date" value={editInv.exitDate || ''} onChange={e => setEditInv({ ...editInv, exitDate: e.target.value })} /></div>}
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Notes</label><input style={inp} value={editInv.notes} onChange={e => setEditInv({ ...editInv, notes: e.target.value })} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Agreement terms (leave blank for standard terms — one clause per line)</label><textarea style={{ ...inp, minHeight: 90, fontFamily: 'inherit' }} value={editInv.terms} onChange={e => setEditInv({ ...editInv, terms: e.target.value })} placeholder="Leave blank to auto-generate standard investment terms." /></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button style={styles.primaryBtn} onClick={saveInv}>Save Investor</button>
+              <button style={styles.ghostBtn} onClick={() => setEditInv(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {invList.length === 0 ? <div style={styles.emptyBox}>No investors yet. Add your first investor to generate an agreement and start quarterly profit-sharing.</div> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead><tr>{['Investor', 'Capital', 'Share mode', 'Effective %', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {invList.map(i => (
+                  <tr key={i.id} style={{ background: i.status === 'exited' ? '#FAFAF8' : undefined }}>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{i.name}{i.contact ? <div style={{ fontSize: 11, color: '#999', fontWeight: 400 }}>{i.contact}</div> : null}</td>
+                    <td style={styles.td}>{fmt(i.investedAmount || 0)}</td>
+                    <td style={styles.td}>{i.shareMode === 'fixed' ? 'Fixed ' + (i.sharePct || 0) + '%' : 'Pro-rata'}</td>
+                    <td style={{ ...styles.td, fontWeight: 600, color: '#1A7A3E' }}>{(Math.round(effPctOf(i) * 100) / 100)}%</td>
+                    <td style={styles.td}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: i.status === 'exited' ? '#F3F4F6' : '#E7F6EC', color: i.status === 'exited' ? '#888' : '#1A7A3E' }}>{i.status === 'exited' ? 'Exited' : 'Active'}</span></td>
+                    <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                      <button style={styles.iconBtn} title="Investment agreement" onClick={() => setPrintAgr(i)}><FileSignature size={14} /></button>
+                      {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditInv({ ...blankInv(), ...i })}><Pencil size={14} /></button>}
+                      {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => delInv(i.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>)}
+
+      {/* ── DISTRIBUTIONS TAB ── */}
+      {tab === 'distributions' && (<>
+        {canEdit && !editDist && <button style={{ ...styles.primaryBtn, marginBottom: 14 }} onClick={newDist}><Plus size={15} /> New Profit-Share</button>}
+
+        {editDist && (() => {
+          const pool = parseFloat(editDist.proRataPoolPct) || 0;
+          const net = parseFloat(editDist.netProfit) || 0;
+          const active = invList.filter(i => i.status !== 'exited');
+          const totalPct = active.reduce((s, i) => s + effPctOf(i, pool), 0);
+          return (
+            <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 20, marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 14 }}>New Profit-Share (Quarterly / Half-yearly / Yearly / Custom)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+                <div><label style={lbl}>Period type</label>
+                  <select style={inp} value={editDist.periodType || 'quarterly'} onChange={e => recalcDist({ periodType: e.target.value })}>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="halfyearly">Half-yearly</option>
+                    <option value="yearly">Yearly</option>
+                    <option value="custom">Custom period</option>
+                  </select>
+                </div>
+                {editDist.periodType !== 'custom' && <div><label style={lbl}>Year</label><input style={inp} type="number" value={editDist.year} onChange={e => recalcDist({ year: parseInt(e.target.value) || new Date().getFullYear() })} /></div>}
+                {(editDist.periodType === 'quarterly' || editDist.periodType === 'halfyearly') && (
+                  <div><label style={lbl}>{editDist.periodType === 'quarterly' ? 'Quarter' : 'Half'}</label>
+                    <select style={inp} value={editDist.period} onChange={e => recalcDist({ period: e.target.value })}>
+                      {(PERIOD_OPTS[editDist.periodType] || []).map(q => <option key={q} value={q}>{editDist.periodType === 'halfyearly' ? (q === 'H2' ? 'H2 (Jul–Dec)' : 'H1 (Jan–Jun)') : q}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div><label style={lbl}>Period from</label><input style={inp} type="date" value={editDist.periodFrom} onChange={e => recalcDist({ periodType: 'custom', periodFrom: e.target.value })} /></div>
+                <div><label style={lbl}>Period to</label><input style={inp} type="date" value={editDist.periodTo} onChange={e => recalcDist({ periodType: 'custom', periodTo: e.target.value })} /></div>
+              </div>
+              {editDist.breakdown && (
+                <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 12.5, color: '#555' }}>
+                  <b>Auto-computed from Manufacturing data:</b> Revenue {fmt(editDist.breakdown.rev)} − Purchases {fmt(editDist.breakdown.pur)} − Payroll {fmt(editDist.breakdown.pay)} − Expenses {fmt(editDist.breakdown.exp)} = <b style={{ color: editDist.breakdown.net >= 0 ? '#1A7A3E' : '#B5453A' }}>Net {fmt(editDist.breakdown.net)}</b>
+                  <button style={{ ...styles.ghostBtn, marginLeft: 10, padding: '2px 10px', fontSize: 12 }} onClick={() => recalcDist({ periodFrom: editDist.periodFrom, periodTo: editDist.periodTo })}>↻ Recompute</button>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                <div><label style={lbl}>Net profit for quarter (editable)</label><input style={inp} type="number" value={editDist.netProfit} onChange={e => setEditDist({ ...editDist, netProfit: e.target.value })} /></div>
+                <div><label style={lbl}>Pro-rata pool % (of net profit)</label><input style={inp} type="number" value={editDist.proRataPoolPct} onChange={e => setEditDist({ ...editDist, proRataPoolPct: e.target.value })} /><div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>Split among pro-rata investors by capital. Fixed-% investors take their own %.</div></div>
+              </div>
+              {/* Preview allocations */}
+              <div style={{ overflowX: 'auto', marginTop: 12 }}>
+                <table style={styles.table}>
+                  <thead><tr>{['Investor', 'Mode', 'Effective %', 'Amount'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {active.map(i => { const ep = effPctOf(i, pool); return (
+                      <tr key={i.id}>
+                        <td style={{ ...styles.td, fontWeight: 600 }}>{i.name}</td>
+                        <td style={styles.td}>{i.shareMode === 'fixed' ? 'Fixed' : 'Pro-rata'}</td>
+                        <td style={styles.td}>{Math.round(ep * 100) / 100}%</td>
+                        <td style={{ ...styles.td, fontWeight: 600 }}>{fmt(net * ep / 100)}</td>
+                      </tr>
+                    ); })}
+                    <tr style={{ background: '#F8F5EE', fontWeight: 700 }}>
+                      <td style={styles.td} colSpan={2}>Total to investors</td>
+                      <td style={styles.td}>{Math.round(totalPct * 100) / 100}%</td>
+                      <td style={styles.td}>{fmt(net * totalPct / 100)}</td>
+                    </tr>
+                    <tr style={{ fontWeight: 600, color: '#888' }}>
+                      <td style={styles.td} colSpan={3}>Company retains</td>
+                      <td style={styles.td}>{fmt(net * Math.max(0, 100 - totalPct) / 100)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {totalPct > 100 && <div style={{ color: '#B5453A', fontSize: 12.5, marginTop: 8 }}>⚠ Investor shares total more than 100% of profit — check the fixed %s and pool %.</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                <button style={styles.primaryBtn} onClick={saveDist}>Save Distribution</button>
+                <button style={styles.ghostBtn} onClick={() => setEditDist(null)}>Cancel</button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {distList.length === 0 ? <div style={styles.emptyBox}>No quarterly distributions yet. Create one — the net profit is auto-suggested from your Manufacturing data and you can adjust it before splitting.</div> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {distList.map(d => {
+              const paid = (d.allocations || []).filter(a => a.status === 'paid').reduce((s, a) => s + (a.amount || 0), 0);
+              const total = (d.allocations || []).reduce((s, a) => s + (a.amount || 0), 0);
+              return (
+                <div key={d.id} style={{ border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, background: '#fff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{distLabel(d)}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>{d.periodFrom} → {d.periodTo} · Net profit {fmt(d.netProfit)}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button style={styles.iconBtn} title="Print statement (all / selected person)" onClick={() => { setStmtWho('all'); setPrintStmt(d); }}><Printer size={14} /></button>
+                      {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditDist({ ...d })}><Pencil size={14} /></button>}
+                      {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => delDist(d.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#555', margin: '8px 0' }}>Paid {fmt(paid)} of {fmt(total)}</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={styles.table}>
+                      <thead><tr>{['Investor', 'Share %', 'Amount', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {(d.allocations || []).map(a => (
+                          <tr key={a.investorId}>
+                            <td style={{ ...styles.td, fontWeight: 600 }}>{a.name}</td>
+                            <td style={styles.td}>{a.effPct}%</td>
+                            <td style={{ ...styles.td, fontWeight: 600 }}>{fmt(a.amount)}</td>
+                            <td style={styles.td}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: a.status === 'paid' ? '#E7F6EC' : '#FEF3C7', color: a.status === 'paid' ? '#1A7A3E' : '#92400E' }}>{a.status === 'paid' ? 'Paid' + (a.paidDate ? ' · ' + a.paidDate : '') : 'Pending'}</span></td>
+                            <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                              <button style={styles.iconBtn} title="Payout receipt" onClick={() => setPrintRcpt({ dist: d, alloc: a })}><FileText size={14} /></button>
+                              {canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 10px', fontSize: 12 }} onClick={() => togglePaid(d.id, a.investorId)}>{a.status === 'paid' ? 'Mark pending' : 'Mark paid'}</button>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>)}
+
+      {/* ── Investment Agreement print ── */}
+      {printAgr && (
+        <DocPrintOverlay onClose={() => setPrintAgr(null)} filename={'Investment-Agreement-' + (printAgr.name || 'Investor').replace(/\s+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>INVESTMENT &amp; PROFIT-SHARING AGREEMENT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 20 }}>Manufacturing Division · Dated {printAgr.agreementDate || today}</div>
+          <table style={{ width: '100%', fontSize: 13, marginBottom: 18, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '4px 8px', color: '#666', width: 180 }}>Investor</td><td style={{ padding: '4px 8px', fontWeight: 600 }}>{printAgr.name}</td></tr>
+              {printAgr.contact ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Contact</td><td style={{ padding: '4px 8px' }}>{printAgr.contact}</td></tr> : null}
+              {printAgr.phone || printAgr.email ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Phone / Email</td><td style={{ padding: '4px 8px' }}>{[printAgr.phone, printAgr.email].filter(Boolean).join(' · ')}</td></tr> : null}
+              {printAgr.address ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Address</td><td style={{ padding: '4px 8px' }}>{printAgr.address}</td></tr> : null}
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Invested amount</td><td style={{ padding: '4px 8px', fontWeight: 600 }}>{fmt(printAgr.investedAmount || 0)}</td></tr>
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Profit share</td><td style={{ padding: '4px 8px' }}>{printAgr.shareMode === 'fixed' ? 'Fixed ' + (printAgr.sharePct || 0) + '% of quarterly net profit' : 'Pro-rata by invested capital'}</td></tr>
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Join date</td><td style={{ padding: '4px 8px' }}>{printAgr.joinDate || '—'}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 8 }}>Terms &amp; Conditions</div>
+          <ol style={{ fontSize: 12.5, color: '#333', lineHeight: 1.7, paddingLeft: 20, margin: 0 }}>
+            {agreementTerms(printAgr).map((t, idx) => <li key={idx} style={{ marginBottom: 6 }}>{t}</li>)}
+          </ol>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 60 }}>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>{printAgr.name} (Investor)</div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
+
+      {/* ── Payout receipt print ── */}
+      {printRcpt && (
+        <DocPrintOverlay onClose={() => setPrintRcpt(null)} filename={'Payout-' + (printRcpt.alloc.name || 'Investor').replace(/\s+/g, '-') + '-' + distLabel(printRcpt.dist).replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>PROFIT-SHARE PAYOUT RECEIPT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 20 }}>{distLabel(printRcpt.dist)} ({printRcpt.dist.periodFrom} → {printRcpt.dist.periodTo})</div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '6px 8px', color: '#666', width: 200 }}>Investor</td><td style={{ padding: '6px 8px', fontWeight: 600 }}>{printRcpt.alloc.name}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Quarter net profit</td><td style={{ padding: '6px 8px' }}>{fmt(printRcpt.dist.netProfit)}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Share of profit</td><td style={{ padding: '6px 8px' }}>{printRcpt.alloc.effPct}%</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Amount payable</td><td style={{ padding: '6px 8px', fontWeight: 700, fontSize: 16, color: '#1A7A3E' }}>{fmt(printRcpt.alloc.amount)}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Status</td><td style={{ padding: '6px 8px' }}>{printRcpt.alloc.status === 'paid' ? 'PAID' + (printRcpt.alloc.paidDate ? ' on ' + printRcpt.alloc.paidDate : '') : 'PENDING'}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 70 }}>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>Received by (Investor)</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
+
+      {/* ── Distribution statement print (all investors or a selected person) ── */}
+      {printStmt && (() => {
+        const allAllocs = printStmt.allocations || [];
+        const rows = stmtWho === 'all' ? allAllocs : allAllocs.filter(a => a.investorId === stmtWho);
+        const whoName = stmtWho === 'all' ? '' : ((allAllocs.find(a => a.investorId === stmtWho) || {}).name || '');
+        return (
+        <DocPrintOverlay onClose={() => setPrintStmt(null)} filename={'Profit-Share-' + distLabel(printStmt).replace(/[^0-9A-Za-z]+/g, '-') + (whoName ? '-' + whoName.replace(/\s+/g, '-') : '') + '.pdf'} businessInfo={businessInfo}>
+          {/* person picker — hidden in print/PDF */}
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '8px 12px', background: '#EEF2FF', borderRadius: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#3D52A0' }}>Print for:</span>
+            <select value={stmtWho} onChange={e => setStmtWho(e.target.value)} style={{ border: '1px solid #CBD5E1', borderRadius: 6, padding: '5px 8px', fontSize: 13 }}>
+              <option value="all">All investors</option>
+              {allAllocs.map(a => <option key={a.investorId} value={a.investorId}>{a.name}</option>)}
+            </select>
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>PROFIT-SHARE STATEMENT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 4 }}>{distLabel(printStmt)} ({printStmt.periodFrom} → {printStmt.periodTo})</div>
+          {whoName && <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#1E2A4A', marginBottom: 14 }}>Investor: {whoName}</div>}
+          {!whoName && <div style={{ marginBottom: 14 }} />}
+          {printStmt.breakdown && (
+            <div style={{ fontSize: 12.5, color: '#555', marginBottom: 12 }}>Revenue {fmt(printStmt.breakdown.rev)} − Purchases {fmt(printStmt.breakdown.pur)} − Payroll {fmt(printStmt.breakdown.pay)} − Expenses {fmt(printStmt.breakdown.exp)} = <b>Net profit {fmt(printStmt.netProfit)}</b></div>
+          )}
+          <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F1EFE9' }}>{['Investor', 'Share %', 'Amount', 'Status'].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #DDD' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(a => (
+                <tr key={a.investorId}><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.name}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.effPct}%</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{fmt(a.amount)}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.status === 'paid' ? 'Paid' + (a.paidDate ? ' · ' + a.paidDate : '') : 'Pending'}</td></tr>
+              ))}
+              <tr style={{ fontWeight: 700 }}><td style={{ padding: '6px 8px' }}>{whoName ? 'Total' : 'Total to investors'}</td><td></td><td style={{ padding: '6px 8px' }}>{fmt(rows.reduce((s, a) => s + (a.amount || 0), 0))}</td><td></td></tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 50 }}>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>{whoName ? whoName + ' (Investor)' : 'Investor'}</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
+          </div>
+        </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -24623,6 +25060,8 @@ export default function App() {
   const [moms,             _setMoms]       = useState([]);
   const [purchaseReqs,     _setPReqs]      = useState([]);
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
+  const [investors,        _setInv]        = useState([]);
+  const [profitShares,     _setPS]         = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
@@ -24814,6 +25253,8 @@ export default function App() {
       _setMoms(data.moms || []);
       _setPReqs(data.purchaseReqs || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
+      _setInv(data.investors || []);
+      _setPS(data.profitShares || []);
     }, (err) => {
       console.warn('Firestore load error:', err);
       setDataError(true);
@@ -24909,6 +25350,8 @@ export default function App() {
   const setMoms             = mkSet(_setMoms,'moms');
   const setPurchaseReqs     = mkSet(_setPReqs,'purchaseReqs');
   const setRackStore        = mkSet(_setRS,        'rackStore');
+  const setInvestors        = mkSet(_setInv,   'investors');
+  const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -25075,7 +25518,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -25147,6 +25590,8 @@ export default function App() {
     if (backup.moms)            setMoms(backup.moms);
     if (backup.purchaseReqs)    setPurchaseReqs(backup.purchaseReqs);
     if (backup.rackStore)       setRackStore(backup.rackStore);
+    if (backup.investors)       setInvestors(backup.investors);
+    if (backup.profitShares)    setProfitShares(backup.profitShares);
     alert('✅ Data restored successfully! All your records are back.');
   }
 
@@ -25175,6 +25620,8 @@ export default function App() {
       ['Vendors', vendors, setVendors],
       ['Items', items, setItems],
       ['Payroll runs', payrollRuns, setPayrollRuns],
+      ['Investors', investors, setInvestors],
+      ['Profit shares', profitShares, setProfitShares],
     ];
     if (only) {
       let fixed = 0; const lines = [];
@@ -26241,6 +26688,23 @@ export default function App() {
             moms={moms}
             setMoms={setMoms}
             employees={sessionEmployees}
+          />
+        );
+      case 'investors':
+        return (
+          <InvestorShareView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            investors={investors}
+            setInvestors={setInvestors}
+            profitShares={profitShares}
+            setProfitShares={setProfitShares}
+            documents={sessionDocs}
+            vouchers={sessionVouchers}
+            pettyCash={sessionPettyCash}
+            payrollRuns={payrollRuns}
           />
         );
       case 'purchasereq':
