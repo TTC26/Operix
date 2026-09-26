@@ -1743,6 +1743,37 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 // ─── Items ─────────────────────────────────────────────────────
 
 const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+// 2-digit category code → first two digits of the 10-digit item code (CCTTNNNNNN)
+const ITEM_CATEGORY_CODES = {
+  'Raw Material': '01', 'Alloy / Metal': '02', 'Steel / Iron': '03', 'Packing Material': '04',
+  'Consumable': '05', 'Spare Part': '06', 'Finished Good': '07', 'Semi-Finished': '08',
+  'Trading Item': '09', 'Service': '10', 'Other': '99',
+};
+// Build a 10-digit item code: CC (category) + TT (material/type) + NNNNNN (running serial).
+// The material→2-digit map is kept in businessInfo.itemTypeCodes so codes stay stable and reusable.
+function makeItemCode({ category, materialType, currentId, items = [], businessInfo = {}, persistTypeCodes }) {
+  const catCode = ITEM_CATEGORY_CODES[category] || '99';
+  const tname = String(materialType || '').trim().toLowerCase();
+  let reg = { ...(businessInfo.itemTypeCodes || {}) };
+  let typeCode = '00';
+  if (tname) {
+    if (reg[tname]) typeCode = reg[tname];
+    else {
+      const used = new Set(Object.values(reg));
+      let n = 1; while (n < 100 && used.has(String(n).padStart(2, '0'))) n++;
+      typeCode = String(n).padStart(2, '0');
+      reg[tname] = typeCode;
+      if (persistTypeCodes) persistTypeCodes(reg);
+    }
+  }
+  const prefix = catCode + typeCode;
+  let mx = 0;
+  (items || []).forEach(it => {
+    const c = String(it.itemCode || '');
+    if (c.length === 10 && c.slice(0, 4) === prefix && it.id !== currentId) { const nn = parseInt(c.slice(4)) || 0; if (nn > mx) mx = nn; }
+  });
+  return prefix + String(mx + 1).padStart(6, '0');
+}
 
 function ItemsList({ items, setEditing, setItems, businessInfo }) {
   const fmt = makeFmt(businessInfo);
@@ -1852,25 +1883,44 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
   );
 }
 
-function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
+function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
-  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', ...item });
+  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', materialType: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  // Existing material/type names (for quick reuse via the datalist)
+  const knownTypes = [...new Set((items || []).map(it => (it.materialType || '').trim()).filter(Boolean))].sort();
+  function generateCode() {
+    if (!form.category) { alert('Please select a Category first — it sets the first two digits.'); return; }
+    const code = makeItemCode({
+      category: form.category, materialType: form.materialType, currentId: form.id,
+      items, businessInfo,
+      persistTypeCodes: setBusinessInfo ? (reg) => setBusinessInfo(prev => ({ ...prev, itemTypeCodes: reg })) : null,
+    });
+    set('itemCode', code);
+  }
   return (
     <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
       {/* Item code + category */}
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
-          <label style={styles.label}>Item Code</label>
-          <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={styles.input} placeholder="e.g. RM-001, ST-002" />
+          <label style={styles.label}>Item Code <span style={{ color: '#999', fontWeight: 400 }}>(10-digit: CC-TT-NNNNNN)</span></label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={{ ...styles.input, fontFamily: 'monospace', letterSpacing: 1 }} placeholder="auto — click Generate" />
+            <button type="button" onClick={generateCode} style={{ ...styles.ghostBtn, whiteSpace: 'nowrap', flexShrink: 0 }} title="Generate 10-digit code from Category + Material">⚙ Generate</button>
+          </div>
         </div>
         <div style={{ ...styles.formGroup, flex: 1 }}>
-          <label style={styles.label}>Category</label>
+          <label style={styles.label}>Category <span style={{ color: '#999', fontWeight: 400 }}>(1st 2 digits)</span></label>
           <select value={form.category||''} onChange={e=>set('category',e.target.value)} style={styles.input}>
             <option value=''>— Select —</option>
-            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{ITEM_CATEGORY_CODES[c] ? ITEM_CATEGORY_CODES[c] + ' · ' : ''}{c}</option>)}
           </select>
         </div>
+      </div>
+      <div style={{ ...styles.formGroup }}>
+        <label style={styles.label}>Material / Type <span style={{ color: '#999', fontWeight: 400 }}>(next 2 digits — e.g. Copper, Steel)</span></label>
+        <input value={form.materialType||''} onChange={e => set('materialType', e.target.value)} style={styles.input} placeholder="e.g. Copper, Steel, Aluminium" list="item-material-types" />
+        <datalist id="item-material-types">{knownTypes.map(t => <option key={t} value={t} />)}</datalist>
       </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
@@ -26951,6 +27001,8 @@ export default function App() {
           }}
           onClose={() => setEditingItem(null)}
           businessInfo={businessInfo}
+          items={items}
+          setBusinessInfo={setBusinessInfo}
         />
       )}
 
