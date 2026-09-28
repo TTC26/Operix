@@ -19538,7 +19538,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
   );
 }
 
-function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
+function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {}, ownerUid = '' }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [catFilter, setCatFilter]   = React.useState('all');
   const [editing, setEditing]       = React.useState(null);
@@ -19653,14 +19653,28 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
         </div>
       )}
 
-      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} ownerUid={ownerUid} />}
     </div>
   );
 }
 
-function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose }) {
+function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose, ownerUid = '' }) {
   const [form, setForm] = React.useState(rec);
+  const [uploading, setUploading] = React.useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  async function handleFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!ownerUid) { alert('Cannot upload right now — please try again in a moment.'); return; }
+    if (file.size > 25 * 1024 * 1024) { alert('File too large (max 25 MB). For bigger files, use a Drive/SharePoint share link instead.'); e.target.value = ''; return; }
+    setUploading(true);
+    try {
+      const res = await uploadDrawing(ownerUid, 'projectdocs', file);
+      setForm(f => ({ ...f, link: res.url, fileName: res.name, filePath: res.path }));
+    } catch (err) { alert('Upload failed: ' + (err.message || err)); }
+    setUploading(false);
+    e.target.value = '';
+  }
   const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
   const row = { marginBottom: 12 };
   const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
@@ -19683,7 +19697,18 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
           <div style={row}><label style={lbl}>Status</label><select style={styles.input} value={form.status} onChange={e => set('status', e.target.value)}>{statuses.map(sx => <option key={sx}>{sx}</option>)}</select></div>
           <div style={row}><label style={lbl}>Submitted To</label><input style={styles.input} value={form.submittedTo} onChange={e => set('submittedTo', e.target.value)} placeholder="Consultant / Client" /></div>
         </div>
-        <div style={row}><label style={lbl}>Link (Drive / SharePoint URL — optional)</label><input style={styles.input} value={form.link} onChange={e => set('link', e.target.value)} placeholder="https://..." /></div>
+        <div style={row}>
+          <label style={lbl}>Attach document (upload the file, or paste a cloud link)</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ ...styles.ghostBtn, cursor: uploading ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+              {uploading ? '⏳ Uploading…' : '⬆ Upload file'}
+              <input type="file" style={{ display: 'none' }} disabled={uploading} onChange={handleFile} />
+            </label>
+            {form.fileName && <span style={{ fontSize: 12, color: '#1A7A3E' }}>✓ {form.fileName}</span>}
+          </div>
+          <input style={styles.input} value={form.link || ''} onChange={e => set('link', e.target.value)} placeholder="https://drive.google.com/…  (or upload above)" />
+          <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>Tip: a path from your computer (like D:\… ) will not open on other devices. Upload the file, or use a shared Drive/SharePoint link.</div>
+        </div>
         <div style={row}><label style={lbl}>Remarks</label><textarea style={{ ...styles.input, minHeight: 50, resize: 'vertical' }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
           <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
@@ -25994,6 +26019,7 @@ export default function App() {
         handoverDocs={handoverDocs}
         subcontractors={subcontractors}
         setView={setView}
+        ownerUid={ownerUid}
       />
     );
     if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
