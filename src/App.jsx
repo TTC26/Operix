@@ -3117,10 +3117,20 @@ function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, v
 
 function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [], employees = [], labourGroups = [], userRole = '', raBillings = [], siteActivities = [] }) {
   const _fmtD = makeFmt(businessInfo);
-  const _raTot = rb => (rb.items||[]).reduce((s,i)=>s+((parseFloat(i.contractValue)||0)*((parseFloat(i.thisQty)||0)-(parseFloat(i.previousQty)||0))/100),0);
-  const _billed = (raBillings||[]).reduce((s,rb)=>s+_raTot(rb),0);
-  const _received = (raBillings||[]).filter(rb=>rb.status==='paid').reduce((s,rb)=>s+_raTot(rb),0);
-  const _outstanding = _billed - _received;
+  // RA bill total INCLUDING tax — matches the RA Billing screen's grand total
+  // (subtotal of work done + GST/VAT), so the dashboard figure reconciles with it.
+  const _raCC = COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other;
+  const _raSellerState = businessInfo?.state || '';
+  const _raSub = rb => (rb.items||[]).reduce((s,i)=>s+((parseFloat(i.contractValue)||0)*((parseFloat(i.thisQty)||0)-(parseFloat(i.previousQty)||0))/100),0);
+  const _raTot = rb => { const sub = _raSub(rb); return _raCC.hasTax ? (calcModuleTax(sub, rb.taxRate||0, _raCC, rb.placeOfSupply, _raSellerState).grandTotal || sub) : sub; };
+  // Billed = RA project billing (with tax) + approved sales invoices (Sales linked in).
+  const _raBilled = (raBillings||[]).reduce((s,rb)=>s+_raTot(rb),0);
+  const _billed = _raBilled + (stats?.totalRevenue||0);
+  // Received counts BOTH: money recorded against RA bills (receivedAmount, or the
+  // full bill once marked Paid) AND cash recorded in Accounts as receipt vouchers.
+  const _raReceived = (raBillings||[]).reduce((s,rb)=> s + (parseFloat(rb.receivedAmount) || (rb.status==='paid' ? _raTot(rb) : 0)), 0);
+  const _received = _raReceived + (stats?.totalReceived||0);
+  const _outstanding = Math.max(0, _billed - _received);
   const _showBilling = (activeTypes.includes('service')||activeTypes.includes('fmamc')) && (raBillings||[]).length>0;
   const _absAlerts = (['admin','manager','hr'].includes(userRole) ? employees : []).map(emp => {
     const dset = new Set();
