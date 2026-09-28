@@ -241,6 +241,41 @@ export function subscribeCompanyData(uid, callback, onError) {
   return () => { if (unsubMain) unsubMain(); if (unsubParts) unsubParts(); };
 }
 
+// ─── Global access control (super-admin managed paywall bypass) ───────────────
+// A single shared document any signed-in user can READ at login to learn whether
+// their email is on the free/bypass list. Only the super-admin edits it from the
+// in-app panel. (Firestore rule: allow read for any auth user on appConfig/access;
+// allow write only for the super-admin email.)
+const ACCESS_DOC = doc(db, 'appConfig', 'access');
+
+export async function loadBypassEmails() {
+  try {
+    const snap = await getDoc(ACCESS_DOC);
+    const arr = snap.exists() && Array.isArray(snap.data().bypassEmails) ? snap.data().bypassEmails : [];
+    return arr.map((e) => String(e).toLowerCase().trim()).filter(Boolean);
+  } catch (e) {
+    console.warn('loadBypassEmails:', e.message);
+    return [];
+  }
+}
+
+export function subscribeBypassEmails(callback) {
+  return onSnapshot(
+    ACCESS_DOC,
+    (snap) => {
+      const arr = snap.exists() && Array.isArray(snap.data().bypassEmails) ? snap.data().bypassEmails : [];
+      callback(arr.map((e) => String(e).toLowerCase().trim()).filter(Boolean));
+    },
+    (err) => console.warn('subscribeBypassEmails:', err.code, err.message)
+  );
+}
+
+export async function saveBypassEmails(emails) {
+  const clean = [...new Set((emails || []).map((e) => String(e).toLowerCase().trim()).filter(Boolean))];
+  await setDoc(ACCESS_DOC, { bypassEmails: clean, updatedAt: Date.now() }, { merge: true });
+  return clean;
+}
+
 export async function getMembership(uid) {
   const snap = await getDoc(doc(db, 'staff_memberships', uid));
   if (snap.exists()) return snap.data();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -53,6 +53,10 @@ const ROLE_MODULES = {
 // Emails that bypass all plan gates (dev / owner accounts)
 const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'elcabwiresindustry@outlook.com'];
 const isTestEmail = (e) => !!e && TEST_EMAILS.includes(String(e).toLowerCase().trim());
+// Super-admins: the only accounts allowed to manage the live paywall-bypass list
+// from inside the app (Settings → Super Admin). Everyone else never sees the panel.
+const SUPER_ADMINS = ['srm10988@gmail.com'];
+const isSuperAdmin = (e) => !!e && SUPER_ADMINS.includes(String(e).toLowerCase().trim());
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
 const PLAN_MODULES = {
@@ -2273,7 +2277,23 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete, onRepairTags, isMultiBiz = false }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete, onRepairTags, isMultiBiz = false, isSuperAdmin = false, bypassEmails = [], onSaveBypass }) {
+  const [bpNew, setBpNew] = React.useState('');
+  const [bpBusy, setBpBusy] = React.useState(false);
+  async function addBypass() {
+    const e = bpNew.trim().toLowerCase();
+    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { alert('Enter a valid email address.'); return; }
+    if (bypassEmails.includes(e)) { alert('That email is already on the free list.'); setBpNew(''); return; }
+    setBpBusy(true);
+    try { await onSaveBypass([...bypassEmails, e]); setBpNew(''); } catch (err) { alert('Could not save: ' + (err.message || err)); }
+    setBpBusy(false);
+  }
+  async function removeBypass(e) {
+    if (!window.confirm('Remove ' + e + ' from the free-access list? They will fall back to the trial/paywall.')) return;
+    setBpBusy(true);
+    try { await onSaveBypass(bypassEmails.filter(x => x !== e)); } catch (err) { alert('Could not save: ' + (err.message || err)); }
+    setBpBusy(false);
+  }
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   const [cloudBackups, setCloudBackups] = useState(null);
@@ -2634,6 +2654,33 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                 setCloudBusy(false);
               }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
+            </div>
+            )}
+
+            {/* ── Super Admin — paywall bypass list (only you) ── */}
+            {isSuperAdmin && (
+            <div style={{ background: '#1E2A4A', borderRadius: 12, padding: '20px 24px', marginTop: 20, color: '#fff' }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>🛡️ Super Admin · Free-access accounts</div>
+              <div style={{ fontSize: 12, color: '#C7D0E0', marginBottom: 14, lineHeight: 1.6 }}>
+                Emails added here skip the trial &amp; paywall — full access, free. Changes apply to everyone instantly, on every device. Only you (super-admin) can see or edit this.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                <input value={bpNew} onChange={e => setBpNew(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addBypass(); }} placeholder="user@example.com" style={{ flex: 1, minWidth: 200, border: '1px solid #3D4E6E', background: '#16223D', color: '#fff', borderRadius: 8, padding: '9px 12px', fontSize: 13 }} />
+                <button disabled={bpBusy} onClick={addBypass} style={{ background: '#C9A24B', color: '#1E2A4A', border: 'none', borderRadius: 8, padding: '9px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{bpBusy ? '…' : '+ Grant free access'}</button>
+              </div>
+              {bypassEmails.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8FA0BC', fontStyle: 'italic' }}>No free accounts yet. Add an email above.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {bypassEmails.map(e => (
+                    <div key={e} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#16223D', border: '1px solid #2C3B5A', borderRadius: 8, padding: '8px 12px' }}>
+                      <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{e}</span>
+                      <button disabled={bpBusy} onClick={() => removeBypass(e)} style={{ background: 'none', border: 'none', color: '#E88', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: '#7C8CA8', marginTop: 12 }}>{bypassEmails.length} account{bypassEmails.length !== 1 ? 's' : ''} with free access · built-in test accounts always bypass and aren't shown here.</div>
             </div>
             )}
 
@@ -25113,6 +25160,7 @@ export default function App() {
   const [investors,        _setInv]        = useState([]);
   const [profitShares,     _setPS]         = useState([]);
   const [notifications,    setNotifications] = useState([]);
+  const [bypassEmails,     setBypassEmails]   = useState([]); // global super-admin-managed free list
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
   const [activeBizContext, setActiveBizContext] = useState(null);
@@ -25120,6 +25168,13 @@ export default function App() {
   const migratedRef = React.useRef(false);
   const latestDataRef = React.useRef({});
   const cloudBackupCheckedRef = React.useRef(false);
+
+  // ── Global paywall-bypass list (super-admin managed, live) ───────────────────
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeBypassEmails(setBypassEmails);
+    return () => { try { unsub && unsub(); } catch (_e) {} };
+  }, [user]);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -25774,7 +25829,8 @@ export default function App() {
   const trialDaysLeft  = _trialDaysUsed !== null ? Math.max(0, TRIAL_DAYS - _trialDaysUsed) : null;
   const trialExpired   = _trialDaysUsed !== null && _trialDaysUsed >= TRIAL_DAYS;
   const isSubscribed   = !!businessInfo.subscriptionActive;
-  const isTestAccount  = isTestEmail(user?.email);
+  const _email = String(user?.email || '').toLowerCase().trim();
+  const isTestAccount  = isTestEmail(user?.email) || (!!_email && bypassEmails.includes(_email));
 
   // Once data is loaded and user hasn't chosen a session workspace yet,
   // always route to setup or home screen — never fall through to main app.
@@ -26187,7 +26243,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} onRepairTags={repairBizTags} isMultiBiz={isMultiBiz} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} onRepairTags={repairBizTags} isMultiBiz={isMultiBiz} isSuperAdmin={isSuperAdmin(user?.email)} bypassEmails={bypassEmails} onSaveBypass={saveBypassEmails} />;
       case 'pettycash':
         return (
           <PettyCashList
