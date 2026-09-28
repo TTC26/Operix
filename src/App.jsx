@@ -51,7 +51,7 @@ const ROLE_MODULES = {
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
 // Emails that bypass all plan gates (dev / owner accounts)
-const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'elcabwiresindustry@outlook.com'];
+const TEST_EMAILS = ['info.orytech@gmail.com', 'srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'elcabwiresindustry@outlook.com'];
 const isTestEmail = (e) => !!e && TEST_EMAILS.includes(String(e).toLowerCase().trim());
 // Super-admins: the only accounts allowed to manage the live paywall-bypass list
 // from inside the app (Settings → Super Admin). Everyone else never sees the panel.
