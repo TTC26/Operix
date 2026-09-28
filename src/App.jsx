@@ -55,7 +55,7 @@ const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'el
 const isTestEmail = (e) => !!e && TEST_EMAILS.includes(String(e).toLowerCase().trim());
 // Super-admins: the only accounts allowed to manage the live paywall-bypass list
 // from inside the app (Settings → Super Admin). Everyone else never sees the panel.
-const SUPER_ADMINS = ['srm10988@gmail.com'];
+const SUPER_ADMINS = ['info.oryqen@gmail.com'];
 const isSuperAdmin = (e) => !!e && SUPER_ADMINS.includes(String(e).toLowerCase().trim());
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
