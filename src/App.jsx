@@ -3823,6 +3823,7 @@ const SECTION_VIEWS = {
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
+  mep_clients: ['customers', 'enquiries', 'items'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
   admin:       ['staff', 'contracts', 'termslibrary', 'mom', 'investors'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
@@ -4278,6 +4279,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* ═══════════ MEP ERP (service division) ═══════════ */}
           {showService && (<>
             <div style={{ padding: '10px 14px 4px', fontSize: 11, fontWeight: 800, letterSpacing: '0.09em', color: '#1A7A3E', textTransform: 'uppercase' }}>MEP ERP</div>
+
+            <Section sectionKey="mep_clients" label="Clients & Sales">
+              <NavBtn id="customers" label="Clients / Customers" icon={Users} />
+              <NavBtn id="enquiries" label="Enquiries"          icon={FileSignature} />
+              <NavBtn id="items"     label="Item Master"         icon={Package} />
+            </Section>
 
             <Section sectionKey="mep_projects" label="Projects">
               <NavBtn id="siteprojects" label="Project Master"    icon={MapPin} />
