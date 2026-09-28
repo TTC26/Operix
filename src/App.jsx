@@ -192,6 +192,15 @@ const COUNTRY_CONFIG = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// Ensure a user-typed link is an absolute URL so it opens externally instead of
+// being treated as a path inside the app (the cause of "link not working").
+function normalizeUrl(u) {
+  let s = String(u || '').trim();
+  if (!s) return '';
+  if (/^(mailto:|tel:)/i.test(s)) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return 'https://' + s.replace(/^\/+/, '');
+}
 function currency(n, sym, locale) {
   if (isNaN(n) || n == null) n = 0;
   const s = sym !== undefined ? sym : '₹';
@@ -19616,7 +19625,7 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
               {list.map(d => (
                 <tr key={d.id}>
                   <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.docNo || '—'}</td>
-                  <td style={td}>{d.title}{d.link && <a href={d.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
+                  <td style={td}>{d.title}{d.link && <a href={normalizeUrl(d.link)} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5', textDecoration: 'underline' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(d.projectId)}</td>
                   <td style={td}>{d.category}{d.subType && <div style={{ fontSize: 11, color: '#999' }}>{d.subType}</div>}</td>
                   <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{d.revision}</td>
