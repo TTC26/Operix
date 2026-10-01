@@ -5016,18 +5016,28 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
     setDoc((d) => {
       const sel = (d.items || []).filter((it) => selSet.has(it.id));
       if (sel.length < 2) return d;
+      const gid = crypto.randomUUID();
       const totalAmt = sel.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
-      const names = sel.map((it) => (it.name || '').trim()).filter(Boolean);
-      const merged = { ...EMPTY_ITEM_ROW(businessInfo), id: crypto.randomUUID(), name: names.join('\n'), qty: 1, rate: totalAmt, gst: sel[0].gst, discount: 0, hsn: sel[0].hsn || '' };
+      // Keep each item as its own row (own Sl + Description). The FIRST becomes the
+      // group head and carries the single combined price (Qty 1 × total); the rest
+      // are description-only children whose price columns are covered by the head's
+      // row-span, so the printed table shows one merged HSN/Qty/Rate/GST/Amount block.
+      const grouped = sel.map((it, i) => i === 0
+        ? { ...it, mergeGroupId: gid, mergeHead: true, qty: 1, rate: totalAmt, discount: 0 }
+        : { ...it, mergeGroupId: gid, mergeHead: false, qty: 0, rate: 0, gst: 0, discount: 0 });
       let inserted = false;
       const out = [];
       for (const it of d.items) {
-        if (selSet.has(it.id)) { if (!inserted) { out.push(merged); inserted = true; } }
+        if (selSet.has(it.id)) { if (!inserted) { out.push(...grouped); inserted = true; } }
         else out.push(it);
       }
       return { ...d, items: out };
     });
     setMergeSel([]);
+  }
+  function unmergeGroup(gid) {
+    if (!gid) return;
+    setDoc((d) => ({ ...d, items: (d.items || []).map((it) => it.mergeGroupId === gid ? { ...it, mergeGroupId: undefined, mergeHead: undefined } : it) }));
   }
   const bizBadge = BIZ_BADGE[doc.bizType];
   const showBizBadge = !!bizBadge;
@@ -5950,26 +5960,41 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 if (doc.type === 'packing_list') _cols += 4; else { _cols++; if (cc.hasTax) _cols++; _cols++; }
                 if (isEditable) _cols++;
                 const _fieldLbl = { fontSize: 10.5, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 2 };
+                // Merge-group map: members share mergeGroupId; the head carries the price.
+                const _groups = {};
+                doc.items.forEach((it) => { if (it.mergeGroupId) { (_groups[it.mergeGroupId] = _groups[it.mergeGroupId] || []).push(it.id); } });
                 return doc.items.map((it, idx) => {
                 const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+                const _gid = it.mergeGroupId;
+                const _grpIds = _gid ? _groups[_gid] : null;
+                const _span = _grpIds ? _grpIds.length : 1;
+                const _isHead = !_gid || it.mergeHead || (_grpIds && _grpIds[0] === it.id);
+                const _isChild = _gid && !_isHead;
+                // Price cells (HSN/Qty/Rate/GST/Amount or packing cols). For a merged group,
+                // render them once on the head row with rowSpan; child rows omit them.
+                const priceCells = doc.type === 'packing_list' ? (<>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.packages ?? 1}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.netWeight ?? 0}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.grossWeight ?? 0}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>{it.dimensions || ''}</td>
+                </>) : (<>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.qty}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.rate}</td>
+                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.gst}</td>}
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 500, verticalAlign: 'top' }}>{fmt(amount)}</td>
+                </>);
+                // For packing list the Qty column sits before the packing cols; keep a standalone HSN + Qty handling.
                 const columnarRow = (
                   <tr key={it.id + '-print'} className="di-print-row">
                     <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{idx + 1}</td>
                     <td style={styles.td}>
                       <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>
                     </td>
-                    {doc.type !== 'packing_list' && cc.splitTax && (<td style={{ ...styles.td, verticalAlign: 'top' }}>{it.hsn}</td>)}
-                    <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.qty}</td>
+                    {doc.type !== 'packing_list' && cc.splitTax && !_isChild && (<td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>{it.hsn}</td>)}
                     {doc.type === 'packing_list' ? (<>
-                      <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.packages ?? 1}</td>
-                      <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.netWeight ?? 0}</td>
-                      <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.grossWeight ?? 0}</td>
-                      <td style={{ ...styles.td, verticalAlign: 'top' }}>{it.dimensions || ''}</td>
-                    </>) : (<>
-                      <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.rate}</td>
-                      {cc.hasTax && <td style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.gst}</td>}
-                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500, verticalAlign: 'top' }}>{fmt(amount)}</td>
-                    </>)}
+                      {!_isChild && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.qty}</td>}
+                      {!_isChild && priceCells}
+                    </>) : (!_isChild && priceCells)}
                   </tr>
                 );
                 // ── Editor (screen) block: Sl + description on their own lines, fields merged below ──
@@ -5977,15 +6002,17 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 const screenRow = (
                   <tr key={it.id + '-screen'} className="di-screen-row">
                     <td colSpan={_cols} style={{ ...styles.td, padding: '12px 10px' }}>
-                      {/* Line 1 — Sl + item picker + delete */}
+                      {/* Line 1 — Sl + item picker + merge/unmerge + delete */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                        {isEditable && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick to merge rows into one line" style={{ cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }} />}
+                        {isEditable && !_gid && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick 2+ rows, then Merge" style={{ cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }} />}
                         <span style={{ fontWeight: 700, color: '#1E2A4A', fontSize: 13, minWidth: 22 }}>{idx + 1}.</span>
+                        {_gid && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 8px' }}>{_isHead ? '⑃ Merged group (' + _span + ')' : '↳ part of group'}</span>}
                         {isEditable && <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 280 }}>
                           <option value="">Custom item</option>
                           {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>}
                         <div style={{ flex: 1 }} />
+                        {isEditable && _gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }} title="Split this group back into separate lines">Unmerge</button>}
                         {isEditable && <button onClick={() => removeRow(it.id)} style={styles.iconBtn} title="Remove line"><Trash2 size={15} color="#B5453A" /></button>}
                       </div>
                       {/* Line 2 — full-width description */}
@@ -5993,8 +6020,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" rows={2}
                             style={{ ...styles.inlineInput, ...styles.inlineInputEditable, width: '100%', boxSizing: 'border-box', resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4, fontFamily: 'inherit', minHeight: 40, marginBottom: 10 }} />
                         : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4, marginBottom: 10 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
-                      {/* Line 3 — compact merged fields */}
-                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      {/* Line 3 — compact merged fields (hidden for group children; head shows the single group price) */}
+                      {_isChild
+                        ? <div style={{ fontSize: 11.5, color: '#888780', fontStyle: 'italic' }}>— price shown once on the group's first line —</div>
+                        : <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                         {doc.type !== 'packing_list' && cc.splitTax && numField('HSN/SAC', (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                             <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 80, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
@@ -6015,7 +6044,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                             <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{fmt(amount)}</div>
                           </div>
                         </>)}
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 );
@@ -6027,10 +6056,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
 
           {isEditable && <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={addRow} style={styles.addRowBtn}><Plus size={14} /> Add line item</button>
-            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Merge {mergeSel.length} items into one line</button>}
+            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Group {mergeSel.length} items (one shared price)</button>}
             {mergeSel.length >= 1
-              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to merge)' : ''}</span>
-              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick the checkbox on rows to merge them into a single line</span>}
+              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to group)' : ''}</span>
+              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick rows then Group — each keeps its Sl &amp; description, with one shared HSN/Qty/Rate/Amount</span>}
           </div>}
 
           {/* ── Packing List weight totals ── */}
