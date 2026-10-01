@@ -393,7 +393,15 @@ async function downloadDocPDF(elOrSelector, filename) {
     if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     const el = typeof elOrSelector === 'string' ? document.querySelector(elOrSelector) : elOrSelector;
     if (!el) { alert('Nothing to download'); return; }
-    const canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+    // html2canvas ignores @media print, so force the print layout via a class during capture
+    // (hides editor-only rows/controls, shows the clean columnar print rows).
+    el.classList.add('pdf-exporting');
+    let canvas;
+    try {
+      canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+    } finally {
+      el.classList.remove('pdf-exporting');
+    }
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = pdf.internal.pageSize.getWidth();
@@ -5907,7 +5915,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }
             /* Editor uses a stacked block per item; print uses the columnar table row */
             .di-screen-row { display: table-row; } .di-print-row { display: none; }
-            @media print { .di-screen-row { display: none !important; } .di-print-row { display: table-row !important; } }`}</style>
+            @media print { .di-screen-row { display: none !important; } .di-print-row { display: table-row !important; } }
+            /* PDF export (html2canvas) can't read @media print — mirror the print layout here */
+            .pdf-exporting .di-screen-row, .pdf-exporting .no-print { display: none !important; }
+            .pdf-exporting .di-print-row { display: table-row !important; }
+            .pdf-exporting .di-screen { display: none !important; } .pdf-exporting .di-print { display: block !important; }
+            .pdf-exporting .di-input { border: none !important; background: transparent !important; box-shadow: none !important; color: #000 !important; }`}</style>
           <table style={styles.table}>
             <thead>
               <tr>
@@ -5985,7 +5998,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         {doc.type !== 'packing_list' && cc.splitTax && numField('HSN/SAC', (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                             <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 80, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
-                            {isEditable && <button type="button" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780' }}>🔍</button>}
+                            {isEditable && <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780' }}>🔍</button>}
                           </div>
                         ))}
                         {numField('Qty', <input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 70, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
