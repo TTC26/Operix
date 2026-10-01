@@ -15393,7 +15393,10 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
           const c = allParties.find(x => x.id === e.target.value);
           set('customerId', e.target.value);
           set('customerSnapshot', c || null);
-          if (c?.taxId && !form.vendorGst) set('vendorGst', c.taxId);
+          // Auto-fill from the selected vendor/customer master record.
+          // The master stores GST as `gstin` (older records may use `taxId`).
+          set('vendorGst', c ? (c.gstin || c.taxId || '') : '');
+          if (c && !form.vendorContactPerson) { const cp = [c.contactPerson || c.contact, c.phone, c.email].filter(Boolean).join(' · '); if (cp) set('vendorContactPerson', cp); }
         }} style={inputStyle}>
           <option value="">— Select customer / vendor —</option>
           {(customers||[]).length > 0 && <optgroup label="Customers">{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>}
