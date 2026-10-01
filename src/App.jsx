@@ -15419,6 +15419,14 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
         {form.poRefNumber && <div style={{ fontSize:11, color:'#1A7A3E', marginTop:4 }}>✓ Linked: <b>{form.poRefNumber}</b></div>}
       </div>
 
+      <div style={{ marginTop: 14 }}>
+        <label style={labelStyle}>Delivery To (Delivery Address / Site)</label>
+        <textarea value={form.deliveryAddress || ''} onChange={e => set('deliveryAddress', e.target.value)} style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} placeholder="Where goods / work are to be delivered — site name & full address" />
+        {form.customerSnapshot?.address && !form.deliveryAddress && (
+          <button type="button" onClick={() => set('deliveryAddress', form.customerSnapshot.address)} style={{ marginTop: 6, fontSize: 11, background: 'none', border: 'none', color: '#3D52A0', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Use supplier/client address</button>
+        )}
+      </div>
+
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
         <div>
           <label style={labelStyle}>Our Company Role Label</label>
@@ -15474,7 +15482,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
             <div style={styles.formGroup}>
               <label style={labelStyle}>Vendor GST No.</label>
               <input value={form.vendorGst} onChange={e=>set('vendorGst',e.target.value)}
-                placeholder={form.customerSnapshot?.taxId || 'e.g. 33ABCDE1234F1Z5'} style={inputStyle} />
+                placeholder={form.customerSnapshot?.gstin || form.customerSnapshot?.taxId || 'e.g. 33ABCDE1234F1Z5'} style={inputStyle} />
             </div>
           )}
           <div style={styles.formGroup}>
@@ -15691,7 +15699,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <td style="padding:10px 12px;border:1px solid #ddd;vertical-align:top;">
             <b>${c.customerSnapshot?.name||'—'}</b><br/>
             <span style="color:#555;font-size:11px;">${c.customerSnapshot?.address||''}</span><br/>
-            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.vendorGst||c.customerSnapshot?.taxId||'—'}</b></span><br/>` : ''}
+            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.vendorGst||c.customerSnapshot?.gstin||c.customerSnapshot?.taxId||'—'}</b></span><br/>` : ''}
             <span style="font-size:11px;">Contact: ${c.vendorContactPerson||'—'}</span>
           </td>
         </tr>
