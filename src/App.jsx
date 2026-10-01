@@ -101,6 +101,35 @@ const DOC_TYPES = {
   creditnote:   { label: 'Credit/Debit note', prefix: 'CDN', icon: FileMinus,     color: '#B5453A', party: 'customer' },
 };
 
+// ─── Payment modes (shared across vouchers, petty cash, and all suite forms) ──
+const PAYMENT_MODES = ['Cash', 'Cheque', 'Demand Draft (DD)', 'NEFT', 'RTGS', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+
+// ─── GST state codes (India) — for "Place of Supply: State (code)" on documents ──
+const GST_STATE_CODES = {
+  'jammu and kashmir': '01', 'jammu & kashmir': '01', 'himachal pradesh': '02', 'punjab': '03',
+  'chandigarh': '04', 'uttarakhand': '05', 'haryana': '06', 'delhi': '07', 'rajasthan': '08',
+  'uttar pradesh': '09', 'bihar': '10', 'sikkim': '11', 'arunachal pradesh': '12', 'nagaland': '13',
+  'manipur': '14', 'mizoram': '15', 'tripura': '16', 'meghalaya': '17', 'assam': '18',
+  'west bengal': '19', 'jharkhand': '20', 'odisha': '21', 'orissa': '21', 'chhattisgarh': '22',
+  'madhya pradesh': '23', 'gujarat': '24', 'daman and diu': '25', 'dadra and nagar haveli': '26',
+  'dadra and nagar haveli and daman and diu': '26', 'maharashtra': '27', 'karnataka': '29',
+  'goa': '30', 'lakshadweep': '31', 'kerala': '32', 'tamil nadu': '33', 'tamilnadu': '33',
+  'puducherry': '34', 'pondicherry': '34', 'andaman and nicobar islands': '35', 'telangana': '36',
+  'andhra pradesh': '37', 'ladakh': '38', 'other territory': '97',
+};
+function gstStateCode(name) {
+  const k = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/&/g, 'and');
+  return GST_STATE_CODES[k] || '';
+}
+// Returns "Tamil Nadu (33)". If a code is already present, or no match, returns input unchanged.
+function withStateCode(name) {
+  const s = String(name || '').trim();
+  if (!s) return '';
+  if (/\(\s*\d{1,2}\s*\)/.test(s)) return s; // already has a (code)
+  const code = gstStateCode(s);
+  return code ? s + ' (' + code + ')' : s;
+}
+
 // ─── Convert map ──────────────────────────────────────────────────────────────
 const CONVERT_TO = {
   quotation: ['invoice'],
@@ -6352,7 +6381,7 @@ function PettyCashForm({ entry, onSave, onClose, currentUserName = '' }) {
         <div style={styles.formGroup}>
           <label style={styles.label}>Payment Mode</label>
           <select value={form.mode} onChange={e => set('mode', e.target.value)} style={styles.input}>
-            {['Cash', 'Cheque', 'NEFT', 'UPI', 'Other'].map(m => <option key={m}>{m}</option>)}
+            {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
         <div style={styles.formGroup}>
@@ -6844,7 +6873,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
         <div style={styles.formGroup}>
           <label style={styles.label}>Payment Mode</label>
           <select value={form.mode} onChange={e => set('mode', e.target.value)} style={styles.input}>
-            {['Cash', 'Cheque', 'NEFT', 'RTGS', 'UPI', 'Other'].map(m => <option key={m}>{m}</option>)}
+            {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
         <div style={styles.formGroup}>
@@ -7037,7 +7066,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
     ['Payment Date', voucher.date],
     ...(voucher.refNo ? [['Reference Number', voucher.refNo]] : []),
     ['Payment Mode', voucher.mode],
-    ...(placeOfSupply ? [['Place Of Supply', placeOfSupply]] : []),
+    ...(placeOfSupply ? [['Place Of Supply', withStateCode(placeOfSupply)]] : []),
     [isPayment ? 'Amount Paid In Words' : 'Amount Received In Words', amtInWords],
     ...((voucher.narration || voucher.accountHead) ? [['Description', voucher.narration || voucher.accountHead]] : []),
   ];
@@ -7057,12 +7086,13 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
-        {/* Centered title */}
+        {/* Centered title with gold accent */}
         <div style={{ textAlign: 'center', margin: '28px 0 30px' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.04em', fontFamily: 'Georgia, serif' }}>
+          <div style={{ fontSize: 21, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.05em', fontFamily: 'Georgia, serif' }}>
             {isPayment ? 'PAYMENT VOUCHER' : 'PAYMENT RECEIPT'}
           </div>
-          <div style={{ fontSize: 11.5, color: '#888', marginTop: 4 }}>No: {voucher.voucherNo}</div>
+          <div style={{ width: 64, height: 3, background: '#C9A24B', borderRadius: 2, margin: '8px auto 0' }} />
+          <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>No: {voucher.voucherNo}</div>
         </div>
         {/* Body: label/value column on the left + shaded amount box top-right */}
         <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', marginBottom: 40 }}>
@@ -7076,9 +7106,9 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
               ))}
             </tbody>
           </table>
-          <div style={{ width: 210, flexShrink: 0, background: '#4A4A4A', color: '#fff', borderRadius: 4, padding: '18px 20px', textAlign: 'center' }}>
-            <div style={{ fontSize: 12.5, opacity: 0.85, marginBottom: 6 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmt(voucher.amount || 0)}</div>
+          <div style={{ width: 220, flexShrink: 0, background: isPayment ? 'linear-gradient(135deg, #1E2A4A 0%, #2D3E6A 100%)' : 'linear-gradient(135deg, #15663A 0%, #1E9150 100%)', color: '#fff', borderRadius: 12, padding: '20px 22px', textAlign: 'center', boxShadow: '0 6px 18px rgba(30,42,74,0.18)' }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#C9A24B', fontWeight: 700, marginBottom: 8 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'Georgia, serif' }}>{fmt(voucher.amount || 0)}</div>
           </div>
         </div>
         {/* Footer: Paid To / Received From  +  Authorized Signature */}
