@@ -5000,7 +5000,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [] }) {
+function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -5303,8 +5303,23 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
 
           {(doc.type === 'purchase' || doc.type === 'purchasebill') && (
             <div style={styles.formGroup}>
-              <label style={styles.label}>{doc.type === 'purchase' ? 'Reference / requisition no.' : 'Vendor bill / invoice no.'}</label>
-              <input value={doc.refNumber} onChange={(e) => update('refNumber', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              <label style={styles.label}>{doc.type === 'purchase' ? 'Requisition No. / Reference' : 'Vendor bill / invoice no.'}</label>
+              {doc.type === 'purchase' ? (<>
+                <input value={doc.refNumber || ''} onChange={(e) => {
+                  const v = e.target.value;
+                  update('refNumber', v);
+                  // If they picked an existing PR, remember the link too
+                  const pr = (purchaseReqs || []).find(p => (p.number || '') === v);
+                  update('prId', pr ? pr.id : '');
+                }} list="pr-number-list" placeholder="Pick a PR or type a reference" style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+                <datalist id="pr-number-list">
+                  {(purchaseReqs || []).filter(p => p && p.number && (!doc.bizType || (p.bizType || 'trading') === doc.bizType)).map(p => (
+                    <option key={p.id} value={p.number}>{p.linkName || p.title || p.department || ''}</option>
+                  ))}
+                </datalist>
+              </>) : (
+                <input value={doc.refNumber} onChange={(e) => update('refNumber', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              )}
             </div>
           )}
 
@@ -5930,8 +5945,17 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             .pdf-exporting .di-screen-row, .pdf-exporting .no-print { display: none !important; }
             .pdf-exporting .di-print-row { display: table-row !important; }
             .pdf-exporting .di-screen { display: none !important; } .pdf-exporting .di-print { display: block !important; }
-            .pdf-exporting .di-input { border: none !important; background: transparent !important; box-shadow: none !important; color: #000 !important; }`}</style>
-          <table style={styles.table}>
+            .pdf-exporting .di-input { border: none !important; background: transparent !important; box-shadow: none !important; color: #000 !important; }
+            /* Professional bordered item table — only in print / PDF, editor stays clean */
+            @media print {
+              .doc-items-table { border: 1.5px solid #1E2A4A !important; border-collapse: collapse !important; }
+              .doc-items-table thead th { border: 1px solid #1E2A4A !important; background: #F1EFE9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 7px 8px !important; }
+              .doc-items-table tbody td { border: 1px solid #B9B4A6 !important; padding: 7px 8px !important; }
+            }
+            .pdf-exporting.doc-items-table, .pdf-exporting .doc-items-table { border: 1.5px solid #1E2A4A !important; border-collapse: collapse !important; }
+            .pdf-exporting .doc-items-table thead th { border: 1px solid #1E2A4A !important; background: #F1EFE9 !important; padding: 7px 8px !important; }
+            .pdf-exporting .doc-items-table tbody td { border: 1px solid #B9B4A6 !important; padding: 7px 8px !important; }`}</style>
+          <table className="doc-items-table" style={{ ...styles.table, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ ...styles.th, width: 34, textAlign: 'center' }}>Sl</th>
@@ -26091,6 +26115,7 @@ export default function App() {
           onConvert={convertDoc}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
           documents={documents}
+          purchaseReqs={purchaseReqs}
         />
       );
     }
