@@ -6686,7 +6686,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
         <VoucherForm voucher={editing} customers={customers} vendors={vendors} documents={documents} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printVoucher && (
-        <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
+        <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} customers={customers} vendors={vendors} onClose={() => setPrintVoucher(null)} />
       )}
       {statementParty && (
         <PartyStatementModal party={statementParty} vouchers={list} businessInfo={businessInfo} onClose={() => setStatementParty(null)} />
@@ -7019,16 +7019,27 @@ function VoucherSignatory({ businessInfo, leftLabel }) {
   );
 }
 
-function VoucherPrintModal({ voucher, businessInfo, onClose }) {
+function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], vendors = [] }) {
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const isPayment = voucher.type === 'payment';
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
-  const details = [
-    ['Account Head', voucher.accountHead],
+  // Resolve the party's full address (for the "Paid To / Received From" block)
+  const _party = [...(vendors || []), ...(customers || [])].find(p => (p.name || '') === voucher.party);
+  const partyAddr = voucher.partyAddress || _party?.address || '';
+  const partyState = _party?.state || '';
+  const amtInWords = (() => {
+    const words = numToWords(Math.floor(Math.abs(parseFloat(voucher.amount) || 0)));
+    return (cc.currency === '₹' ? 'Indian Rupee ' : (cc.currency || '') + ' ') + words + ' Only';
+  })();
+  const placeOfSupply = voucher.placeOfSupply || partyState || businessInfo.state || '';
+  const rows = [
+    ['Payment Date', voucher.date],
+    ...(voucher.refNo ? [['Reference Number', voucher.refNo]] : []),
     ['Payment Mode', voucher.mode],
-    ...(voucher.refNo ? [['Reference / Cheque No', voucher.refNo]] : []),
-    ...(voucher.narration ? [['Narration', voucher.narration]] : []),
+    ...(placeOfSupply ? [['Place Of Supply', placeOfSupply]] : []),
+    [isPayment ? 'Amount Paid In Words' : 'Amount Received In Words', amtInWords],
+    ...((voucher.narration || voucher.accountHead) ? [['Description', voucher.narration || voucher.accountHead]] : []),
   ];
 
   return (
@@ -7046,38 +7057,46 @@ function VoucherPrintModal({ voucher, businessInfo, onClose }) {
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
-        {/* Title */}
-        <div style={{ textAlign: 'right', marginBottom: 20 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: isPayment ? '#B91C1C' : '#1A7A3E', letterSpacing: '0.07em' }}>
-            {isPayment ? 'PAYMENT VOUCHER' : 'RECEIPT VOUCHER'}
+        {/* Centered title */}
+        <div style={{ textAlign: 'center', margin: '28px 0 30px' }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.04em', fontFamily: 'Georgia, serif' }}>
+            {isPayment ? 'PAYMENT VOUCHER' : 'PAYMENT RECEIPT'}
           </div>
-          <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>No: <strong>{voucher.voucherNo}</strong> &nbsp;·&nbsp; Date: <strong>{voucher.date}</strong></div>
+          <div style={{ fontSize: 11.5, color: '#888', marginTop: 4 }}>No: {voucher.voucherNo}</div>
         </div>
-        {/* Party */}
-        <div style={{ background: '#F8F5EE', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
-          <div style={{ fontSize: 10, color: '#888780', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>{isPayment ? 'Paid To' : 'Received From'}</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#1E2A4A' }}>{voucher.party}</div>
+        {/* Body: label/value column on the left + shaded amount box top-right */}
+        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', marginBottom: 40 }}>
+          <table style={{ flex: 1, fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              {rows.map(([label, val]) => (
+                <tr key={label}>
+                  <td style={{ padding: '10px 0', color: '#888780', width: '38%', fontWeight: 400, verticalAlign: 'top', whiteSpace: 'nowrap' }}>{label}</td>
+                  <td style={{ padding: '10px 10px 10px 0', color: '#1E2A4A', fontWeight: 700, borderBottom: '1px solid #EDEAE1' }}>{val}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ width: 210, flexShrink: 0, background: '#4A4A4A', color: '#fff', borderRadius: 4, padding: '18px 20px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12.5, opacity: 0.85, marginBottom: 6 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmt(voucher.amount || 0)}</div>
+          </div>
         </div>
-        {/* Detail rows */}
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 20 }}>
-          <tbody>
-            {details.map(([label, val]) => (
-              <tr key={label}>
-                <td style={{ padding: '8px 0', color: '#888780', width: '36%', fontWeight: 500, borderBottom: '1px solid #F0EDE5' }}>{label}</td>
-                <td style={{ padding: '8px 0', color: '#1E2A4A', borderBottom: '1px solid #F0EDE5' }}>{val}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {/* Amount */}
-        <div style={{ background: isPayment ? '#FEF2F2' : '#EEF7F1', borderRadius: 8, padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 14, color: isPayment ? '#B91C1C' : '#1A7A3E', fontWeight: 600 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: isPayment ? '#B91C1C' : '#1A7A3E' }}>{fmt(voucher.amount || 0)}</div>
+        {/* Footer: Paid To / Received From  +  Authorized Signature */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 50 }}>
+          <div style={{ maxWidth: '55%' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', marginBottom: 8 }}>{isPayment ? 'Paid To' : 'Received From'}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1E2A4A' }}>{voucher.party || '—'}</div>
+            {partyAddr && <div style={{ fontSize: 12, color: '#555', marginTop: 3, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{partyAddr}</div>}
+          </div>
+          <div style={{ textAlign: 'center', minWidth: 200 }}>
+            <div style={{ fontSize: 12.5, color: '#555', marginBottom: 46 }}>Authorized Signature</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', borderTop: '1px solid #333', paddingTop: 6 }}>For {businessInfo?.name || businessInfo?.companyName || 'the Company'}</div>
+            <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Proprietor</div>
+          </div>
         </div>
-        <VoucherSignatory businessInfo={businessInfo} leftLabel={isPayment ? 'Paid By' : 'Received By'} />
         {/* Bank details */}
         {(businessInfo.bankName || businessInfo.bankAccount) && (
-          <div style={{ marginTop: 20, paddingTop: 14, borderTop: '1px dashed #EAE6DB', fontSize: 11, color: '#888780' }}>
+          <div style={{ marginTop: 28, paddingTop: 14, borderTop: '1px dashed #EAE6DB', fontSize: 11, color: '#888780' }}>
             <strong style={{ color: '#555' }}>Bank: </strong>
             {businessInfo.bankName && <span>{businessInfo.bankName} </span>}
             {businessInfo.bankAccount && <span>· A/C: {businessInfo.bankAccount} </span>}
