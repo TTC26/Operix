@@ -13895,6 +13895,42 @@ function PartsMasterList({ parts, setParts, vendors = [], ownerUid, userRole }) 
     setParts(prev => prev.filter(p => p.id !== id));
   }
 
+  async function downloadPartsTemplate() {
+    const aoa = [['Part Number', 'Name', 'Description', 'Material', 'Weight', 'Finish', 'Tolerance', 'QC Criteria'],
+      ['SPN-0001', 'BRACKET L-TYPE', 'Mounting bracket', 'MS', '0.4 kg', 'Powder coated', '±0.2mm', 'Visual + dimensional'],
+      ['SPN-0002', 'SHAFT 20MM', 'Drive shaft', 'EN8', '1.2 kg', 'Hard chrome', '±0.05mm', 'Hardness 55 HRC']];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 14 }, { wch: 11 }, { wch: 22 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Parts'); XLSX.writeFile(wb, 'PartsMaster-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'PartsMaster-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importPartsXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /part|name|desc|material|weight|finish|toler|qc/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { pn: find('part number', 'part no', 'partno', 'part'), name: find('name'), desc: find('desc'), mat: find('material'), wt: find('weight'), fin: find('finish'), tol: find('toler'), qc: find('qc', 'quality') }; }
+      else { start = 0; idx = { pn: 0, name: 1, desc: 2, mat: 3, wt: 4, fin: 5, tol: 6, qc: 7 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      let count = parts.length;
+      const added = r2.slice(start).map(c => {
+        const name = g(c, idx.name) || g(c, idx.pn); if (!name || /^(name|part)/i.test(g(c, idx.name))) return null;
+        count++;
+        return { id: crypto.randomUUID(), createdAt: Date.now(), partNumber: g(c, idx.pn) || ('SPN-' + String(count).padStart(4, '0')), name: g(c, idx.name) || name, description: g(c, idx.desc), material: g(c, idx.mat), weight: g(c, idx.wt), finish: g(c, idx.fin), tolerance: g(c, idx.tol), qcCriteria: g(c, idx.qc), avl: [], drawingUrl: '', drawingPath: '', specs: '' };
+      }).filter(Boolean);
+      if (!added.length) { alert('No rows with a Part found. Check the Part Number / Name columns.'); e.target.value = ''; return; }
+      setParts(prev => [...added, ...(Array.isArray(prev) ? prev : [])]);
+      alert('✅ Imported ' + added.length + ' part(s).');
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   const filtered = parts.filter(p => {
     const q = search.toLowerCase();
     return !q || (p.partNumber + ' ' + p.name + ' ' + p.description).toLowerCase().includes(q);
@@ -13907,7 +13943,11 @@ function PartsMasterList({ parts, setParts, vendors = [], ownerUid, userRole }) 
           <h1 className="serif" style={styles.h1}>Parts Master</h1>
           <p style={styles.muted}>{parts.length} parts registered</p>
         </div>
-        {canEdit && <button onClick={() => { setEditing(null); setCreating(true); }} style={styles.primaryBtn}><Plus size={15} /> New Part</button>}
+        {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button onClick={() => { setEditing(null); setCreating(true); }} style={styles.primaryBtn}><Plus size={15} /> New Part</button>
+          <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Part Number, Name, Description, Material, Weight, Finish, Tolerance, QC Criteria">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importPartsXlsx} /></label>
+          <button type="button" onClick={downloadPartsTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
+        </div>}
       </div>
 
       <div style={{ ...styles.searchWrap, marginBottom: 16, maxWidth: 380 }}>
@@ -14339,13 +14379,54 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, b
     setEditing(null);
   }
 
+  async function downloadRMTemplate() {
+    const aoa = [['Name', 'Unit', 'Current Stock', 'Min Stock', 'Rate'], ['STEEL ROD 10MM', 'kg', 500, 50, 65], ['COPPER WIRE 2.5SQMM', 'm', 1200, 100, 18], ['PVC GRANULES', 'kg', 300, 40, 95]];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'RawMaterials'); XLSX.writeFile(wb, 'RawMaterials-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'RawMaterials-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importRMXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /name|material|unit|stock|rate|min/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { name: find('name', 'material', 'item'), unit: find('unit', 'uom'), stock: find('current stock', 'stock', 'qty', 'opening'), min: find('min'), rate: find('rate', 'price', 'cost') }; }
+      else { start = 0; idx = { name: 0, unit: 1, stock: 2, min: 3, rate: 4 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      const num = (v) => parseFloat(String(v).replace(/[^0-9.]/g, '')) || 0;
+      const existing = Array.isArray(rawMaterials) ? rawMaterials : [];
+      const added = []; let updated = 0;
+      r2.slice(start).forEach(c => {
+        const name = g(c, idx.name); if (!name || /^(name|material|item)$/i.test(name)) return;
+        const rec = { name, unit: g(c, idx.unit), stock: num(g(c, idx.stock)), minStock: num(g(c, idx.min)), rate: num(g(c, idx.rate)) };
+        const match = existing.find(x => (x.name || '').trim().toLowerCase() === name.toLowerCase());
+        if (match) { updated++; match._upd = rec; } else { added.push({ ...rec, id: crypto.randomUUID() }); }
+      });
+      if (!added.length && !updated) { alert('No rows with a Name found. Check the Name column.'); e.target.value = ''; return; }
+      setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(x => x._upd ? { ...x, ...x._upd, _upd: undefined } : x).concat(added));
+      alert('✅ Imported ' + added.length + ' new material(s)' + (updated ? ' and updated ' + updated + ' existing (stock/rate refreshed).' : '.'));
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Raw Materials</h1>
         <p style={styles.muted}>Track your raw material inventory and stock levels.</p>
       </div>
-      {canEdit && <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>}
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
+        <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>
+        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Name, Unit, Current Stock, Min Stock, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importRMXlsx} /></label>
+        <button type="button" onClick={downloadRMTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
+      </div>}
       <div style={{ ...styles.list, marginTop: 16 }}>
         {rawMaterials.length === 0 && <div style={styles.emptyBox}>No raw materials yet. Add materials to use in Bill of Materials.</div>}
         {rawMaterials.map((m) => (
