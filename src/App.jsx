@@ -73,7 +73,7 @@ const PLAN_MODULES = {
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis','investors',
+    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -3866,7 +3866,7 @@ const SECTION_VIEWS = {
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
   engineering: ['partsmaster', 'engdocs'],
-  production:  ['rawmaterials', 'bom', 'productionorders'],
+  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
@@ -3880,7 +3880,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
@@ -4185,6 +4185,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Production" />
                 <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
                 <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+                <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
 
                 <SubLabel label="Quality" />
                 <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
@@ -4528,6 +4529,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
               <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
               <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+              <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
             </Section>
           )}
 
@@ -11707,6 +11709,147 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── BO Shortages (Manufacturing) — material availability vs BOM requirement ──
+function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const today = new Date().toISOString().slice(0, 10);
+  const n3 = (x) => Math.round((parseFloat(x) || 0) * 1000) / 1000;
+  const bomList = (Array.isArray(boms) ? boms : []).filter(b => b && (!isMultiBiz || !b.bizType || b.bizType === currentBizType));
+  const rmById = {}; (rawMaterials || []).forEach(r => { if (r && r.id) rmById[r.id] = r; });
+  const [selBomId, setSelBomId] = React.useState('');
+  const [qty, setQty] = React.useState(1);
+  const [result, setResult] = React.useState(null);
+  const [printRep, setPrintRep] = React.useState(null);
+
+  function buildRows(bom, q) {
+    return (bom.materials || []).map(m => {
+      const rm = rmById[m.materialId];
+      const perBom = parseFloat(m.qty) || 0;
+      const overall = perBom * q;
+      const available = rm ? (parseFloat(rm.stock) || 0) : 0;
+      return { materialId: m.materialId, name: m.name || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
+    });
+  }
+  function compute() {
+    const bom = bomList.find(b => b.id === selBomId);
+    if (!bom) { alert('Please select a BOM first.'); return; }
+    const q = parseFloat(qty) || 0;
+    if (q <= 0) { alert('Enter a valid BO quantity (how many sets/batches to produce).'); return; }
+    setResult({ bomId: bom.id, bomName: bom.name || '(unnamed BOM)', outputQty: bom.outputQty || 1, outputUnit: bom.unit || '', qty: q, date: today, rows: buildRows(bom, q) });
+  }
+  function saveReport() {
+    if (!result) return;
+    const rec = { ...result, id: Date.now().toString(), bizType: currentBizType, createdAt: new Date().toISOString() };
+    setBoShortages(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    alert('✅ Shortage report saved.');
+  }
+  function del(id) { if (!window.confirm('Delete this saved shortage report?')) return; setBoShortages(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const savedList = (Array.isArray(boShortages) ? boShortages : []).filter(r => !isMultiBiz || (r.bizType || 'trading') === currentBizType).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const shortCount = result ? result.rows.filter(r => r.shortage > 0).length : 0;
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const tdc = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F2EFE6' };
+  const ResultTable = ({ rows }) => (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+        <thead><tr>{['Material', 'Available', 'Required / BOM', 'Required Overall', 'Shortage', 'Unit'].map(h => <th key={h} style={{ ...th, textAlign: h === 'Material' || h === 'Unit' ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ background: r.shortage > 0 ? '#FEF2F2' : undefined }}>
+              <td style={{ ...tdc, fontWeight: 600 }}>{r.name}</td>
+              <td style={{ ...tdc, textAlign: 'right' }}>{n3(r.available)}</td>
+              <td style={{ ...tdc, textAlign: 'right' }}>{n3(r.perBom)}</td>
+              <td style={{ ...tdc, textAlign: 'right', fontWeight: 600 }}>{n3(r.overall)}</td>
+              <td style={{ ...tdc, textAlign: 'right', fontWeight: 700, color: r.shortage > 0 ? '#B91C1C' : '#1A7A3E' }}>{r.shortage > 0 ? n3(r.shortage) : '—'}</td>
+              <td style={tdc}>{r.unit}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div style={styles.page}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 className="serif" style={styles.h1}>BO Shortages</h2>
+        <div style={styles.muted}>Pick a BOM and the order quantity to see material availability, requirement and shortage</div>
+      </div>
+
+      {/* Calculator */}
+      <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 18 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: 2, minWidth: 220 }}>
+            <label style={styles.label}>BOM / Product</label>
+            <select value={selBomId} onChange={e => { setSelBomId(e.target.value); setResult(null); }} style={styles.input}>
+              <option value="">— Select BOM —</option>
+              {bomList.map(b => <option key={b.id} value={b.id}>{b.name || '(unnamed BOM)'}{b.outputQty ? ' — makes ' + b.outputQty + ' ' + (b.unit || '') : ''}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={styles.label}>BO Quantity (sets/batches)</label>
+            <input type="number" min="1" value={qty} onChange={e => setQty(e.target.value)} style={styles.input} />
+          </div>
+          <button style={styles.primaryBtn} onClick={compute}>Calculate Shortage</button>
+        </div>
+        {bomList.length === 0 && <div style={{ fontSize: 12.5, color: '#B5453A', marginTop: 10 }}>No BOMs yet. Create a Bill of Materials first (Production → Bill of Materials).</div>}
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{result.bomName}</div>
+              <div style={{ fontSize: 12, color: '#888' }}>BO Qty: {result.qty} × BOM{result.outputQty ? ' (each makes ' + result.outputQty + ' ' + result.outputUnit + ')' : ''} · {result.rows.length} materials · <b style={{ color: shortCount ? '#B91C1C' : '#1A7A3E' }}>{shortCount ? shortCount + ' short' : 'All available'}</b></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={styles.ghostBtn} onClick={() => setPrintRep(result)}><Printer size={14} /> Print</button>
+              {canEdit && <button style={styles.primaryBtn} onClick={saveReport}>Save Report</button>}
+            </div>
+          </div>
+          <ResultTable rows={result.rows} />
+        </div>
+      )}
+
+      {/* Saved reports */}
+      {savedList.length > 0 && (<>
+        <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', margin: '8px 0 10px' }}>Saved Shortage Reports</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {savedList.map(r => {
+            const sc = (r.rows || []).filter(x => x.shortage > 0).length;
+            return (
+              <div key={r.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, background: '#fff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.bomName} <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>· BO Qty {r.qty} · {r.date}</span></div>
+                    <div style={{ fontSize: 12, color: sc ? '#B91C1C' : '#1A7A3E' }}>{sc ? sc + ' material(s) short' : 'All materials available'}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
+                    {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>)}
+
+      {/* Print overlay */}
+      {printRep && (
+        <DocPrintOverlay onClose={() => setPrintRep(null)} filename={'BO-Shortage-' + (printRep.bomName || 'BOM').replace(/\s+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>BO SHORTAGE REPORT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{printRep.bomName} · BO Qty {printRep.qty} · {printRep.date}</div>
+          <ResultTable rows={printRep.rows || []} />
+          <div style={{ marginTop: 14, fontSize: 12.5, color: '#555' }}>Materials short: <b style={{ color: (printRep.rows || []).filter(x => x.shortage > 0).length ? '#B91C1C' : '#1A7A3E' }}>{(printRep.rows || []).filter(x => x.shortage > 0).length}</b> of {(printRep.rows || []).length}</div>
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
@@ -25369,6 +25512,7 @@ export default function App() {
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
   const [investors,        _setInv]        = useState([]);
   const [profitShares,     _setPS]         = useState([]);
+  const [boShortages,      _setBOS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [bypassEmails,     setBypassEmails]   = useState([]); // global super-admin-managed free list
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -25570,6 +25714,7 @@ export default function App() {
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
       _setInv(data.investors || []);
       _setPS(data.profitShares || []);
+      _setBOS(data.boShortages || []);
     }, (err) => {
       console.warn('Firestore load error:', err);
       setDataError(true);
@@ -25667,6 +25812,7 @@ export default function App() {
   const setRackStore        = mkSet(_setRS,        'rackStore');
   const setInvestors        = mkSet(_setInv,   'investors');
   const setProfitShares     = mkSet(_setPS,    'profitShares');
+  const setBoShortages      = mkSet(_setBOS,   'boShortages');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -25833,7 +25979,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -25907,6 +26053,7 @@ export default function App() {
     if (backup.rackStore)       setRackStore(backup.rackStore);
     if (backup.investors)       setInvestors(backup.investors);
     if (backup.profitShares)    setProfitShares(backup.profitShares);
+    if (backup.boShortages)     setBoShortages(backup.boShortages);
     alert('✅ Data restored successfully! All your records are back.');
   }
 
@@ -25937,6 +26084,7 @@ export default function App() {
       ['Payroll runs', payrollRuns, setPayrollRuns],
       ['Investors', investors, setInvestors],
       ['Profit shares', profitShares, setProfitShares],
+      ['BO shortages', boShortages, setBoShortages],
     ];
     if (only) {
       let fixed = 0; const lines = [];
@@ -27023,6 +27171,19 @@ export default function App() {
             vouchers={sessionVouchers}
             pettyCash={sessionPettyCash}
             payrollRuns={payrollRuns}
+          />
+        );
+      case 'boshortage':
+        return (
+          <BOShortageView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            boms={boms}
+            rawMaterials={rawMaterials}
+            boShortages={boShortages}
+            setBoShortages={setBoShortages}
           />
         );
       case 'purchasereq':
