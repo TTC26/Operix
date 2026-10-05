@@ -11726,12 +11726,18 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
   const [printRep, setPrintRep] = React.useState(null);
 
   function buildRows(bom, q) {
-    return (bom.materials || []).map(m => {
-      const rm = rmById[m.materialId];
+    // Support both BOM shapes: BOMForm saves `materials` ({materialId,...}); older/other
+    // BOMs may use `components` ({itemId,...}). Match stock from Raw Materials by id or name.
+    const lines = (bom.materials && bom.materials.length) ? bom.materials : (bom.components || []);
+    return lines.map(m => {
+      const mid = m.materialId || m.itemId || '';
+      const nm = m.name || '';
+      let rm = rmById[mid];
+      if (!rm && nm) rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === nm.trim().toLowerCase());
       const perBom = parseFloat(m.qty) || 0;
       const overall = perBom * q;
       const available = rm ? (parseFloat(rm.stock) || 0) : 0;
-      return { materialId: m.materialId, name: m.name || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
+      return { materialId: rm ? rm.id : mid, name: nm || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
     });
   }
   function compute() {
@@ -11837,7 +11843,13 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button style={styles.ghostBtn} onClick={() => setPrintRep(result)}><Printer size={14} /> Print</button>
-              {canEdit && shortCount > 0 && <button style={{ ...styles.primaryBtn, background: '#B91C1C' }} onClick={() => createPR(result)}>🛒 Raise PR for {shortCount} shortage{shortCount !== 1 ? 's' : ''}</button>}
+              <button
+                style={{ ...styles.primaryBtn, background: shortCount > 0 ? '#B91C1C' : '#C9C4B8', cursor: shortCount > 0 ? 'pointer' : 'not-allowed' }}
+                disabled={shortCount === 0}
+                title={shortCount > 0 ? 'Create a Purchase Requisition for the short materials' : 'No shortages to raise a PR for'}
+                onClick={() => createPR(result)}>
+                🛒 Raise PR{shortCount > 0 ? ' for ' + shortCount + ' shortage' + (shortCount !== 1 ? 's' : '') : ' (no shortage)'}
+              </button>
               {canEdit && <button style={styles.primaryBtn} onClick={saveReport}>Save Report</button>}
             </div>
           </div>
@@ -11859,7 +11871,7 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
                     <div style={{ fontSize: 12, color: sc ? '#B91C1C' : '#1A7A3E' }}>{sc ? sc + ' material(s) short' : 'All materials available'}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    {canEdit && sc > 0 && <button style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B91C1C' }} title="Raise a Purchase Requisition for the shortages" onClick={() => createPR(r)}>🛒 Raise PR</button>}
+                    {sc > 0 && <button style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B91C1C' }} title="Raise a Purchase Requisition for the shortages" onClick={() => createPR(r)}>🛒 Raise PR</button>}
                     <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
                     {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
                   </div>
