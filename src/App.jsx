@@ -11714,7 +11714,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
 }
 
 // ─── BO Shortages (Manufacturing) — material availability vs BOM requirement ──
-function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages }) {
+function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
   const canEdit = userRole === 'admin' || userRole === 'manager';
   const today = new Date().toISOString().slice(0, 10);
   const n3 = (x) => Math.round((parseFloat(x) || 0) * 1000) / 1000;
@@ -11748,6 +11748,33 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
     alert('✅ Shortage report saved.');
   }
   function del(id) { if (!window.confirm('Delete this saved shortage report?')) return; setBoShortages(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  function nextPRNumber() {
+    const yr = new Date().getFullYear();
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
+    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+  }
+  function createPR(rep) {
+    if (!setPurchaseReqs) return;
+    const shortRows = (rep.rows || []).filter(r => r.shortage > 0);
+    if (!shortRows.length) { alert('No shortages — nothing to raise a PR for.'); return; }
+    const items = shortRows.map(r => {
+      const rm = rmById[r.materialId];
+      return { itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: rm ? (parseFloat(rm.rate) || '') : '', hsn: '', purpose: 'BOM shortage — ' + rep.bomName };
+    });
+    const rec = {
+      id: Date.now().toString(), number: nextPRNumber(), bizType: currentBizType,
+      type: 'manufacturing', linkId: rep.bomId || '', linkName: rep.bomName || '',
+      date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
+      bomRef: rep.bomId || '', bomMult: rep.qty || 1,
+      items, remarks: 'Auto-raised from BO Shortage (BO Qty ' + rep.qty + ')',
+      approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
+    };
+    setPurchaseReqs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    if (window.confirm('✅ Purchase Requisition ' + rec.number + ' created with ' + items.length + ' short item(s).\n\nOpen Purchase Requisition now? (From there, approve it and convert to a PO for your vendor.)')) {
+      if (setView) setView('purchasereq');
+    }
+  }
 
   const savedList = (Array.isArray(boShortages) ? boShortages : []).filter(r => !isMultiBiz || (r.bizType || 'trading') === currentBizType).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const shortCount = result ? result.rows.filter(r => r.shortage > 0).length : 0;
@@ -11808,8 +11835,9 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
               <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{result.bomName}</div>
               <div style={{ fontSize: 12, color: '#888' }}>BO Qty: {result.qty} × BOM{result.outputQty ? ' (each makes ' + result.outputQty + ' ' + result.outputUnit + ')' : ''} · {result.rows.length} materials · <b style={{ color: shortCount ? '#B91C1C' : '#1A7A3E' }}>{shortCount ? shortCount + ' short' : 'All available'}</b></div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button style={styles.ghostBtn} onClick={() => setPrintRep(result)}><Printer size={14} /> Print</button>
+              {canEdit && shortCount > 0 && <button style={{ ...styles.primaryBtn, background: '#B91C1C' }} onClick={() => createPR(result)}>🛒 Raise PR for {shortCount} shortage{shortCount !== 1 ? 's' : ''}</button>}
               {canEdit && <button style={styles.primaryBtn} onClick={saveReport}>Save Report</button>}
             </div>
           </div>
@@ -11830,7 +11858,8 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
                     <div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.bomName} <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>· BO Qty {r.qty} · {r.date}</span></div>
                     <div style={{ fontSize: 12, color: sc ? '#B91C1C' : '#1A7A3E' }}>{sc ? sc + ' material(s) short' : 'All materials available'}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {canEdit && sc > 0 && <button style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B91C1C' }} title="Raise a Purchase Requisition for the shortages" onClick={() => createPR(r)}>🛒 Raise PR</button>}
                     <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
                     {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
                   </div>
@@ -27305,6 +27334,9 @@ export default function App() {
             rawMaterials={rawMaterials}
             boShortages={boShortages}
             setBoShortages={setBoShortages}
+            purchaseReqs={purchaseReqs}
+            setPurchaseReqs={setPurchaseReqs}
+            setView={setView}
           />
         );
       case 'purchasereq':
