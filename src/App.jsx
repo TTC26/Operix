@@ -14499,6 +14499,41 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
     setForm((f) => ({ ...f, materials: f.materials.filter((_, idx) => idx !== i) }));
   }
 
+  async function downloadBomTemplate() {
+    const aoa = [['Material', 'Unit', 'Qty'], ['STEEL ROD 10MM', 'kg', 12], ['COPPER WIRE 2.5SQMM', 'm', 40], ['PVC GRANULES', 'kg', 5]];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, 'BOM-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'BOM-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importBomXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /material|item|name|unit|qty|quantity/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { name: find('material', 'item', 'name', 'description'), unit: find('unit', 'uom'), qty: find('qty', 'quantity', 'nos') }; }
+      else { start = 0; idx = { name: 0, unit: 1, qty: 2 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      const added = r2.slice(start).map(c => {
+        const name = g(c, idx.name); if (!name || /^(material|item|name)$/i.test(name)) return null;
+        // Match an existing raw material by name (case-insensitive) to link its id/unit
+        const rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === name.toLowerCase());
+        return { materialId: rm ? rm.id : '', name: rm ? rm.name : name, unit: g(c, idx.unit) || (rm && rm.unit) || '', qty: parseFloat(g(c, idx.qty).replace(/[^0-9.]/g, '')) || 0 };
+      }).filter(Boolean);
+      if (!added.length) { alert('No rows with a Material name found. Check the Material column.'); e.target.value = ''; return; }
+      const unmatched = added.filter(a => !a.materialId).length;
+      setForm((f) => ({ ...f, materials: [...(f.materials || []), ...added] }));
+      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Raw Materials — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {parts.length > 0 && (
@@ -14536,7 +14571,12 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
           <button onClick={() => removeMaterial(i)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
         </div>
       ))}
-      <button onClick={addMaterial} style={{ ...styles.ghostBtn, marginBottom: 16, fontSize: 13 }}><Plus size={14} /> Add material</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+        <button onClick={addMaterial} style={{ ...styles.ghostBtn, fontSize: 13 }}><Plus size={14} /> Add material</button>
+        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }} title="Bulk-import materials from Excel/CSV — columns: Material, Unit, Qty">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importBomXlsx} /></label>
+        <button type="button" onClick={downloadBomTemplate} style={{ ...styles.ghostBtn, fontSize: 13 }} title="Download the import template">⬇ Template</button>
+        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Raw Materials by name)</span>
+      </div>
       <div style={styles.sectionDivider}>Engineering Specifications</div>
       <SpecsFields
         specs={form.specs}
