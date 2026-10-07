@@ -1830,12 +1830,24 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [catFilter, setCatFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [showPrint, setShowPrint] = useState(false);
   const filtered = items.filter(it => {
     const matchCat = !catFilter || it.category === catFilter;
     const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  const splitTax = cc.splitTax;
+  async function exportItemsXlsx() {
+    const head = ['Item Code', 'Name', 'Category', ...(splitTax ? ['HSN/SAC'] : []), 'Unit', 'Opening Stock', 'Min Stock', 'Purchase Rate', 'Sale Rate', ...(cc.hasTax ? [cc.taxLabel + ' %'] : [])];
+    const aoa = [head, ...filtered.map(it => [
+      it.itemCode || '', it.name || '', it.category || '', ...(splitTax ? [it.hsn || ''] : []),
+      it.unit || '', Number(it.openingStock) || 0, Number(it.minStock) || 0,
+      Number(it.purchaseRate ?? it.rate) || 0, Number(it.saleRate ?? it.rate) || 0, ...(cc.hasTax ? [Number(it.gst) || 0] : []),
+    ])];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Items'); XLSX.writeFile(wb, 'Item-Master.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'Item-Master.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
   function handleItemImport(e){
     const file = e.target.files && e.target.files[0]; if(!file) return;
     const rdr = new FileReader();
@@ -1900,6 +1912,8 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
         <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
+        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+        {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -1929,6 +1943,31 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
           </div>
         ))}
       </div>
+
+      {showPrint && (
+        <DocPrintOverlay onClose={() => setShowPrint(false)} filename="Item-Master.pdf" businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>ITEM MASTER</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}{catFilter ? ' · ' + catFilter : ''} · {new Date().toLocaleDateString('en-IN')}</div>
+          <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F1EFE9' }}>{['Code', 'Name', 'Category', ...(cc.splitTax ? ['HSN'] : []), 'Unit', 'Op.Stock', 'Buy', 'Sell', ...(cc.hasTax ? [cc.taxLabel + '%'] : [])].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: h === 'Name' || h === 'Category' ? 'left' : 'right', borderBottom: '1px solid #CCC', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {filtered.map(it => (
+                <tr key={it.id}>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontFamily: 'monospace' }}>{it.itemCode || ''}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{it.name}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE' }}>{it.category || ''}</td>
+                  {cc.splitTax && <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{it.hsn || ''}</td>}
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{it.unit || ''}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{Number(it.openingStock) || 0}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{fmt(it.saleRate ?? it.rate ?? 0)}</td>
+                  {cc.hasTax && <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{Number(it.gst) || 0}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
