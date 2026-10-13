@@ -2028,13 +2028,30 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
           <label style={styles.label}>Purchase rate (cost price)</label>
-          <input type="number" value={form.purchaseRate ?? form.rate ?? 0} onChange={e => set('purchaseRate', Number(e.target.value))} style={styles.input} placeholder="0.00" />
+          <input type="number" value={form.purchaseRate ?? form.rate ?? 0} onChange={e => {
+            const pr = Number(e.target.value) || 0;
+            const mg = parseFloat(form.marginPct);
+            setForm(p => ({ ...p, purchaseRate: pr, ...(!isNaN(mg) ? { saleRate: Math.round(pr * (1 + mg / 100) * 100) / 100 } : {}) }));
+          }} style={styles.input} placeholder="0.00" />
+        </div>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Margin % <span style={{ color: '#999', fontWeight: 400 }}>(auto-calcs sale)</span></label>
+          <input type="number" value={form.marginPct ?? ''} onChange={e => {
+            const mg = e.target.value === '' ? '' : (parseFloat(e.target.value) || 0);
+            const pr = Number(form.purchaseRate ?? form.rate) || 0;
+            setForm(p => ({ ...p, marginPct: mg, ...(mg !== '' ? { saleRate: Math.round(pr * (1 + mg / 100) * 100) / 100 } : {}) }));
+          }} style={styles.input} placeholder="e.g. 20" />
         </div>
         <div style={{ ...styles.formGroup, flex: 1 }}>
           <label style={styles.label}>Sale rate (selling price)</label>
-          <input type="number" value={form.saleRate ?? form.rate ?? 0} onChange={e => set('saleRate', Number(e.target.value))} style={styles.input} placeholder="0.00" />
+          <input type="number" value={form.saleRate ?? form.rate ?? 0} onChange={e => {
+            const sr = Number(e.target.value) || 0;
+            const pr = Number(form.purchaseRate ?? form.rate) || 0;
+            setForm(p => ({ ...p, saleRate: sr, marginPct: pr > 0 ? Math.round(((sr / pr) - 1) * 10000) / 100 : p.marginPct }));
+          }} style={styles.input} placeholder="0.00" />
         </div>
       </div>
+      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: -6, marginBottom: 6 }}>Enter a Margin % to auto-calculate the sale rate, or type the sale rate directly — both stay in sync.</div>
       {cc.hasTax && (
         <div style={{ display: 'flex', gap: 12 }}>
           <div style={{ ...styles.formGroup, flex: 1 }}>
