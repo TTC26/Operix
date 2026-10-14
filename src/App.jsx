@@ -522,7 +522,7 @@ const styles = {
   secondaryBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#F5F3EE', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 16px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   ghostBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 14px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   iconBtn: { background: 'none', border: 'none', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', cursor: 'pointer' },
-  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13, position: 'relative', overflow: 'visible' },
+  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13, position: 'relative', overflow: 'hidden' },
   previewHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   previewBrand: { fontSize: 19, fontWeight: 600, color: '#1E2A4A' },
   previewSmall: { fontSize: 12, color: '#888780', marginTop: 2, lineHeight: 1.5 },
@@ -7086,48 +7086,20 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   );
 }
 
-// Injects CSS so letterpad header/footer are fixed on every printed page.
-// The body's top/bottom padding is MEASURED from the real letterhead image height
-// (not a fixed guess) so the content never overlaps the letterhead or leaves a gap.
+// Letterhead header/footer flow INLINE (not fixed) so the document content always
+// starts cleanly below the header — no overlap, no manual height guessing. The
+// header image spans the full page width; content follows it naturally.
 function LetterpadPrintStyle() {
-  const [pad, setPad] = React.useState({ top: 0, bottom: 0 });
-  React.useEffect(() => {
-    const measure = () => {
-      const h = document.querySelector('.lh-pad-header');
-      const f = document.querySelector('.lh-pad-footer');
-      setPad({ top: h ? h.offsetHeight + 18 : 0, bottom: f ? f.offsetHeight + 14 : 0 });
-    };
-    measure();
-    const t1 = setTimeout(measure, 150);
-    const t2 = setTimeout(measure, 600);
-    const imgs = document.querySelectorAll('.lh-pad-header img, .lh-pad-footer img');
-    imgs.forEach(im => im.addEventListener('load', measure));
-    window.addEventListener('resize', measure);
-    window.addEventListener('beforeprint', measure);
-    return () => { clearTimeout(t1); clearTimeout(t2); imgs.forEach(im => im.removeEventListener('load', measure)); window.removeEventListener('resize', measure); window.removeEventListener('beforeprint', measure); };
-  }, []);
   return (
     <style>{`
-      /* ── Screen: footer fills full width edge-to-edge ── */
-      @media screen {
-        .lh-pad-footer { padding: 0 !important; overflow: hidden !important; }
-        .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
-        .lh-pad-header img { width: 100% !important; height: auto !important; display: block !important; }
-      }
-      /* ── Print: header/footer fixed so they repeat on every page; body padding
-         auto-sized to the measured letterhead height (no overlap, no gap). ── */
+      .lh-pad-header img, .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
+      /* Break the letterhead out of the page padding so the colored design bleeds
+         to the top/side edges (header) and bottom/side edges (footer) — no gap.
+         (.print-area / .preview padding is 40px top-bottom, 48px sides.) */
+      .lh-pad-header { margin: -40px -48px 16px -48px !important; width: auto !important; background: #fff !important; }
+      .lh-pad-footer { margin: 18px -48px -40px -48px !important; width: auto !important; background: #fff !important; }
       @media print {
-        .lh-pad-header {
-          position: fixed !important; top: 0 !important; left: 0 !important;
-          right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
-        }
-        .lh-pad-header img { width: 100% !important; height: auto !important; display: block !important; }
-        .lh-pad-footer {
-          position: fixed !important; bottom: 0 !important; left: 0 !important;
-          right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
-        }
-        .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
-        .print-area { padding-top: ${pad.top}px !important; padding-bottom: ${pad.bottom}px !important; }
+        .print-area { padding-top: 0 !important; padding-bottom: 0 !important; }
       }
     `}</style>
   );
