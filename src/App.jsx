@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails } from './firebase';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails, loadBranding, saveBranding } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -2495,6 +2495,42 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
         })()}
 
         {userRole === 'admin' && (<>
+        <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Branding &amp; Letterhead</div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 12, lineHeight: 1.6 }}>
+          Upload your <b>logo</b> for the standard templates, or upload a full <b>letterhead</b> image (your printed pad design) to print documents on your own letterhead. When a letterhead is set, every document's Print / PDF screen shows a <b>"📃 Use Letterhead"</b> toggle.
+        </div>
+
+        {/* Logo */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Company Logo <span style={{ color: '#999', fontWeight: 400 }}>(for standard templates — PNG/JPG, under 500 KB)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.logo && <img src={form.logo} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 8, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.logo ? 'Change logo' : '⬆ Upload logo'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} /></label>
+            {form.logo && <button type="button" onClick={() => setForm(p => ({ ...p, logo: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+        </div>
+
+        {/* Letterhead header */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(full-width — top of page, under 1.5 MB)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.letterhead && <img src={form.letterhead} alt="letterhead" style={{ width: 160, maxHeight: 60, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterhead ? 'Change letterhead' : '⬆ Upload letterhead'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadUpload} /></label>
+            {form.letterhead && <button type="button" onClick={() => setForm(p => ({ ...p, letterhead: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+        </div>
+
+        {/* Letterhead footer (optional) */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(full-width — bottom of page)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.letterheadFooter && <img src={form.letterheadFooter} alt="footer" style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterheadFooter ? 'Change footer' : '⬆ Upload footer'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadFooterUpload} /></label>
+            {form.letterheadFooter && <button type="button" onClick={() => setForm(p => ({ ...p, letterheadFooter: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+        </div>
+        {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
+
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Region &amp; Tax</div>
 
         <div style={styles.formGroup}>
@@ -7050,41 +7086,48 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   );
 }
 
-// Injects CSS so letterpad header/footer are fixed on every printed page
+// Injects CSS so letterpad header/footer are fixed on every printed page.
+// The body's top/bottom padding is MEASURED from the real letterhead image height
+// (not a fixed guess) so the content never overlaps the letterhead or leaves a gap.
 function LetterpadPrintStyle() {
+  const [pad, setPad] = React.useState({ top: 0, bottom: 0 });
+  React.useEffect(() => {
+    const measure = () => {
+      const h = document.querySelector('.lh-pad-header');
+      const f = document.querySelector('.lh-pad-footer');
+      setPad({ top: h ? h.offsetHeight + 18 : 0, bottom: f ? f.offsetHeight + 14 : 0 });
+    };
+    measure();
+    const t1 = setTimeout(measure, 150);
+    const t2 = setTimeout(measure, 600);
+    const imgs = document.querySelectorAll('.lh-pad-header img, .lh-pad-footer img');
+    imgs.forEach(im => im.addEventListener('load', measure));
+    window.addEventListener('resize', measure);
+    window.addEventListener('beforeprint', measure);
+    return () => { clearTimeout(t1); clearTimeout(t2); imgs.forEach(im => im.removeEventListener('load', measure)); window.removeEventListener('resize', measure); window.removeEventListener('beforeprint', measure); };
+  }, []);
   return (
     <style>{`
-      /* ── Screen: force footer to fill full width edge-to-edge ── */
+      /* ── Screen: footer fills full width edge-to-edge ── */
       @media screen {
-        .lh-pad-footer {
-          height: 130px !important;
-          padding: 0 !important;
-          overflow: hidden !important;
-        }
-        .lh-pad-footer img {
-          width: 100% !important;
-          height: 130px !important;
-          object-fit: cover !important;
-          object-position: center !important;
-          display: block !important;
-        }
-        .lh-pad-header img {
-          width: 100% !important;
-          height: auto !important;
-          display: block !important;
-        }
+        .lh-pad-footer { padding: 0 !important; overflow: hidden !important; }
+        .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
+        .lh-pad-header img { width: 100% !important; height: auto !important; display: block !important; }
       }
-      /* ── Print: fixed position so header/footer repeat on every page ── */
+      /* ── Print: header/footer fixed so they repeat on every page; body padding
+         auto-sized to the measured letterhead height (no overlap, no gap). ── */
       @media print {
         .lh-pad-header {
           position: fixed !important; top: 0 !important; left: 0 !important;
           right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
         }
+        .lh-pad-header img { width: 100% !important; height: auto !important; display: block !important; }
         .lh-pad-footer {
           position: fixed !important; bottom: 0 !important; left: 0 !important;
           right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
         }
-        .print-area { padding-top: 215px !important; padding-bottom: 135px !important; }
+        .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
+        .print-area { padding-top: ${pad.top}px !important; padding-bottom: ${pad.bottom}px !important; }
       }
     `}</style>
   );
@@ -25748,6 +25791,14 @@ export default function App() {
     return () => { try { unsub && unsub(); } catch (_e) {} };
   }, [user]);
 
+  // ── Load branding (logo / letterhead) from its own doc and merge into state ──
+  useEffect(() => {
+    if (!ownerUid) return;
+    loadBranding(ownerUid).then((b) => {
+      if (b && Object.keys(b).length) _setBi((prev) => ({ ...prev, ...b }));
+    }).catch(() => {});
+  }, [ownerUid]);
+
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     return watchAuth(async (firebaseUser) => {
@@ -25861,7 +25912,9 @@ export default function App() {
       const _biRaw = data.businessInfo || {};
       const _biClean = {};
       Object.keys(_biRaw).forEach((k) => { if (!BRANDING_KEYS.includes(k)) _biClean[k] = _biRaw[k]; });
-      _setBi(_biClean);
+      // Keep branding (logo/letterhead) that's already in memory — it lives in a
+      // separate Firestore doc and must survive each main-doc snapshot.
+      _setBi((prev) => { const b = {}; BRANDING_KEYS.forEach((k) => { if (prev && prev[k]) b[k] = prev[k]; }); return { ..._biClean, ...b }; });
       // One-time cleanup: strip any legacy letterhead/logo from the main document
       // so it drops below Firestore's 1 MB limit and saves reach the server again.
       try {
@@ -25968,12 +26021,16 @@ export default function App() {
   function setBusinessInfo(v) {
     _setBi((prev) => {
       const raw = typeof v === 'function' ? v(prev) : v;
-      // Letterhead/logo are intentionally NOT stored — keeps the company document
-      // well under Firestore's 1 MB limit so every save reaches the server.
+      // Core (text) fields go in the main company doc (kept small, <1 MB).
       const core = {};
       Object.keys(raw || {}).forEach((k) => { if (!BRANDING_KEYS.includes(k)) core[k] = raw[k]; });
       persist({ businessInfo: core });
-      return core;
+      // Branding (logo / letterhead images) lives in its own doc so the main doc
+      // stays small; save it separately and KEEP it in memory so it persists.
+      const brand = {};
+      BRANDING_KEYS.forEach((k) => { if (raw && raw[k] !== undefined) brand[k] = raw[k]; });
+      if (ownerUid && Object.keys(brand).length) { try { saveBranding(ownerUid, brand); } catch (_e) {} }
+      return { ...core, ...brand };
     });
   }
   const setDocuments        = mkSet(_setDocs,  'documents');
