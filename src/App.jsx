@@ -342,6 +342,8 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
   return (
     <>
       {autoWide && <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
+      {/* Letterhead edge-to-edge: zero the page margins so the header/footer reach the paper edges */}
+      {useLH && !autoWide && <style>{`@media print { html, body { margin:0 !important; padding:0 !important; } @page { size: A4; margin: 0 !important; } .doc-print-area .pa-body { padding-top: 14px !important; } }`}</style>}
       <div className="no-print" onClick={onClose}
         style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:998 }}/>
       <div className="no-print" style={{ position:'fixed', top:16, right:24, zIndex:1001, display:'flex', gap:8 }}>
@@ -369,7 +371,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
           )}
           {children}
           {useLH && businessInfo?.letterheadFooter && (
-            <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'100%', display:'block', marginTop:32 }}/>
+            <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'calc(100% + 112px)', marginLeft:-56, marginRight:-56, display:'block', marginTop:32 }}/>
           )}
         </div>
       </div>
