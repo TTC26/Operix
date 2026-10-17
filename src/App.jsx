@@ -342,8 +342,15 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
   return (
     <>
       {autoWide && <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
-      {/* Letterhead edge-to-edge: zero the page margins so the header/footer reach the paper edges */}
-      {useLH && !autoWide && <style>{`@media print { html, body { margin:0 !important; padding:0 !important; } @page { size: A4; margin: 0 !important; } .doc-print-area .pa-body { padding-top: 14px !important; } }`}</style>}
+      {/* Letterhead edge-to-edge + footer pinned to page bottom (same rules as the
+         main document editor, so every print across the app looks identical). */}
+      {useLH && !autoWide && <style>{`@media print {
+        html, body { margin:0 !important; padding:0 !important; }
+        @page { size: A4; margin: 0 !important; }
+        .doc-print-area .pa-body { padding-top: 14px !important; padding-bottom: 110px !important; }
+        .doc-print-area .lh-pad-footer { position: fixed !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; margin:0 !important; background:#fff !important; z-index:9999 !important; }
+        .doc-print-area .lh-pad-footer img { width:100% !important; display:block !important; }
+      }`}</style>}
       <div className="no-print" onClick={onClose}
         style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:998 }}/>
       <div className="no-print" style={{ position:'fixed', top:16, right:24, zIndex:1001, display:'flex', gap:8 }}>
@@ -359,6 +366,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={styles.primaryBtn} onClick={()=>window.print()}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
+        <DocFontStyle businessInfo={businessInfo} />
         {useLH && <LetterheadHeader bi={businessInfo} />}
         <div className="pa-body" style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
           {!useLH && businessInfo && (
@@ -371,7 +379,9 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
           )}
           {children}
           {useLH && businessInfo?.letterheadFooter && (
-            <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'calc(100% + 112px)', marginLeft:-56, marginRight:-56, display:'block', marginTop:32 }}/>
+            <div className="lh-pad-footer" style={{ marginTop:32, marginLeft:-56, marginRight:-56 }}>
+              <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'100%', display:'block' }}/>
+            </div>
           )}
         </div>
       </div>
@@ -2532,6 +2542,17 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
           </div>
         </div>
         {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Document Font <span style={{ color: '#999', fontWeight: 400 }}>(applies to all printed documents)</span></label>
+          <select value={form.docFont || 'serif'} onChange={e => setForm(p => ({ ...p, docFont: e.target.value }))} style={{ ...styles.input, fontFamily: (DOC_FONTS[form.docFont] || DOC_FONTS.serif).stack }}>
+            {Object.entries(DOC_FONTS).map(([k, v]) => <option key={k} value={k} style={{ fontFamily: v.stack }}>{v.label}</option>)}
+          </select>
+          <div style={{ marginTop: 8, padding: '10px 14px', border: '1px solid #EAE6DB', borderRadius: 8, background: '#fff', fontFamily: (DOC_FONTS[form.docFont] || DOC_FONTS.serif).stack }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>Preview — {businessInfo?.name || 'Your Company'}</div>
+            <div style={{ fontSize: 12.5, color: '#555', marginTop: 2 }}>Invoice No: INV/26-27/001 · Amount: ₹1,23,456.00 — The quick brown fox.</div>
+          </div>
+        </div>
 
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Region &amp; Tax</div>
 
@@ -5653,6 +5674,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         </div>
 
         <div style={styles.preview} className="print-area">
+          <DocFontStyle businessInfo={businessInfo} />
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
           {useLH && <LetterheadHeader bi={businessInfo} />}
           {/* ── DRAFT watermark — visible on screen + print when not approved ── */}
@@ -7067,6 +7089,28 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
 // Letterhead header/footer flow INLINE (not fixed) so the document content always
 // starts cleanly below the header — no overlap, no manual height guessing. The
 // header image spans the full page width; content follows it naturally.
+// Document font choices (applied to all printed documents). Web-safe stacks so
+// they render identically on screen and in print — no missing-font fallback.
+const DOC_FONTS = {
+  serif:   { label: 'Georgia (classic serif)',  stack: "Georgia, 'Times New Roman', serif" },
+  times:   { label: 'Times New Roman',           stack: "'Times New Roman', Times, serif" },
+  arial:   { label: 'Arial / Helvetica',         stack: "Arial, Helvetica, sans-serif" },
+  calibri: { label: 'Calibri / Segoe',           stack: "Calibri, 'Segoe UI', Candara, Arial, sans-serif" },
+  tahoma:  { label: 'Verdana / Tahoma',          stack: "Verdana, Tahoma, Geneva, sans-serif" },
+  roboto:  { label: 'Roboto (modern)',           stack: "Roboto, 'Helvetica Neue', Arial, sans-serif" },
+};
+// Forces the chosen font across the whole printed document (screen + print), so the
+// text auto-adjusts cleanly in the selected style everywhere.
+function DocFontStyle({ businessInfo }) {
+  const stack = (DOC_FONTS[businessInfo && businessInfo.docFont] || DOC_FONTS.serif).stack;
+  return <style>{`
+    .print-area, .print-area *:not([class*="draft-watermark"]),
+    .doc-print-area, .doc-print-area *:not([class*="draft-watermark"]) {
+      font-family: ${stack} !important;
+    }
+  `}</style>;
+}
+
 function LetterpadPrintStyle() {
   return (
     <style>{`
@@ -7082,10 +7126,14 @@ function LetterpadPrintStyle() {
         .print-area {
           margin: 0 !important; width: 100% !important; max-width: none !important;
           border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
-          padding: 0 40px 0 40px !important;
+          padding: 0 40px 96px 40px !important;
         }
         .lh-pad-header { margin: 0 -40px 14px -40px !important; }
-        .lh-pad-footer { margin: 16px -40px 0 -40px !important; }
+        /* Footer pinned to the bottom of the page, independent of content length */
+        .lh-pad-footer {
+          position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+          width: 100% !important; margin: 0 !important; background: #fff !important; z-index: 9999 !important;
+        }
       }
       /* PDF export (html2canvas) can't read @media print — bleed the letterhead to
          the captured element edges here too. */
