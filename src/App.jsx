@@ -73,7 +73,7 @@ const PLAN_MODULES = {
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage',
+    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -3959,7 +3959,7 @@ const SECTION_VIEWS = {
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
   engineering: ['partsmaster', 'engdocs'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
-  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
+  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   mep_clients: ['customers', 'enquiries', 'items'],
@@ -3972,7 +3972,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
@@ -4284,6 +4284,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
                 <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
                 <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+                <NavBtn id="fatsat"         label="FAT / SAT / STP"   icon={ClipboardList} />
                 <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
                 <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
                 <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
@@ -4632,6 +4633,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
               <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
               <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+              <NavBtn id="fatsat"         label="FAT / SAT / STP"   icon={ClipboardList} />
               <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
               <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
               <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
@@ -6088,85 +6090,59 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 const _span = _grpIds ? _grpIds.length : 1;
                 const _isHead = !_gid || it.mergeHead || (_grpIds && _grpIds[0] === it.id);
                 const _isChild = _gid && !_isHead;
-                // Price cells (HSN/Qty/Rate/GST/Amount or packing cols). For a merged group,
-                // render them once on the head row with rowSpan; child rows omit them.
+                const numIn = (val, onCh, w) => <input type="number" className="di-input" value={val} onChange={onCh} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: w, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />;
+                // Price cells — shown once per group (rowSpan on head), omitted on children.
                 const priceCells = doc.type === 'packing_list' ? (<>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.packages ?? 1}</td>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.netWeight ?? 0}</td>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.grossWeight ?? 0}</td>
-                  <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>{it.dimensions || ''}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 56)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.packages ?? 1, (e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.netWeight ?? 0, (e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0), 72)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.grossWeight ?? 0, (e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0), 72)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 96, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H" readOnly={!isEditable} /></td>
                 </>) : (<>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.qty}</td>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.rate}</td>
-                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.gst}</td>}
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 500, verticalAlign: 'top' }}>{fmt(amount)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.rate, (e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0), 84)}</td>
+                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmt(amount)}</td>
                 </>);
-                // For packing list the Qty column sits before the packing cols; keep a standalone HSN + Qty handling.
-                const columnarRow = (
-                  <tr key={it.id + '-print'} className="di-print-row">
-                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{idx + 1}</td>
-                    <td style={styles.td}>
-                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>
+                return (
+                  <tr key={it.id}>
+                    {/* Sl + merge tick */}
+                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8, whiteSpace: 'nowrap' }}>
+                      {isEditable && !_gid && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick 2+ rows then Group" style={{ cursor: 'pointer', display: 'block', margin: '0 auto 4px', width: 14, height: 14 }} />}
+                      {idx + 1}
                     </td>
-                    {doc.type !== 'packing_list' && cc.splitTax && !_isChild && (<td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>{it.hsn}</td>)}
-                    {doc.type === 'packing_list' ? (<>
-                      {!_isChild && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{it.qty}</td>}
-                      {!_isChild && priceCells}
-                    </>) : (!_isChild && priceCells)}
-                  </tr>
-                );
-                // ── Editor (screen) block: Sl + description on their own lines, fields merged below ──
-                const numField = (label, node) => (<div><label style={_fieldLbl}>{label}</label>{node}</div>);
-                const screenRow = (
-                  <tr key={it.id + '-screen'} className="di-screen-row">
-                    <td colSpan={_cols} style={{ ...styles.td, padding: '12px 10px' }}>
-                      {/* Line 1 — Sl + item picker + merge/unmerge + delete */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                        {isEditable && !_gid && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick 2+ rows, then Merge" style={{ cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }} />}
-                        <span style={{ fontWeight: 700, color: '#1E2A4A', fontSize: 13, minWidth: 22 }}>{idx + 1}.</span>
-                        {_gid && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 8px' }}>{_isHead ? '⑃ Merged group (' + _span + ')' : '↳ part of group'}</span>}
-                        {isEditable && <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 280 }}>
+                    {/* Item: picker + group tag (screen only) + auto-grow description */}
+                    <td style={{ ...styles.td, verticalAlign: 'top' }}>
+                      {isEditable && <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 240 }}>
                           <option value="">Custom item</option>
                           {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>}
-                        <div style={{ flex: 1 }} />
-                        {isEditable && _gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px' }} title="Split this group back into separate lines">Unmerge</button>}
-                        {isEditable && <button onClick={() => removeRow(it.id)} style={styles.iconBtn} title="Remove line"><Trash2 size={15} color="#B5453A" /></button>}
-                      </div>
-                      {/* Line 2 — full-width description */}
-                      {isEditable
-                        ? <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" rows={2}
-                            style={{ ...styles.inlineInput, ...styles.inlineInputEditable, width: '100%', boxSizing: 'border-box', resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4, fontFamily: 'inherit', minHeight: 40, marginBottom: 10 }} />
-                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4, marginBottom: 10 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
-                      {/* Line 3 — compact merged fields (hidden for group children; head shows the single group price) */}
-                      {_isChild
-                        ? <div style={{ fontSize: 11.5, color: '#888780', fontStyle: 'italic' }}>— price shown once on the group's first line —</div>
-                        : <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                        {doc.type !== 'packing_list' && cc.splitTax && numField('HSN/SAC', (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <input value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 80, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
-                            {isEditable && <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780' }}>🔍</button>}
-                          </div>
-                        ))}
-                        {numField('Qty', <input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 70, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                        {doc.type === 'packing_list' ? (<>
-                          {numField('Pkgs', <input type="number" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                          {numField('Net Wt (kg)', <input type="number" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                          {numField('Gross Wt (kg)', <input type="number" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                          {numField('Dimensions', <input value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} />)}
-                        </>) : (<>
-                          {numField('Rate', <input type="number" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 110, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                          {cc.hasTax && numField(cc.taxLabel + ' %', <input type="number" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />)}
-                          <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                            <label style={_fieldLbl}>Amount</label>
-                            <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{fmt(amount)}</div>
-                          </div>
-                        </>)}
+                        </select>
+                        {_gid && <span style={{ fontSize: 10, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 7px', whiteSpace: 'nowrap' }}>{_isHead ? '⑃ group ' + _span : '↳ grouped'}</span>}
+                        {_gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 7px' }} title="Split group">Unmerge</button>}
                       </div>}
+                      {isEditable
+                        ? <div style={{ display: 'grid', width: '100%' }}>
+                            <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', minHeight: 24, fontFamily: 'inherit' }}>{(it.name || 'Item description') + ' '}</div>
+                            <textarea className="di-input" value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', height: '100%' }} />
+                          </div>
+                        : <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>}
                     </td>
+                    {/* HSN (once per group) */}
+                    {doc.type !== 'packing_list' && cc.splitTax && !_isChild && (
+                      <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <input className="di-input" value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
+                          {isEditable && <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>🔍</button>}
+                        </div>
+                      </td>
+                    )}
+                    {!_isChild && priceCells}
+                    {isEditable && <td className="no-print" style={{ ...styles.td, verticalAlign: 'top' }}>
+                      <button onClick={() => removeRow(it.id)} style={styles.iconBtn} title="Remove line"><Trash2 size={14} color="#B5453A" /></button>
+                    </td>}
                   </tr>
                 );
-                return <React.Fragment key={it.id}>{screenRow}{columnarRow}</React.Fragment>;
                 });
               })()}
             </tbody>
@@ -7093,14 +7069,27 @@ function LetterpadPrintStyle() {
   return (
     <style>{`
       .lh-pad-header img, .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
-      /* Break the letterhead out of the page padding so the colored design bleeds
-         to the top/side edges (header) and bottom/side edges (footer) — no gap.
-         (.print-area / .preview padding is 40px top-bottom, 48px sides.) */
+      /* On-screen preview: bleed out of the card padding (40px top/btm, 48px sides). */
       .lh-pad-header { margin: -40px -48px 16px -48px !important; width: auto !important; background: #fff !important; }
       .lh-pad-footer { margin: 18px -48px -40px -48px !important; width: auto !important; background: #fff !important; }
+      /* Print: remove the browser's page margins so the letterhead reaches the paper
+         edges; keep the body text inset. */
       @media print {
-        .print-area { padding-top: 0 !important; padding-bottom: 0 !important; }
+        html, body { margin: 0 !important; padding: 0 !important; }
+        @page { size: A4; margin: 0 !important; }
+        .print-area {
+          margin: 0 !important; width: 100% !important; max-width: none !important;
+          border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+          padding: 0 40px 0 40px !important;
+        }
+        .lh-pad-header { margin: 0 -40px 14px -40px !important; }
+        .lh-pad-footer { margin: 16px -40px 0 -40px !important; }
       }
+      /* PDF export (html2canvas) can't read @media print — bleed the letterhead to
+         the captured element edges here too. */
+      .pdf-exporting { padding: 0 40px 0 40px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+      .pdf-exporting .lh-pad-header { margin: 0 -40px 14px -40px !important; }
+      .pdf-exporting .lh-pad-footer { margin: 16px -40px 0 -40px !important; }
     `}</style>
   );
 }
@@ -11780,6 +11769,302 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── FAT / SAT / STP test standards (IEC + equivalent IS) per product ─────────
+// Reference standards for electrical equipment acceptance testing. Verify against
+// the latest edition / project spec before use.
+const PRODUCT_TEST_STANDARDS = {
+  'Power Transformer (Oil)': { iec: 'IEC 60076', is: 'IS 2026', tests: [
+    ['Winding resistance measurement', 'IEC 60076-1', 'Balanced across phases, within ±2% of calculated'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-1', 'Ratio within ±0.5% of rated; vector group confirmed'],
+    ['Insulation resistance / Polarisation Index', 'IEC 60076 / IS 2026', 'IR ≥ 1000 MΩ; PI ≥ 1.3'],
+    ['No-load loss & no-load current', 'IEC 60076-1', 'Within guaranteed value + tolerance (+15%)'],
+    ['Load loss & impedance voltage', 'IEC 60076-1', 'Impedance within ±10% of declared'],
+    ['Separate-source AC voltage withstand (HV)', 'IEC 60076-3', 'Withstand 1 min, no breakdown'],
+    ['Induced overvoltage withstand', 'IEC 60076-3', 'Withstand, no breakdown'],
+    ['Transformer oil dielectric strength (BDV)', 'IEC 60156 / IS 6792', '≥ 60 kV (new oil)'],
+  ]},
+  'Distribution Transformer (Oil)': { iec: 'IEC 60076', is: 'IS 1180', tests: [
+    ['Winding resistance measurement', 'IEC 60076-1', 'Balanced within ±2%'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-1', 'Ratio within ±0.5%; vector group confirmed'],
+    ['Insulation resistance', 'IS 1180 / IEC 60076', 'IR ≥ specified MΩ'],
+    ['No-load & load loss, impedance', 'IEC 60076-1', 'Within guaranteed + tolerance'],
+    ['Power-frequency withstand (HV)', 'IEC 60076-3', '1 min, no breakdown'],
+    ['Oil dielectric strength (BDV)', 'IEC 60156 / IS 6792', '≥ 60 kV'],
+  ]},
+  'Dry-Type Transformer': { iec: 'IEC 60076-11', is: 'IS 11171', tests: [
+    ['Winding resistance measurement', 'IEC 60076-11', 'Balanced within ±2%'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-11', 'Within ±0.5%'],
+    ['Insulation resistance / PI', 'IEC 60076-11', 'IR ≥ specified; PI ≥ 1.5'],
+    ['No-load & load loss', 'IEC 60076-11', 'Within guaranteed + tolerance'],
+    ['Power-frequency / induced withstand', 'IEC 60076-11', 'No breakdown'],
+    ['Partial discharge measurement', 'IEC 60076-11', '≤ specified pC'],
+  ]},
+  'LV Power Cable (≤1.1 kV)': { iec: 'IEC 60502-1', is: 'IS 7098 (Part 1)', tests: [
+    ['Conductor resistance', 'IEC 60228 / IS 8130', '≤ max DC resistance for size'],
+    ['Insulation resistance', 'IEC 60502-1', '≥ specified MΩ·km'],
+    ['High-voltage (AC) withstand', 'IEC 60502-1', '3.5 kV, 5 min, no breakdown'],
+    ['Sheath spark test', 'IEC 60502-1', 'Continuous, no puncture'],
+    ['Insulation / sheath thickness', 'IEC 60502-1', 'Within tolerance'],
+  ]},
+  'MV/HV XLPE Cable (3.3–33 kV)': { iec: 'IEC 60502-2', is: 'IS 7098 (Part 2)', tests: [
+    ['Conductor resistance', 'IEC 60228', '≤ max for size'],
+    ['Partial discharge test', 'IEC 60502-2', '≤ 10 pC at 1.73 U₀'],
+    ['High-voltage AC withstand', 'IEC 60502-2', 'Per voltage class, no breakdown'],
+    ['Insulation resistance', 'IEC 60502-2', '≥ specified'],
+    ['Dissipation factor (tan δ)', 'IEC 60502-2', 'Within limit'],
+  ]},
+  'LV Switchgear Panel (PCC/MCC)': { iec: 'IEC 61439-1/2', is: 'IS 8623 (Part 1/2)', tests: [
+    ['Continuity of protective bonding circuit', 'IEC 61439-1', '≤ 0.1 Ω'],
+    ['Insulation resistance', 'IEC 61439-1', '≥ specified MΩ'],
+    ['Power-frequency dielectric withstand', 'IEC 61439-1', '2.5 kV, 1 min, no breakdown'],
+    ['Operation / functional test', 'IEC 61439-1', 'All devices operate correctly'],
+    ['Wiring, labelling & tightness check', 'IEC 61439-1', 'Per drawing / torque chart'],
+    ['Protective device settings verification', 'IEC 61439-1', 'Per relay / setting schedule'],
+  ]},
+  'MV Switchgear (up to 36 kV)': { iec: 'IEC 62271-200', is: 'IS 3427', tests: [
+    ['Power-frequency voltage withstand', 'IEC 62271-1', 'Per rated insulation level'],
+    ['Insulation resistance', 'IEC 62271-200', '≥ specified'],
+    ['Main circuit contact resistance', 'IEC 62271-1', '≤ specified µΩ'],
+    ['Mechanical operation test', 'IEC 62271-1', 'Smooth open/close, correct timing'],
+    ['Interlock & functional test', 'IEC 62271-200', 'All interlocks operate correctly'],
+  ]},
+  'Bus Duct / Busway': { iec: 'IEC 61439-6', is: 'IS 8623 (Part 1)', tests: [
+    ['Continuity of protective circuit', 'IEC 61439-6', '≤ specified'],
+    ['Insulation resistance', 'IEC 61439-6', '≥ specified'],
+    ['Power-frequency dielectric withstand', 'IEC 61439-6', 'Per rated, no breakdown'],
+    ['Joint / bolt torque check', 'IEC 61439-6', 'Per torque specification'],
+    ['Dimensional & routing check', 'IEC 61439-6', 'Per approved GA drawing'],
+  ]},
+  'LT Induction Motor': { iec: 'IEC 60034-1', is: 'IS 325', tests: [
+    ['Winding resistance (per phase)', 'IEC 60034-1', 'Balanced within 2%'],
+    ['Insulation resistance & PI', 'IEC 60034-1', 'IR ≥ specified; PI ≥ 1.5'],
+    ['High-voltage withstand', 'IEC 60034-1', '2U + 1000 V, 1 min'],
+    ['No-load running test', 'IEC 60034-1', 'Current & vibration within limits'],
+    ['Direction of rotation', 'IEC 60034-1', 'As specified'],
+  ]},
+  'Current Transformer (CT)': { iec: 'IEC 61869-2', is: 'IS 2705', tests: [
+    ['Ratio & polarity', 'IEC 61869-2', 'Within accuracy class'],
+    ['Insulation resistance', 'IEC 61869-2', '≥ specified'],
+    ['Power-frequency withstand (pri/sec)', 'IEC 61869-2', 'Per rated level'],
+    ['Magnetization / knee-point voltage', 'IEC 61869-2', '≥ specified Vk'],
+  ]},
+  'Voltage Transformer (PT/VT)': { iec: 'IEC 61869-3', is: 'IS 3156', tests: [
+    ['Ratio & polarity', 'IEC 61869-3', 'Within accuracy class'],
+    ['Insulation resistance', 'IEC 61869-3', '≥ specified'],
+    ['Power-frequency withstand', 'IEC 61869-3', 'Per rated level'],
+  ]},
+  'APFC / Capacitor Panel': { iec: 'IEC 61439-1 / IEC 60831', is: 'IS 8623 / IS 13340', tests: [
+    ['Capacitor capacitance / kVAr output', 'IEC 60831', 'Within −5% / +10% of rated kVAr'],
+    ['Insulation resistance', 'IEC 61439-1', '≥ specified'],
+    ['Protective bonding continuity', 'IEC 61439-1', '≤ 0.1 Ω'],
+    ['APFC relay functional / step switching', 'IEC 61439-1', 'Steps switch correctly'],
+  ]},
+  'Other / Custom': { iec: '', is: '', tests: [] },
+};
+
+function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, fatReports = [], setFatReports, customers = [] }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const today = new Date().toISOString().slice(0, 10);
+  const [editing, setEditing] = React.useState(null);
+  const [printRep, setPrintRep] = React.useState(null);
+
+  const list = (Array.isArray(fatReports) ? fatReports : [])
+    .filter(r => !isMultiBiz || (r.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  function nextNo(type) {
+    const yr = new Date().getFullYear();
+    const n = (Array.isArray(fatReports) ? fatReports : []).filter(r => (r.number || '').includes('/' + yr + '/')).length + 1;
+    return (type || 'FAT') + '/' + yr + '/' + String(n).padStart(3, '0');
+  }
+  function blank() {
+    return { id: Date.now().toString(), testType: 'FAT', number: nextNo('FAT'), date: today, product: '', iec: '', isCode: '',
+      clientId: '', client: '', project: '', make: '', rating: '', serialNo: '', qty: '',
+      rows: [], testedBy: '', witnessedBy: '', approvedBy: '', overall: 'Pass', remarks: '' };
+  }
+  function pickProduct(p) {
+    const std = PRODUCT_TEST_STANDARDS[p] || { iec: '', is: '', tests: [] };
+    setEditing(e => ({ ...e, product: p, iec: std.iec, isCode: std.is,
+      rows: std.tests.map(([name, ref, acc]) => ({ name, ref, acceptance: acc, observed: '', status: '', remarks: '' })) }));
+  }
+  const setR = (i, k, v) => setEditing(e => { const r = [...(e.rows || [])]; r[i] = { ...r[i], [k]: v }; return { ...e, rows: r }; });
+  const addRow = () => setEditing(e => ({ ...e, rows: [...(e.rows || []), { name: '', ref: '', acceptance: '', observed: '', status: '', remarks: '' }] }));
+  const delRow = (i) => setEditing(e => ({ ...e, rows: (e.rows || []).filter((_, idx) => idx !== i) }));
+  function save() {
+    if (!editing.product) { alert('Select a product/equipment first.'); return; }
+    const anyFail = (editing.rows || []).some(r => (r.status || '').toLowerCase() === 'fail');
+    const rec = { ...editing, overall: anyFail ? 'Fail' : (editing.overall || 'Pass'), bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setFatReports(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this test report?')) return; setFatReports(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '7px 8px', borderBottom: '2px solid #EAE6DB' };
+  const td = { padding: '5px 6px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', verticalAlign: 'top' };
+  const cellInput = { width: '100%', border: '1px solid #E5E1D6', borderRadius: 5, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' };
+
+  // ── Editor ──
+  if (editing) {
+    const e = editing;
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+          <button onClick={() => setEditing(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
+          <h2 className="serif" style={styles.h1}>{e.testType} Report — {e.number}</h2>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+            <div><label style={lbl}>Test Type</label>
+              <select style={inp} value={e.testType} onChange={ev => setEditing(p => ({ ...p, testType: ev.target.value, number: nextNo(ev.target.value) }))}>
+                <option value="FAT">FAT — Factory Acceptance Test</option>
+                <option value="SAT">SAT — Site Acceptance Test</option>
+                <option value="STP">STP — Standard Test Procedure</option>
+              </select>
+            </div>
+            <div><label style={lbl}>Report No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
+            <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Product / Equipment</label>
+              <select style={inp} value={e.product} onChange={ev => pickProduct(ev.target.value)}>
+                <option value="">— Select product —</option>
+                {Object.keys(PRODUCT_TEST_STANDARDS).map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+          {e.product && (
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', background: '#EEF2FF', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 13 }}>
+              <div><span style={{ color: '#888', fontWeight: 600 }}>IEC Standard: </span><b style={{ color: '#1E2A4A' }}>{e.iec || '—'}</b></div>
+              <div><span style={{ color: '#888', fontWeight: 600 }}>Equivalent IS: </span><b style={{ color: '#1E2A4A' }}>{e.isCode || '—'}</b></div>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 8 }}>
+            <div><label style={lbl}>Client</label>
+              <input style={inp} value={e.client} list="fat-clients" onChange={ev => setEditing(p => ({ ...p, client: ev.target.value }))} placeholder="Client / customer" />
+              <datalist id="fat-clients">{customers.map(c => <option key={c.id} value={c.name} />)}</datalist>
+            </div>
+            <div><label style={lbl}>Project / PO</label><input style={inp} value={e.project} onChange={ev => setEditing(p => ({ ...p, project: ev.target.value }))} /></div>
+            <div><label style={lbl}>Make</label><input style={inp} value={e.make} onChange={ev => setEditing(p => ({ ...p, make: ev.target.value }))} /></div>
+            <div><label style={lbl}>Rating / Specification</label><input style={inp} value={e.rating} onChange={ev => setEditing(p => ({ ...p, rating: ev.target.value }))} placeholder="e.g. 1000 kVA, 11/0.433 kV" /></div>
+            <div><label style={lbl}>Serial No.</label><input style={inp} value={e.serialNo} onChange={ev => setEditing(p => ({ ...p, serialNo: ev.target.value }))} /></div>
+            <div><label style={lbl}>Quantity</label><input style={inp} value={e.qty} onChange={ev => setEditing(p => ({ ...p, qty: ev.target.value }))} /></div>
+          </div>
+
+          <div style={{ fontWeight: 700, color: '#1E2A4A', margin: '16px 0 8px' }}>Test Schedule &amp; Results</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead><tr>{['#', 'Test Description', 'Standard Ref.', 'Acceptance / Spec', 'Observed / Result', 'Status', 'Remarks', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.rows || []).map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ ...td, textAlign: 'center' }}>{i + 1}</td>
+                    <td style={td}><input style={cellInput} value={r.name} onChange={ev => setR(i, 'name', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.ref} onChange={ev => setR(i, 'ref', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.acceptance} onChange={ev => setR(i, 'acceptance', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.observed} onChange={ev => setR(i, 'observed', ev.target.value)} /></td>
+                    <td style={td}>
+                      <select style={{ ...cellInput, width: 80 }} value={r.status} onChange={ev => setR(i, 'status', ev.target.value)}>
+                        <option value="">—</option><option value="Pass">Pass</option><option value="Fail">Fail</option><option value="NA">N/A</option>
+                      </select>
+                    </td>
+                    <td style={td}><input style={cellInput} value={r.remarks} onChange={ev => setR(i, 'remarks', ev.target.value)} /></td>
+                    <td style={{ ...td, textAlign: 'center' }}><button onClick={() => delRow(i)} style={styles.iconBtn}><Trash2 size={13} color="#B5453A" /></button></td>
+                  </tr>
+                ))}
+                {(e.rows || []).length === 0 && <tr><td colSpan={8} style={{ ...td, color: '#999', textAlign: 'center', padding: 16 }}>Select a product to load its standard tests, or add rows manually.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={addRow} style={{ ...styles.ghostBtn, marginTop: 8 }}><Plus size={14} /> Add test row</button>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginTop: 16 }}>
+            <div><label style={lbl}>Tested By</label><input style={inp} value={e.testedBy} onChange={ev => setEditing(p => ({ ...p, testedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Witnessed By (Client)</label><input style={inp} value={e.witnessedBy} onChange={ev => setEditing(p => ({ ...p, witnessedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Approved By</label><input style={inp} value={e.approvedBy} onChange={ev => setEditing(p => ({ ...p, approvedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Overall Result</label>
+              <select style={inp} value={e.overall} onChange={ev => setEditing(p => ({ ...p, overall: ev.target.value }))}>
+                <option value="Pass">Pass / Accepted</option><option value="Fail">Fail / Rejected</option><option value="Conditional">Conditional</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}><label style={lbl}>Remarks</label><textarea style={{ ...inp, minHeight: 56 }} value={e.remarks} onChange={ev => setEditing(p => ({ ...p, remarks: ev.target.value }))} /></div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+            <button style={styles.primaryBtn} onClick={save}>Save Report</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List ──
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>FAT / SAT / STP Test Reports</h2>
+          <div style={styles.muted}>Factory &amp; Site Acceptance Tests with standard IEC / IS test procedures per product</div>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New Test Report</button>}
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No test reports yet. Click "New Test Report", pick a product, and the standard tests + IEC/IS codes load automatically.</div> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {list.map(r => (
+            <div key={r.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.number} <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#EEF2FF', color: '#3D52A0' }}>{r.testType}</span></div>
+                <div style={{ fontSize: 12.5, color: '#555', marginTop: 3 }}>{r.product} · {r.iec}{r.isCode ? ' / ' + r.isCode : ''}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{r.client || '—'}{r.rating ? ' · ' + r.rating : ''} · {r.date} · <b style={{ color: r.overall === 'Fail' ? '#B91C1C' : (r.overall === 'Conditional' ? '#C9752A' : '#1A7A3E') }}>{r.overall}</b></div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
+                {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditing({ ...blank(), ...r })}><Pencil size={14} /></button>}
+                {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {printRep && (
+        <DocPrintOverlay onClose={() => setPrintRep(null)} filename={printRep.testType + '-' + (printRep.product || 'Report').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 2 }}>{printRep.testType === 'FAT' ? 'FACTORY ACCEPTANCE TEST (FAT) REPORT' : printRep.testType === 'SAT' ? 'SITE ACCEPTANCE TEST (SAT) REPORT' : 'STANDARD TEST PROCEDURE (STP) REPORT'}</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 14 }}>Report No: {printRep.number} · Date: {printRep.date}</div>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginBottom: 12 }}><tbody>
+            <tr><td style={{ padding: '3px 8px', color: '#666', width: 150 }}>Product / Equipment</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.product}</td><td style={{ padding: '3px 8px', color: '#666', width: 120 }}>IEC Standard</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.iec || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Client</td><td style={{ padding: '3px 8px' }}>{printRep.client || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Equivalent IS</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.isCode || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Rating / Spec</td><td style={{ padding: '3px 8px' }}>{printRep.rating || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Serial No.</td><td style={{ padding: '3px 8px' }}>{printRep.serialNo || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Project / PO</td><td style={{ padding: '3px 8px' }}>{printRep.project || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Quantity</td><td style={{ padding: '3px 8px' }}>{printRep.qty || '—'}</td></tr>
+          </tbody></table>
+          <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', border: '1px solid #333' }}>
+            <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>{['#', 'Test', 'Standard', 'Acceptance / Spec', 'Observed', 'Status', 'Remarks'].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: 'left', border: '1px solid #33415E' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {(printRep.rows || []).map((r, i) => (
+                <tr key={i}>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC', textAlign: 'center' }}>{i + 1}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.name}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.ref}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.acceptance}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.observed}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC', fontWeight: 700, color: (r.status || '').toLowerCase() === 'fail' ? '#B91C1C' : ((r.status || '').toLowerCase() === 'pass' ? '#1A7A3E' : '#555') }}>{r.status}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.remarks}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 12, fontSize: 13 }}>Overall Result: <b style={{ color: printRep.overall === 'Fail' ? '#B91C1C' : '#1A7A3E' }}>{printRep.overall}</b></div>
+          {printRep.remarks && <div style={{ marginTop: 6, fontSize: 12, color: '#555' }}>Remarks: {printRep.remarks}</div>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 50, fontSize: 12 }}>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Tested By<br /><b>{printRep.testedBy || ''}</b></div></div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Witnessed By<br /><b>{printRep.witnessedBy || ''}</b></div></div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Approved By<br /><b>{printRep.approvedBy || ''}</b></div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
@@ -25746,6 +26031,7 @@ export default function App() {
   const [investors,        _setInv]        = useState([]);
   const [profitShares,     _setPS]         = useState([]);
   const [boShortages,      _setBOS]        = useState([]);
+  const [fatReports,       _setFAT]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [bypassEmails,     setBypassEmails]   = useState([]); // global super-admin-managed free list
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -25958,6 +26244,7 @@ export default function App() {
       _setInv(data.investors || []);
       _setPS(data.profitShares || []);
       _setBOS(data.boShortages || []);
+      _setFAT(data.fatReports || []);
     }, (err) => {
       console.warn('Firestore load error:', err);
       setDataError(true);
@@ -26060,6 +26347,7 @@ export default function App() {
   const setInvestors        = mkSet(_setInv,   'investors');
   const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
+  const setFatReports       = mkSet(_setFAT,   'fatReports');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -26226,7 +26514,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -26301,6 +26589,7 @@ export default function App() {
     if (backup.investors)       setInvestors(backup.investors);
     if (backup.profitShares)    setProfitShares(backup.profitShares);
     if (backup.boShortages)     setBoShortages(backup.boShortages);
+    if (backup.fatReports)      setFatReports(backup.fatReports);
     alert('✅ Data restored successfully! All your records are back.');
   }
 
@@ -26332,6 +26621,7 @@ export default function App() {
       ['Investors', investors, setInvestors],
       ['Profit shares', profitShares, setProfitShares],
       ['BO shortages', boShortages, setBoShortages],
+      ['FAT/SAT reports', fatReports, setFatReports],
     ];
     if (only) {
       let fixed = 0; const lines = [];
@@ -27434,6 +27724,18 @@ export default function App() {
             purchaseReqs={purchaseReqs}
             setPurchaseReqs={setPurchaseReqs}
             setView={setView}
+          />
+        );
+      case 'fatsat':
+        return (
+          <FATSATView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            fatReports={fatReports}
+            setFatReports={setFatReports}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
           />
         );
       case 'purchasereq':
