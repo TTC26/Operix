@@ -12751,6 +12751,14 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter));
+  // Letterhead print: reserve exact page margins (mm) from each image's real aspect ratio,
+  // so fixed header/footer sit in the margins and repeat identically on every page.
+  const [lhMM, setLhMM] = React.useState({ t: 90, b: 68 });
+  const onLHImg = (which) => (e) => {
+    const img = e.target; if (!img || !img.naturalWidth) return;
+    const mm = Math.ceil(210 * (img.naturalHeight / img.naturalWidth)); // full-bleed A4 width = 210mm
+    setLhMM(p => (p[which] === mm ? p : { ...p, [which]: mm }));
+  };
 
   const list = (Array.isArray(moms) ? moms : [])
     .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
@@ -12824,26 +12832,30 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area', 'minutes-of-meeting.pdf')}><Download size={15} /> PDF</button>
           <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
-        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: 0 }}>
-          <style>{`
-            @media print {
-              html, body { margin:0 !important; padding:0 !important; }
-              @page { size: A4; margin: ${lhOn ? '0' : '14mm'}; }
-              .print-area { position:static !important; overflow:visible !important; padding:0 !important; }
-              /* thead/tfoot repeat on EVERY printed page and reserve their space */
-              .mom-print-tbl thead { display: table-header-group !important; }
-              .mom-print-tbl tfoot { display: table-footer-group !important; }
-            }
-            .mom-lh-img { width:100% !important; display:block !important; }
-          `}</style>
-          <table className="mom-print-tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><td style={{ padding: 0, border: 0 }}>
-              {lhHdr
-                ? <div style={{ background: '#fff' }}><img className="mom-lh-img" src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} /></div>
-                : <div style={{ padding: '40px 56px 0' }}><StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} /></div>}
-            </td></tr></thead>
-            <tbody><tr><td style={{ padding: lhOn ? '14px 48px 10px' : '14px 56px 10px', border: 0, verticalAlign: 'top' }}>
-          {lhHdr && <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right', marginBottom: 6 }}>Minutes of Meeting<div style={{ fontSize: 11.5, color: '#888', fontWeight: 400, marginTop: 2 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div></div>}
+        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: lhOn ? 0 : '40px 56px' }}>
+          {lhOn && (
+            <style>{`
+              @media print {
+                html, body { margin:0 !important; padding:0 !important; }
+                /* Reserve space for the letterhead on EVERY page; fixed header/footer live here */
+                @page { size: A4; margin: ${lhHdr ? lhMM.t : 14}mm 0 ${lhFtr ? lhMM.b : 14}mm 0 !important; }
+                .print-area { position:static !important; overflow:visible !important; padding:0 !important; }
+                .mom-fx-hdr { position:fixed !important; top:0 !important; left:0 !important; right:0 !important; width:100% !important; }
+                .mom-fx-ftr { position:fixed !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; }
+                .mom-fx-hdr img, .mom-fx-ftr img { width:100% !important; display:block !important; }
+                .mom-fx-body { padding: 0 14mm !important; }
+              }
+            `}</style>
+          )}
+          {lhHdr && (
+            <div className="mom-fx-hdr" style={{ background: '#fff' }}>
+              <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} onLoad={onLHImg('t')} />
+            </div>
+          )}
+          <div className="mom-fx-body" style={lhOn ? { padding: '16px 48px 0' } : undefined}>
+          {lhHdr
+            ? <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right', marginBottom: 6 }}>Minutes of Meeting<div style={{ fontSize: 11.5, color: '#888', fontWeight: 400, marginTop: 2 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div></div>
+            : <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />}
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
@@ -12902,13 +12914,12 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Prepared by</div>
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Chairperson</div>
           </div>
-            </td></tr></tbody>
-            {lhFtr && (
-              <tfoot><tr><td style={{ padding: 0, border: 0 }}>
-                <div style={{ background: '#fff' }}><img className="mom-lh-img" src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} /></div>
-              </td></tr></tfoot>
-            )}
-          </table>
+          </div>{/* mom-fx-body */}
+          {lhFtr && (
+            <div className="mom-fx-ftr" style={{ background: '#fff' }}>
+              <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} onLoad={onLHImg('b')} />
+            </div>
+          )}
         </div>
       </div>
     );
