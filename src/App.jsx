@@ -12841,12 +12841,15 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
       // block, starting a new sheet when one fills up. Every sheet gets its own header +
       // footer, so they appear on EVERY page and nothing is ever clipped — this does not
       // rely on thead repetition or position:fixed (both buggy for multi-page in Chromium).
-      const HDRMM = lhHdr ? 86 : 30;
-      const FTRMM = lhFtr ? 64 : 14;
+      // Letterhead reserved per page (smaller than the image's natural full-width size, so
+      // more content fits). object-fit:contain shows the whole letterhead, scaled down and
+      // centred. Same header/footer on every page.
+      const HDRMM = lhHdr ? 56 : 30;
+      const FTRMM = lhFtr ? 40 : 14;
       const headerInner = lhHdr
-        ? `<img src="${businessInfo.letterhead}" style="width:100%;height:100%;object-fit:fill;display:block;"/>`
+        ? `<img src="${businessInfo.letterhead}" style="width:100%;height:100%;object-fit:contain;object-position:center top;display:block;"/>`
         : `<div style="padding:8mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
-      const footerInner = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;height:100%;object-fit:fill;display:block;"/>` : '';
+      const footerInner = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;height:100%;object-fit:contain;object-position:center bottom;display:block;"/>` : '';
       const DHEAD = `<div class="dhead"><div class="c0">#</div><div class="c1">Discussion / Point</div><div class="c2">Decision</div><div class="c3">Action By</div><div class="c4">Follow-up</div></div>`;
       // Content as an ordered list of single-root blocks (discussion rows flow individually)
       const B = [];
