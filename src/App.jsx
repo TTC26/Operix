@@ -12750,6 +12750,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   });
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter));
 
   const list = (Array.isArray(moms) ? moms : [])
     .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
@@ -12816,10 +12817,15 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
+          {(businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <button onClick={() => setUseLH(v => !v)} style={{ ...styles.ghostBtn, ...(useLH ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}</button>}
+          <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area', 'minutes-of-meeting.pdf')}><Download size={15} /> PDF</button>
           <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-          <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />
+          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
+          {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml)
+            ? <><LetterheadHeader bi={businessInfo} /><div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right', marginBottom: 6 }}>Minutes of Meeting<div style={{ fontSize: 11.5, color: '#888', fontWeight: 400, marginTop: 2 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div></div></>
+            : <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />}
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
@@ -12878,6 +12884,11 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Prepared by</div>
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Chairperson</div>
           </div>
+          {useLH && businessInfo?.letterheadFooter && (
+            <div className="lh-pad-footer" style={{ background: '#fff' }}>
+              <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} />
+            </div>
+          )}
         </div>
       </div>
     );
