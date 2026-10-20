@@ -12837,36 +12837,18 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     // Print in an isolated document so header/footer repeat on every page and no content is clipped.
     const momPrint = () => {
-      // Fixed STANDARD reserves (mm) matching the standard letterhead image sizes
-      // (header 1654x680 -> 87mm, footer 1654x500 -> 64mm). Constant, so it fits on
-      // every page no matter how long the content is or what body font is used.
-      const topMM = lhHdr ? 87 : 15;
-      const botMM = lhFtr ? 64 : 15;
-      const hdr = lhHdr
-        ? `<div style="position:fixed;top:0;left:0;right:0;background:#fff;"><img src="${businessInfo.letterhead}" style="width:100%;display:block;"/></div>`
-        : `<div class="c"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:10px;margin-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
-      const ftr = lhFtr
-        ? `<div style="position:fixed;bottom:0;left:0;right:0;background:#fff;"><img src="${businessInfo.letterheadFooter}" style="width:100%;display:block;"/></div>`
-        : '';
+      // Header & footer live in the table's thead/tfoot: the browser repeats them on
+      // EVERY page and reserves their space automatically, and body content flows
+      // through tbody without ever being clipped — works for any number of pages.
+      const headerCell = lhHdr
+        ? `<img src="${businessInfo.letterhead}" style="width:100%;display:block;"/>`
+        : `<div style="padding:12mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:10px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
+      const footerCell = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;display:block;"/>` : '<div style="height:12mm;"></div>';
       const titleBlock = `<div style="text-align:center;margin:8px 0 12px;"><div style="font-size:19px;font-weight:700;color:#1E2A4A;letter-spacing:.06em;text-transform:uppercase;">Minutes of Meeting</div><div style="width:70px;height:3px;background:#C9A24B;border-radius:2px;margin:7px auto 0;"></div><div style="font-size:11px;color:#888;margin-top:6px;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`;
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(m.title || 'Minutes of Meeting')}</title>
-        <style>
-          @page { size:A4; margin: ${topMM}mm 0 ${botMM}mm 0; }
-          html,body{margin:0;padding:0;}
-          body{font-family:Arial,Helvetica,sans-serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-          .c{padding:0 14mm;}
-          table{width:100%;border-collapse:collapse;}
-          .dt th{background:#F8F5EE;color:#1E2A4A;font-weight:600;font-size:11px;text-align:left;padding:6px 8px;border-bottom:1px solid #EAE6DB;}
-          .dt td{font-size:12px;color:#333;padding:6px 8px;border-bottom:1px solid #F0EDE5;vertical-align:top;}
-          .dt tr{page-break-inside:avoid;}
-          .sec{font-size:12px;font-weight:700;color:#C9A24B;margin:14px 0 4px;}
-          .ttl{font-size:18px;font-weight:700;color:#1E2A4A;margin-bottom:12px;}
-        </style></head><body>
-        ${hdr}
-        <div class="c">
+      const bodyInner = `
           ${titleBlock}
           <div class="ttl">${esc(m.title || '')}</div>
-          <table style="font-size:12.5px;margin-bottom:16px;"><tbody>
+          <table class="mtbl" style="font-size:12.5px;margin-bottom:16px;"><tbody>
             <tr><td style="color:#888;width:120px;padding:3px 0;">Date</td><td style="color:#1E2A4A;font-weight:600;">${esc(fmtDate(m.date))}${m.time ? ' · ' + esc(m.time) : ''}</td><td style="color:#888;width:120px;padding:3px 0;">Venue</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.venue || '—')}</td></tr>
             <tr><td style="color:#888;padding:3px 0;">Chairperson</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.chairperson || '—')}</td><td style="color:#888;padding:3px 0;">Next Meeting</td><td style="color:#1E2A4A;font-weight:600;">${m.nextDate ? esc(fmtDate(m.nextDate)) + (m.nextTime ? ' · ' + esc(m.nextTime) : '') : '—'}</td></tr>
           </tbody></table>
@@ -12880,9 +12862,30 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
           <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px;">
             <div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Prepared by</div>
             <div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Chairperson</div>
-          </div>
-        </div>
-        ${ftr}
+          </div>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(m.title || 'Minutes of Meeting')}</title>
+        <style>
+          @page { size:A4; margin: 0; }
+          html,body{margin:0;padding:0;}
+          body{font-family:Arial,Helvetica,sans-serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+          table.page{width:100%;border-collapse:collapse;}
+          table.page>thead{display:table-header-group;}
+          table.page>tfoot{display:table-footer-group;}
+          table.page>thead>tr>td,table.page>tfoot>tr>td{padding:0;}
+          table.page>tbody>tr>td{padding:4px 14mm 10px 14mm;vertical-align:top;}
+          .mtbl{width:100%;border-collapse:collapse;}
+          .dt{width:100%;border-collapse:collapse;}
+          .dt th{background:#F8F5EE;color:#1E2A4A;font-weight:600;font-size:11px;text-align:left;padding:6px 8px;border-bottom:1px solid #EAE6DB;}
+          .dt td{font-size:12px;color:#333;padding:6px 8px;border-bottom:1px solid #F0EDE5;vertical-align:top;}
+          .dt tr{page-break-inside:avoid;}
+          .sec{font-size:12px;font-weight:700;color:#C9A24B;margin:14px 0 4px;}
+          .ttl{font-size:18px;font-weight:700;color:#1E2A4A;margin-bottom:12px;}
+        </style></head><body>
+        <table class="page">
+          <thead><tr><td>${headerCell}</td></tr></thead>
+          <tfoot><tr><td>${footerCell}</td></tr></tfoot>
+          <tbody><tr><td>${bodyInner}</td></tr></tbody>
+        </table>
       </body></html>`;
       // Hidden iframe = isolated print context that works inside the desktop app
       // (window.open popups are blocked there). Header/footer repeat on every page.
