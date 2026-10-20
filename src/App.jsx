@@ -26100,10 +26100,16 @@ export default function App() {
   }, [user]);
 
   // ── Load branding (logo / letterhead) from its own doc and merge into state ──
+  // On account switch, first CLEAR any previous account's branding so one company's
+  // letterhead never leaks onto another, then load the correct account's branding.
   useEffect(() => {
     if (!ownerUid) return;
+    _setBi((prev) => { const c = { ...prev }; BRANDING_KEYS.forEach((k) => { delete c[k]; }); return c; });
     loadBranding(ownerUid).then((b) => {
-      if (b && Object.keys(b).length) _setBi((prev) => ({ ...prev, ...b }));
+      _setBi((prev) => {
+        const c = { ...prev }; BRANDING_KEYS.forEach((k) => { delete c[k]; });
+        return { ...c, ...(b || {}) };
+      });
     }).catch(() => {});
   }, [ownerUid]);
 
