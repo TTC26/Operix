@@ -2413,6 +2413,10 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
   const [cloudBackups, setCloudBackups] = useState(null);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudMsg, setCloudMsg] = useState('');
+  const [lhDim, setLhDim] = useState(null);   // header image {w,h}
+  const [lhfDim, setLhfDim] = useState(null);  // footer image {w,h}
+  const LH_STD = { w: 1654, h: 680 };          // standard header px
+  const LHF_STD = { w: 1654, h: 500 };         // standard footer px
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
   function handleSave() {
@@ -2524,22 +2528,28 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
 
         {/* Letterhead header */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(full-width — top of page, under 1.5 MB)</span></label>
+          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(standard size <b>1654 × 680 px</b> — top of page, under 1.5 MB)</span></label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {form.letterhead && <img src={form.letterhead} alt="letterhead" style={{ width: 160, maxHeight: 60, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            {form.letterhead && <img src={form.letterhead} alt="letterhead" onLoad={e => setLhDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 60, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
             <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterhead ? 'Change letterhead' : '⬆ Upload letterhead'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadUpload} /></label>
-            {form.letterhead && <button type="button" onClick={() => setForm(p => ({ ...p, letterhead: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+            {form.letterhead && <button type="button" onClick={() => { setForm(p => ({ ...p, letterhead: '' })); setLhDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
           </div>
+          {form.letterhead && lhDim && (lhDim.w === LH_STD.w && lhDim.h === LH_STD.h
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Correct standard size ({lhDim.w} × {lhDim.h} px)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ This image is {lhDim.w} × {lhDim.h} px — please resize to the standard <b>{LH_STD.w} × {LH_STD.h} px</b> for a clean print.</div>)}
         </div>
 
         {/* Letterhead footer (optional) */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(full-width — bottom of page)</span></label>
+          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(standard size <b>1654 × 500 px</b> — bottom of page)</span></label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {form.letterheadFooter && <img src={form.letterheadFooter} alt="footer" style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            {form.letterheadFooter && <img src={form.letterheadFooter} alt="footer" onLoad={e => setLhfDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
             <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterheadFooter ? 'Change footer' : '⬆ Upload footer'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadFooterUpload} /></label>
-            {form.letterheadFooter && <button type="button" onClick={() => setForm(p => ({ ...p, letterheadFooter: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+            {form.letterheadFooter && <button type="button" onClick={() => { setForm(p => ({ ...p, letterheadFooter: '' })); setLhfDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
           </div>
+          {form.letterheadFooter && lhfDim && (lhfDim.w === LHF_STD.w && lhfDim.h === LHF_STD.h
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Correct standard size ({lhfDim.w} × {lhfDim.h} px)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ This image is {lhfDim.w} × {lhfDim.h} px — please resize to the standard <b>{LHF_STD.w} × {LHF_STD.h} px</b> for a clean print.</div>)}
         </div>
         {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
 
@@ -12827,17 +12837,18 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     // Print in an isolated document so header/footer repeat on every page and no content is clipped.
     const momPrint = () => {
-      const topMM = lhHdr ? lhMM.t : 15;
-      const botMM = lhFtr ? lhMM.b : 15;
+      // Fixed STANDARD reserves (mm) matching the standard letterhead image sizes
+      // (header 1654x680 -> 87mm, footer 1654x500 -> 64mm). Constant, so it fits on
+      // every page no matter how long the content is or what body font is used.
+      const topMM = lhHdr ? 87 : 15;
+      const botMM = lhFtr ? 64 : 15;
       const hdr = lhHdr
         ? `<div style="position:fixed;top:0;left:0;right:0;background:#fff;"><img src="${businessInfo.letterhead}" style="width:100%;display:block;"/></div>`
-        : `<div class="c"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1E2A4A;padding-bottom:10px;margin-bottom:8px;"><div><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div><div style="text-align:right;"><div style="font-size:15px;font-weight:700;color:#C9A24B;letter-spacing:.05em;text-transform:uppercase;">Minutes of Meeting</div><div style="font-size:11px;color:#888;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div></div></div>`;
+        : `<div class="c"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:10px;margin-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
       const ftr = lhFtr
         ? `<div style="position:fixed;bottom:0;left:0;right:0;background:#fff;"><img src="${businessInfo.letterheadFooter}" style="width:100%;display:block;"/></div>`
         : '';
-      const titleRight = lhHdr
-        ? `<div style="text-align:right;font-size:15px;font-weight:700;color:#C9A24B;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Minutes of Meeting<div style="font-size:11px;color:#888;font-weight:400;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`
-        : '';
+      const titleBlock = `<div style="text-align:center;margin:8px 0 12px;"><div style="font-size:19px;font-weight:700;color:#1E2A4A;letter-spacing:.06em;text-transform:uppercase;">Minutes of Meeting</div><div style="width:70px;height:3px;background:#C9A24B;border-radius:2px;margin:7px auto 0;"></div><div style="font-size:11px;color:#888;margin-top:6px;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(m.title || 'Minutes of Meeting')}</title>
         <style>
           @page { size:A4; margin: ${topMM}mm 0 ${botMM}mm 0; }
@@ -12853,7 +12864,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         </style></head><body>
         ${hdr}
         <div class="c">
-          ${titleRight}
+          ${titleBlock}
           <div class="ttl">${esc(m.title || '')}</div>
           <table style="font-size:12.5px;margin-bottom:16px;"><tbody>
             <tr><td style="color:#888;width:120px;padding:3px 0;">Date</td><td style="color:#1E2A4A;font-weight:600;">${esc(fmtDate(m.date))}${m.time ? ' · ' + esc(m.time) : ''}</td><td style="color:#888;width:120px;padding:3px 0;">Venue</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.venue || '—')}</td></tr>
@@ -12873,10 +12884,22 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         </div>
         ${ftr}
       </body></html>`;
-      const w = window.open('', '_blank', 'width=1000,height=700');
-      if (!w) { window.alert('Please allow pop-ups to print.'); return; }
-      w.document.write(html); w.document.close();
-      setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 500);
+      // Hidden iframe = isolated print context that works inside the desktop app
+      // (window.open popups are blocked there). Header/footer repeat on every page.
+      const ifr = document.createElement('iframe');
+      ifr.setAttribute('aria-hidden', 'true');
+      ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+      document.body.appendChild(ifr);
+      const d = ifr.contentWindow.document;
+      d.open(); d.write(html); d.close();
+      const go = () => {
+        try {
+          ifr.contentWindow.focus();
+          ifr.contentWindow.onafterprint = () => { try { document.body.removeChild(ifr); } catch (e) {} };
+          ifr.contentWindow.print();
+        } catch (e) { try { document.body.removeChild(ifr); } catch (_e) {} }
+      };
+      setTimeout(go, 600);
     };
     return (
       <div>
@@ -12893,9 +12916,12 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
             </div>
           )}
           <div className="mom-fx-body" style={lhOn ? { padding: '16px 48px 0' } : undefined}>
-          {lhHdr
-            ? <div style={{ fontSize: 16, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'right', marginBottom: 6 }}>Minutes of Meeting<div style={{ fontSize: 11.5, color: '#888', fontWeight: 400, marginTop: 2 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div></div>
-            : <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />}
+          {!lhHdr && <StdDocHeader businessInfo={businessInfo} title="" subtitle="" />}
+          <div style={{ textAlign: 'center', margin: '8px 0 12px' }}>
+            <div style={{ fontSize: 19, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Minutes of Meeting</div>
+            <div style={{ width: 70, height: 3, background: '#C9A24B', borderRadius: 2, margin: '7px auto 0' }} />
+            <div style={{ fontSize: 11.5, color: '#888', marginTop: 6 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div>
+          </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
