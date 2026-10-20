@@ -12837,72 +12837,77 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     // Print in an isolated document so header/footer repeat on every page and no content is clipped.
     const momPrint = () => {
-      // Header & footer live in the table's thead/tfoot: the browser repeats them on
-      // EVERY page and reserves their space automatically, and body content flows
-      // through tbody without ever being clipped — works for any number of pages.
-      const headerCell = lhHdr
-        ? `<img src="${businessInfo.letterhead}" style="width:100%;display:block;"/>`
-        : `<div style="padding:12mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:10px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
-      const footerCell = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;display:block;"/>` : '<div style="height:12mm;"></div>';
-      const titleBlock = `<div style="text-align:center;margin:8px 0 12px;"><div style="font-size:19px;font-weight:700;color:#1E2A4A;letter-spacing:.06em;text-transform:uppercase;">Minutes of Meeting</div><div style="width:70px;height:3px;background:#C9A24B;border-radius:2px;margin:7px auto 0;"></div><div style="font-size:11px;color:#888;margin-top:6px;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`;
-      const bodyInner = `
-          ${titleBlock}
-          <div class="ttl">${esc(m.title || '')}</div>
-          <table class="mtbl" style="font-size:12.5px;margin-bottom:16px;"><tbody>
-            <tr><td style="color:#888;width:120px;padding:3px 0;">Date</td><td style="color:#1E2A4A;font-weight:600;">${esc(fmtDate(m.date))}${m.time ? ' · ' + esc(m.time) : ''}</td><td style="color:#888;width:120px;padding:3px 0;">Venue</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.venue || '—')}</td></tr>
-            <tr><td style="color:#888;padding:3px 0;">Chairperson</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.chairperson || '—')}</td><td style="color:#888;padding:3px 0;">Next Meeting</td><td style="color:#1E2A4A;font-weight:600;">${m.nextDate ? esc(fmtDate(m.nextDate)) + (m.nextTime ? ' · ' + esc(m.nextTime) : '') : '—'}</td></tr>
-          </tbody></table>
-          <div class="sec">${m.type === 'external' ? 'OUR ATTENDEES (' + esc(businessInfo.name || 'Company') + ')' : 'ATTENDEES'}</div>
-          <table class="dt" style="margin-bottom:14px;"><thead><tr><th>Name</th><th>Designation</th><th>Department</th></tr></thead><tbody>
-            ${(m.internalAttendees || []).length ? (m.internalAttendees || []).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.designation || '—')}</td><td>${esc(a.department || '—')}</td></tr>`).join('') : '<tr><td colspan="3">—</td></tr>'}
-          </tbody></table>
-          ${m.type === 'external' ? `<div class="sec">${esc((m.extCompany || 'EXTERNAL PARTY').toUpperCase())}</div><table class="dt" style="margin-bottom:14px;"><thead><tr><th>Name</th><th>Designation</th></tr></thead><tbody>${(m.extPersons || []).length ? (m.extPersons || []).map(p => `<tr><td>${esc(p.name || '—')}</td><td>${esc(p.designation || '—')}</td></tr>`).join('') : '<tr><td colspan="2">—</td></tr>'}</tbody></table>` : ''}
-          ${(m.agenda || []).filter(a => a && a.trim()).length ? `<div class="sec">AGENDA</div><ol style="margin:0 0 14px;padding-left:20px;font-size:12.5px;color:#333;">${(m.agenda || []).filter(a => a && a.trim()).map(a => `<li style="margin-bottom:3px;">${esc(a)}</li>`).join('')}</ol>` : ''}
-          ${rows.length ? `<div class="sec">DISCUSSION, DECISIONS &amp; ACTIONS</div><table class="dt"><thead><tr><th>#</th><th>Discussion / Point</th><th>Decision</th><th>Action By</th><th>Follow-up</th></tr></thead><tbody>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.point || '—')}</td><td>${esc(r.decision || '—')}</td><td>${esc(r.actionBy || '—')}</td><td>${r.followup ? esc(fmtDate(r.followup)) : '—'}</td></tr>`).join('')}</tbody></table>` : ''}
-          <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px;">
-            <div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Prepared by</div>
-            <div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Chairperson</div>
-          </div>`;
+      // Manual pagination: we build real A4 "sheets" in JS and flow the content block by
+      // block, starting a new sheet when one fills up. Every sheet gets its own header +
+      // footer, so they appear on EVERY page and nothing is ever clipped — this does not
+      // rely on thead repetition or position:fixed (both buggy for multi-page in Chromium).
+      const HDRMM = lhHdr ? 86 : 30;
+      const FTRMM = lhFtr ? 64 : 14;
+      const headerInner = lhHdr
+        ? `<img src="${businessInfo.letterhead}" style="width:100%;height:100%;object-fit:fill;display:block;"/>`
+        : `<div style="padding:8mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
+      const footerInner = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;height:100%;object-fit:fill;display:block;"/>` : '';
+      const DHEAD = `<div class="dhead"><div class="c0">#</div><div class="c1">Discussion / Point</div><div class="c2">Decision</div><div class="c3">Action By</div><div class="c4">Follow-up</div></div>`;
+      // Content as an ordered list of single-root blocks (discussion rows flow individually)
+      const B = [];
+      B.push(`<div class="blk" style="text-align:center;margin:2px 0 12px;"><div style="font-size:19px;font-weight:700;color:#1E2A4A;letter-spacing:.06em;text-transform:uppercase;">Minutes of Meeting</div><div style="width:70px;height:3px;background:#C9A24B;border-radius:2px;margin:7px auto 0;"></div><div style="font-size:11px;color:#888;margin-top:6px;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`);
+      if (m.title) B.push(`<div class="blk" style="font-size:18px;font-weight:700;color:#1E2A4A;margin-bottom:12px;">${esc(m.title)}</div>`);
+      B.push(`<div class="blk"><table style="width:100%;font-size:12.5px;border-collapse:collapse;"><tbody><tr><td style="color:#888;width:120px;padding:3px 0;">Date</td><td style="color:#1E2A4A;font-weight:600;">${esc(fmtDate(m.date))}${m.time ? ' · ' + esc(m.time) : ''}</td><td style="color:#888;width:120px;padding:3px 0;">Venue</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.venue || '—')}</td></tr><tr><td style="color:#888;padding:3px 0;">Chairperson</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.chairperson || '—')}</td><td style="color:#888;padding:3px 0;">Next Meeting</td><td style="color:#1E2A4A;font-weight:600;">${m.nextDate ? esc(fmtDate(m.nextDate)) + (m.nextTime ? ' · ' + esc(m.nextTime) : '') : '—'}</td></tr></tbody></table></div>`);
+      B.push(`<div class="blk"><div class="sec">${m.type === 'external' ? 'OUR ATTENDEES (' + esc(businessInfo.name || 'Company') + ')' : 'ATTENDEES'}</div><table class="dt"><thead><tr><th>Name</th><th>Designation</th><th>Department</th></tr></thead><tbody>${(m.internalAttendees || []).length ? (m.internalAttendees || []).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.designation || '—')}</td><td>${esc(a.department || '—')}</td></tr>`).join('') : '<tr><td colspan="3">—</td></tr>'}</tbody></table></div>`);
+      if (m.type === 'external') B.push(`<div class="blk"><div class="sec">${esc((m.extCompany || 'EXTERNAL PARTY').toUpperCase())}</div><table class="dt"><thead><tr><th>Name</th><th>Designation</th></tr></thead><tbody>${(m.extPersons || []).length ? (m.extPersons || []).map(p => `<tr><td>${esc(p.name || '—')}</td><td>${esc(p.designation || '—')}</td></tr>`).join('') : '<tr><td colspan="2">—</td></tr>'}</tbody></table></div>`);
+      if ((m.agenda || []).filter(a => a && a.trim()).length) B.push(`<div class="blk"><div class="sec">AGENDA</div><ol style="margin:0;padding-left:20px;font-size:12.5px;color:#333;">${(m.agenda || []).filter(a => a && a.trim()).map(a => `<li style="margin-bottom:3px;">${esc(a)}</li>`).join('')}</ol></div>`);
+      if (rows.length) {
+        B.push(`<div class="blk"><div class="sec">DISCUSSION, DECISIONS &amp; ACTIONS</div>${DHEAD}</div>`);
+        rows.forEach((r, i) => B.push(`<div class="drow"><div class="c0">${i + 1}</div><div class="c1">${esc(r.point || '—')}</div><div class="c2">${esc(r.decision || '—')}</div><div class="c3">${esc(r.actionBy || '—')}</div><div class="c4">${r.followup ? esc(fmtDate(r.followup)) : '—'}</div></div>`));
+      }
+      B.push(`<div class="blk" style="margin-top:36px;display:flex;justify-content:space-between;font-size:12px;"><div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Prepared by</div><div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Chairperson</div></div>`);
+
+      const script = '(function(){'
+        + 'var out=document.getElementById("out");'
+        + 'var hd=document.getElementById("hdtpl").innerHTML;'
+        + 'var ft=document.getElementById("fttpl").innerHTML;'
+        + 'var cur,bd;'
+        + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);cur=s;bd=b;}'
+        + 'np();'
+        + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i];var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(node.className&&node.className.indexOf("drow")>-1){var dh=document.createElement("div");dh.innerHTML=DHEADHTML;if(dh.firstElementChild)bd.appendChild(dh.firstElementChild);}bd.appendChild(node);}}'
+        + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
+        + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
+        + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
+        + '})();';
+
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(m.title || 'Minutes of Meeting')}</title>
         <style>
           @page { size:A4; margin: 0; }
           html,body{margin:0;padding:0;}
           body{font-family:Arial,Helvetica,sans-serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-          table.page{width:100%;border-collapse:collapse;}
-          table.page>thead{display:table-header-group;}
-          table.page>tfoot{display:table-footer-group;}
-          table.page>thead>tr>td,table.page>tfoot>tr>td{padding:0;}
-          table.page>tbody>tr>td{padding:4px 14mm 10px 14mm;vertical-align:top;}
-          .mtbl{width:100%;border-collapse:collapse;}
-          .dt{width:100%;border-collapse:collapse;}
+          .sheet{position:relative;width:210mm;height:296mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}
+          .hd{position:absolute;top:0;left:0;right:0;height:${HDRMM}mm;overflow:hidden;background:#fff;}
+          .ft{position:absolute;bottom:0;left:0;right:0;height:${FTRMM}mm;overflow:hidden;background:#fff;}
+          .bd{position:absolute;top:${HDRMM}mm;bottom:${FTRMM}mm;left:0;right:0;overflow:hidden;padding:5mm 14mm 0;box-sizing:border-box;}
+          .sec{font-size:12px;font-weight:700;color:#C9A24B;margin:12px 0 4px;}
+          .dt{width:100%;border-collapse:collapse;margin-bottom:4px;}
           .dt th{background:#F8F5EE;color:#1E2A4A;font-weight:600;font-size:11px;text-align:left;padding:6px 8px;border-bottom:1px solid #EAE6DB;}
           .dt td{font-size:12px;color:#333;padding:6px 8px;border-bottom:1px solid #F0EDE5;vertical-align:top;}
-          .dt tr{page-break-inside:avoid;}
-          .sec{font-size:12px;font-weight:700;color:#C9A24B;margin:14px 0 4px;}
-          .ttl{font-size:18px;font-weight:700;color:#1E2A4A;margin-bottom:12px;}
+          .dhead{display:flex;background:#F8F5EE;font-weight:600;font-size:11px;color:#1E2A4A;border-bottom:1px solid #EAE6DB;}
+          .drow{display:flex;font-size:12px;color:#333;border-bottom:1px solid #F0EDE5;}
+          .dhead>div,.drow>div{padding:6px 8px;box-sizing:border-box;overflow-wrap:break-word;word-break:break-word;}
+          .c0{width:6%;}.c1{width:32%;}.c2{width:40%;}.c3{width:12%;}.c4{width:10%;}
         </style></head><body>
-        <table class="page">
-          <thead><tr><td>${headerCell}</td></tr></thead>
-          <tfoot><tr><td>${footerCell}</td></tr></tfoot>
-          <tbody><tr><td>${bodyInner}</td></tr></tbody>
-        </table>
+        <div id="out"></div>
+        <div id="hdtpl" style="display:none">${headerInner}</div>
+        <div id="fttpl" style="display:none">${footerInner}</div>
+        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};${script}</script>
       </body></html>`;
       // Hidden iframe = isolated print context that works inside the desktop app
-      // (window.open popups are blocked there). Header/footer repeat on every page.
+      // (window.open popups are blocked there). The in-document script paginates & prints.
       const ifr = document.createElement('iframe');
       ifr.setAttribute('aria-hidden', 'true');
       ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
       document.body.appendChild(ifr);
       const d = ifr.contentWindow.document;
       d.open(); d.write(html); d.close();
-      const go = () => {
-        try {
-          ifr.contentWindow.focus();
-          ifr.contentWindow.onafterprint = () => { try { document.body.removeChild(ifr); } catch (e) {} };
-          ifr.contentWindow.print();
-        } catch (e) { try { document.body.removeChild(ifr); } catch (_e) {} }
-      };
-      setTimeout(go, 600);
+      // Safety cleanup in case afterprint never fires
+      setTimeout(() => { try { if (ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) {} }, 60000);
     };
     return (
       <div>
