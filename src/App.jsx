@@ -243,6 +243,8 @@ function makeFmt(businessInfo) {
 }
 
 function computeTotals(doc, sellerState, country) {
+  // A deleted (cancelled) document counts as nil everywhere — reports, GST, outstanding.
+  if (doc && doc.status === 'deleted') doc = { ...doc, items: [] };
   let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
@@ -893,7 +895,7 @@ function buildZohoDocPrint(o) {
 
   const sealHtml = ((bi.seal || bi.signature) && bi.printSeal !== false) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
   TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln"' + (sealHtml ? ' style="margin-top:2px"' : '') + '>' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
-  return { blocks, thead, tblOpen, watermark: doc.status === 'draft' ? 'DRAFT' : '' };
+  return { blocks, thead, tblOpen, watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
 }
 
 // Build a landscape-width version of a portrait letterhead image from the SAME source: the image keeps its
@@ -1074,7 +1076,7 @@ function buildOverseasQuotePrint(o) {
   B('<div class="ov-sign"><div class="ov-p">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + '<div style="font-weight:700">Authorized Signatory</div>' + (doc.ovSignName ? '<div>' + esc(doc.ovSignName) + '</div>' : '') + '<div>' + esc(doc.ovSignDesig || 'MD') + '</div>' + (_sigContact ? '<div>Mob: ' + esc(_sigContact) + '</div>' : '') + '</div>');
 
   return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:3mm 14mm 0 !important;font-size:10.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
-    pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'draft' ? 'DRAFT' : '' };
+    pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
 }
 
 // Screen preview of the offer (same blocks as the print, assembled into one page)
@@ -4870,6 +4872,7 @@ function StatusBadge({ status }) {
     approved:  { bg: '#EAF3DE', color: '#3B6D11', label: 'Approved' },
     rejected:  { bg: '#FBEAE7', color: '#B5453A', label: 'Rejected' },
     paid:      { bg: '#D6F0E0', color: '#1A5C35', label: 'Paid' },
+    deleted:   { bg: '#FBEAE7', color: '#B5453A', label: 'Deleted' },
   };
   const s = map[status] || map.draft;
   return <span style={{ ...styles.badge, background: s.bg, color: s.color }}>{s.label}</span>;
@@ -4927,7 +4930,7 @@ function ApprovalActions({ item, onUpdate, userRole, compact = false }) {
   );
 }
 
-function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'] }) {
+function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'], userRole = 'admin' }) {
   const isMultiBiz = activeTypes.length > 1;
   const [filterBizType, setFilterBizType] = React.useState(
     activeTypes.length === 1 ? activeTypes[0] : 'all'
@@ -4981,9 +4984,9 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
       ) : (
         <div style={styles.list}>
           {visibleDocs.map((d) => (
-            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1 }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} showBizBadge={isMultiBiz} /></div>
-              <button onClick={() => deleteDoc(d.id)} style={styles.iconBtn} title="Delete"><Trash2 size={15} color="#B5453A" /></button>
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: d.status === 'deleted' ? 0.55 : 1 }}>
+              <div style={{ flex: 1, textDecoration: d.status === 'deleted' ? 'line-through' : 'none' }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} showBizBadge={isMultiBiz} /></div>
+              {userRole === 'admin' && d.status !== 'deleted' && <button onClick={() => deleteDoc(d.id)} style={styles.iconBtn} title="Delete (admin only)"><Trash2 size={15} color="#B5453A" /></button>}
             </div>
           ))}
         </div>
@@ -6167,7 +6170,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -6227,18 +6230,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const isForwarded = doc.status === 'submitted' || doc.status === 'verified';
   const inReview = isForwarded; // alias for layout checks below
   // Editable if: admin/manager always, or any role when doc is in draft/rejected (preparing stage)
-  const isEditable =
+  const isDeleted = doc.status === 'deleted';
+  const isEditable = !isDeleted && (
     userRole === 'admin' || userRole === 'manager' ||
-    (doc.status === 'draft' || doc.status === 'rejected');
+    (doc.status === 'draft' || doc.status === 'rejected'));
 
+  // Saving only saves. Nothing is downloaded automatically — use Print / PDF when you want a copy.
   async function handleSaveAndDownload(status) {
-    setPdfLoading(true);
-    try {
-      const el = document.querySelector('.print-area');
-      const fname = `${(DOC_TYPES[doc.type]?.label || doc.type).replace(/\s+/g,'-')}-${doc.number || 'draft'}.pdf`;
-      if (el) await downloadDocPDF(el, fname);
-    } catch(e) { console.error(e); }
-    setPdfLoading(false);
     onSave(status);
   }
 
@@ -6327,7 +6325,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: bizBadge.bg, color: bizBadge.color, letterSpacing: '0.04em' }}>{bizBadge.label}</span>
             )}
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="doc-actions" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto', justifyContent: 'flex-end' }}>
+          <style>{`.doc-actions button, .doc-actions select { white-space: nowrap; }`}</style>
           {/* Previous docs dropdown */}
           {sameDocs.length > 0 && (
             <select value="" onChange={e => { if (e.target.value && onOpenDoc) onOpenDoc(e.target.value); }}
@@ -6367,8 +6366,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </button>
           )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
-          <button onClick={async () => { setPdfLoading(true); await downloadDocPDF('.print-area', `${(DOC_TYPES[doc.type]?.label||doc.type).replace(/\s+/g,'-')}-${doc.number||'draft'}.pdf`); setPdfLoading(false); }} style={styles.ghostBtn} disabled={pdfLoading}>{pdfLoading ? '⏳' : <Download size={15}/>} {pdfLoading ? 'Generating...' : 'Download PDF'}</button>
+          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => { const b = document.getElementById('doc-print-btn'); if (b) b.click(); }} style={styles.ghostBtn} title="Opens the print dialog — choose 'Save as PDF'"><Download size={15}/> Save as PDF</button>
+          {userRole === 'admin' && !isDeleted && onDeleteDoc && documents.some(d => d.id === doc.id) && (
+            <button onClick={() => onDeleteDoc(doc.id)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}><Trash2 size={15} /> Delete</button>
+          )}
+          {isDeleted && <span style={{ fontSize: 12.5, fontWeight: 700, color: '#B5453A', background: '#FBEAE7', borderRadius: 8, padding: '6px 12px' }}>🗑 DELETED — read only</span>}
 
           {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
           {userRole !== 'admin' && (doc.status === 'draft' || doc.status === 'rejected') && (
@@ -6384,7 +6387,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           )}
 
           {/* ── ADMIN / MANAGER: forwarded or any editable status ── */}
-          {(userRole === 'admin' || userRole === 'manager') && !rejectMode && (
+          {(userRole === 'admin' || userRole === 'manager') && !rejectMode && !isDeleted && (
             <>
               {/* Can always save as draft */}
               {!isApproved && <button onClick={() => handleSaveAndDownload('draft')} style={styles.ghostBtn}>💾 Save Draft</button>}
@@ -6432,6 +6435,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
       {doc.status === 'rejected' && doc.rejectionNote && (
         <div style={{ background: '#FBEAE7', border: '1px solid #E9B8B3', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13 }} className="no-print">
           <strong style={{ color: '#B5453A' }}>Rejected:</strong> <span style={{ color: '#5F5E5A' }}>{doc.rejectionNote}</span>
+        </div>
+      )}
+
+      {isDeleted && (
+        <div style={{ background: '#FBEAE7', border: '1px solid #E9B8B3', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: '#B5453A' }} className="no-print">
+          🗑 <strong>This document was deleted{doc.deletedBy ? ' by ' + doc.deletedBy : ''}.</strong> It stays in the list for number tracking but cannot be edited, approved or forwarded.
         </div>
       )}
 
@@ -6736,7 +6745,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
           {useLH && <LetterheadHeader bi={businessInfo} />}
           {/* ── DRAFT watermark — visible on screen + print when not approved ── */}
-          {doc.status === 'draft' && (
+          {(doc.status === 'draft' || doc.status === 'deleted') && (
             <div style={{
               position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
               pointerEvents: 'none', zIndex: 9, display: 'flex',
@@ -6747,7 +6756,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 color: 'rgba(185, 28, 28, 0.10)',
                 transform: 'rotate(-35deg)', userSelect: 'none',
                 whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif',
-              }}>DRAFT</span>
+              }}>{doc.status === 'deleted' ? 'DELETED' : 'DRAFT'}</span>
             </div>
           )}
           {doc.overseas && doc.type === 'quotation' && (() => {
@@ -27646,6 +27655,7 @@ export default function App() {
   }
 
   function handleSaveDoc(status, rejectionNote) {
+    if (activeDoc && activeDoc.status === 'deleted') { setActiveDoc(null); setView('documents'); return; }
     const saved = {
       ...activeDoc,
       status: status || activeDoc.status || 'draft',
@@ -27717,9 +27727,17 @@ export default function App() {
     setView('documents');
   }
 
+  // Soft delete (admin only): the document number stays in the list, marked DELETED and read-only.
+  // Totals/reports treat it as nil and any stock it moved is reversed.
   function deleteDoc(id) {
-    if (!window.confirm('Delete this document?')) return;
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
+    if (userRole !== 'admin') { alert('Only an admin can delete documents.'); return; }
+    const d = documents.find((x) => x.id === id);
+    if (!d || d.status === 'deleted') return;
+    const lbl = (DOC_TYPES[d.type]?.label || d.type) + ' ' + (d.number || '');
+    if (!window.confirm('Delete ' + lbl + '?\n\nThe number stays in the list marked DELETED. It cannot be edited or used again.')) return;
+    setDocuments((prev) => prev.map((x) => x.id === id ? { ...x, status: 'deleted', statusBeforeDelete: x.status || 'draft', deletedAt: Date.now(), deletedBy: user?.email || '' } : x));
+    const rel = (stockLedger || []).filter((e) => e.docId === id && !e.reversal);
+    if (rel.length) setStockLedger((prev) => [...prev, ...rel.map((e) => ({ ...e, id: crypto.randomUUID(), qty: -(e.qty || 0), note: 'Deleted — ' + (e.note || ''), reversal: true }))]);
   }
 
   async function handleLogout() { await logOut(); }
@@ -28018,6 +28036,7 @@ export default function App() {
           businessInfo={businessInfo}
           userRole={userRole}
           onSave={handleSaveDoc}
+          onDeleteDoc={(id) => { deleteDoc(id); setActiveDoc(null); setView('documents'); }}
           onCancel={() => { setActiveDoc(null); setView('documents'); }}
           onAddCustomer={(c) => setEditingCustomer(c || { name: '' })}
           onAddVendor={(v) => setEditingVendor(v || { name: '' })}
@@ -28332,6 +28351,7 @@ export default function App() {
             setSearch={setDocSearch}
             openDoc={openDoc}
             deleteDoc={deleteDoc}
+            userRole={userRole}
             startNewDoc={startNewDoc}
             activeTypes={sessionActiveTypes}
           />
@@ -29039,6 +29059,14 @@ export default function App() {
 
   return (
     <div style={styles.app} className="no-print-bg">
+      <style>{`
+        /* Global toolbar alignment: action-button rows wrap instead of overflowing; labels never break mid-word */
+        button { white-space: nowrap; }
+        div:has(> button + button), div:has(> button + a), div:has(> button + label), div:has(> label + button) { flex-wrap: wrap; row-gap: 8px; }
+        div:has(> div > button + button):not([style*="overflow"]) { flex-wrap: wrap; row-gap: 10px; }
+        div:has(> div > button + button) > div:has(> button + button) { justify-content: flex-end; }
+        @media print { button { white-space: normal; } }
+      `}</style>
       <style>{`
         * { box-sizing: border-box; }
         .nav-toggle { display: none; }
