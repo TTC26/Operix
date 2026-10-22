@@ -937,7 +937,7 @@ async function fitLetterheadWide(url, ratio) {
 }
 
 // ─── Overseas / export commercial offer (quotation) ───────────────────────────────────────────
-const OV_CURRENCIES = { USD: 'US Dollars', EUR: 'Euros', GBP: 'Pounds Sterling', AED: 'UAE Dirhams', SAR: 'Saudi Riyals', QAR: 'Qatari Riyals', OMR: 'Omani Rials', KWD: 'Kuwaiti Dinars', BHD: 'Bahraini Dinars', SGD: 'Singapore Dollars', AUD: 'Australian Dollars', LKR: 'Sri Lankan Rupees' };
+const OV_CURRENCIES = { INR: 'Indian Rupees', USD: 'US Dollars', EUR: 'Euros', GBP: 'Pounds Sterling', AED: 'UAE Dirhams', SAR: 'Saudi Riyals', QAR: 'Qatari Riyals', OMR: 'Omani Rials', KWD: 'Kuwaiti Dinars', BHD: 'Bahraini Dinars', SGD: 'Singapore Dollars', AUD: 'Australian Dollars', LKR: 'Sri Lankan Rupees' };
 const OV_DEFAULT_TERMS = [
   ['Prices', 'In {CUR} per metre, on Ex-Works basis as per Incoterms 2020.'],
   ['Offer validity', '7 days from the offer date. Thereafter, subject to our written re-confirmation.'],
@@ -961,7 +961,7 @@ const OV_DEFAULT_PRICEVAR = 'Prices are firm only within the offer validity. The
 const OV_DEFAULT_ENCL = 'Technical Data Sheets (TDS) for each cable item\nDrum schedule — on order confirmation';
 
 function ovInitDefaults(doc, bi) {
-  const cur = doc.ovCurrency || 'USD';
+  const cur = doc.ovCurrency || 'INR';
   return {
     overseas: true,
     ovCurrency: cur,
@@ -977,8 +977,8 @@ function ovInitDefaults(doc, bi) {
     ovTerms: (doc.ovTerms && doc.ovTerms.length) ? doc.ovTerms : OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', cur) })),
     ovEnclosures: doc.ovEnclosures != null && doc.ovEnclosures !== '' ? doc.ovEnclosures : OV_DEFAULT_ENCL,
     ovSignName: doc.ovSignName || (bi && bi.signatory) || '',
-    ovSignDesig: doc.ovSignDesig || '',
-    ovSignContact: doc.ovSignContact || [bi && bi.phone, bi && bi.email].filter(Boolean).join(' | '),
+    ovSignDesig: doc.ovSignDesig || 'MD',
+    ovSignContact: doc.ovSignContact || (bi && bi.phone) || '',
   };
 }
 
@@ -996,30 +996,30 @@ function numToWordsIntl(n) {
 }
 
 const OV_CSS =
-  '.ov-page{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111;line-height:1.5;}'
-  + '.ov-co{display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1.5px solid #1F3A7A;margin-bottom:12px;}'
+  '.ov-page{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#111;line-height:1.4;}'
+  + '.ov-co{display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1.5px solid #1F3A7A;margin-bottom:8px;}'
   + '.ov-co img{height:54px;object-fit:contain;}.ov-co .r{text-align:right;font-size:10px;color:#333;line-height:1.45;}.ov-co .r b{font-size:11.5px;color:#1F3A7A;}'
-  + '.ov-title{text-align:center;font-size:17px;font-weight:700;color:#1F3A7A;padding:7px 0 6px;border-top:1.5px solid #1F3A7A;border-bottom:1px solid #1F3A7A;margin-bottom:8px;letter-spacing:.3px;}'
-  + '.ov-refs{display:flex;justify-content:space-between;font-size:11px;margin-bottom:10px;}.ov-refs>div+div{text-align:right;}'
-  + '.ov-h{font-size:12.5px;font-weight:700;color:#1F3A7A;border-bottom:1.5px solid #1F3A7A;padding-bottom:3px;margin:14px 0 6px;text-transform:uppercase;}'
-  + '.ov-note{font-style:italic;font-size:10.5px;margin-bottom:6px;}'
+  + '.ov-title{text-align:center;font-size:15.5px;font-weight:700;color:#1F3A7A;padding:5px 0 4px;border-top:1.5px solid #1F3A7A;border-bottom:1px solid #1F3A7A;margin-bottom:6px;letter-spacing:.3px;}'
+  + '.ov-refs{display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:6px;}.ov-refs>div+div{text-align:right;}'
+  + '.ov-h{font-size:11.5px;font-weight:700;color:#1F3A7A;border-bottom:1.5px solid #1F3A7A;padding-bottom:2px;margin:9px 0 5px;text-transform:uppercase;}'
+  + '.ov-note{font-style:italic;font-size:10px;margin-bottom:4px;}'
   + '.ov-t{width:100%;border-collapse:collapse;table-layout:fixed;}'
-  + '.ov-t th{background:#1F3A7A;color:#fff;border:1px solid #1F3A7A;padding:5px 6px;font-size:10.5px;text-align:center;}'
-  + '.ov-t td{border:1px solid #444;padding:4px 6px;font-size:10.5px;vertical-align:top;}'
+  + '.ov-t th{background:#1F3A7A;color:#fff;border:1px solid #1F3A7A;padding:3px 5px;font-size:10px;text-align:center;}'
+  + '.ov-t td{border:1px solid #444;padding:2.5px 5px;font-size:10px;vertical-align:top;}'
   + '.ov-t td.c{text-align:center;}.ov-t td.r{text-align:right;white-space:nowrap;}.ov-t td.d{overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}'
   + '.ov-t tr.tq td{font-weight:700;}.ov-t tr.tv td{background:#DCE4F4;font-weight:700;}'
   + '.ov-t td.k{font-weight:700;background:#F3F5FA;}'
-  + '.ov-p{font-size:11px;margin:0 0 5px;}.ov-sm{font-size:10.5px;margin:0 0 3px;}'
-  + '.ov-words{font-weight:700;font-size:11px;margin:8px 0;}'
-  + '.ov-ul{margin:4px 0 4px 18px;padding:0;font-size:11px;}.ov-sign{margin-top:12px;font-size:11px;}';
+  + '.ov-p{font-size:10.5px;margin:0 0 3px;}.ov-sm{font-size:10px;margin:0 0 2px;}'
+  + '.ov-words{font-weight:700;font-size:10.5px;margin:6px 0;}'
+  + '.ov-ul{margin:3px 0 3px 18px;padding:0;font-size:10.5px;}.ov-sign{margin-top:6px;font-size:10.5px;}';
 
 function buildOverseasQuotePrint(o) {
   const { doc, bi, party, withCompany } = o;
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl = (v) => esc(v).replace(/\n/g, '<br>');
-  const cur = doc.ovCurrency || 'USD';
+  const cur = doc.ovCurrency || 'INR';
   const curName = OV_CURRENCIES[cur] || cur;
-  const money = (n, dp) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const money = (n, dp) => Number(n || 0).toLocaleString(cur === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
   const items = doc.items || [];
   const unitOf = (it) => (it.unit && it.unit !== 'pcs') ? it.unit : (doc.ovUnit || 'm');
   const amtOf = (it) => (Number(it.qty) || 0) * (Number(it.rate) || 0);
@@ -1053,7 +1053,7 @@ function buildOverseasQuotePrint(o) {
   });
   blocks.push({ t: 'trow', id: 1, o: o1, th: th1, h: '<tr class="tq"><td colspan="2" style="text-align:right">Total Quantity</td><td class="c">' + money(totQty, totQty % 1 ? 2 : 0) + '</td><td class="c">' + (units.length === 1 ? esc(units[0]) : '') + '</td><td></td><td></td></tr><tr class="tv"><td colspan="5" style="text-align:right">TOTAL OFFER VALUE (' + esc(cur) + ')</td><td class="r">' + money(total, 2) + '</td></tr>' });
   const whole = Math.floor(total + 1e-9), cents = Math.round((total - whole) * 100);
-  B('<div class="ov-words">Amount in words: ' + esc(curName) + ' ' + esc(numToWordsIntl(whole)) + (cents ? ' and ' + esc(numToWordsIntl(cents)) + ' Cents' : '') + ' Only</div>');
+  B('<div class="ov-words">Amount in words: ' + esc(curName) + ' ' + esc(cur === 'INR' ? numToWords(whole) : numToWordsIntl(whole)) + (cents ? ' and ' + esc(numToWordsIntl(cents)) + (cur === 'INR' ? ' Paise' : ' Cents') : '') + ' Only</div>');
 
   if (doc.ovPriceVar) {
     B('<div class="ov-h">2. Price Variation</div>');
@@ -1067,12 +1067,13 @@ function buildOverseasQuotePrint(o) {
   }
   const encl = String(doc.ovEnclosures || '').split('\n').map(s => s.trim()).filter(Boolean);
   if (encl.length) B('<div><div class="ov-h">4. Enclosures</div><ul class="ov-ul">' + encl.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>');
-  B('<div class="ov-p" style="margin-top:10px">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div>');
+  // signature block: mobile number only — any e-mail address is stripped from the contact line
+  const _sigContact = String(doc.ovSignContact || '').split('|').map(x => x.trim()).filter(x => x && x.indexOf('@') < 0).join(' | ').replace(/^(mob(ile)?\.?\s*:?\s*)/i, '');
   const sealOn = (bi.seal || bi.signature) && bi.printSeal !== false;
-  const sealHtml = sealOn ? '<div style="height:66px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '<div style="height:40px"></div>';
-  B('<div class="ov-sign"><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + (doc.ovSignName ? '<div style="font-weight:700">' + esc(doc.ovSignName) + '</div>' : '') + (doc.ovSignDesig ? '<div>' + esc(doc.ovSignDesig) + '</div>' : '') + (doc.ovSignContact ? '<div>' + esc(doc.ovSignContact) + '</div>' : '') + '</div>');
+  const sealHtml = sealOn ? '<div style="height:54px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:52px;max-width:80px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:38px;max-width:100px;object-fit:contain">' : '') + '</div>' : '<div style="height:34px"></div>';
+  B('<div class="ov-sign"><div class="ov-p">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + '<div style="font-weight:700">Authorized Signatory</div>' + (doc.ovSignName ? '<div>' + esc(doc.ovSignName) + '</div>' : '') + '<div>' + esc(doc.ovSignDesig || 'MD') + '</div>' + (_sigContact ? '<div>Mob: ' + esc(_sigContact) + '</div>' : '') + '</div>');
 
-  return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:4mm 14mm 0 !important;font-size:11.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
+  return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:3mm 14mm 0 !important;font-size:10.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
     pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'draft' ? 'DRAFT' : '' };
 }
 
@@ -1120,12 +1121,39 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ ...styles.formGroup, flex: 1 }}>
             <label style={lbl}>Currency</label>
-            <select value={doc.ovCurrency || 'USD'} onChange={(e) => upd('ovCurrency', e.target.value)} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+            <select value={doc.ovCurrency || 'INR'} onChange={(e) => {
+              const nc = e.target.value, oc = doc.ovCurrency || 'INR';
+              setDoc((d) => ({ ...d, ovCurrency: nc,
+                ovBasis: (d.ovBasis || '').split(oc).join(nc),
+                ovTerms: (d.ovTerms || []).map((t, i) => i === 0 ? { ...t, v: (t.v || '').split(oc).join(nc) } : t) }));
+            }} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
               {Object.keys(OV_CURRENCIES).map(c => <option key={c} value={c}>{c} — {OV_CURRENCIES[c]}</option>)}
             </select>
           </div>
           {f('ovUnit', 'Default unit', 'm')}
         </div>
+        {(doc.ovCurrency || 'INR') !== 'INR' && (() => {
+          const cur = doc.ovCurrency || 'INR';
+          const fx = parseFloat(doc.ovFx) || 0;
+          const converted = (doc.items || []).some(it => it.baseRate != null);
+          return (
+            <div style={{ background: '#fff', border: '1px dashed #9FB4E0', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1F3A7A', marginBottom: 6 }}>💱 Convert existing INR rates → {cur}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
+                1 {cur} =
+                <input type="number" step="0.0001" value={doc.ovFx || ''} onChange={(e) => upd('ovFx', e.target.value)} placeholder="e.g. 88.50" readOnly={!isEditable} style={{ ...styles.input, width: 110, padding: '4px 8px' }} />
+                INR
+              </div>
+              {isEditable && (<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" disabled={!fx} onClick={() => setDoc((d) => ({ ...d, items: (d.items || []).map(it => { const base = it.baseRate != null ? Number(it.baseRate) : (Number(it.rate) || 0); return { ...it, baseRate: base, rate: Math.round((base / fx) * 10000) / 10000 }; }) }))}
+                  style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '4px 10px', opacity: fx ? 1 : 0.5 }}>Convert all rates to {cur}</button>
+                {converted && <button type="button" onClick={() => setDoc((d) => ({ ...d, items: (d.items || []).map(it => { if (it.baseRate == null) return it; const { baseRate, ...rest } = it; return { ...rest, rate: baseRate }; }) }))}
+                  style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>↩ Restore original INR rates</button>}
+              </div>)}
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 5 }}>{converted ? 'Original INR rates are saved — "Restore" brings them back. Changing the rate above and pressing Convert again re-calculates from the originals.' : 'Enter today\'s rate and press Convert — the INR rates are kept safely so nothing is lost.'}</div>
+            </div>
+          );
+        })()}
         <div style={{ display: 'flex', gap: 10 }}>{f('ovRevision', 'Revision', 'Rev. 1')}{f('ovValidUntil', 'Valid until', '', 'date')}</div>
         {f('ovKindAttn', 'Kind Attention', 'Mr. …')}
         {f('ovSubject', 'Subject', 'Offer for supply of …')}
@@ -1138,7 +1166,7 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
             <label style={{ ...lbl, marginBottom: 0 }}>Commercial terms &amp; conditions <span style={{ background: '#E1E8F7', borderRadius: 10, padding: '1px 8px', fontSize: 11 }}>{terms.length}</span></label>
             {isEditable && (<div style={{ display: 'flex', gap: 6 }}>
               <button type="button" onClick={() => upd('ovTerms', [...terms, { k: '', v: '' }])} style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '4px 10px' }}><Plus size={12} /> Add term</button>
-              <button type="button" onClick={() => { if (window.confirm('Reset all terms to the standard list?')) upd('ovTerms', OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', doc.ovCurrency || 'USD') }))); }} style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>Reset</button>
+              <button type="button" onClick={() => { if (window.confirm('Reset all terms to the standard list?')) upd('ovTerms', OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', doc.ovCurrency || 'INR') }))); }} style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>Reset</button>
             </div>)}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
@@ -1155,8 +1183,8 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
           </div>
         </div>
         {ta('ovEnclosures', 'Enclosures (one per line)', 60)}
-        <div style={{ display: 'flex', gap: 10 }}>{f('ovSignName', 'Signatory name')}{f('ovSignDesig', 'Designation')}</div>
-        {f('ovSignContact', 'Signatory contact line', '+91 … | email')}
+        <div style={{ display: 'flex', gap: 10 }}>{f('ovSignName', 'Signatory name (optional)')}{f('ovSignDesig', 'Designation', 'MD')}</div>
+        {f('ovSignContact', 'Mobile number', '+91 …')}
       </>)}
     </div>
   );
