@@ -641,12 +641,27 @@ function qrSvg(text, size) {
   } catch (e) { return ''; }
 }
 
+// Print templates (user-supplied sample designs). Each is a set of CSS variables for the shared builder.
+const ZOHO_THEMES = {
+  gst:    { label: 'GST Tax Invoice', desc: 'Framed page, blue header, HSN tax summary + QR', swatch: 'linear-gradient(90deg,#1F4E79,#E6EEF6)', v: { ac: '#1F4E79', thbg: '#1F4E79', thfg: '#fff', gl: '#000', tint: '#E6EEF6', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+  wave:   { label: 'Corporate Blue', desc: 'Clean blue boxes, light-blue table header', swatch: 'linear-gradient(90deg,#DCE6F2,#1F4E79)', v: { ac: '#1F4E79', thbg: '#DCE6F2', thfg: '#1F3A5F', gl: '#000', tint: '#DCE6F2', frame: 'none', sb: '1px solid #000', ta: 'left', tc: '#1F4E79', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  purple: { label: 'Modern Purple', desc: 'Purple header row, soft grid, zebra rows', swatch: 'linear-gradient(90deg,#5B3FA8,#EEE9F8)', v: { ac: '#5B3FA8', thbg: '#5B3FA8', thfg: '#fff', gl: '#CFC6E8', tint: '#EEE9F8', frame: 'none', sb: '1px solid #CFC6E8', ta: 'left', tc: '#5B3FA8', tfs: '20px', zebra: '#F7F4FC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  green:  { label: 'Fresh Green', desc: 'Green title + header, light-green striped rows', swatch: 'linear-gradient(90deg,#6AAB57,#E3F0DC)', v: { ac: '#4C9A3A', thbg: '#6AAB57', thfg: '#fff', gl: '#9CC890', tint: '#DDEED6', frame: 'none', sb: '1px solid #9CC890', ta: 'right', tc: '#4C9A3A', tfs: '22px', zebra: '#E3F0DC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  tally:  { label: 'Tally Classic', desc: 'Cyan company band, compact bordered grid', swatch: 'linear-gradient(90deg,#BDE5F4,#fff)', v: { ac: '#0B6E8F', thbg: '#BDE5F4', thfg: '#000', gl: '#000', tint: '#BDE5F4', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '14px', zebra: 'transparent', cband: '#BDE5F4', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+  classic:{ label: 'Classic', desc: 'Our original serif look, soft borders', swatch: 'linear-gradient(90deg,#F1EFE9,#B9B4A6)', v: { ac: '#1E2A4A', thbg: '#F1EFE9', thfg: '#000', gl: '#B9B4A6', tint: '#F1EFE9', frame: 'none', sb: '1px solid #B9B4A6', ta: 'left', tc: '#1E2A4A', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Georgia,"Times New Roman",serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  formal: { label: 'Formal B/W', desc: 'Our original black & white bordered format', swatch: 'linear-gradient(90deg,#f0f0f0,#000)', v: { ac: '#000', thbg: '#F0F0F0', thfg: '#000', gl: '#000', tint: '#F0F0F0', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+};
+function zohoThemeCss(id) {
+  const th = ZOHO_THEMES[id] || ZOHO_THEMES.gst;
+  return ':root{' + Object.keys(th.v).map(k => '--' + k + ':' + th.v[k] + ';').join('') + '}';
+}
+
 // Generic-mode CSS: restyles any cloned data table to the same blue-header / black-grid look.
 const ZOHO_GEN_CSS =
   '.bd{padding:3mm 4mm !important;}'
   + 'table.gdata{border-collapse:collapse;width:100%;margin:2px 0;}'
-  + 'table.gdata th{background:#1F4E79 !important;color:#fff !important;border:1px solid #000 !important;padding:5px 6px !important;font-size:10.5px !important;font-weight:700 !important;}'
-  + 'table.gdata td{border:1px solid #000 !important;padding:5px 6px !important;font-size:10.5px !important;color:#000 !important;vertical-align:top;}'
+  + 'table.gdata th{background:var(--thbg) !important;color:var(--thfg) !important;border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;font-weight:700 !important;}'
+  + 'table.gdata td{border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;color:#000 !important;vertical-align:top;}'
   + 'table.gplain td,table.gplain th{padding:3px 5px;}'
   + 'img{max-width:100%;}';
 
@@ -656,37 +671,37 @@ function printView(sel, bi) { return printPaginated(sel, bi, null, true); }
 // ─── GST tax-invoice print (framed page, full-height item grid, HSN tax summary) ───
 // Built from document data (not cloned from the screen) so every page is identical in layout.
 const ZOHO_PRINT_CSS =
-  'body{font-family:Arial,Helvetica,sans-serif !important;color:#111;font-size:11px;line-height:1.45;}'
-  + '.bd{left:10mm !important;right:10mm !important;padding:0 !important;margin:2mm 0;border:1px solid #000;}'
-  + '.zco{display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #000;}'
+  'body{font-family:var(--font) !important;color:#111;font-size:11px;line-height:1.45;}'
+  + '.bd{left:10mm !important;right:10mm !important;padding:var(--bpad) !important;margin:2mm 0;border:var(--frame);}'
+  + '.zco{display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--cband);border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
   + '.zco img{width:56px;height:56px;object-fit:contain;}.zconame{font-size:16px;font-weight:700;}.zcosm{font-size:10.5px;color:#333;}'
-  + '.zh1{text-align:center;font-size:15px;font-weight:700;letter-spacing:1px;padding:6px 10px;border-bottom:1px solid #000;}'
+  + '.zh1{text-align:var(--ta);color:var(--tc);font-size:var(--tfs);font-weight:700;letter-spacing:1px;padding:6px 10px;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
   + '.zbadge{display:inline-block;margin-left:10px;font-size:9px;font-weight:700;letter-spacing:.8px;padding:1px 7px;border:1px solid #000;border-radius:3px;vertical-align:middle;}'
-  + '.zmeta{display:flex;border-bottom:1px solid #000;}.zmeta>div{flex:1;padding:5px 10px;min-width:0;}.zmeta>div+div{border-left:1px solid #000;}'
+  + '.zmeta{display:flex;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}.zmeta>div{flex:1;padding:5px 10px;min-width:0;}.zmeta>div+div{border-left:1px solid var(--gl);}'
   + '.zmeta .k{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:.6px;}.zmeta .v{font-size:11.5px;font-weight:700;overflow-wrap:break-word;}'
-  + '.zparty{display:flex;border-bottom:1px solid #000;}'
-  + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid #000;}'
+  + '.zparty{display:flex;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
+  + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid var(--gl);}'
   + '.zlbl{font-size:9.5px;font-weight:700;letter-spacing:.8px;color:#444;text-transform:uppercase;margin-bottom:3px;}'
   + '.zpn{font-size:12.5px;font-weight:700;margin-bottom:2px;}.zps{font-size:10.5px;color:#222;overflow-wrap:break-word;}'
-  + '.zt{width:calc(100% + 2px);margin:0 -1px;border-collapse:collapse;table-layout:fixed;border:0;}'
-  + '.zt th{background:#1F4E79;color:#fff;border:1px solid #000;padding:6px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
-  + '.zt td{border:1px solid #000;padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
+  + '.zt{width:var(--tw);margin:var(--tm);border-collapse:collapse;table-layout:fixed;border:0;}'
+  + '.zt th{background:var(--thbg);color:var(--thfg);border:1px solid var(--gl);padding:6px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+  + '.zt tbody tr:nth-child(even) td{background:var(--zebra);}.zt td{border:1px solid var(--gl);padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
   + '.zt thead th{border-top:0;}'
   + '.zt .c{text-align:center;white-space:nowrap;}.zt .r{text-align:right;white-space:nowrap;}.zt .l{text-align:left;}'
   + '.zt td.d{white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;}'
   + '.zt td.amt{font-weight:700;}'
   + '.zt tr.fill td{border-top:0;border-bottom:0;padding:0;}'
-  + '.zsum{display:flex;border-top:1px solid #000;}.zsumL{flex:1;min-width:0;padding:7px 10px;}.zsumR{width:80mm;flex:none;border-left:1px solid #000;}'
+  + '.zsum{display:flex;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}.zsumL{flex:1;min-width:0;padding:7px 10px;}.zsumR{width:80mm;flex:none;border-left:1px solid var(--gl);}'
   + '.zwords{font-size:11px;font-style:italic;font-weight:700;margin-bottom:6px;}.zbank div{font-size:10.5px;margin-bottom:1px;}.zbank b{font-weight:700;}'
   + '.ztot{width:100%;border-collapse:collapse;}.ztot td{padding:5px 10px;font-size:11px;border-bottom:1px solid #bbb;white-space:nowrap;}'
-  + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:#E6EEF6;font-size:13px;font-weight:700;border-top:1.5px solid #000;border-bottom:0;}'
-  + '.ztax{width:calc(100% + 2px);margin:0 -1px;border-collapse:collapse;table-layout:fixed;border-top:1px solid #000;}'
-  + '.ztax th{background:#E6EEF6;border:1px solid #000;padding:4px 5px;font-size:10px;font-weight:700;text-align:center;}'
-  + '.ztax td{border:1px solid #000;padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
+  + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:var(--tint);font-size:13px;font-weight:700;border-top:1.5px solid var(--ac);border-bottom:0;}'
+  + '.ztax{width:var(--tw);margin:var(--tm);border-collapse:collapse;table-layout:fixed;border-top:1px solid var(--gl);}'
+  + '.ztax th{background:var(--tint);border:1px solid var(--gl);padding:4px 5px;font-size:10px;font-weight:700;text-align:center;}'
+  + '.ztax td{border:1px solid var(--gl);padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
   + '.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
   + '.ztc{padding:0 10px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
-  + '.zsig{display:flex;justify-content:space-between;padding:6px 10px 8px;border-top:1px solid #000;font-size:11px;}'
-  + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:#1F4E79;}';
+  + '.zsig{display:flex;justify-content:space-between;padding:6px 10px 8px;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);border-bottom:var(--sb);font-size:11px;}'
+  + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:var(--ac);}';
 
 function buildZohoDocPrint(o) {
   const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
@@ -822,7 +837,7 @@ function buildZohoDocPrint(o) {
   }
 
   const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
-  if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid #000">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
+  if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
 
   TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div><div class="ln">' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
   return { blocks, thead, tblOpen };
@@ -836,8 +851,9 @@ async function printPaginated(sel, bi, pre, gen) {
     if (!bi || typeof bi !== 'object') bi = (typeof window !== 'undefined' && window.__operixBI) || {};
     const _qa = typeof sel === 'string' ? document.querySelectorAll(sel) : null;
     const src = _qa ? _qa[_qa.length - 1] : sel;
-    const lhHdrUrl = bi && bi.letterhead ? bi.letterhead : '';
-    const lhFtrUrl = bi && bi.letterheadFooter ? bi.letterheadFooter : '';
+    const _logoMode = !pre && gen && bi && bi.printHeader === 'logo';
+    const lhHdrUrl = bi && bi.letterhead && !_logoMode ? bi.letterhead : '';
+    const lhFtrUrl = bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '';
     if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
     if (!pre && gen && !src) { window.print(); return; }
 
@@ -995,7 +1011,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.doc-items-table td.tdwrap{white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
       + '.doc-items-table td.tdwrap *{white-space:normal !important;max-width:100%;}'
       + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
-      + ((pre || gen) ? ZOHO_PRINT_CSS : '')
+      + ((pre || gen) ? zohoThemeCss(bi && bi.template) + ZOHO_PRINT_CSS : '')
       + (gen ? ZOHO_GEN_CSS : '')
       + '</style></head><body>'
       + '<div id="out"></div>'
@@ -3285,20 +3301,43 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
         </>)}
 
         <div style={styles.formGroup}>
-          <label style={styles.label}>Print template</label>
-          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
-            {templates.map((t) => (
-              <button key={t.id} onClick={() => setForm((p) => ({ ...p, template: t.id }))}
-                style={{ flexShrink: 0, width: 130, border: form.template === t.id ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 8px', cursor: 'pointer', textAlign: 'center', background: form.template === t.id ? '#F0EFE9' : '#FAF8F4' }}>
-                <div style={{ height: 36, borderRadius: 6, marginBottom: 7, background: t.swatch, border: '1px solid rgba(0,0,0,0.06)' }} />
-                <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1E2A4A' }}>{t.label}</div>
-                <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{t.desc}</div>
-              </button>
-            ))}
+          <label style={styles.label}>Print format &amp; header</label>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 8, lineHeight: 1.6 }}>
+            Every printed document (invoices, vouchers, GRN, pay slips, etc.) uses one standard framed format. Choose what goes on top of each page:
           </div>
-          {/* Live mini preview */}
-          <div style={{ marginTop: 14, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 18px', fontSize: 11 }}>
-            <TemplateMiniPreview template={form.template || 'classic'} name={form.name || 'Your Company'} />
+          {(() => {
+            const cur = form.printHeader || ((form.letterhead || form.letterheadFooter) ? 'letterhead' : 'logo');
+            const opt = (id, title, desc) => (
+              <button key={id} type="button" onClick={() => setForm((p) => ({ ...p, printHeader: id }))}
+                style={{ flex: 1, minWidth: 180, textAlign: 'left', border: cur === id ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', background: cur === id ? '#F0EFE9' : '#FAF8F4' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A' }}>{cur === id ? '● ' : '○ '}{title}</div>
+                <div style={{ fontSize: 11.5, color: '#888780', marginTop: 3 }}>{desc}</div>
+              </button>
+            );
+            return (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {opt('logo', 'Logo + company details', 'Uses the logo uploaded above with your name, address, GSTIN, phone and email.')}
+                {opt('letterhead', 'Letterhead images', 'Uses the header and footer letterhead images on every page.')}
+              </div>
+            );
+          })()}
+          <div style={{ fontSize: 11.5, color: '#888780', marginTop: 8 }}>Invoice / quotation screens also have a per-document "Use Letterhead" toggle that overrides this.</div>
+        </div>
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Print template <span style={{ color: '#999', fontWeight: 400 }}>(used for every printed document)</span></label>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
+            {Object.entries(ZOHO_THEMES).map(([id, t]) => {
+              const sel = (ZOHO_THEMES[form.template] ? form.template : 'gst') === id;
+              return (
+                <button key={id} type="button" onClick={() => setForm((p) => ({ ...p, template: id }))}
+                  style={{ flexShrink: 0, width: 150, border: sel ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 8px', cursor: 'pointer', textAlign: 'center', background: sel ? '#F0EFE9' : '#FAF8F4' }}>
+                  <div style={{ height: 40, borderRadius: 6, marginBottom: 7, background: t.swatch, border: '1px solid rgba(0,0,0,0.08)' }} />
+                  <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1E2A4A' }}>{sel ? '✓ ' : ''}{t.label}</div>
+                  <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{t.desc}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -5711,7 +5750,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [rejectionNote, setRejectionNote] = useState('');
   const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
   const [mepPickerOpen, setMepPickerOpen] = useState(false);
-  const [useLH, setUseLH] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
+  const [useLH, setUseLH] = useState(businessInfo?.printHeader ? (businessInfo.printHeader === 'letterhead' && !!(businessInfo?.letterhead||businessInfo?.letterheadFooter||businessInfo?.letterheadHtml)) : !!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [mergeSel, setMergeSel] = useState([]);
@@ -5754,7 +5793,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const totals = computeTotals(doc, businessInfo.state, businessInfo.country);
   const customer = partyList.find((c) => c.id === doc.customerId);
   const displayParty = customer || doc.customerSnapshot; // fallback to snapshot when live record unavailable
-  const template = businessInfo.template || 'classic';
+  // Screen preview: bordered "formal" layout for the new templates, original look for "classic". Print uses buildZohoDocPrint + the chosen theme.
+  const template = businessInfo.template === 'classic' ? 'classic' : 'formal';
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
