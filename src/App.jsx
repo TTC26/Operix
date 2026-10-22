@@ -363,7 +363,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <button style={styles.primaryBtn} onClick={()=>window.print()}><Printer size={15}/> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', businessInfo)}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -577,6 +577,82 @@ function buildZohoDocPrintOld(o) {
   return { blocks, thead, tblOpen };
 }
 
+// ─── Minimal QR code generator (byte mode, ECC level M, versions 1–10) → SVG string ───
+function qrSvg(text, size) {
+  try {
+    const bytes = Array.from(unescape(encodeURIComponent(String(text))), c => c.charCodeAt(0));
+    const ECC = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26], NB = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+    const rawMods = (v) => { let r = (16 * v + 128) * v + 64; if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; } return r; };
+    let ver = 1;
+    for (; ver <= 10; ver++) { const cap = Math.floor(rawMods(ver) / 8) - ECC[ver] * NB[ver]; if (4 + (ver < 10 ? 8 : 16) + 8 * bytes.length <= cap * 8) break; }
+    if (ver > 10) return '';
+    const dataCw = Math.floor(rawMods(ver) / 8) - ECC[ver] * NB[ver];
+    const bits = [];
+    const put = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
+    put(0, Math.min(4, dataCw * 8 - bits.length));
+    while (bits.length % 8) bits.push(0);
+    for (let p = 0xEC; bits.length < dataCw * 8; p ^= 0xEC ^ 0x11) put(p, 8);
+    const data = []; for (let i = 0; i < bits.length; i += 8) { let b = 0; for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k]; data.push(b); }
+    const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; };
+    const eccLen = ECC[ver], nBlocks = NB[ver];
+    const div = new Array(eccLen).fill(0); div[eccLen - 1] = 1;
+    for (let i = 0, root = 1; i < eccLen; i++) { for (let j = 0; j < eccLen; j++) { div[j] = mul(div[j], root); if (j + 1 < eccLen) div[j] ^= div[j + 1]; } root = mul(root, 2); }
+    const raw = Math.floor(rawMods(ver) / 8), nShort = nBlocks - raw % nBlocks, shortLen = Math.floor(raw / nBlocks);
+    const blocks = []; let off = 0;
+    for (let i = 0; i < nBlocks; i++) {
+      const len = shortLen - eccLen + (i < nShort ? 0 : 1);
+      const d = data.slice(off, off + len); off += len;
+      const rem = new Array(eccLen).fill(0);
+      d.forEach(b => { const f = b ^ rem.shift(); rem.push(0); div.forEach((c, k) => { rem[k] ^= mul(c, f); }); });
+      if (i < nShort) d.push(0);
+      blocks.push(d.concat(rem));
+    }
+    const all = [];
+    for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== shortLen - eccLen || j >= nShort) all.push(b[i]); });
+    const N = ver * 4 + 17;
+    const M = Array.from({ length: N }, () => new Array(N).fill(false)), F = Array.from({ length: N }, () => new Array(N).fill(false));
+    const setFn = (x, y, v) => { M[y][x] = v; F[y][x] = true; };
+    for (let i = 0; i < N; i++) { setFn(6, i, i % 2 === 0); setFn(i, 6, i % 2 === 0); }
+    const finder = (x, y) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const d = Math.max(Math.abs(dx), Math.abs(dy)), xx = x + dx, yy = y + dy; if (xx >= 0 && xx < N && yy >= 0 && yy < N) setFn(xx, yy, d !== 2 && d !== 4); } };
+    finder(3, 3); finder(N - 4, 3); finder(3, N - 4);
+    const pos = [];
+    if (ver > 1) { const n = Math.floor(ver / 7) + 2, step = Math.ceil((ver * 4 + 4) / (n * 2 - 2)) * 2; for (let p = N - 7, k = 0; k < n - 1; k++, p -= step) pos.unshift(p); pos.unshift(6); }
+    pos.forEach((px, i) => pos.forEach((py, j) => { if ((i === 0 && j === 0) || (i === 0 && j === pos.length - 1) || (i === pos.length - 1 && j === 0)) return; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setFn(px + dx, py + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1); }));
+    const fmt = (mask) => {
+      const d = (0 << 3) | mask; let r = d; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+      const b = ((d << 10) | r) ^ 0x5412, g = (i) => ((b >>> i) & 1) !== 0;
+      for (let i = 0; i <= 5; i++) setFn(8, i, g(i)); setFn(8, 7, g(6)); setFn(8, 8, g(7)); setFn(7, 8, g(8));
+      for (let i = 9; i < 15; i++) setFn(14 - i, 8, g(i));
+      for (let i = 0; i < 8; i++) setFn(N - 1 - i, 8, g(i));
+      for (let i = 8; i < 15; i++) setFn(8, N - 15 + i, g(i));
+      setFn(8, N - 8, true);
+    };
+    fmt(0);
+    if (ver >= 7) { let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25); const b = (ver << 12) | r; for (let i = 0; i < 18; i++) { const c = ((b >>> i) & 1) !== 0, a = N - 11 + i % 3, bb = Math.floor(i / 3); setFn(a, bb, c); setFn(bb, a, c); } }
+    let k = 0;
+    for (let right = N - 1; right >= 1; right -= 2) { if (right === 6) right = 5; for (let v = 0; v < N; v++) for (let j = 0; j < 2; j++) { const x = right - j, up = ((right + 1) & 2) === 0, y = up ? N - 1 - v : v; if (!F[y][x] && k < all.length * 8) { M[y][x] = ((all[k >>> 3] >>> (7 - (k & 7))) & 1) !== 0; k++; } } }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!F[y][x] && (x + y) % 2 === 0) M[y][x] = !M[y][x];
+    fmt(0);
+    let d = '';
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (M[y][x]) d += 'M' + (x + 2) + ',' + (y + 2) + 'h1v1h-1z';
+    const px = size || 90;
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (N + 4) + ' ' + (N + 4) + '" width="' + px + '" height="' + px + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+  } catch (e) { return ''; }
+}
+
+// Generic-mode CSS: restyles any cloned data table to the same blue-header / black-grid look.
+const ZOHO_GEN_CSS =
+  '.bd{padding:3mm 4mm !important;}'
+  + 'table.gdata{border-collapse:collapse;width:100%;margin:2px 0;}'
+  + 'table.gdata th{background:#1F4E79 !important;color:#fff !important;border:1px solid #000 !important;padding:5px 6px !important;font-size:10.5px !important;font-weight:700 !important;}'
+  + 'table.gdata td{border:1px solid #000 !important;padding:5px 6px !important;font-size:10.5px !important;color:#000 !important;vertical-align:top;}'
+  + 'table.gplain td,table.gplain th{padding:3px 5px;}'
+  + 'img{max-width:100%;}';
+
+// Print any on-screen document view in the standard framed format (letterhead if configured).
+function printView(sel, bi) { return printPaginated(sel, bi, null, true); }
+
 // ─── GST tax-invoice print (framed page, full-height item grid, HSN tax summary) ───
 // Built from document data (not cloned from the screen) so every page is identical in layout.
 const ZOHO_PRINT_CSS =
@@ -592,10 +668,9 @@ const ZOHO_PRINT_CSS =
   + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid #000;}'
   + '.zlbl{font-size:9.5px;font-weight:700;letter-spacing:.8px;color:#444;text-transform:uppercase;margin-bottom:3px;}'
   + '.zpn{font-size:12.5px;font-weight:700;margin-bottom:2px;}.zps{font-size:10.5px;color:#222;overflow-wrap:break-word;}'
-  + '.zt{width:100%;border-collapse:collapse;table-layout:fixed;border:0;}'
+  + '.zt{width:calc(100% + 2px);margin:0 -1px;border-collapse:collapse;table-layout:fixed;border:0;}'
   + '.zt th{background:#1F4E79;color:#fff;border:1px solid #000;padding:6px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
   + '.zt td{border:1px solid #000;padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
-  + '.zt tr>*:first-child{border-left:0;}.zt tr>*:last-child{border-right:0;}'
   + '.zt thead th{border-top:0;}'
   + '.zt .c{text-align:center;white-space:nowrap;}.zt .r{text-align:right;white-space:nowrap;}.zt .l{text-align:left;}'
   + '.zt td.d{white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;}'
@@ -605,10 +680,10 @@ const ZOHO_PRINT_CSS =
   + '.zwords{font-size:11px;font-style:italic;font-weight:700;margin-bottom:6px;}.zbank div{font-size:10.5px;margin-bottom:1px;}.zbank b{font-weight:700;}'
   + '.ztot{width:100%;border-collapse:collapse;}.ztot td{padding:5px 10px;font-size:11px;border-bottom:1px solid #bbb;white-space:nowrap;}'
   + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:#E6EEF6;font-size:13px;font-weight:700;border-top:1.5px solid #000;border-bottom:0;}'
-  + '.ztax{width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #000;}'
+  + '.ztax{width:calc(100% + 2px);margin:0 -1px;border-collapse:collapse;table-layout:fixed;border-top:1px solid #000;}'
   + '.ztax th{background:#E6EEF6;border:1px solid #000;padding:4px 5px;font-size:10px;font-weight:700;text-align:center;}'
   + '.ztax td{border:1px solid #000;padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
-  + '.ztax tr>*:first-child{border-left:0;}.ztax tr>*:last-child{border-right:0;}.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
+  + '.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
   + '.ztc{padding:0 10px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
   + '.zsig{display:flex;justify-content:space-between;padding:6px 10px 8px;border-top:1px solid #000;font-size:11px;}'
   + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:#1F4E79;}';
@@ -711,7 +786,13 @@ function buildZohoDocPrint(o) {
     }
   }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
-  TL('<div class="zsum"><div class="zsumL">' + left + '</div><div class="zsumR">' + rightTot + '</div></div>');
+  let qrBlock = '';
+  if (!isPL) {
+    const qrTxt = ['DOC:' + (t.label || doc.type) + ' ' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.gstin || bi.name || ''), 'TO:' + ((party && (party.gstin || party.taxId)) || (party && party.name) || ''), 'AMT:' + Math.round(totals.grandTotal || 0)].join('|');
+    const svg = qrSvg(qrTxt, 84);
+    if (svg) qrBlock = '<div style="flex:none;text-align:center;margin-left:10px"><div style="border:1px solid #000;padding:2px;line-height:0">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div>';
+  }
+  TL('<div class="zsum"><div class="zsumL" style="display:flex;justify-content:space-between;align-items:flex-start"><div style="min-width:0;flex:1">' + left + '</div>' + qrBlock + '</div><div class="zsumR">' + rightTot + '</div></div>');
 
   if (!isPL && cc.hasTax && cc.splitTax) {
     const grp = {};
@@ -750,24 +831,73 @@ function buildZohoDocPrint(o) {
 // Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
 // table row-by-row, and prints real A4 sheets each carrying the header + footer. Works
 // around Chromium multi-page bugs (thead no-repeat, position:fixed clipping).
-function printPaginated(sel, bi, pre) {
+async function printPaginated(sel, bi, pre, gen) {
   try {
-    const src = typeof sel === 'string' ? document.querySelector(sel) : sel;
+    if (!bi || typeof bi !== 'object') bi = (typeof window !== 'undefined' && window.__operixBI) || {};
+    const _qa = typeof sel === 'string' ? document.querySelectorAll(sel) : null;
+    const src = _qa ? _qa[_qa.length - 1] : sel;
     const lhHdrUrl = bi && bi.letterhead ? bi.letterhead : '';
     const lhFtrUrl = bi && bi.letterheadFooter ? bi.letterheadFooter : '';
-    if (!pre && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
+    if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
+    if (!pre && gen && !src) { window.print(); return; }
 
-    // Measure letterhead natural heights (mm at full A4 width), capped.
-    const mmOf = (imgSel, cap, fb) => {
+    // Measure letterhead natural heights (mm at full A4 width), capped. Falls back to
+    // loading the image off-screen when the page doesn't already contain it.
+    const mmOf = async (imgSel, url, cap, fb) => {
       const im = src ? src.querySelector(imgSel) : null;
       if (im && im.naturalWidth) return Math.min(Math.ceil(210 * im.naturalHeight / im.naturalWidth), cap);
+      try {
+        const pm = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; setTimeout(() => res(null), 3000); });
+        if (pm && pm.naturalWidth) return Math.min(Math.ceil(210 * pm.naturalHeight / pm.naturalWidth), cap);
+      } catch (e) {}
       return fb;
     };
-    const HDRMM = lhHdrUrl ? mmOf('.lh-pad-header img', 60, 55) : (pre ? 8 : 0);
-    const FTRMM = lhFtrUrl ? mmOf('.lh-pad-footer img', 46, 40) : (pre ? 12 : 0);
+    const noLH = !lhHdrUrl && !lhFtrUrl;
+    const HDRMM = lhHdrUrl ? await mmOf('.lh-pad-header img', lhHdrUrl, 60, 55) : ((pre || gen) ? 8 : 0);
+    const FTRMM = lhFtrUrl ? await mmOf('.lh-pad-footer img', lhFtrUrl, 46, 40) : ((pre || gen) ? 12 : 0);
 
     let blocks = [], theadHTML = '', tblOpen = '';
-    if (pre) { blocks = pre.blocks; theadHTML = pre.thead; tblOpen = pre.tblOpen; } else {
+    if (pre) { blocks = pre.blocks; theadHTML = pre.thead; tblOpen = pre.tblOpen; } else if (gen) {
+      // Generic mode: any on-screen print view → framed sheets. Every data table is split row-by-row
+      // with its own header repeated on each page; other content flows block by block.
+      src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
+      src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
+      src.querySelectorAll('select').forEach(s2 => { try { Array.from(s2.options).forEach(o => o.removeAttribute('selected')); if (s2.selectedIndex >= 0) s2.options[s2.selectedIndex].setAttribute('selected', 'selected'); } catch (e) {} });
+      const clone = src.cloneNode(true);
+      clone.querySelectorAll('.no-print, .di-screen, .di-screen-row, .lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
+      clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
+      clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
+      clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
+      if (noLH && bi) {
+        const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        blocks.push({ t: '', h: '<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + e2(bi.name) + '</div><div class="zcosm">' + e2(bi.address) + '</div><div class="zcosm">' + (bi.gstin ? 'GSTIN: ' + e2(bi.gstin) : '') + (bi.phone ? ' · ' + e2(bi.phone) : '') + (bi.email ? ' · ' + e2(bi.email) : '') + '</div></div></div>' });
+      }
+      let tid = 0;
+      const walkG = (el) => {
+        if (el.tagName === 'TABLE') {
+          tid++;
+          const isData = !!el.querySelector('th');
+          const thead = el.querySelector('thead');
+          const head = thead ? thead.outerHTML : '';
+          const trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
+          const trs2 = trs.length ? trs : Array.from(el.querySelectorAll(':scope > tr'));
+          const cls = (isData ? 'gdata ' : 'gplain ') + (el.className || '');
+          const open = '<table class="' + cls + '" style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+          let i = 0;
+          while (i < trs2.length) {
+            let span = 1;
+            trs2[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+            blocks.push({ h: trs2.slice(i, i + span).map(r => r.outerHTML).join(''), t: 'trow', id: tid, o: open, th: head });
+            i += span;
+          }
+        } else if (el.querySelector && el.querySelector('table') && el.children.length) {
+          Array.from(el.children).forEach(walkG);
+        } else {
+          blocks.push({ h: el.outerHTML, t: '' });
+        }
+      };
+      Array.from(clone.children).forEach(walkG);
+    } else {
     // Persist live form values into attributes so the clone keeps them (cloneNode drops them).
     src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
     src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
@@ -831,16 +961,19 @@ function printPaginated(sel, bi, pre) {
     const script = '(function(){'
       + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];'
       + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;curBody=null;}'
-      + 'function startTbl(){var w=document.createElement("div");w.innerHTML=TBLOPEN+THEADHTML+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");}'
+      + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
-      + 'np();'
-      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail"){TAIL.push(B.h);continue;}'
-      + 'if(B.t==="trow"){if(!curBody)startTbl();var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
-      + 'if(!fits()){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);np();startTbl();curBody.insertAdjacentHTML("beforeend",B.h);} }'
-      + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(!fits()){bd.removeChild(node);np();bd.appendChild(node);} }'
+      + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
+      + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(nd.children.length>1){bd.removeChild(nd);var kids=Array.prototype.slice.call(nd.children);for(var z=0;z<kids.length;z++)placeNode(kids[z]);}}'
+      + 'np();var LASTROW=-1,TH=0;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
+      + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
+      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
+      + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
+      + 'if(!fits()||(i===LASTROW&&TH>0&&used()+TH>bd.clientHeight)){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",B.h);} }'
+      + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;placeNode(node);}'
       + '}'
       + 'if(TAIL.length){var tw=document.createElement("div");tw.style.display="flow-root";tw.innerHTML=TAIL.join("");bd.appendChild(tw);'
-      + 'if(!fits()){bd.removeChild(tw);np();bd.appendChild(tw);}'
+      + 'if(!fits()){bd.removeChild(tw);np();bd.appendChild(tw);var fp=bd.clientHeight-(tw.offsetTop+tw.offsetHeight)-3;if(fp>0)tw.style.marginTop=fp+"px";}'
       + 'else if(curBody){var tH=tw.offsetHeight;bd.removeChild(tw);var lastEl=bd.lastElementChild;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;'
       + 'if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}'
       + 'bd.appendChild(tw);} }'
@@ -862,7 +995,8 @@ function printPaginated(sel, bi, pre) {
       + '.doc-items-table td.tdwrap{white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
       + '.doc-items-table td.tdwrap *{white-space:normal !important;max-width:100%;}'
       + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
-      + (pre ? ZOHO_PRINT_CSS : '')
+      + ((pre || gen) ? ZOHO_PRINT_CSS : '')
+      + (gen ? ZOHO_GEN_CSS : '')
       + '</style></head><body>'
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
@@ -7067,7 +7201,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','petty-cash-statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -7745,7 +7879,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','voucher.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print / PDF</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print / PDF</button>
       </div>
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
@@ -7818,7 +7952,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
@@ -8936,7 +9070,7 @@ function GRNPrint({ grn, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -8996,7 +9130,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -11379,7 +11513,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payroll-summary.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -11468,7 +11602,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payslips.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print All ({lines.length})</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print All ({lines.length})</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
         {lines.map((l, i) => (
@@ -11808,7 +11942,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
           <div style={{ display: 'flex', gap: 8 }}>
             {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area',`service-order-${order.number||'so'}.pdf`)}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={14}/> Print</button>
+            <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={14}/> Print</button>
             <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
           </div>
         </div>
@@ -11938,7 +12072,7 @@ function PrintModal({ title, children, onClose }) {
           <span style={{ fontWeight: 700, fontSize: 15 }}>{title}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','bin-card.pdf')}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={14}/> Print / Save PDF</button>
+            <button style={styles.primaryBtn} onClick={() => printView('.print-area', undefined)}><Printer size={14}/> Print / Save PDF</button>
             <button style={styles.secondaryBtn} onClick={onClose}><X size={14}/> Close</button>
           </div>
         </div>
@@ -12097,7 +12231,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
-          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+          <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
           <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -15714,7 +15848,7 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -17549,7 +17683,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
         {(bi?.letterhead||bi?.letterheadHtml) && <button onClick={() => setUseLHPartner(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHPartner?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHPartner?'Letterhead ON':'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','partner-agreement.pdf')} style={styles.ghostBtn}><Download size={13} style={{ marginRight: 4 }}/> PDF</button>
-        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
+        <button onClick={() => printView('.print-area', bi)} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
         {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
@@ -25496,7 +25630,7 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -26583,6 +26717,7 @@ export default function App() {
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [businessInfo,     _setBi]     = useState({});
+  try { window.__operixBI = businessInfo; } catch (e) {}
   const [documents,        _setDocs]   = useState([]);
   const [customers,        _setCusts]  = useState([]);
   const [vendors,          _setVends]  = useState([]);
