@@ -2415,8 +2415,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
   const [cloudMsg, setCloudMsg] = useState('');
   const [lhDim, setLhDim] = useState(null);   // header image {w,h}
   const [lhfDim, setLhfDim] = useState(null);  // footer image {w,h}
-  const LH_STD = { w: 1654, h: 680 };          // standard header px
-  const LHF_STD = { w: 1654, h: 500 };         // standard footer px
+  const LH_REC_W = 1654;                        // recommended full-page width (A4 @200dpi)
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
   function handleSave() {
@@ -2528,28 +2527,28 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
 
         {/* Letterhead header */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(standard size <b>1654 × 680 px</b> — top of page, under 1.5 MB)</span></label>
+          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(full page width — <b>≈1654 px wide</b>; any height, it auto-fits; under 1.5 MB)</span></label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             {form.letterhead && <img src={form.letterhead} alt="letterhead" onLoad={e => setLhDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 60, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
             <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterhead ? 'Change letterhead' : '⬆ Upload letterhead'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadUpload} /></label>
             {form.letterhead && <button type="button" onClick={() => { setForm(p => ({ ...p, letterhead: '' })); setLhDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
           </div>
-          {form.letterhead && lhDim && (lhDim.w === LH_STD.w && lhDim.h === LH_STD.h
-            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Correct standard size ({lhDim.w} × {lhDim.h} px)</div>
-            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ This image is {lhDim.w} × {lhDim.h} px — please resize to the standard <b>{LH_STD.w} × {LH_STD.h} px</b> for a clean print.</div>)}
+          {form.letterhead && lhDim && (lhDim.w >= 1400
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhDim.w} × {lhDim.h} px (full width, auto-fits)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhDim.w} × {lhDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
         </div>
 
         {/* Letterhead footer (optional) */}
         <div style={styles.formGroup}>
-          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(standard size <b>1654 × 500 px</b> — bottom of page)</span></label>
+          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(full page width — <b>≈1654 px wide</b>; any height, it auto-fits)</span></label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             {form.letterheadFooter && <img src={form.letterheadFooter} alt="footer" onLoad={e => setLhfDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
             <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterheadFooter ? 'Change footer' : '⬆ Upload footer'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadFooterUpload} /></label>
             {form.letterheadFooter && <button type="button" onClick={() => { setForm(p => ({ ...p, letterheadFooter: '' })); setLhfDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
           </div>
-          {form.letterheadFooter && lhfDim && (lhfDim.w === LHF_STD.w && lhfDim.h === LHF_STD.h
-            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Correct standard size ({lhfDim.w} × {lhfDim.h} px)</div>
-            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ This image is {lhfDim.w} × {lhfDim.h} px — please resize to the standard <b>{LHF_STD.w} × {LHF_STD.h} px</b> for a clean print.</div>)}
+          {form.letterheadFooter && lhfDim && (lhfDim.w >= 1400
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhfDim.w} × {lhfDim.h} px (full width, auto-fits)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhfDim.w} × {lhfDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
         </div>
         {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
 
@@ -12841,11 +12840,13 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
       // block, starting a new sheet when one fills up. Every sheet gets its own header +
       // footer, so they appear on EVERY page and nothing is ever clipped — this does not
       // rely on thead repetition or position:fixed (both buggy for multi-page in Chromium).
-      // Letterhead reserved per page (smaller than the image's natural full-width size, so
-      // more content fits). object-fit:contain shows the whole letterhead, scaled down and
-      // centred. Same header/footer on every page.
-      const HDRMM = lhHdr ? 56 : 30;
-      const FTRMM = lhFtr ? 40 : 14;
+      // Band height = each letterhead's own natural full-width height (measured from the
+      // preview image), capped so a very tall letterhead doesn't eat the page. When the band
+      // equals the natural height the image fills it with NO distortion (short letterheads);
+      // a capped tall letterhead is lightly compressed. Same header/footer on every page.
+      const HCAP = 60, FCAP = 46;
+      const HDRMM = lhHdr ? Math.min(lhMM.t || 56, HCAP) : 30;
+      const FTRMM = lhFtr ? Math.min(lhMM.b || 40, FCAP) : 14;
       const headerInner = lhHdr
         ? `<img src="${businessInfo.letterhead}" style="width:100%;height:100%;object-fit:fill;display:block;"/>`
         : `<div style="padding:8mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
