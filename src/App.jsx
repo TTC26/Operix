@@ -688,6 +688,11 @@ function printLetterFromHtml(html, biz, opts) {
     const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
+    if (biz.seal || biz.signature) {
+      const sb = page.querySelector('.sig-box');
+      const sp = sb && sb.firstElementChild;
+      if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
+    }
     Array.from(page.children).forEach(el => blocks.push({ t: '', h: el.outerHTML }));
     return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
   } catch (e) { console.error(e); printHTML(html); }
@@ -867,7 +872,8 @@ function buildZohoDocPrint(o) {
   const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
   if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
 
-  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div><div class="ln">' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
+  const sealHtml = (bi.seal || bi.signature) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
+  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln"' + (sealHtml ? ' style="margin-top:2px"' : '') + '>' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
   return { blocks, thead, tblOpen, watermark: doc.status === 'draft' ? 'DRAFT' : '' };
 }
 
@@ -3102,6 +3108,17 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
     };
   }
 
+  function handleSealUpload(key) {
+    return (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 200 * 1024) { alert('Please choose an image under 200 KB (transparent PNG works best).'); return; }
+      const reader = new FileReader();
+      reader.onload = () => setForm(p => ({ ...p, [key]: reader.result }));
+      reader.readAsDataURL(file);
+    };
+  }
+
   function handleLogoUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -3193,6 +3210,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhfDim.w} × {lhfDim.h} px (full width, auto-fits)</div>
             : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhfDim.w} × {lhfDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
         </div>
+        {/* Company seal + authorised signature (printed beside the signatory line) */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Company Seal &amp; Signature <span style={{ color: '#999', fontWeight: 400 }}>(optional — transparent PNG, under 200 KB each; printed above the "Authorised Signatory" line on invoices, letters and contracts)</span></label>
+          {[['seal', 'Company seal'], ['signature', 'Authorised signature']].map(([key, lbl]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, width: 130, color: '#555' }}>{lbl}</span>
+              {form[key] && <img src={form[key]} alt={lbl} style={{ width: 56, height: 56, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+              <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form[key] ? 'Change' : '⬆ Upload'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSealUpload(key)} /></label>
+              {form[key] && <button type="button" onClick={() => setForm(p => ({ ...p, [key]: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+            </div>
+          ))}
+        </div>
+
         {/* Optional landscape letterhead (used for wide prints: payroll sheet, employee register, etc.) */}
         <div style={styles.formGroup}>
           <label style={styles.label}>Landscape Letterhead (optional) <span style={{ color: '#999', fontWeight: 400 }}>(for wide prints like Payroll &amp; Employee Register — <b>≈2339 px wide</b>; under 700 KB each). If not set, the portrait letterhead is auto-stretched to fit.</span></label>
@@ -6985,7 +7015,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 8 }}>
               {/* Seal / Stamp area */}
               <div style={{ border: '1px dashed #DDD8CC', borderRadius: 8, minHeight: 72, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 11, color: '#C8C4BB', letterSpacing: '0.05em' }}>SEAL / STAMP</span>
+                {businessInfo.seal ? <img src={businessInfo.seal} alt="seal" style={{ height: 64, maxWidth: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 11, color: '#C8C4BB', letterSpacing: '0.05em' }}>SEAL / STAMP</span>}
               </div>
               {/* Signatory */}
               <div style={{ textAlign: 'center' }}>
@@ -17393,11 +17423,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
 
+    const sealImgs = (bi?.seal || bi?.signature) ? `<div style="height:66px;display:flex;align-items:center;gap:10px;margin-bottom:2px">${bi?.seal ? `<img src="${bi.seal}" style="height:64px;max-width:90px;object-fit:contain" />` : ''}${bi?.signature ? `<img src="${bi.signature}" style="height:44px;max-width:110px;object-fit:contain" />` : ''}</div>` : '';
     const sigBlock = `
       <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.buyerRole||'Buyer'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:36px;">${bi?.name||bi?.companyName||''}</div>
+          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${bi?.name||bi?.companyName||''}</div>${sealImgs}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryOurName||'Authorised Signatory'}</b>
             ${c.signatoryOurDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryOurDesignation}</div>` : ''}
@@ -26785,7 +26816,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   );
 }
 
-const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'letterheadLand', 'letterheadFooterLand'];
+const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'letterheadLand', 'letterheadFooterLand', 'seal', 'signature'];
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
