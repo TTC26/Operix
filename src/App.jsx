@@ -936,6 +936,232 @@ async function fitLetterheadWide(url, ratio) {
   } catch (e) { return url; }
 }
 
+// ─── Overseas / export commercial offer (quotation) ───────────────────────────────────────────
+const OV_CURRENCIES = { USD: 'US Dollars', EUR: 'Euros', GBP: 'Pounds Sterling', AED: 'UAE Dirhams', SAR: 'Saudi Riyals', QAR: 'Qatari Riyals', OMR: 'Omani Rials', KWD: 'Kuwaiti Dinars', BHD: 'Bahraini Dinars', SGD: 'Singapore Dollars', AUD: 'Australian Dollars', LKR: 'Sri Lankan Rupees' };
+const OV_DEFAULT_TERMS = [
+  ['Prices', 'In {CUR} per metre, on Ex-Works basis as per Incoterms 2020.'],
+  ['Offer validity', '7 days from the offer date. Thereafter, subject to our written re-confirmation.'],
+  ['Payment terms', '40% advance with the PO and balance 60% against Proforma Invoice before dispatch. All bank charges outside India are to the Buyer\'s account.'],
+  ['Delivery', 'Within 4–6 weeks from receipt of a technically and commercially clear PO, approved TDS/QAP, manufacturing clearance and advance payment, whichever is later. Part shipments allowed.'],
+  ['Quantity / drum length tolerance', '± 5% per item. Invoicing will be on the actual quantity supplied.'],
+  ['Packing', 'Export-worthy, seaworthy wooden / steel drums with ends sealed. Drum schedule will be shared on order confirmation. Drums are non-returnable.'],
+  ['Taxes & duties', 'Export supply is zero-rated in India. Import customs duty, VAT and any other levies at the destination are to the Buyer\'s account. Any other applicable taxes, duties or levies, if any, are not included in the quoted prices and shall be charged extra.'],
+  ['Inspection & testing', 'Routine and acceptance tests as per the relevant standard at the manufacturing works. Test certificates will be provided with each shipment. Third-party inspection, if required, will be at the Buyer\'s cost, including the cable consumed in testing. Fresh type tests are not included.'],
+  ['Documents', 'Commercial Invoice, Packing List, Bill of Lading / Airway Bill, Certificate of Origin, and Test Certificates. Legalization / attestation, if required, will be charged at actuals.'],
+  ['Technical approval', 'Supply will be against the Buyer-approved TDS/QAP. Approval is to be given within 2 weeks of the PO, failing which the delivery schedule and prices may be revised.'],
+  ['Warranty', '14 months from the date of dispatch against manufacturing defects only. Our liability is limited to repair or replacement of the defective length.'],
+  ['Liquidated damages', 'Not applicable.'],
+  ['Storage after readiness', 'If the Buyer does not lift the material within 15 days of readiness, storage and handling charges will apply at actuals.'],
+  ['Cancellation', 'Orders once accepted cannot be cancelled. Costs incurred up to the date of any cancellation shall be borne by the Buyer.'],
+  ['Limitation of liability', 'Our total liability shall not exceed the value of the order. Neither party is liable for indirect or consequential losses.'],
+  ['Force majeure', 'Neither party shall be liable for delay or failure due to events beyond its reasonable control. Time for performance will be extended accordingly.'],
+  ['Governing law & disputes', 'Governed by the laws of India. Disputes will first be settled amicably, failing which by arbitration at Chennai, India in English.'],
+];
+const OV_DEFAULT_PRICEVAR = 'Prices are firm only within the offer validity. Thereafter, or for orders where metal is not booked, prices are variable as per the prevailing LME Copper and Aluminium prices on the date of metal booking.\nMetal booking will be done on receipt of a technically and commercially clear PO, advance payment and the Buyer\'s written instruction.\nThe revised firm prices will be confirmed in writing and shall apply for the rest of the order.';
+const OV_DEFAULT_ENCL = 'Technical Data Sheets (TDS) for each cable item\nDrum schedule — on order confirmation';
+
+function ovInitDefaults(doc, bi) {
+  const cur = doc.ovCurrency || 'USD';
+  return {
+    overseas: true,
+    ovCurrency: cur,
+    ovUnit: doc.ovUnit || 'm',
+    ovRevision: doc.ovRevision || '',
+    ovValidUntil: doc.ovValidUntil || '',
+    ovKindAttn: doc.ovKindAttn || '',
+    ovSubject: doc.ovSubject || '',
+    ovReference: doc.ovReference || '',
+    ovIntro: doc.ovIntro || ('Thank you for your enquiry. We, ' + ((bi && bi.name) || 'our company') + ', are pleased to submit our offer for the supply of the items listed below, in accordance with the enclosed Technical Data Sheets and the commercial terms set out in this offer. We trust our offer meets your requirements and look forward to your valued order.'),
+    ovBasis: doc.ovBasis || ('Prices in ' + cur + ' per metre on Ex-Works basis (Incoterms 2020).'),
+    ovPriceVar: doc.ovPriceVar != null && doc.ovPriceVar !== '' ? doc.ovPriceVar : OV_DEFAULT_PRICEVAR,
+    ovTerms: (doc.ovTerms && doc.ovTerms.length) ? doc.ovTerms : OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', cur) })),
+    ovEnclosures: doc.ovEnclosures != null && doc.ovEnclosures !== '' ? doc.ovEnclosures : OV_DEFAULT_ENCL,
+    ovSignName: doc.ovSignName || (bi && bi.signatory) || '',
+    ovSignDesig: doc.ovSignDesig || '',
+    ovSignContact: doc.ovSignContact || [bi && bi.phone, bi && bi.email].filter(Boolean).join(' | '),
+  };
+}
+
+function numToWordsIntl(n) {
+  n = Math.floor(Math.abs(Number(n) || 0));
+  if (n === 0) return 'Zero';
+  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (x) => x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? '-' + a[x % 10] : '');
+  const three = (x) => (x >= 100 ? a[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' : '') : '') + (x % 100 ? two(x % 100) : '');
+  const parts = []; const sc = ['', ' Thousand', ' Million', ' Billion', ' Trillion'];
+  let i = 0;
+  while (n > 0) { const c = n % 1000; if (c) parts.unshift(three(c) + sc[i]); n = Math.floor(n / 1000); i++; }
+  return parts.join(' ');
+}
+
+const OV_CSS =
+  '.ov-page{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111;line-height:1.5;}'
+  + '.ov-co{display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1.5px solid #1F3A7A;margin-bottom:12px;}'
+  + '.ov-co img{height:54px;object-fit:contain;}.ov-co .r{text-align:right;font-size:10px;color:#333;line-height:1.45;}.ov-co .r b{font-size:11.5px;color:#1F3A7A;}'
+  + '.ov-title{text-align:center;font-size:17px;font-weight:700;color:#1F3A7A;padding:7px 0 6px;border-top:1.5px solid #1F3A7A;border-bottom:1px solid #1F3A7A;margin-bottom:8px;letter-spacing:.3px;}'
+  + '.ov-refs{display:flex;justify-content:space-between;font-size:11px;margin-bottom:10px;}.ov-refs>div+div{text-align:right;}'
+  + '.ov-h{font-size:12.5px;font-weight:700;color:#1F3A7A;border-bottom:1.5px solid #1F3A7A;padding-bottom:3px;margin:14px 0 6px;text-transform:uppercase;}'
+  + '.ov-note{font-style:italic;font-size:10.5px;margin-bottom:6px;}'
+  + '.ov-t{width:100%;border-collapse:collapse;table-layout:fixed;}'
+  + '.ov-t th{background:#1F3A7A;color:#fff;border:1px solid #1F3A7A;padding:5px 6px;font-size:10.5px;text-align:center;}'
+  + '.ov-t td{border:1px solid #444;padding:4px 6px;font-size:10.5px;vertical-align:top;}'
+  + '.ov-t td.c{text-align:center;}.ov-t td.r{text-align:right;white-space:nowrap;}.ov-t td.d{overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}'
+  + '.ov-t tr.tq td{font-weight:700;}.ov-t tr.tv td{background:#DCE4F4;font-weight:700;}'
+  + '.ov-t td.k{font-weight:700;background:#F3F5FA;}'
+  + '.ov-p{font-size:11px;margin:0 0 5px;}.ov-sm{font-size:10.5px;margin:0 0 3px;}'
+  + '.ov-words{font-weight:700;font-size:11px;margin:8px 0;}'
+  + '.ov-ul{margin:4px 0 4px 18px;padding:0;font-size:11px;}.ov-sign{margin-top:12px;font-size:11px;}';
+
+function buildOverseasQuotePrint(o) {
+  const { doc, bi, party, withCompany } = o;
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nl = (v) => esc(v).replace(/\n/g, '<br>');
+  const cur = doc.ovCurrency || 'USD';
+  const curName = OV_CURRENCIES[cur] || cur;
+  const money = (n, dp) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const items = doc.items || [];
+  const unitOf = (it) => (it.unit && it.unit !== 'pcs') ? it.unit : (doc.ovUnit || 'm');
+  const amtOf = (it) => (Number(it.qty) || 0) * (Number(it.rate) || 0);
+  const total = items.reduce((s, it) => s + amtOf(it), 0);
+  const totQty = items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  const units = Array.from(new Set(items.map(unitOf)));
+  const blocks = [];
+  const B = (h) => blocks.push({ h, t: '' });
+  const fmtDate = (d) => { if (!d) return ''; const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '.' + m[2] + '.' + m[1] : d; };
+
+  if (withCompany) {
+    B('<div class="ov-co"><div>' + (bi.logo ? '<img src="' + bi.logo + '">' : '<b style="font-size:16px;color:#1F3A7A">' + esc(bi.name) + '</b>') + '</div><div class="r"><b>' + esc(bi.name) + '</b><br>' + nl(bi.address) + (bi.phone ? '<br>Phone: ' + esc(bi.phone) : '') + (bi.email ? '<br>Email: ' + esc(bi.email) : '') + '</div></div>');
+  }
+  B('<div class="ov-title">COMMERCIAL OFFER / QUOTATION</div>');
+  B('<div class="ov-refs"><div>Offer Ref.: ' + esc(doc.number || '') + (doc.ovRevision ? '<br>Revision: ' + esc(doc.ovRevision) : '') + '</div><div>Date: ' + esc(fmtDate(doc.date)) + (doc.ovValidUntil ? '<br>Valid until: ' + esc(fmtDate(doc.ovValidUntil)) : '') + '</div></div>');
+  B('<div class="ov-p">To,<br><b>' + (party ? esc(party.name) : '—') + '</b>' + (party && party.address ? '<br>' + nl(party.address) : '') + '</div>');
+  if (doc.ovKindAttn) B('<div class="ov-p"><b>Kind Attention: ' + esc(doc.ovKindAttn) + '</b></div>');
+  if (doc.ovSubject) B('<div class="ov-p"><b>Subject: ' + esc(doc.ovSubject) + '</b></div>');
+  if (doc.ovReference) B('<div class="ov-p">Reference: ' + esc(doc.ovReference) + '</div>');
+  B('<div class="ov-p" style="margin-top:8px">Dear Sir/Madam,</div>');
+  if (doc.ovIntro) B('<div class="ov-p">' + nl(doc.ovIntro) + '</div>');
+
+  B('<div class="ov-h">1. Price Schedule</div>');
+  if (doc.ovBasis) B('<div class="ov-note">' + esc(doc.ovBasis) + '</div>');
+  const cols = [{ w: 7, l: 'S. No.' }, { w: -1, l: 'Description of Goods' }, { w: 10, l: 'Qty' }, { w: 7, l: 'Unit' }, { w: 15, l: 'Unit Rate<br>(' + esc(cur) + ')' }, { w: 17, l: 'Amount<br>(' + esc(cur) + ')' }];
+  const fixed = cols.filter(c => c.w > 0).reduce((a, c) => a + c.w, 0);
+  const o1 = '<table class="ov-t"><colgroup>' + cols.map(c => '<col style="width:' + (c.w < 0 ? 100 - fixed : c.w) + '%">').join('') + '</colgroup>';
+  const th1 = '<thead><tr>' + cols.map(c => '<th>' + c.l + '</th>').join('') + '</tr></thead>';
+  items.forEach((it, i) => {
+    blocks.push({ t: 'trow', id: 1, o: o1, th: th1, h: '<tr><td class="c">' + (i + 1) + '</td><td class="d">' + nl(it.name || '') + '</td><td class="c">' + money(it.qty, (Number(it.qty) % 1) ? 2 : 0) + '</td><td class="c">' + esc(unitOf(it)) + '</td><td class="r">' + money(it.rate, 4) + '</td><td class="r">' + money(amtOf(it), 2) + '</td></tr>' });
+  });
+  blocks.push({ t: 'trow', id: 1, o: o1, th: th1, h: '<tr class="tq"><td colspan="2" style="text-align:right">Total Quantity</td><td class="c">' + money(totQty, totQty % 1 ? 2 : 0) + '</td><td class="c">' + (units.length === 1 ? esc(units[0]) : '') + '</td><td></td><td></td></tr><tr class="tv"><td colspan="5" style="text-align:right">TOTAL OFFER VALUE (' + esc(cur) + ')</td><td class="r">' + money(total, 2) + '</td></tr>' });
+  const whole = Math.floor(total + 1e-9), cents = Math.round((total - whole) * 100);
+  B('<div class="ov-words">Amount in words: ' + esc(curName) + ' ' + esc(numToWordsIntl(whole)) + (cents ? ' and ' + esc(numToWordsIntl(cents)) + ' Cents' : '') + ' Only</div>');
+
+  if (doc.ovPriceVar) {
+    B('<div class="ov-h">2. Price Variation</div>');
+    String(doc.ovPriceVar).split('\n').filter(l => l.trim()).forEach(l => B('<div class="ov-p">' + esc(l.trim()) + '</div>'));
+  }
+  const terms = (doc.ovTerms || []).filter(t => (t.k || t.v));
+  if (terms.length) {
+    B('<div class="ov-h">3. Commercial Terms &amp; Conditions</div>');
+    const o2 = '<table class="ov-t"><colgroup><col style="width:6%"><col style="width:23%"><col style="width:71%"></colgroup>';
+    terms.forEach((t, i) => blocks.push({ t: 'trow', id: 2, o: o2, th: '', h: '<tr><td class="c">' + (i + 1) + '</td><td class="k">' + esc(t.k) + '</td><td class="d">' + esc(t.v) + '</td></tr>' }));
+  }
+  const encl = String(doc.ovEnclosures || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (encl.length) B('<div><div class="ov-h">4. Enclosures</div><ul class="ov-ul">' + encl.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>');
+  B('<div class="ov-p" style="margin-top:10px">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div>');
+  const sealOn = (bi.seal || bi.signature) && bi.printSeal !== false;
+  const sealHtml = sealOn ? '<div style="height:66px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '<div style="height:40px"></div>';
+  B('<div class="ov-sign"><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + (doc.ovSignName ? '<div style="font-weight:700">' + esc(doc.ovSignName) + '</div>' : '') + (doc.ovSignDesig ? '<div>' + esc(doc.ovSignDesig) + '</div>' : '') + (doc.ovSignContact ? '<div>' + esc(doc.ovSignContact) + '</div>' : '') + '</div>');
+
+  return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:4mm 14mm 0 !important;font-size:11.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
+    pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'draft' ? 'DRAFT' : '' };
+}
+
+// Screen preview of the offer (same blocks as the print, assembled into one page)
+function ovBlocksToHtml(r) {
+  let html = '', cur = null, buf = '';
+  const flush = () => { if (cur) { html += cur.o + (cur.th || '') + '<tbody>' + buf + '</tbody></table>'; cur = null; buf = ''; } };
+  r.blocks.forEach(b => {
+    if (b.t === 'trow') { if (cur && cur.id !== b.id) flush(); if (!cur) cur = b; buf += b.h; }
+    else { flush(); html += b.h; }
+  });
+  flush();
+  return html;
+}
+
+function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
+  const upd = (k, v) => setDoc((d) => ({ ...d, [k]: v }));
+  const ro = isEditable ? {} : styles.inputReadOnly;
+  const lbl = { ...styles.label, fontSize: 11.5 };
+  const f = (k, label, ph, type) => (
+    <div style={{ ...styles.formGroup, flex: 1 }}>
+      <label style={lbl}>{label}</label>
+      <input type={type || 'text'} value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} placeholder={ph || ''} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
+    </div>
+  );
+  const ta = (k, label, rows) => (
+    <div style={styles.formGroup}>
+      <label style={lbl}>{label}</label>
+      <textarea value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} style={{ ...styles.input, minHeight: rows || 60, resize: 'vertical', ...ro }} readOnly={!isEditable} />
+    </div>
+  );
+  const terms = doc.ovTerms || [];
+  const setTerm = (i, k, v) => upd('ovTerms', terms.map((t, j) => j === i ? { ...t, [k]: v } : t));
+  return (
+    <div style={{ border: '1px solid #C9D6F0', background: '#F5F8FE', borderRadius: 10, padding: '12px 12px 4px', marginBottom: 14 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13, color: '#1F3A7A', marginBottom: 8, cursor: isEditable ? 'pointer' : 'default' }}>
+        <input type="checkbox" checked={!!doc.overseas} disabled={!isEditable}
+          onChange={(e) => {
+            if (e.target.checked) setDoc((d) => ({ ...d, ...ovInitDefaults(d, businessInfo), items: (d.items || []).map(it => ({ ...it, gst: 0 })) }));
+            else upd('overseas', false);
+          }} />
+        🌍 Overseas / Export quotation (Commercial Offer format)
+      </label>
+      {doc.overseas && (<>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ ...styles.formGroup, flex: 1 }}>
+            <label style={lbl}>Currency</label>
+            <select value={doc.ovCurrency || 'USD'} onChange={(e) => upd('ovCurrency', e.target.value)} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+              {Object.keys(OV_CURRENCIES).map(c => <option key={c} value={c}>{c} — {OV_CURRENCIES[c]}</option>)}
+            </select>
+          </div>
+          {f('ovUnit', 'Default unit', 'm')}
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>{f('ovRevision', 'Revision', 'Rev. 1')}{f('ovValidUntil', 'Valid until', '', 'date')}</div>
+        {f('ovKindAttn', 'Kind Attention', 'Mr. …')}
+        {f('ovSubject', 'Subject', 'Offer for supply of …')}
+        {f('ovReference', 'Reference', 'Your enquiry dated …')}
+        {ta('ovIntro', 'Introduction paragraph', 80)}
+        {f('ovBasis', 'Price basis note (under "Price Schedule")')}
+        {ta('ovPriceVar', 'Price variation clause (one paragraph per line)', 90)}
+        <div style={styles.formGroup}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <label style={{ ...lbl, marginBottom: 0 }}>Commercial terms &amp; conditions <span style={{ background: '#E1E8F7', borderRadius: 10, padding: '1px 8px', fontSize: 11 }}>{terms.length}</span></label>
+            {isEditable && (<div style={{ display: 'flex', gap: 6 }}>
+              <button type="button" onClick={() => upd('ovTerms', [...terms, { k: '', v: '' }])} style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '4px 10px' }}><Plus size={12} /> Add term</button>
+              <button type="button" onClick={() => { if (window.confirm('Reset all terms to the standard list?')) upd('ovTerms', OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', doc.ovCurrency || 'USD') }))); }} style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>Reset</button>
+            </div>)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+            {terms.map((t, i) => (
+              <div key={i} style={{ background: '#fff', border: '1px solid #E3E8F4', borderRadius: 6, padding: 6 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: '#999', minWidth: 16 }}>{i + 1}</span>
+                  <input value={t.k} onChange={(e) => setTerm(i, 'k', e.target.value)} placeholder="Heading" readOnly={!isEditable} style={{ ...styles.input, padding: '4px 8px', fontSize: 12, fontWeight: 600, flex: 1 }} />
+                  {isEditable && <button type="button" onClick={() => upd('ovTerms', terms.filter((_, j) => j !== i))} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>}
+                </div>
+                <textarea value={t.v} onChange={(e) => setTerm(i, 'v', e.target.value)} placeholder="Term text" readOnly={!isEditable} style={{ ...styles.input, minHeight: 48, resize: 'vertical', fontSize: 12, padding: '4px 8px' }} />
+              </div>
+            ))}
+          </div>
+        </div>
+        {ta('ovEnclosures', 'Enclosures (one per line)', 60)}
+        <div style={{ display: 'flex', gap: 10 }}>{f('ovSignName', 'Signatory name')}{f('ovSignDesig', 'Designation')}</div>
+        {f('ovSignContact', 'Signatory contact line', '+91 … | email')}
+      </>)}
+    </div>
+  );
+}
+
 // Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
 // table row-by-row, and prints real A4 sheets each carrying the header + footer. Works
 // around Chromium multi-page bugs (thead no-repeat, position:fixed clipping).
@@ -1110,7 +1336,7 @@ async function printPaginated(sel, bi, pre, gen) {
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
     const script = '(function(){'
-      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];var WMT=typeof WM==="string"?WM:"";'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];var PGF=typeof PGFT==="string"?PGFT:"";var WMT=typeof WM==="string"?WM:"";'
       + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);if(WMT){var w=document.createElement("div");w.className="wm";w.textContent=WMT;s.appendChild(w);}out.appendChild(s);bd=b;curBody=null;}'
       + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
@@ -1129,6 +1355,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'else if(curBody){var tH=tw.offsetHeight;bd.removeChild(tw);var lastEl=bd.lastElementChild;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;'
       + 'if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}'
       + 'bd.appendChild(tw);} }'
+      + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
       + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
@@ -1140,7 +1367,8 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.sheet{position:relative;width:' + SW + 'mm;height:' + SH + 'mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
-      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.pgf{position:absolute;left:0;right:0;bottom:' + (FTRMM + 1) + 'mm;text-align:center;font-size:9px;color:#666;font-family:Arial,sans-serif;}'
+      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + ((pre && pre.pgf) ? 6 : 0)) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
       + '.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:120px;font-weight:900;letter-spacing:12px;color:rgba(185,28,28,0.10);white-space:nowrap;pointer-events:none;z-index:5;font-family:Arial,sans-serif;}'
       + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
       + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
@@ -1155,7 +1383,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify((pre && pre.pgf) || '') + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -6111,7 +6339,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </button>
           )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, buildZohoDocPrint({ doc, t, totals, bi: useSeal ? businessInfo : { ...businessInfo, printSeal: false }, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
           <button onClick={async () => { setPdfLoading(true); await downloadDocPDF('.print-area', `${(DOC_TYPES[doc.type]?.label||doc.type).replace(/\s+/g,'-')}-${doc.number||'draft'}.pdf`); setPdfLoading(false); }} style={styles.ghostBtn} disabled={pdfLoading}>{pdfLoading ? '⏳' : <Download size={15}/>} {pdfLoading ? 'Generating...' : 'Download PDF'}</button>
 
           {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
@@ -6354,6 +6582,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </>);
           })()}
 
+          {doc.type === 'quotation' && <OverseasQuoteFields doc={doc} setDoc={setDoc} isEditable={isEditable} businessInfo={businessInfo} />}
+
           <div style={styles.formGroup}>
             <label style={styles.label}>Notes</label>
             <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 60, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="Additional notes for this document…" />
@@ -6448,8 +6678,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
                         title="Rate"
                       />
-                      {cc.hasTax && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
-                      {cc.hasTax && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {doc.overseas && doc.type === 'quotation' && (<input value={(it.unit && it.unit !== 'pcs') ? it.unit : ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} title="Unit" placeholder={doc.ovUnit || 'm'} style={{ width: 34, border: '1px solid #E3E8F4', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1F3A7A', textAlign: 'center', outline: 'none', padding: '2px 3px' }} />)}
+                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
                       {isEditable && (
                         <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
                       )}
@@ -6491,7 +6722,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               }}>DRAFT</span>
             </div>
           )}
+          {doc.overseas && doc.type === 'quotation' && (() => {
+            const _r = buildOverseasQuotePrint({ doc, bi: businessInfo, party: displayParty, withCompany: !(useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter)) });
+            return <div className="ov-page" style={{ padding: '4px 2px' }} dangerouslySetInnerHTML={{ __html: '<style>' + OV_CSS + '</style>' + ovBlocksToHtml(_r) }} />;
+          })()}
           {(() => {
+            if (doc.overseas && doc.type === 'quotation') return null;
             // ── Letterhead mode: skip template header entirely ──
             if (useLH && businessInfo?.letterhead) {
               return (
@@ -6794,7 +7030,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             return null;
           })()}
 
-          {(template !== 'formal' && template !== 'prestige') && (<>
+          {(template !== 'formal' && template !== 'prestige') && !(doc.overseas && doc.type === 'quotation') && (<>
 
           {doc.type === 'packing_list' ? (
             <>
