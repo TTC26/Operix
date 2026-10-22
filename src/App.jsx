@@ -6156,8 +6156,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       </div>}
                       {isEditable
                         ? <div style={{ display: 'grid', width: '100%' }}>
-                            <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', minHeight: 24, fontFamily: 'inherit' }}>{(it.name || 'Item description') + ' '}</div>
-                            <textarea className="di-input" value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', height: '100%' }} />
+                            <div className="di-screen" style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', minHeight: 24, fontFamily: 'inherit' }}>{(it.name || 'Item description') + ' '}</div>
+                            <textarea className="di-input di-screen" value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', height: '100%' }} />
+                            <div className="di-print" style={{ gridArea: '1 / 1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', color: '#000' }}>{it.name}</div>
                           </div>
                         : <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>}
                     </td>
