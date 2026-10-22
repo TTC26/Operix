@@ -5962,7 +5962,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const customer = partyList.find((c) => c.id === doc.customerId);
   const displayParty = customer || doc.customerSnapshot; // fallback to snapshot when live record unavailable
   // Screen preview: bordered "formal" layout for the new templates, original look for "classic". Print uses buildZohoDocPrint + the chosen theme.
-  const template = businessInfo.template === 'classic' ? 'classic' : 'formal';
+  const template = 'classic'; // editor layout (has the editable items table); the chosen print template is applied by buildZohoDocPrint
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
