@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails, loadBranding, saveBranding } from './firebase';
 
 
@@ -73,7 +73,7 @@ const PLAN_MODULES = {
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat',
+    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -5031,7 +5031,7 @@ const SECTION_VIEWS = {
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
-  engineering: ['partsmaster', 'engdocs'],
+  engineering: ['partsmaster', 'engdocs', 'tds'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
@@ -5046,7 +5046,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
@@ -5347,6 +5347,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Engineering" />
                 <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
                 <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+                <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
 
                 <SubLabel label="Production" />
                 <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
@@ -5687,6 +5688,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="engineering" label="Engineering">
               <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
               <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+              <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
             </Section>
           )}
 
@@ -12504,9 +12506,9 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
             </table>
           </div>
           {order.notes && <div style={{ marginTop: 16, fontSize: 12, color: '#555' }}><strong>Notes: </strong>{order.notes}</div>}
-          <div style={{ marginTop: 36, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#555' }}>
-            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 140 }}>Customer Signature</div></div>
-            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 140 }}>Authorised Signatory</div></div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 12, color: '#555' }}>
+            <div style={{ textAlign: 'center', width: 160 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Customer Signature</div></div>
+            <div style={{ textAlign: 'center', width: 160 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Authorised Signatory</div></div>
           </div>
           {useLH && businessInfo?.letterheadFooter && (
             <div className="lh-pad-footer" style={{ background: '#fff' }}>
@@ -12988,6 +12990,210 @@ const PRODUCT_TEST_STANDARDS = {
   ]},
   'Other / Custom': { iec: '', is: '', tests: [] },
 };
+
+// ═══ Technical Data Sheet (customer-specific cable TDS) ═══
+const TDS_FIELD_GROUPS = [
+  { title: 'General', fields: [['title','Sheet title (heading)',2],['cableType','Type of Cable'],['voltage','Voltage Grade (Volts)'],['cores','No of Cores & Nominal Area'],['code','Cable Code']] },
+  { title: 'Conductor', fields: [['condMat','Material'],['condSpec','Reference Specification'],['condShape','Shape of Conductor'],['area','Nominal Area (sq.mm)'],['minWires','Minimum No of Wires'],['dcRes','Max D.C. Resistance @20°C (Ohm/Km)']] },
+  { title: 'Insulation', fields: [['insMat','Material'],['insSpec','Reference Specification'],['insColour','Colour of Insulation'],['insNom','Thickness — Nominal (mm)'],['insMin','Thickness — Minimum at a point (mm)']] },
+  { title: 'Inner Sheath', toggle: 'hasInner', fields: [['innerMat','Material'],['innerMethod','Method of Application'],['innerSpec','Reference Specification'],['innerDia','Calculated Laid-up Diameter (mm)'],['innerMin','Minimum Thickness (mm)']] },
+  { title: 'Armouring', toggle: 'hasArmour', fields: [['armMat','Material'],['armSpec','Reference Specification'],['armDia','Calculated Dia over Inner Sheath (mm)'],['armType','Type of Armour'],['armDim','Dimension of Armour (mm)'],['armTol','Tolerance on Dimension']] },
+  { title: 'Outer Sheath', fields: [['outMat','Material'],['outSpec','Reference Specification'],['outColour','Colour of Outer Sheath'],['outDia','Calculated Dia over Armour (mm)'],['outNom','Thickness — Nominal (mm)'],['outMin','Thickness — Minimum at a point (mm)']] },
+  { title: 'Electrical Parameters', fields: [['acRes','Max AC Resistance @90°C (Ohm/Km)'],['react','Calculated Reactance (Ohm/Km)'],['cap','Capacitance (Mfd/Km)'],['tNorm','Max Conductor Temp — Normal (°C)'],['tSC','Max Conductor Temp — Short Circuit (°C)'],['scRating','Short Circuit Rating 1 sec (kA)']] },
+  { title: 'Current Carrying Capacity', fields: [['ground','In Ground at 30°C (Amp)'],['air','In Air at 40°C (Amp)'],['ampSpec','Reference Specification']] },
+  { title: 'FR-LSH Properties', toggle: 'hasFR', fields: [['coi','Critical Oxygen Index (%)'],['ti','Temperature Index (°C)'],['sd','Smoke Density Rating (%)'],['hag','Halogen Acid Gas Generation (%)'],['flame','Flammability Test',2]] },
+  { title: 'Finished Cable', fields: [['overall','Approx Overall Diameter (mm)'],['drum','Standard Drum Length (Meters)'],['drumTol','Tolerance on Drum Length (%)'],['bend','Bending Radius'],['pull1','Safe Pulling Force — with Stocking',2],['pull2','Safe Pulling Force — with pulling eyes',2]] },
+];
+const TDS_BASE = {
+  hasInner: true, hasArmour: true, hasFR: true, voltage: '1100',
+  condMat: 'STRANDED ANNEALED BARE COPPER', condSpec: 'IS: 8130-2013',
+  insMat: 'CROSS LINKED POLY ETHYLENE (XLPE)', insSpec: 'IS: 7098 (PART-1)-1988',
+  innerMat: 'POLYVINYL CHLORIDE (PVC)', innerMethod: 'EXTRUDED', innerSpec: 'IS: 5831-1984', innerMin: '0.30',
+  armSpec: 'IS: 3975-1999', armTol: '± 10 %',
+  outMat: 'PVC TYPE ST-2 FR-LSH', outSpec: 'IS: 5831-1984', outColour: 'BLACK', outNom: 'N.A.',
+  tNorm: '90', tSC: '250', ampSpec: 'IS: 3961 (PART-6)-2016',
+  coi: '29', ti: '250', sd: '60', hag: '20', flame: 'PERIOD OF BURNING MAX. 60 SECONDS; UNAFFECTED LENGTH MIN. 50 MM',
+  drum: '1000', drumTol: '±5', bend: '12 x Diameter of Cable',
+  pull1: '9 x D², D = Diameter of Cable in mm', pull2: '5 x Sum of Area of Conductors',
+};
+const TDS_PRESETS = {
+  '3C x 630 sq.mm (2XFY) FR-LSH': { title: '3 CORE LT XLPE CABLE — 3C x 630 sq.mm (2XFY) FR-LSH', cableType: 'LT XLPE ARMOURED CABLE', cores: '3 CORE X 630', code: '2XFY', condShape: 'STRANDED SECTOR SHAPED', area: '630', minWires: '53', dcRes: '0.0283', insSpec: 'IS: 7098 (PART-1)-2025', insColour: 'RED, YELLOW AND BLUE', insNom: '2.40', insMin: '2.06', innerMat: 'THERMOPLASTIC', innerMethod: 'TAPE WRAPPED', innerSpec: 'IS: 7098 (PART-1)-2025', innerDia: '71.50', innerMin: '0.70', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '72.90', armType: 'FORMED WIRE (FLAT STRIP)', armDim: '4 X 0.80', outDia: '74.50', outMin: '2.84', acRes: '0.0391', react: '0.069', cap: '0.36', scRating: '90.09', ground: '661', air: '870', overall: '72.00 ± 3.00', drum: '500/1000' },
+  '1C x 630 sq.mm (2XFaY) Armoured': { title: 'SINGLE CORE ARMOURED CABLE — 1C x 630 sq.mm (2XFaY)', cableType: 'COPPER XLPE ARMOURED CABLE', cores: '1 CORE X 630', code: '2XFY', condShape: 'STRANDED COMPACTED CIRCULAR', area: '630', minWires: '53', dcRes: '0.0283', insColour: 'NATURAL', insNom: '2.80', insMin: '2.42', hasInner: false, armMat: 'ALUMINIUM', armDia: 'N.A', armType: 'FLAT STRIP', armDim: '4 X 0.8', outColour: 'BLACK OR AS PER CUSTOMER REQUIREMENT', outDia: '35.50', outMin: '1.72', acRes: '0.0360', react: '0.086', cap: '1.67', scRating: '90.09', ground: '661', air: '961', overall: '39.00 ± 3.00', drum: '500/1000' },
+  '3C x 6 sq.mm (2XWY) FR-LSH': { title: '3 CORE XLPE CABLE — 3C x 6 sq.mm (2XWY) FR-LSH', cableType: 'XLPE ARMOURED CABLE', cores: '3 CORE X 6.0', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '6.0', minWires: '7', dcRes: '3.08', insColour: 'RED, YELLOW AND BLUE', insNom: '0.70', insMin: '0.63', innerDia: '9.07', armMat: 'GALVANISED STEEL ROUND WIRE', armDia: '9.67', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040', outDia: '12.47', outMin: '1.24', acRes: '3.94', react: '0.090', cap: '0.84', scRating: '0.858', ground: '56', air: '52', overall: '15 ± 3' },
+  '19C x 2.5 sq.mm (2XFY) Control': { title: '19 CORE XLPE CONTROL CABLE — 19C x 2.5 sq.mm (2XFY) FR-LSH', cableType: 'XLPE ARMOURED CONTROL CABLE', cores: '19 CORE X 2.5', code: '2XFY', condShape: 'STRANDED NON COMPACTED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'ALL CORES GREY WITH NUMBERING', insNom: '0.70', insMin: '0.63', innerDia: '16.00', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '16.60', armType: 'FORMED WIRE (FLAT STRIP)', armDim: '4 X 0.8', outDia: '18.20', outMin: '1.40', acRes: '9.48', react: '0.100', cap: '0.10', scRating: '0.358', ground: '34', air: '30', overall: '22 ± 3' },
+  '7C x 2.5 sq.mm (2XWY) FR-LSH': { title: '7 CORE XLPE CABLE — 7C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE ARMOURED CABLE', cores: '7 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'GREY WITH NUMBERING', insNom: '0.70', insMin: '0.63', innerDia: '9.60', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '10.20', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040 %', outDia: '13.00', outMin: '1.24', acRes: '9.44', react: '0.100', cap: '0.10', scRating: '0.358', ground: '34', air: '30', overall: '15.50 ± 3.00', drum: '500/1000' },
+  '2C x 2.5 sq.mm (2XWY) FR-LSH': { title: '2 CORE XLPE ARMOURED CABLE — 2C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE LT ARMOURED CABLE', cores: '2 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'RED AND BLACK', insNom: '0.90', insMin: '0.71', innerDia: '6.40', armMat: 'GALVANISED STEEL ROUND WIRE', armDia: '7.00', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040', outDia: '9.80', outMin: '1.24', acRes: '9.49', react: '0.100', cap: '0.10', scRating: '0.3575', ground: '41', air: '36', overall: '12.50 ± 3' },
+};
+function tdsRows(v) {
+  const g = (k) => (v[k] === undefined || v[k] === null || v[k] === '') ? '—' : String(v[k]);
+  const secs = [];
+  const add = (title, rows) => secs.push({ title, rows });
+  add('GENERAL', [['Type of Cable', '', g('cableType')], ['Voltage Grade', 'Volts', g('voltage')], ['No of Cores and Nominal Area', 'No & sq.mm', g('cores')], ['Cable Code', '', g('code')]]);
+  add('CONDUCTOR', [['Material', '', g('condMat')], ['Reference Specification', '', g('condSpec')], ['Shape of Conductor', '', g('condShape')], ['Nominal Area of Conductor', 'Sq.mm', g('area')], ['Minimum Number of Wires in Conductor', 'Nos', g('minWires'), 'Minimum'], ['Diameter of Wires in Conductor', 'mm', 'Wires are so chosen so that the required Conductor Resistance requirements are achieved'], ['Maximum D.C. Resistance at 20 Deg C', 'Ohm/Km', g('dcRes')]]);
+  add('INSULATION', [['Material', '', g('insMat')], ['Reference Specification', '', g('insSpec')], ['Colour of Insulation', '', g('insColour')], ['Thickness of Insulation', '', ''], ['Nominal', 'mm', g('insNom'), '', 1], ['Minimum at a Point', 'mm', g('insMin'), '', 1]]);
+  if (v.hasInner) add('INNER SHEATH', [['Material', '', g('innerMat')], ['Method of Application', '', g('innerMethod')], ['Reference Specification', '', g('innerSpec')], ['Calculated Laid-up Diameter', 'mm', g('innerDia')], ['Minimum Thickness of Sheath', 'mm', g('innerMin')]]);
+  if (v.hasArmour) add('ARMOURING', [['Material', '', g('armMat')], ['Reference Specification', '', g('armSpec')], ['Calculated Diameter over Inner Sheath', 'mm', g('armDia')], ['Type of Armour', '', g('armType')], ['Dimension of Armour', 'mm', g('armDim')], ['Tolerance on Dimension of Armour', 'mm / %', g('armTol')]]);
+  add('OUTER SHEATH', [['Material', '', g('outMat')], ['Reference Specification', '', g('outSpec')], ['Colour of Outer Sheath', '', g('outColour')], ['Calculated Diameter over Armour', 'mm', g('outDia')], ['Thickness of Outer Sheath', '', ''], ['Nominal', 'mm', g('outNom'), '', 1], ['Minimum at a Point', 'mm', g('outMin'), '', 1]]);
+  add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for 1 second duration', 'kA', g('scRating')]]);
+  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
+  if (v.hasFR) add('FR-LSH PROPERTIES', [['Critical Oxygen Index', '%', g('coi')], ['Temperature Index', 'Deg C', g('ti')], ['Smoke Density Rating', '%', g('sd')], ['Halogen Acid Gas Generation', '%', g('hag')], ['Flammability Test', '', g('flame')]]);
+  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'Newtons', g('pull1'), '', 1], ['When pulled with pulling eyes', 'Newton', g('pull2'), '', 1]]);
+  return secs.map((s, i) => {
+    const n = i + 1; let m = 0, sub = 0;
+    return { n, title: s.title, rows: s.rows.map(r => {
+      if (r[4]) { sub++; return { no: n + '.' + m + '.' + sub, label: r[0], unit: r[1], val: r[2], spec: r[3], indent: true }; }
+      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec: r[3] || '' };
+    }) };
+  });
+}
+function TDSPrintBody({ rec }) {
+  const secs = tdsRows(rec.v || {});
+  const th = { border: '1px solid #444', padding: '5px 6px', fontSize: 11.5, background: '#E9EEF7', color: '#1E2A4A', textAlign: 'left' };
+  const td = { border: '1px solid #666', padding: '4px 6px', fontSize: 11.5, verticalAlign: 'top' };
+  return (
+    <div>
+      <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#1E2A4A', letterSpacing: 0.5 }}>TECHNICAL DATA SHEET</div>
+      <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, margin: '4px 0 8px' }}>{(rec.v || {}).title}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11.5, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span><b>Document No.:</b> {rec.docNo}</span><span><b>TDS No.:</b> {rec.number}</span><span><b>Customer:</b> {rec.customer || 'MARKET'}</span>
+        {rec.refDoc ? <span><b>Ref:</b> {rec.refDoc}</span> : null}<span><b>Date:</b> {rec.date}</span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><th style={{ ...th, width: 44 }}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, width: 62 }}>Specified</th><th style={{ ...th, width: 70 }}>Unit</th><th style={{ ...th, width: '32%' }}>Committed Values</th></tr></thead>
+        <tbody>
+          {secs.map(s => (
+            <React.Fragment key={s.n}>
+              <tr><td style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.title}</td></tr>
+              {s.rows.map(r => (
+                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 18 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, textAlign: 'center' }}>{r.val}</td></tr>
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+      {rec.notes ? <div style={{ marginTop: 8, fontSize: 11.5 }}><b>Notes:</b> {rec.notes}</div> : null}
+      <div style={{ textAlign: 'center', fontSize: 11, color: '#555', marginTop: 12 }}>* This is a computer generated document. No signature is required *</div>
+    </div>
+  );
+}
+function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, tdsSheets = [], setTdsSheets, customers = [], documents = [] }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'staff';
+  const today = new Date().toISOString().slice(0, 10);
+  const [editing, setEditing] = React.useState(null);
+  const [printRec, setPrintRec] = React.useState(null);
+  const [q, setQ] = React.useState('');
+  const all = Array.isArray(tdsSheets) ? tdsSheets : [];
+  const list = all.filter(r => !r.deleted).filter(r => !isMultiBiz || (r.bizType || 'manufacturing') === currentBizType)
+    .filter(r => !q || ((r.number || '') + ' ' + (r.customer || '') + ' ' + ((r.v || {}).title || '')).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const quotes = (documents || []).filter(d => d.type === 'quotation' && d.status !== 'deleted');
+  function fy() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return String(y).slice(2) + '-' + String(y + 1).slice(2); }
+  function nextNo() { const p = 'EWI/TDS/' + fy() + '/'; const n = all.filter(r => (r.number || '').startsWith(p)).length + 1; return p + String(n).padStart(3, '0'); }
+  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: 'EWI/TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
+  const setV = (k, val) => setEditing(e => ({ ...e, v: { ...e.v, [k]: val } }));
+  function pickPreset(name) { if (!name) return; setEditing(e => ({ ...e, v: { ...TDS_BASE, ...TDS_PRESETS[name] } })); }
+  function pickQuote(id) {
+    const d = quotes.find(x => x.id === id); if (!d) { setEditing(e => ({ ...e, refDoc: '' })); return; }
+    const c = (customers || []).find(x => x.id === d.customerId);
+    setEditing(e => ({ ...e, refDoc: d.number || '', customerId: d.customerId || '', customer: (c && c.name) || d.customerName || e.customer }));
+  }
+  function save() {
+    if (!editing.v.title) { alert('Enter the sheet title.'); return; }
+    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditing(null);
+  }
+  function dup(r) { setEditing({ ...r, id: Date.now().toString(), number: nextNo(), date: today, createdAt: undefined, v: { ...r.v } }); }
+  function del(id) { if (userRole !== 'admin') { alert('Only an admin can delete.'); return; } if (!window.confirm('Delete this TDS?')) return; setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === id ? { ...x, deleted: true, deletedAt: Date.now() } : x)); }
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+
+  if (editing) {
+    const e = editing, v = e.v || {};
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+          <button onClick={() => setEditing(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
+          <h2 className="serif" style={{ ...styles.h1, flex: 1 }}>Technical Data Sheet — {e.number}</h2>
+          <button onClick={() => setPrintRec(e)} style={styles.ghostBtn}><Printer size={14} /> Preview / Print</button>
+          <button onClick={save} style={styles.primaryBtn}>Save</button>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+            <div><label style={lbl}>TDS No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
+            <div><label style={lbl}>Document No.</label><input style={inp} value={e.docNo} onChange={ev => setEditing(p => ({ ...p, docNo: ev.target.value }))} /></div>
+            <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
+            <div><label style={lbl}>Customer</label>
+              <input style={inp} list="tds-cust" value={e.customer} onChange={ev => { const c = (customers || []).find(x => x.name === ev.target.value); setEditing(p => ({ ...p, customer: ev.target.value, customerId: c ? c.id : '' })); }} placeholder="Customer name (or MARKET)" />
+              <datalist id="tds-cust">{(customers || []).map(c => <option key={c.id} value={c.name} />)}</datalist></div>
+            <div><label style={lbl}>From Quotation (optional)</label>
+              <select style={inp} value={(quotes.find(d => d.number === e.refDoc) || {}).id || ''} onChange={ev => pickQuote(ev.target.value)}>
+                <option value="">— none —</option>
+                {quotes.map(d => <option key={d.id} value={d.id}>{d.number}</option>)}
+              </select></div>
+            <div><label style={lbl}>Load a standard cable</label>
+              <select style={inp} value="" onChange={ev => pickPreset(ev.target.value)}>
+                <option value="">— choose preset (overwrites values) —</option>
+                {Object.keys(TDS_PRESETS).map(k => <option key={k} value={k}>{k}</option>)}
+              </select></div>
+          </div>
+        </div>
+        {TDS_FIELD_GROUPS.map(gr => (
+          <div key={gr.title} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>{gr.title}</div>
+              {gr.toggle && <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 5 }}><input type="checkbox" checked={!!v[gr.toggle]} onChange={ev => setV(gr.toggle, ev.target.checked)} /> Include in sheet</label>}
+            </div>
+            {(!gr.toggle || v[gr.toggle]) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+                {gr.fields.map(([k, label, wide]) => (
+                  <div key={k} style={wide ? { gridColumn: '1 / -1' } : null}><label style={lbl}>{label}</label><input style={inp} value={v[k] || ''} onChange={ev => setV(k, ev.target.value)} /></div>
+                ))}
+              </div>)}
+          </div>
+        ))}
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16 }}>
+          <label style={lbl}>Notes (printed below the table)</label>
+          <textarea style={{ ...inp, minHeight: 60 }} value={e.notes || ''} onChange={ev => setEditing(p => ({ ...p, notes: ev.target.value }))} />
+        </div>
+        {printRec && (
+          <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+            <TDSPrintBody rec={printRec} />
+          </DocPrintOverlay>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <h2 className="serif" style={{ ...styles.h1, flex: 1, margin: 0 }}>Technical Data Sheets</h2>
+        <input style={{ ...inp, width: 220 }} placeholder="Search TDS / customer…" value={q} onChange={ev => setQ(ev.target.value)} />
+        {canEdit && <button onClick={() => setEditing(blank())} style={styles.primaryBtn}><Plus size={14} /> New TDS</button>}
+      </div>
+      {list.length === 0 && <div style={{ color: '#888780', padding: 30, textAlign: 'center', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12 }}>No technical data sheets yet. Click “New TDS”, pick a standard cable preset and edit the values.</div>}
+      <div style={{ display: 'grid', gap: 8 }}>
+        {list.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontWeight: 600, fontSize: 13.5, color: '#1E2A4A' }}>{(r.v || {}).title}</div>
+              <div style={{ fontSize: 12, color: '#777' }}><span style={{ fontFamily: 'monospace', color: '#C9A24B' }}>{r.number}</span> · {r.customer || 'MARKET'}{r.refDoc ? ' · Ref ' + r.refDoc : ''} · {r.date}</div>
+            </div>
+            <button style={styles.iconBtn} title="Print" onClick={() => setPrintRec(r)}><Printer size={15} /></button>
+            {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditing({ ...r, v: { ...r.v } })}><Pencil size={15} /></button>}
+            {canEdit && <button style={styles.iconBtn} title="Duplicate for another customer" onClick={() => dup(r)}><Copy size={15} /></button>}
+            {userRole === 'admin' && <button style={styles.iconBtn} title="Delete (admin)" onClick={() => del(r.id)}><Trash2 size={15} color="#B5453A" /></button>}
+          </div>
+        ))}
+      </div>
+      {printRec && (
+        <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <TDSPrintBody rec={printRec} />
+        </DocPrintOverlay>
+      )}
+    </div>
+  );
+}
 
 function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, fatReports = [], setFatReports, customers = [] }) {
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -13739,9 +13945,9 @@ function InvestorShareView({ businessInfo, userRole, currentBizType = 'manufactu
           <ol style={{ fontSize: 12.5, color: '#333', lineHeight: 1.7, paddingLeft: 20, margin: 0 }}>
             {agreementTerms(printAgr).map((t, idx) => <li key={idx} style={{ marginBottom: 6 }}>{t}</li>)}
           </ol>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 60 }}>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>{printAgr.name} (Investor)</div></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 30 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>{printAgr.name} (Investor)</div></div>
           </div>
         </DocPrintOverlay>
       )}
@@ -13760,9 +13966,9 @@ function InvestorShareView({ businessInfo, userRole, currentBizType = 'manufactu
               <tr><td style={{ padding: '6px 8px', color: '#666' }}>Status</td><td style={{ padding: '6px 8px' }}>{printRcpt.alloc.status === 'paid' ? 'PAID' + (printRcpt.alloc.paidDate ? ' on ' + printRcpt.alloc.paidDate : '') : 'PENDING'}</td></tr>
             </tbody>
           </table>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 70 }}>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>Received by (Investor)</div></div>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 40 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Received by (Investor)</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
           </div>
         </DocPrintOverlay>
       )}
@@ -13798,9 +14004,9 @@ function InvestorShareView({ businessInfo, userRole, currentBizType = 'manufactu
               <tr style={{ fontWeight: 700 }}><td style={{ padding: '6px 8px' }}>{whoName ? 'Total' : 'Total to investors'}</td><td></td><td style={{ padding: '6px 8px' }}>{fmt(rows.reduce((s, a) => s + (a.amount || 0), 0))}</td><td></td></tr>
             </tbody>
           </table>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 50 }}>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>{whoName ? whoName + ' (Investor)' : 'Investor'}</div></div>
-            <div style={{ textAlign: 'center', fontSize: 12 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 180 }}>For {businessInfo?.name || 'the Company'}</div></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 30 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>{whoName ? whoName + ' (Investor)' : 'Investor'}</div></div>
           </div>
         </DocPrintOverlay>
         );
@@ -27262,6 +27468,7 @@ export default function App() {
   const [profitShares,     _setPS]         = useState([]);
   const [boShortages,      _setBOS]        = useState([]);
   const [fatReports,       _setFAT]        = useState([]);
+  const [tdsSheets,        _setTDS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
   const [bypassEmails,     setBypassEmails]   = useState([]); // global super-admin-managed free list
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
@@ -27481,6 +27688,7 @@ export default function App() {
       _setPS(data.profitShares || []);
       _setBOS(data.boShortages || []);
       _setFAT(data.fatReports || []);
+      _setTDS(data.tdsSheets || []);
     }, (err) => {
       console.warn('Firestore load error:', err);
       setDataError(true);
@@ -27584,6 +27792,7 @@ export default function App() {
   const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
   const setFatReports       = mkSet(_setFAT,   'fatReports');
+  const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -27759,7 +27968,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -27835,6 +28044,7 @@ export default function App() {
     if (backup.profitShares)    setProfitShares(backup.profitShares);
     if (backup.boShortages)     setBoShortages(backup.boShortages);
     if (backup.fatReports)      setFatReports(backup.fatReports);
+    if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
   }
 
@@ -27867,6 +28077,7 @@ export default function App() {
       ['Profit shares', profitShares, setProfitShares],
       ['BO shortages', boShortages, setBoShortages],
       ['FAT/SAT reports', fatReports, setFatReports],
+      ['Technical data sheets', tdsSheets, setTdsSheets],
     ];
     if (only) {
       let fixed = 0; const lines = [];
@@ -28971,6 +29182,19 @@ export default function App() {
             purchaseReqs={purchaseReqs}
             setPurchaseReqs={setPurchaseReqs}
             setView={setView}
+          />
+        );
+      case 'tds':
+        return (
+          <TDSView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            tdsSheets={tdsSheets}
+            setTdsSheets={setTdsSheets}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            documents={documents}
           />
         );
       case 'fatsat':
