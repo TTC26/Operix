@@ -665,6 +665,32 @@ const ZOHO_GEN_CSS =
   + 'table.gplain td,table.gplain th{padding:3px 5px;}'
   + 'img{max-width:100%;}';
 
+// HR letters (offer / warning / termination): same letterhead-or-logo header on every page, letter body flowed across pages.
+const LETTER_CSS =
+  '.bd{border:none !important;padding:6mm 16mm 0 !important;font-size:13px;line-height:1.7;}'
+  + '.bd p{line-height:1.75;margin:0 0 12px;}.bd h2{text-align:center;color:#1E2A4A;font-size:15px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 20px;}'
+  + '.bd h3{color:#1E2A4A;font-size:13px;margin:16px 0 8px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
+  + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
+  + '.bd td{border:1px solid var(--gl);padding:6px 10px;}.bd tr:nth-child(even) td{background:#F8F8F8;}.bd .total td{font-weight:700;background:var(--tint) !important;}'
+  + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
+
+function printLetterFromHtml(html, biz) {
+  try {
+    biz = biz || (typeof window !== 'undefined' && window.__operixBI) || {};
+    const dd = new DOMParser().parseFromString(html, 'text/html');
+    const page = dd.querySelector('.page');
+    if (!page) { printHTML(html); return; }
+    page.querySelectorAll('.letterhead, .lh, .draft-watermark, .draft-wm').forEach(n => n.remove());
+    page.querySelectorAll('.ref').forEach(r => { if (!r.children.length) { r.style.display = 'block'; r.style.textAlign = 'right'; } });
+    const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
+    const blocks = [];
+    if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
+    Array.from(page.children).forEach(el => blocks.push({ t: '', h: el.outerHTML }));
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true });
+  } catch (e) { console.error(e); printHTML(html); }
+}
+
 // Print any on-screen document view in the standard framed format (letterhead if configured).
 function printView(sel, bi) { return printPaginated(sel, bi, null, true); }
 
@@ -851,7 +877,7 @@ async function printPaginated(sel, bi, pre, gen) {
     if (!bi || typeof bi !== 'object') bi = (typeof window !== 'undefined' && window.__operixBI) || {};
     const _qa = typeof sel === 'string' ? document.querySelectorAll(sel) : null;
     const src = _qa ? _qa[_qa.length - 1] : sel;
-    const _logoMode = !pre && gen && bi && bi.printHeader === 'logo';
+    const _logoMode = ((!pre && gen) || (pre && pre.letter)) && bi && bi.printHeader === 'logo';
     const lhHdrUrl = bi && bi.letterhead && !_logoMode ? bi.letterhead : '';
     const lhFtrUrl = bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '';
     if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
@@ -880,11 +906,12 @@ async function printPaginated(sel, bi, pre, gen) {
       src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
       src.querySelectorAll('select').forEach(s2 => { try { Array.from(s2.options).forEach(o => o.removeAttribute('selected')); if (s2.selectedIndex >= 0) s2.options[s2.selectedIndex].setAttribute('selected', 'selected'); } catch (e) {} });
       const clone = src.cloneNode(true);
-      clone.querySelectorAll('.no-print, .di-screen, .di-screen-row, .lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
+      clone.querySelectorAll('.no-print, .di-screen, .di-screen-row, .lh-pad-header, .lh-pad-footer, .vph').forEach(n => n.remove());
       clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
       clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
       clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
-      if (noLH && bi) {
+      const _headTxt = (clone.textContent || '').replace(/\s+/g, ' ').slice(0, 500);
+      if (noLH && bi && !(bi.name && _headTxt.includes(bi.name))) {
         const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         blocks.push({ t: '', h: '<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + e2(bi.name) + '</div><div class="zcosm">' + e2(bi.address) + '</div><div class="zcosm">' + (bi.gstin ? 'GSTIN: ' + e2(bi.gstin) : '') + (bi.phone ? ' · ' + e2(bi.phone) : '') + (bi.email ? ' · ' + e2(bi.email) : '') + '</div></div></div>' });
       }
@@ -1013,6 +1040,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
       + ((pre || gen) ? zohoThemeCss(bi && bi.template) + ZOHO_PRINT_CSS : '')
       + (gen ? ZOHO_GEN_CSS : '')
+      + (pre && pre.css ? pre.css : '')
       + '</style></head><body>'
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
@@ -7852,7 +7880,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
     );
   }
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 16, borderBottom: '2px solid #1E2A4A' }}>
+    <div className="vph" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 16, borderBottom: '2px solid #1E2A4A' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         {businessInfo.logo && <img src={businessInfo.logo} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6, background: '#fff' }} />}
         <div>
@@ -9782,7 +9810,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 
@@ -9856,7 +9884,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -10514,7 +10542,7 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
