@@ -460,9 +460,12 @@ function printPaginated(sel, bi) {
     const origTbl = src.querySelector('.doc-items-table');
     let colHTML = '';
     if (origTbl) {
-      const ths = origTbl.querySelectorAll('thead tr:last-child > *');
-      const tw = origTbl.getBoundingClientRect().width || 1;
-      colHTML = '<colgroup>' + Array.from(ths).map(th => '<col style="width:' + (th.getBoundingClientRect().width / tw * 100).toFixed(3) + '%">').join('') + '</colgroup>';
+      // Exclude screen-only (no-print) columns, then renormalise widths to 100%.
+      const ths = Array.from(origTbl.querySelectorAll('thead tr:last-child > *'))
+        .filter(th => !th.classList.contains('no-print') && th.getBoundingClientRect().width > 0.5);
+      const ws = ths.map(th => th.getBoundingClientRect().width);
+      const sum = ws.reduce((a, b) => a + b, 0) || 1;
+      colHTML = '<colgroup>' + ws.map(w => '<col style="width:' + (w / sum * 100).toFixed(3) + '%">').join('') + '</colgroup>';
     }
 
     // Clone + resolve print visibility (show di-print, drop screen-only bits + letterhead nodes).
@@ -501,9 +504,11 @@ function printPaginated(sel, bi) {
 
     const script = '(function(){'
       + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd;'
-      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;}'
+      + 'var pageHasHead=false;'
+      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;pageHasHead=false;}'
+      + 'function addHead(){if(THEADTBL){var th=document.createElement("div");th.innerHTML=THEADTBL;if(th.firstElementChild){bd.appendChild(th.firstElementChild);pageHasHead=true;}}}'
       + 'np();'
-      + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i].h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(BLOCKS[i].t==="trow"&&THEADTBL){var th=document.createElement("div");th.innerHTML=THEADTBL;if(th.firstElementChild)bd.appendChild(th.firstElementChild);}bd.appendChild(node);}}'
+      + 'for(var i=0;i<BLOCKS.length;i++){var isRow=BLOCKS[i].t==="trow";if(isRow&&!pageHasHead)addHead();var w=document.createElement("div");w.innerHTML=BLOCKS[i].h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(isRow)addHead();bd.appendChild(node);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
       + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
