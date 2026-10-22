@@ -363,7 +363,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -672,7 +672,7 @@ const LETTER_CSS =
   + '.bd h3{color:#1E2A4A;font-size:13.5px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid #ccc;text-transform:uppercase;letter-spacing:.4px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
   + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
   + '.bd td{border:1px solid var(--gl);padding:6px 10px;}.bd tr:nth-child(even) td{background:#F8F8F8;}.bd .total td{font-weight:700;background:var(--tint) !important;}'
-  + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
+  + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;align-items:flex-end;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
 
 function printLetterFromHtml(html, biz, opts) {
   try {
@@ -688,9 +688,11 @@ function printLetterFromHtml(html, biz, opts) {
     const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
-    if ((biz.seal || biz.signature) && biz.printSeal !== false) {
+    if ((biz.seal || biz.signature) && biz.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false)) {
       const sb = page.querySelector('.sig-box');
       const sp = sb && sb.firstElementChild;
+      const sbs = page.querySelectorAll('.sig-box');
+      sbs.forEach((b2, bi2) => { if (bi2 > 0 && b2.firstElementChild) b2.firstElementChild.style.height = '66px'; });
       if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
     }
     const kids = Array.from(page.children);
@@ -704,7 +706,19 @@ function printLetterFromHtml(html, biz, opts) {
 }
 
 // Print any on-screen document view in the standard framed format (letterhead if configured).
-function printView(sel, bi) { return printPaginated(sel, bi, null, true); }
+function printView(sel, bi, opts) { return printPaginated(sel, bi, null, opts || true); }
+
+// Per-print switch for seal & signature (shown only when a seal/signature is uploaded and enabled in Settings).
+function SealToggle({ businessInfo }) {
+  const [on, setOn] = React.useState(typeof window === 'undefined' || window.__sealOn !== false);
+  if (!(businessInfo && (businessInfo.seal || businessInfo.signature)) || businessInfo.printSeal === false) return null;
+  return (
+    <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
+      style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+      🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+    </button>
+  );
+}
 
 // ─── GST tax-invoice print (framed page, full-height item grid, HSN tax summary) ───
 // Built from document data (not cloned from the screen) so every page is identical in layout.
@@ -738,7 +752,7 @@ const ZOHO_PRINT_CSS =
   + '.ztax td{border:1px solid var(--gl);padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
   + '.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
   + '.ztc{padding:0 10px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
-  + '.zsig{display:flex;justify-content:space-between;padding:6px 10px 8px;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);border-bottom:var(--sb);font-size:11px;}'
+  + '.zsig{display:flex;justify-content:space-between;align-items:flex-end;padding:6px 10px 8px;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);border-bottom:var(--sb);font-size:11px;}'
   + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:var(--ac);}';
 
 function buildZohoDocPrint(o) {
@@ -975,6 +989,29 @@ async function printPaginated(sel, bi, pre, gen) {
       clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
       clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
       clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
+      // Seal & signature: drop them above the "Authorised Signatory" line (and equalise the other party's gap),
+      // or append a signature block when the view has none. Switched by Settings + the per-print toggle.
+      let _needSealAppend = false, _sealImgs = '';
+      const _sealOn = !!(bi && (bi.seal || bi.signature) && bi.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false));
+      if (_sealOn) {
+        _sealImgs = '<div class="zseal" style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>';
+        const _re = /authori[sz]ed\s*(signator|sign)/i;
+        const _cands = Array.from(clone.querySelectorAll('div,td,th,p,span,b,strong,label')).filter(el => _re.test(el.textContent || '') && !Array.from(el.children).some(ch => _re.test(ch.textContent || '')));
+        if (_cands.length) {
+          _cands.forEach(el => {
+            const hold = document.createElement('div'); hold.innerHTML = _sealImgs; const node = hold.firstElementChild;
+            const prev = el.previousElementSibling;
+            if (prev && !(prev.textContent || '').trim() && !prev.querySelector('img')) prev.replaceWith(node);
+            else if (el.parentNode) el.parentNode.insertBefore(node, el);
+            const box = el.parentElement, cont = box && box.parentElement;
+            if (cont) {
+              if (cont.style.display === 'flex') cont.style.alignItems = 'flex-end';
+              else if (cont.style.display === 'grid') cont.style.alignItems = 'end';
+              Array.from(cont.children).filter(b => b !== box).forEach(b => { const f = b.firstElementChild; if (f && !(f.textContent || '').trim() && !f.querySelector('img')) f.style.height = '66px'; });
+            }
+          });
+        } else if (!(gen && gen.sealAppend === false)) _needSealAppend = true;
+      }
       const _headTxt = (clone.textContent || '').replace(/\s+/g, ' ').slice(0, 500);
       if (noLH && bi && !(bi.name && _headTxt.includes(bi.name))) {
         const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1005,6 +1042,10 @@ async function printPaginated(sel, bi, pre, gen) {
         }
       };
       Array.from(clone.children).forEach(walkG);
+      if (_needSealAppend) {
+        const _e3 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        blocks.push({ t: '', h: '<div style="display:flex;justify-content:flex-end;margin-top:18px"><div style="text-align:center;min-width:60mm">' + _sealImgs + '<div style="border-top:1px solid #333;padding-top:4px;font-size:11px;color:#444">For ' + _e3(bi.name) + '<br/>' + _e3(bi.signatory || 'Authorised Signatory') + '</div></div></div>' });
+      }
     } else {
     // Persist live form values into attributes so the clone keeps them (cloneNode drops them).
     src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
@@ -7371,7 +7412,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','petty-cash-statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, { sealAppend: false })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -8049,7 +8090,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','voucher.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print / PDF</button>
       </div>
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
@@ -8122,7 +8163,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, { sealAppend: false })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
@@ -9240,7 +9281,7 @@ function GRNPrint({ grn, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -9300,7 +9341,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -10176,7 +10217,7 @@ function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSav
         <h2 className="serif" style={S.h1}>{ol ? 'Edit Offer Letter' : 'New Offer Letter'}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={S.ghostBtn} onClick={onClose}>Cancel</button>
-          <button style={S.ghostBtn} onClick={() => printOfferLetterDoc({ ...form }, businessInfo)}><Printer size={14} /> Preview</button>
+          <SealToggle businessInfo={businessInfo} /><button style={S.ghostBtn} onClick={() => printOfferLetterDoc({ ...form }, businessInfo)}><Printer size={14} /> Preview</button>
           <button style={S.primaryBtn} onClick={() => onSave(form)}>Save</button>
         </div>
       </div>
@@ -10480,7 +10521,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 className="serif" style={styles.h1}>{letter ? 'Edit' : 'New'} {isWarn ? 'Warning Letter' : 'Termination Letter'}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button style={styles.ghostBtn} onClick={() => printHRLetter(form, selEmp, businessInfo)}><Printer size={14} /> Preview</button>
+          <SealToggle businessInfo={businessInfo} /><button style={styles.ghostBtn} onClick={() => printHRLetter(form, selEmp, businessInfo)}><Printer size={14} /> Preview</button>
           <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
           <button style={styles.primaryBtn} onClick={() => onSave(form)}>Save Letter</button>
         </div>
@@ -11683,7 +11724,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payroll-summary.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -11772,7 +11813,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payslips.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print All ({lines.length})</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print All ({lines.length})</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
         {lines.map((l, i) => (
@@ -12112,7 +12153,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
           <div style={{ display: 'flex', gap: 8 }}>
             {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area',`service-order-${order.number||'so'}.pdf`)}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={14}/> Print</button>
+            <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={14}/> Print</button>
             <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
           </div>
         </div>
@@ -12242,7 +12283,7 @@ function PrintModal({ title, children, onClose }) {
           <span style={{ fontWeight: 700, fontSize: 15 }}>{title}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','bin-card.pdf')}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => printView('.print-area', undefined)}><Printer size={14}/> Print / Save PDF</button>
+            <SealToggle businessInfo={window.__operixBI} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', undefined)}><Printer size={14}/> Print / Save PDF</button>
             <button style={styles.secondaryBtn} onClick={onClose}><X size={14}/> Close</button>
           </div>
         </div>
@@ -12401,7 +12442,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
-          <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
+          <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
           <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -16018,7 +16059,7 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -17476,7 +17517,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.supplierRole||'Supplier'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:36px;">${c.customerSnapshot?.name||''}</div>
+          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${c.customerSnapshot?.name||''}</div>${sealImgs ? '<div style="height:66px;margin-bottom:2px"></div>' : ''}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryClientName||'Authorised Signatory'}</b>
             ${c.signatoryClientDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryClientDesignation}</div>` : ''}
@@ -17848,7 +17889,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
         {(bi?.letterhead||bi?.letterheadHtml) && <button onClick={() => setUseLHPartner(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHPartner?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHPartner?'Letterhead ON':'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','partner-agreement.pdf')} style={styles.ghostBtn}><Download size={13} style={{ marginRight: 4 }}/> PDF</button>
-        <button onClick={() => printView('.print-area', bi)} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
+        <SealToggle businessInfo={bi} /><button onClick={() => printView('.print-area', bi)} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
         {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
@@ -25795,7 +25836,7 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
