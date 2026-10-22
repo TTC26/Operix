@@ -658,7 +658,7 @@ function zohoThemeCss(id) {
 
 // Generic-mode CSS: restyles any cloned data table to the same blue-header / black-grid look.
 const ZOHO_GEN_CSS =
-  '.bd{padding:3mm 4mm !important;}'
+  '.bd{padding:3mm 5mm !important;border:1px solid var(--gl) !important;}'
   + 'table.gdata{border-collapse:collapse;width:100%;margin:2px 0;}'
   + 'table.gdata th{background:var(--thbg) !important;color:var(--thfg) !important;border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;font-weight:700 !important;}'
   + 'table.gdata td{border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;color:#000 !important;vertical-align:top;}'
@@ -1001,7 +1001,9 @@ async function printPaginated(sel, bi, pre, gen) {
           _cands.forEach(el => {
             const hold = document.createElement('div'); hold.innerHTML = _sealImgs; const node = hold.firstElementChild;
             const prev = el.previousElementSibling;
+            const _mb = parseFloat(el.style && el.style.marginBottom) || 0;
             if (prev && !(prev.textContent || '').trim() && !prev.querySelector('img')) prev.replaceWith(node);
+            else if (_mb >= 20 && el.parentNode) { el.style.marginBottom = '2px'; el.parentNode.insertBefore(node, el.nextSibling); } // label, gap, line  →  label, seal, line
             else if (el.parentNode) el.parentNode.insertBefore(node, el);
             const box = el.parentElement, cont = box && box.parentElement;
             if (cont) {
@@ -1035,7 +1037,7 @@ async function printPaginated(sel, bi, pre, gen) {
             blocks.push({ h: trs2.slice(i, i + span).map(r => r.outerHTML).join(''), t: 'trow', id: tid, o: open, th: head });
             i += span;
           }
-        } else if (el.querySelector && el.querySelector('table') && el.children.length) {
+        } else if (el.querySelector && el.querySelector('table') && el.children.length && el.style.display !== 'flex' && el.style.display !== 'grid') {
           Array.from(el.children).forEach(walkG);
         } else {
           blocks.push({ h: el.outerHTML, t: '' });
