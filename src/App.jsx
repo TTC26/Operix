@@ -669,7 +669,7 @@ const ZOHO_GEN_CSS =
 const LETTER_CSS =
   '.bd{border:none !important;padding:6mm 16mm 0 !important;font-size:13px;line-height:1.7;}'
   + '.bd p{line-height:1.75;margin:0 0 12px;}.bd h2{text-align:center;color:#1E2A4A;font-size:15px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 20px;}'
-  + '.bd h3{color:#1E2A4A;font-size:13px;margin:16px 0 8px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
+  + '.bd h3{color:#1E2A4A;font-size:13.5px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid #ccc;text-transform:uppercase;letter-spacing:.4px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
   + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
   + '.bd td{border:1px solid var(--gl);padding:6px 10px;}.bd tr:nth-child(even) td{background:#F8F8F8;}.bd .total td{font-weight:700;background:var(--tint) !important;}'
   + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
@@ -688,12 +688,17 @@ function printLetterFromHtml(html, biz, opts) {
     const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
-    if (biz.seal || biz.signature) {
+    if ((biz.seal || biz.signature) && biz.printSeal !== false) {
       const sb = page.querySelector('.sig-box');
       const sp = sb && sb.firstElementChild;
       if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
     }
-    Array.from(page.children).forEach(el => blocks.push({ t: '', h: el.outerHTML }));
+    const kids = Array.from(page.children);
+    for (let ki = 0; ki < kids.length; ki++) {
+      const el = kids[ki];
+      if (/^H[23]$/.test(el.tagName) && kids[ki + 1]) { blocks.push({ t: '', h: '<div>' + el.outerHTML + kids[ki + 1].outerHTML + '</div>' }); ki++; }
+      else blocks.push({ t: '', h: el.outerHTML });
+    }
     return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
   } catch (e) { console.error(e); printHTML(html); }
 }
@@ -872,9 +877,49 @@ function buildZohoDocPrint(o) {
   const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
   if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
 
-  const sealHtml = (bi.seal || bi.signature) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
+  const sealHtml = ((bi.seal || bi.signature) && bi.printSeal !== false) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
   TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln"' + (sealHtml ? ' style="margin-top:2px"' : '') + '>' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
   return { blocks, thead, tblOpen, watermark: doc.status === 'draft' ? 'DRAFT' : '' };
+}
+
+// Build a landscape-width version of a portrait letterhead image from the SAME source: the image keeps its
+// natural scale (no distortion); the extra width is filled by repeating a blank column in the widest
+// uniform gap near the middle (or by extending the edge columns), so logo/text/wave stay crisp and aligned.
+const _wideCache = {};
+async function fitLetterheadWide(url, ratio) {
+  const key = ratio + '|' + (url ? url.length : 0) + '|' + (url ? url.slice(-40) : '');
+  if (_wideCache[key]) return _wideCache[key];
+  try {
+    const img = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; setTimeout(() => res(null), 4000); });
+    if (!img || !img.naturalWidth) return url;
+    const w = img.naturalWidth, h = img.naturalHeight, W2 = Math.round(w * ratio), extra = W2 - w;
+    if (extra <= 0) return url;
+    const c0 = document.createElement('canvas'); c0.width = w; c0.height = h;
+    const x0 = c0.getContext('2d'); x0.drawImage(img, 0, 0);
+    const d = x0.getImageData(0, 0, w, h).data;
+    // longest run of (near-)identical neighbouring columns within the middle 20–80%
+    const colDiff = (i) => { let t = 0; for (let y = 0; y < h; y += 2) { const a = (y * w + i) * 4, b = (y * w + i + 1) * 4; t += Math.abs(d[a] - d[b]) + Math.abs(d[a + 1] - d[b + 1]) + Math.abs(d[a + 2] - d[b + 2]); } return t / (h / 2); };
+    let best = { len: 0, at: 0 }, run = 0, start = 0;
+    for (let i = Math.floor(w * 0.2); i < Math.floor(w * 0.8); i++) {
+      if (colDiff(i) < 3) { if (!run) start = i; run++; if (run > best.len) best = { len: run, at: start + Math.floor(run / 2) }; } else run = 0;
+    }
+    const c = document.createElement('canvas'); c.width = W2; c.height = h;
+    const g = c.getContext('2d');
+    if (best.len >= 12) {
+      const sp = best.at;
+      g.drawImage(img, 0, 0, sp, h, 0, 0, sp, h);
+      g.drawImage(img, sp, 0, 1, h, sp, 0, extra + 1, h);
+      g.drawImage(img, sp + 1, 0, w - sp - 1, h, sp + extra + 1, 0, w - sp - 1, h);
+    } else {
+      const L = Math.floor(extra / 2), R = extra - L;
+      g.drawImage(img, 0, 0, 1, h, 0, 0, L + 1, h);
+      g.drawImage(img, L, 0);
+      g.drawImage(img, w - 1, 0, 1, h, L + w - 1, 0, R + 1, h);
+    }
+    const out = c.toDataURL('image/png');
+    _wideCache[key] = out;
+    return out;
+  } catch (e) { return url; }
 }
 
 // Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
@@ -889,10 +934,8 @@ async function printPaginated(sel, bi, pre, gen) {
     // Landscape: honour the @page size of the view being printed (or pre.landscape).
     let LS = !!(pre && pre.landscape);
     if (gen) { try { const _m = Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n').match(/size:\s*A4\s*(landscape|portrait)/gi); if (_m && _m.length) LS = /landscape/i.test(_m[_m.length - 1]); } catch (e) {} }
-    const _landH = !!(LS && bi && bi.letterheadLand && !_logoMode);
-    const _landF = !!(LS && bi && bi.letterheadFooterLand && !_logoMode);
-    const lhHdrUrl = _landH ? bi.letterheadLand : (bi && bi.letterhead && !_logoMode ? bi.letterhead : '');
-    const lhFtrUrl = _landF ? bi.letterheadFooterLand : (bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '');
+    let lhHdrUrl = bi && bi.letterhead && !_logoMode ? bi.letterhead : '';
+    let lhFtrUrl = bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '';
     const SW = LS ? 297 : 210, SH = LS ? 209 : 296;
     if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
     if (!pre && gen && !src) { window.print(); return; }
@@ -910,9 +953,15 @@ async function printPaginated(sel, bi, pre, gen) {
       return fb;
     };
     const noLH = !lhHdrUrl && !lhFtrUrl;
+    const _hdrBandMm = lhHdrUrl ? await mmOf('.lh-pad-header img', lhHdrUrl, LS ? 56 : 60, LS ? 40 : 55, 210) : 0;
+    const _ftrBandMm = lhFtrUrl ? await mmOf('.lh-pad-footer img', lhFtrUrl, LS ? 36 : 46, LS ? 28 : 40, 210) : 0;
+    if (LS) { // same source, widened for landscape (no distortion)
+      if (lhHdrUrl) lhHdrUrl = await fitLetterheadWide(lhHdrUrl, 297 / 210);
+      if (lhFtrUrl) lhFtrUrl = await fitLetterheadWide(lhFtrUrl, 297 / 210);
+    }
     const WM = (pre && pre.watermark) || (gen && src && src.querySelector('.draft-watermark') ? 'DRAFT' : '');
-    const HDRMM = lhHdrUrl ? await mmOf(_landH ? null : '.lh-pad-header img', lhHdrUrl, LS ? 45 : 60, LS ? 40 : 55, _landH ? 297 : 210) : ((pre || gen) ? 8 : 0);
-    const FTRMM = lhFtrUrl ? await mmOf(_landF ? null : '.lh-pad-footer img', lhFtrUrl, LS ? 30 : 46, LS ? 28 : 40, _landF ? 297 : 210) : ((pre || gen) ? 12 : 0);
+    const HDRMM = lhHdrUrl ? _hdrBandMm : ((pre || gen) ? 8 : 0);
+    const FTRMM = lhFtrUrl ? _ftrBandMm : ((pre || gen) ? 12 : 0);
 
     let blocks = [], theadHTML = '', tblOpen = '';
     if (pre) { blocks = pre.blocks; theadHTML = pre.thead; tblOpen = pre.tblOpen; } else if (gen) {
@@ -1023,7 +1072,8 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
-      + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(nd.children.length>1){bd.removeChild(nd);var kids=Array.prototype.slice.call(nd.children);for(var z=0;z<kids.length;z++)placeNode(kids[z]);}}'
+      + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
+      + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
       + 'np();var LASTROW=-1,TH=0;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
@@ -3097,17 +3147,6 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
     reader.readAsDataURL(file);
   }
 
-  function handleLandUpload(key) {
-    return (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      if (file.size > 700 * 1024) { alert('Landscape images: please choose an image under 700 KB (e.g. 2339 px wide, saved as optimised PNG/JPG).'); return; }
-      const reader = new FileReader();
-      reader.onload = () => setForm(p => ({ ...p, [key]: reader.result }));
-      reader.readAsDataURL(file);
-    };
-  }
-
   function handleSealUpload(key) {
     return (e) => {
       const file = e.target.files[0];
@@ -3213,6 +3252,10 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
         {/* Company seal + authorised signature (printed beside the signatory line) */}
         <div style={styles.formGroup}>
           <label style={styles.label}>Company Seal &amp; Signature <span style={{ color: '#999', fontWeight: 400 }}>(optional — transparent PNG, under 200 KB each; printed above the "Authorised Signatory" line on invoices, letters and contracts)</span></label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={form.printSeal !== false} onChange={(e) => setForm(p => ({ ...p, printSeal: e.target.checked }))} />
+            Print seal &amp; signature on documents <span style={{ color: '#999' }}>(untick to leave the space blank for hand-signing; invoice &amp; contract screens also have a per-document switch)</span>
+          </label>
           {[['seal', 'Company seal'], ['signature', 'Authorised signature']].map(([key, lbl]) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
               <span style={{ fontSize: 12, width: 130, color: '#555' }}>{lbl}</span>
@@ -3223,18 +3266,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
           ))}
         </div>
 
-        {/* Optional landscape letterhead (used for wide prints: payroll sheet, employee register, etc.) */}
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Landscape Letterhead (optional) <span style={{ color: '#999', fontWeight: 400 }}>(for wide prints like Payroll &amp; Employee Register — <b>≈2339 px wide</b>; under 700 KB each). If not set, the portrait letterhead is auto-stretched to fit.</span></label>
-          {[['letterheadLand', 'Landscape header'], ['letterheadFooterLand', 'Landscape footer']].map(([key, lbl]) => (
-            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
-              <span style={{ fontSize: 12, width: 120, color: '#555' }}>{lbl}</span>
-              {form[key] && <img src={form[key]} alt={lbl} style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
-              <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form[key] ? 'Change' : '⬆ Upload'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLandUpload(key)} /></label>
-              {form[key] && <button type="button" onClick={() => setForm(p => ({ ...p, [key]: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
-            </div>
-          ))}
-        </div>
+        <div style={{ fontSize: 11.5, color: '#888780', marginBottom: 12 }}>Landscape prints (payroll sheet, employee register, wide contracts) are generated automatically from this same header/footer — text and logo stay undistorted; only blank space is widened.</div>
         {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
 
         <div style={styles.formGroup}>
@@ -5842,6 +5874,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const [rejectionNote, setRejectionNote] = useState('');
   const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
   const [mepPickerOpen, setMepPickerOpen] = useState(false);
+  const [useSeal, setUseSeal] = useState(true);
   const [useLH, setUseLH] = useState(businessInfo?.printHeader ? (businessInfo.printHeader === 'letterhead' && !!(businessInfo?.letterhead||businessInfo?.letterheadFooter||businessInfo?.letterheadHtml)) : !!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -6029,8 +6062,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}
             </button>
           )}
+          {(businessInfo?.seal || businessInfo?.signature) && businessInfo.printSeal !== false && (
+            <button onClick={() => setUseSeal(v => !v)} style={{ ...styles.ghostBtn, ...(useSeal ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+              🖋 {useSeal ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+            </button>
+          )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, buildZohoDocPrint({ doc, t, totals, bi: businessInfo, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, buildZohoDocPrint({ doc, t, totals, bi: useSeal ? businessInfo : { ...businessInfo, printSeal: false }, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
           <button onClick={async () => { setPdfLoading(true); await downloadDocPDF('.print-area', `${(DOC_TYPES[doc.type]?.label||doc.type).replace(/\s+/g,'-')}-${doc.number||'draft'}.pdf`); setPdfLoading(false); }} style={styles.ghostBtn} disabled={pdfLoading}>{pdfLoading ? '⏳' : <Download size={15}/>} {pdfLoading ? 'Generating...' : 'Download PDF'}</button>
 
           {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
@@ -17280,6 +17318,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
   const fmt = makeFmt(bi);
   const [useLH, setUseLH] = React.useState(!!(bi?.letterhead || bi?.letterheadFooter));
   const [orient, setOrient] = React.useState('portrait');
+  const [useSeal, setUseSeal] = React.useState(true);
   const effLHH = useLH ? bi?.letterhead : null;
   const effLHF = useLH ? bi?.letterheadFooter : null;
   const isIndia = (bi?.country||'').toLowerCase() === 'india';
@@ -17423,7 +17462,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
 
-    const sealImgs = (bi?.seal || bi?.signature) ? `<div style="height:66px;display:flex;align-items:center;gap:10px;margin-bottom:2px">${bi?.seal ? `<img src="${bi.seal}" style="height:64px;max-width:90px;object-fit:contain" />` : ''}${bi?.signature ? `<img src="${bi.signature}" style="height:44px;max-width:110px;object-fit:contain" />` : ''}</div>` : '';
+    const sealImgs = ((bi?.seal || bi?.signature) && bi?.printSeal !== false && useSeal) ? `<div style="height:66px;display:flex;align-items:center;gap:10px;margin-bottom:2px">${bi?.seal ? `<img src="${bi.seal}" style="height:64px;max-width:90px;object-fit:contain" />` : ''}${bi?.signature ? `<img src="${bi.signature}" style="height:44px;max-width:110px;object-fit:contain" />` : ''}</div>` : '';
     const sigBlock = `
       <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
         <div>
@@ -17465,7 +17504,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       ${sigBlock}
     </div>`;
     printLetterFromHtml('<!DOCTYPE html><html><body>' + inner + '</body></html>',
-      useLH ? bi : { ...bi, printHeader: 'logo' },
+      { ...bi, ...(useLH ? {} : { printHeader: 'logo' }), ...(useSeal ? {} : { printSeal: false }) },
       { landscape: orient === 'landscape', watermark: isDraft ? 'DRAFT' : '' });
   }
 
@@ -17477,6 +17516,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <input type="checkbox" checked={useLH} onChange={e=>setUseLH(e.target.checked)} />
           Use letterpad
         </label>
+        {(bi?.seal || bi?.signature) && (
+          <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+            <input type="checkbox" checked={useSeal} onChange={e=>setUseSeal(e.target.checked)} />
+            Seal &amp; signature
+          </label>
+        )}
         {useLH && effLHH && <span style={{ fontSize:11, color:'#1A7A3E', background:'#EEF9F0', border:'1px solid #B7E5C6', borderRadius:6, padding:'4px 10px' }}>✓ Header from Settings</span>}
         {useLH && effLHF && <span style={{ fontSize:11, color:'#1A7A3E', background:'#EEF9F0', border:'1px solid #B7E5C6', borderRadius:6, padding:'4px 10px' }}>✓ Footer from Settings</span>}
         {useLH && !effLHH && !effLHF && <span style={{ fontSize:11, color:'#B45309', background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:6, padding:'4px 10px' }}>No header/footer saved — add in Settings</span>}
@@ -26816,7 +26861,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   );
 }
 
-const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'letterheadLand', 'letterheadFooterLand', 'seal', 'signature'];
+const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'seal', 'signature'];
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
