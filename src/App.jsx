@@ -456,18 +456,10 @@ function printPaginated(sel, bi) {
     const HDRMM = lhHdrUrl ? mmOf('.lh-pad-header img', 60, 55) : 0;
     const FTRMM = lhFtrUrl ? mmOf('.lh-pad-footer img', 46, 40) : 0;
 
-    // Column widths from the live items table (so split sub-tables stay aligned).
-    const origTbl = src.querySelector('.doc-items-table');
-    let colHTML = '';
-    if (origTbl) {
-      // Exclude screen-only (no-print) columns, then renormalise widths to 100%.
-      const ths = Array.from(origTbl.querySelectorAll('thead tr:last-child > *'))
-        .filter(th => !th.classList.contains('no-print') && th.getBoundingClientRect().width > 0.5);
-      const ws = ths.map(th => th.getBoundingClientRect().width);
-      const sum = ws.reduce((a, b) => a + b, 0) || 1;
-      colHTML = '<colgroup>' + ws.map(w => '<col style="width:' + (w / sum * 100).toFixed(3) + '%">').join('') + '</colgroup>';
-    }
-
+    // Persist live form values into attributes so the clone keeps them (cloneNode drops them).
+    src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
+    src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
+    src.querySelectorAll('select').forEach(sel => { try { Array.from(sel.options).forEach(o => o.removeAttribute('selected')); if (sel.selectedIndex >= 0) sel.options[sel.selectedIndex].setAttribute('selected', 'selected'); } catch (e) {} });
     // Clone + resolve print visibility (show di-print, drop screen-only bits + letterhead nodes).
     const clone = src.cloneNode(true);
     clone.querySelectorAll('.no-print, .di-screen, .di-screen-row').forEach(n => n.remove());
@@ -479,7 +471,7 @@ function printPaginated(sel, bi) {
     // (the paginator re-creates the table + its thead on each page) so columns always align.
     const blocks = [];
     let theadHTML = '';
-    const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;table-layout:fixed;">' + colHTML;
+    const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;">';
     const walk = (el) => {
       if (el.classList && el.classList.contains('doc-items-table')) {
         const thead = el.querySelector('thead');
@@ -525,9 +517,11 @@ function printPaginated(sel, bi) {
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
-      + '.doc-items-table{border-collapse:collapse;width:100%;}'
-      + '.doc-items-table thead th{border:1px solid #1E2A4A;background:#F1EFE9;padding:7px 8px;font-size:12px;}'
-      + '.doc-items-table tbody td{border:1px solid #B9B4A6;padding:7px 8px;font-size:12px;vertical-align:top;}'
+      + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;}'
+      + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11.5px;color:#000;text-align:left;vertical-align:middle;white-space:normal;word-break:break-word;}'
+      + '.doc-items-table tbody td{border:1px solid #000;padding:6px 7px;font-size:11.5px;color:#000;vertical-align:top;white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
+      + '.doc-items-table tbody td *{max-width:100%;}'
+      + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;-webkit-appearance:none;appearance:none;}'
       + '</style></head><body>'
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
