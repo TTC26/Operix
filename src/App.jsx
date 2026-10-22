@@ -437,6 +437,105 @@ async function downloadDocPDF(elOrSelector, filename) {
   }
 }
 
+// Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
+// table row-by-row, and prints real A4 sheets each carrying the header + footer. Works
+// around Chromium multi-page bugs (thead no-repeat, position:fixed clipping).
+function printPaginated(sel, bi) {
+  try {
+    const src = typeof sel === 'string' ? document.querySelector(sel) : sel;
+    const lhHdrUrl = bi && bi.letterhead ? bi.letterhead : '';
+    const lhFtrUrl = bi && bi.letterheadFooter ? bi.letterheadFooter : '';
+    if (!src || (!lhHdrUrl && !lhFtrUrl)) { window.print(); return; }
+
+    // Measure letterhead natural heights (mm at full A4 width), capped.
+    const mmOf = (imgSel, cap, fb) => {
+      const im = src.querySelector(imgSel);
+      if (im && im.naturalWidth) return Math.min(Math.ceil(210 * im.naturalHeight / im.naturalWidth), cap);
+      return fb;
+    };
+    const HDRMM = lhHdrUrl ? mmOf('.lh-pad-header img', 60, 55) : 0;
+    const FTRMM = lhFtrUrl ? mmOf('.lh-pad-footer img', 46, 40) : 0;
+
+    // Column widths from the live items table (so split sub-tables stay aligned).
+    const origTbl = src.querySelector('.doc-items-table');
+    let colHTML = '';
+    if (origTbl) {
+      const ths = origTbl.querySelectorAll('thead tr:last-child > *');
+      const tw = origTbl.getBoundingClientRect().width || 1;
+      colHTML = '<colgroup>' + Array.from(ths).map(th => '<col style="width:' + (th.getBoundingClientRect().width / tw * 100).toFixed(3) + '%">').join('') + '</colgroup>';
+    }
+
+    // Clone + resolve print visibility (show di-print, drop screen-only bits + letterhead nodes).
+    const clone = src.cloneNode(true);
+    clone.querySelectorAll('.no-print, .di-screen, .di-screen-row').forEach(n => n.remove());
+    clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
+    clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
+    clone.querySelectorAll('.lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
+
+    // Build an ordered block list; split the items table into per-group row blocks.
+    const blocks = [];
+    let theadTbl = '';
+    const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;table-layout:fixed;">' + colHTML;
+    const walk = (el) => {
+      if (el.classList && el.classList.contains('doc-items-table')) {
+        const thead = el.querySelector('thead');
+        theadTbl = thead ? (tblOpen + '<thead>' + thead.innerHTML + '</thead></table>') : '';
+        const trs = Array.from(el.querySelectorAll('tbody > tr'));
+        let i = 0;
+        while (i < trs.length) {
+          // keep rowSpan groups together
+          let span = 1;
+          trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+          const grp = trs.slice(i, i + span).map(r => r.outerHTML).join('');
+          blocks.push({ h: tblOpen + '<tbody>' + grp + '</tbody></table>', t: 'trow' });
+          i += span;
+        }
+      } else {
+        blocks.push({ h: el.outerHTML, t: '' });
+      }
+    };
+    Array.from(clone.children).forEach(walk);
+
+    const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
+    const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
+
+    const script = '(function(){'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd;'
+      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;}'
+      + 'np();'
+      + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i].h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(BLOCKS[i].t==="trow"&&THEADTBL){var th=document.createElement("div");th.innerHTML=THEADTBL;if(th.firstElementChild)bd.appendChild(th.firstElementChild);}bd.appendChild(node);}}'
+      + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
+      + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
+      + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
+      + '})();';
+
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Print</title><style>'
+      + '@page{size:A4;margin:0;}html,body{margin:0;padding:0;}'
+      + 'body{font-family:Georgia,"Times New Roman",serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+      + '.sheet{position:relative;width:210mm;height:296mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
+      + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
+      + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
+      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.doc-items-table{border-collapse:collapse;width:100%;}'
+      + '.doc-items-table thead th{border:1px solid #1E2A4A;background:#F1EFE9;padding:7px 8px;font-size:12px;}'
+      + '.doc-items-table tbody td{border:1px solid #B9B4A6;padding:7px 8px;font-size:12px;vertical-align:top;}'
+      + '</style></head><body>'
+      + '<div id="out"></div>'
+      + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
+      + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var THEADTBL=' + JSON.stringify(theadTbl) + ';' + script + '</scr' + 'ipt>'
+      + '</body></html>';
+
+    const ifr = document.createElement('iframe');
+    ifr.setAttribute('aria-hidden', 'true');
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document;
+    d.open(); d.write(html); d.close();
+    setTimeout(() => { try { if (ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) {} }, 60000);
+  } catch (e) { console.error('printPaginated failed', e); window.print(); }
+}
+
 function parseOCRText(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   // Date
@@ -5321,7 +5420,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </button>
           )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button onClick={() => window.print()} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => (useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter)) ? printPaginated('.print-area', businessInfo) : window.print()} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
           <button onClick={async () => { setPdfLoading(true); await downloadDocPDF('.print-area', `${(DOC_TYPES[doc.type]?.label||doc.type).replace(/\s+/g,'-')}-${doc.number||'draft'}.pdf`); setPdfLoading(false); }} style={styles.ghostBtn} disabled={pdfLoading}>{pdfLoading ? '⏳' : <Download size={15}/>} {pdfLoading ? 'Generating...' : 'Download PDF'}</button>
 
           {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
