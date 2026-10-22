@@ -475,22 +475,22 @@ function printPaginated(sel, bi) {
     clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
     clone.querySelectorAll('.lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
 
-    // Build an ordered block list; split the items table into per-group row blocks.
+    // Build an ordered block list; item-table rows are flowed into ONE table per page
+    // (the paginator re-creates the table + its thead on each page) so columns always align.
     const blocks = [];
-    let theadTbl = '';
+    let theadHTML = '';
     const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;table-layout:fixed;">' + colHTML;
     const walk = (el) => {
       if (el.classList && el.classList.contains('doc-items-table')) {
         const thead = el.querySelector('thead');
-        theadTbl = thead ? (tblOpen + '<thead>' + thead.innerHTML + '</thead></table>') : '';
+        theadHTML = thead ? ('<thead>' + thead.innerHTML + '</thead>') : '';
         const trs = Array.from(el.querySelectorAll('tbody > tr'));
         let i = 0;
         while (i < trs.length) {
-          // keep rowSpan groups together
+          // keep rowSpan groups together so a grouped item never splits across pages
           let span = 1;
           trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
-          const grp = trs.slice(i, i + span).map(r => r.outerHTML).join('');
-          blocks.push({ h: tblOpen + '<tbody>' + grp + '</tbody></table>', t: 'trow' });
+          blocks.push({ h: trs.slice(i, i + span).map(r => r.outerHTML).join(''), t: 'trow' });
           i += span;
         }
       } else {
@@ -503,12 +503,16 @@ function printPaginated(sel, bi) {
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
     const script = '(function(){'
-      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd;'
-      + 'var pageHasHead=false;'
-      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;pageHasHead=false;}'
-      + 'function addHead(){if(THEADTBL){var th=document.createElement("div");th.innerHTML=THEADTBL;if(th.firstElementChild){bd.appendChild(th.firstElementChild);pageHasHead=true;}}}'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;'
+      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;curBody=null;}'
+      + 'function startTbl(){var w=document.createElement("div");w.innerHTML=TBLOPEN+THEADHTML+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");}'
+      + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'np();'
-      + 'for(var i=0;i<BLOCKS.length;i++){var isRow=BLOCKS[i].t==="trow";if(isRow&&!pageHasHead)addHead();var w=document.createElement("div");w.innerHTML=BLOCKS[i].h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(isRow)addHead();bd.appendChild(node);}}'
+      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];'
+      + 'if(B.t==="trow"){if(!curBody)startTbl();var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
+      + 'if(!fits()){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);np();startTbl();curBody.insertAdjacentHTML("beforeend",B.h);} }'
+      + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(!fits()){bd.removeChild(node);np();bd.appendChild(node);} }'
+      + '}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
       + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
@@ -528,7 +532,7 @@ function printPaginated(sel, bi) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var THEADTBL=' + JSON.stringify(theadTbl) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
