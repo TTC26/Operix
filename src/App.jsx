@@ -674,7 +674,7 @@ const LETTER_CSS =
   + '.bd td{border:1px solid var(--gl);padding:6px 10px;}.bd tr:nth-child(even) td{background:#F8F8F8;}.bd .total td{font-weight:700;background:var(--tint) !important;}'
   + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
 
-function printLetterFromHtml(html, biz) {
+function printLetterFromHtml(html, biz, opts) {
   try {
     biz = biz || (typeof window !== 'undefined' && window.__operixBI) || {};
     const dd = new DOMParser().parseFromString(html, 'text/html');
@@ -689,7 +689,7 @@ function printLetterFromHtml(html, biz) {
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
     Array.from(page.children).forEach(el => blocks.push({ t: '', h: el.outerHTML }));
-    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: _wm });
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
   } catch (e) { console.error(e); printHTML(html); }
 }
 
@@ -880,26 +880,33 @@ async function printPaginated(sel, bi, pre, gen) {
     const _qa = typeof sel === 'string' ? document.querySelectorAll(sel) : null;
     const src = _qa ? _qa[_qa.length - 1] : sel;
     const _logoMode = ((!pre && gen) || (pre && pre.letter)) && bi && bi.printHeader === 'logo';
-    const lhHdrUrl = bi && bi.letterhead && !_logoMode ? bi.letterhead : '';
-    const lhFtrUrl = bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '';
+    // Landscape: honour the @page size of the view being printed (or pre.landscape).
+    let LS = !!(pre && pre.landscape);
+    if (gen) { try { const _m = Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n').match(/size:\s*A4\s*(landscape|portrait)/gi); if (_m && _m.length) LS = /landscape/i.test(_m[_m.length - 1]); } catch (e) {} }
+    const _landH = !!(LS && bi && bi.letterheadLand && !_logoMode);
+    const _landF = !!(LS && bi && bi.letterheadFooterLand && !_logoMode);
+    const lhHdrUrl = _landH ? bi.letterheadLand : (bi && bi.letterhead && !_logoMode ? bi.letterhead : '');
+    const lhFtrUrl = _landF ? bi.letterheadFooterLand : (bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '');
+    const SW = LS ? 297 : 210, SH = LS ? 209 : 296;
     if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
     if (!pre && gen && !src) { window.print(); return; }
 
     // Measure letterhead natural heights (mm at full A4 width), capped. Falls back to
     // loading the image off-screen when the page doesn't already contain it.
-    const mmOf = async (imgSel, url, cap, fb) => {
-      const im = src ? src.querySelector(imgSel) : null;
-      if (im && im.naturalWidth) return Math.min(Math.ceil(210 * im.naturalHeight / im.naturalWidth), cap);
+    const mmOf = async (imgSel, url, cap, fb, W) => {
+      W = W || 210;
+      const im = (src && imgSel) ? src.querySelector(imgSel) : null;
+      if (im && im.naturalWidth) return Math.min(Math.ceil(W * im.naturalHeight / im.naturalWidth), cap);
       try {
         const pm = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; setTimeout(() => res(null), 3000); });
-        if (pm && pm.naturalWidth) return Math.min(Math.ceil(210 * pm.naturalHeight / pm.naturalWidth), cap);
+        if (pm && pm.naturalWidth) return Math.min(Math.ceil(W * pm.naturalHeight / pm.naturalWidth), cap);
       } catch (e) {}
       return fb;
     };
     const noLH = !lhHdrUrl && !lhFtrUrl;
     const WM = (pre && pre.watermark) || (gen && src && src.querySelector('.draft-watermark') ? 'DRAFT' : '');
-    const HDRMM = lhHdrUrl ? await mmOf('.lh-pad-header img', lhHdrUrl, 60, 55) : ((pre || gen) ? 8 : 0);
-    const FTRMM = lhFtrUrl ? await mmOf('.lh-pad-footer img', lhFtrUrl, 46, 40) : ((pre || gen) ? 12 : 0);
+    const HDRMM = lhHdrUrl ? await mmOf(_landH ? null : '.lh-pad-header img', lhHdrUrl, LS ? 45 : 60, LS ? 40 : 55, _landH ? 297 : 210) : ((pre || gen) ? 8 : 0);
+    const FTRMM = lhFtrUrl ? await mmOf(_landF ? null : '.lh-pad-footer img', lhFtrUrl, LS ? 30 : 46, LS ? 28 : 40, _landF ? 297 : 210) : ((pre || gen) ? 12 : 0);
 
     let blocks = [], theadHTML = '', tblOpen = '';
     if (pre) { blocks = pre.blocks; theadHTML = pre.thead; tblOpen = pre.tblOpen; } else if (gen) {
@@ -1029,9 +1036,9 @@ async function printPaginated(sel, bi, pre, gen) {
       + '})();';
 
     const html = '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Print</title><style>'
-      + '@page{size:A4;margin:0;}html,body{margin:0;padding:0;}'
+      + '@page{size:' + (LS ? 'A4 landscape' : 'A4') + ';margin:0;}html,body{margin:0;padding:0;}'
       + 'body{font-family:Georgia,"Times New Roman",serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
-      + '.sheet{position:relative;width:210mm;height:296mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
+      + '.sheet{position:relative;width:' + SW + 'mm;height:' + SH + 'mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
@@ -3084,6 +3091,17 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
     reader.readAsDataURL(file);
   }
 
+  function handleLandUpload(key) {
+    return (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 700 * 1024) { alert('Landscape images: please choose an image under 700 KB (e.g. 2339 px wide, saved as optimised PNG/JPG).'); return; }
+      const reader = new FileReader();
+      reader.onload = () => setForm(p => ({ ...p, [key]: reader.result }));
+      reader.readAsDataURL(file);
+    };
+  }
+
   function handleLogoUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -3174,6 +3192,18 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
           {form.letterheadFooter && lhfDim && (lhfDim.w >= 1400
             ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhfDim.w} × {lhfDim.h} px (full width, auto-fits)</div>
             : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhfDim.w} × {lhfDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
+        </div>
+        {/* Optional landscape letterhead (used for wide prints: payroll sheet, employee register, etc.) */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Landscape Letterhead (optional) <span style={{ color: '#999', fontWeight: 400 }}>(for wide prints like Payroll &amp; Employee Register — <b>≈2339 px wide</b>; under 700 KB each). If not set, the portrait letterhead is auto-stretched to fit.</span></label>
+          {[['letterheadLand', 'Landscape header'], ['letterheadFooterLand', 'Landscape footer']].map(([key, lbl]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, width: 120, color: '#555' }}>{lbl}</span>
+              {form[key] && <img src={form[key]} alt={lbl} style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+              <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form[key] ? 'Change' : '⬆ Upload'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLandUpload(key)} /></label>
+              {form[key] && <button type="button" onClick={() => setForm(p => ({ ...p, [key]: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+            </div>
+          ))}
         </div>
         {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
 
@@ -17385,22 +17415,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>
       </div>`;
 
-    const html = `<!DOCTYPE html><html><head>
-      <meta charset="utf-8"/>
-      <title>Contract — ${c.number}</title>
-      <style>
-        @page { size: A4 ${orient}; margin: ${lhImg ? '220px' : '15mm'} 15mm ${lhFooterImg ? '140px' : '20mm'} 15mm; ${!lhFooterImg ? `@bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: Arial, sans-serif; font-size: 9px; color: #888; }` : ''} }
-        body { font-family: Georgia, serif; font-size: 13px; color: #222; line-height: 1.7; }
-        h3 { font-size: 14px; font-weight: 700; color: #1E2A4A; border-bottom: 1px solid #ccc;
-             padding-bottom: 6px; margin: 20px 0 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-      </style>
-      ${draftWm}
-    </head><body>
-      ${lhImg}
-      ${companyHeader}
+    // Same framed print engine as every other document: header/footer (letterhead or logo) on every
+    // page, content flows page by page, nothing hidden behind the header/footer.
+    const inner = `<div class="page">
       <div style="text-align:center;margin-bottom:20px;">
         <div style="font-size:17px;font-weight:700;letter-spacing:2px;color:#1E2A4A;text-transform:uppercase;">CONTRACT AGREEMENT</div>
-        <div style="font-size:12px;color:#888;margin-top:4px;">Contract No: ${c.number} &nbsp;|&nbsp; Date: ${c.date}${c.poRefNumber ? ` &nbsp;|&nbsp; PO Ref: <b>${c.poRefNumber}</b>` : ''}${isDraft?' &nbsp;|&nbsp; <span style="color:red;font-weight:700">DRAFT</span>':''}</div>
+        <div style="font-size:12px;color:#888;margin-top:4px;">Contract No: ${c.number} &nbsp;|&nbsp; Date: ${c.date}${c.poRefNumber ? ` &nbsp;|&nbsp; PO Ref: <b>${c.poRefNumber}</b>` : ''}</div>
       </div>
       <div style="background:#f7f6f3;border:1px solid #ddd;border-radius:4px;padding:10px 16px;margin-bottom:20px;font-size:14px;font-weight:700;color:#1E2A4A;">
         Subject: ${c.title}
@@ -17412,13 +17432,10 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       ${milestoneTable}
       ${termsHTML}
       ${sigBlock}
-      ${lhFooterImg}
-    </body></html>`;
-
-    const w = window.open('', '_blank', 'width=900,height=750');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => { w.focus(); w.print(); }, 600);
+    </div>`;
+    printLetterFromHtml('<!DOCTYPE html><html><body>' + inner + '</body></html>',
+      useLH ? bi : { ...bi, printHeader: 'logo' },
+      { landscape: orient === 'landscape', watermark: isDraft ? 'DRAFT' : '' });
   }
 
   return (
@@ -26768,7 +26785,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   );
 }
 
-const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml'];
+const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'letterheadLand', 'letterheadFooterLand'];
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
