@@ -463,15 +463,38 @@ function printPaginated(sel, bi) {
     // Clone + resolve print visibility (show di-print, drop screen-only bits + letterhead nodes).
     const clone = src.cloneNode(true);
     clone.querySelectorAll('.no-print, .di-screen, .di-screen-row').forEach(n => n.remove());
-    clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
+    clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; const td = n.closest('td'); if (td) td.classList.add('tdwrap'); });
     clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
     clone.querySelectorAll('.lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
+
+    // Fixed, sensible column widths (by header label) so numbers never collapse/wrap and
+    // the description column takes the remaining space. table-layout:fixed keeps pages aligned.
+    let colHTML = '';
+    const headThs = Array.from(clone.querySelectorAll('.doc-items-table thead tr:last-child > *'));
+    if (headThs.length) {
+      const widthFor = (lbl) => {
+        if (/DESCRIP|PARTICULAR|ITEM|PRODUCT|GOODS|NAME/.test(lbl)) return -1; // flexible
+        if (/^\s*(SL|#|S\.?\s*NO|SR|SI)\s*$/.test(lbl)) return 5;
+        if (/HSN|SAC/.test(lbl)) return 11;
+        if (/QTY|QUANT|NOS|UNIT\b/.test(lbl)) return 7;
+        if (/RATE|PRICE/.test(lbl)) return 13;
+        if (/GST|TAX|CGST|SGST|IGST|VAT/.test(lbl)) return 8;
+        if (/AMOUNT|TOTAL|VALUE/.test(lbl)) return 16;
+        if (/DIMENSION|SIZE/.test(lbl)) return 11;
+        return 9;
+      };
+      const ws = headThs.map(th => widthFor((th.textContent || '').trim().toUpperCase()));
+      const fixedSum = ws.filter(w => w > 0).reduce((a, b) => a + b, 0);
+      const flexN = ws.filter(w => w < 0).length || 1;
+      const flexW = Math.max(16, (100 - fixedSum) / flexN);
+      colHTML = '<colgroup>' + ws.map(w => '<col style="width:' + (w < 0 ? flexW : w).toFixed(2) + '%">').join('') + '</colgroup>';
+    }
 
     // Build an ordered block list; item-table rows are flowed into ONE table per page
     // (the paginator re-creates the table + its thead on each page) so columns always align.
     const blocks = [];
     let theadHTML = '';
-    const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;">';
+    const tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;table-layout:fixed;">' + colHTML;
     const walk = (el) => {
       if (el.classList && el.classList.contains('doc-items-table')) {
         const thead = el.querySelector('thead');
@@ -517,11 +540,12 @@ function printPaginated(sel, bi) {
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
-      + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;}'
-      + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11.5px;color:#000;text-align:left;vertical-align:middle;white-space:normal;word-break:break-word;}'
-      + '.doc-items-table tbody td{border:1px solid #000;padding:6px 7px;font-size:11.5px;color:#000;vertical-align:top;white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
-      + '.doc-items-table tbody td *{max-width:100%;}'
-      + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;-webkit-appearance:none;appearance:none;}'
+      + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
+      + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+      + '.doc-items-table tbody td{border:1px solid #000;padding:6px 7px;font-size:11px;color:#000;vertical-align:top;white-space:nowrap;overflow:hidden;}'
+      + '.doc-items-table td.tdwrap{white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
+      + '.doc-items-table td.tdwrap *{white-space:normal !important;max-width:100%;}'
+      + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
       + '</style></head><body>'
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
