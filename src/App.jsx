@@ -438,7 +438,7 @@ async function downloadDocPDF(elOrSelector, filename) {
 }
 
 // ─── Zoho / Swipe-style document print (built from data, not cloned from the screen) ───
-const ZOHO_PRINT_CSS =
+const ZOHO_PRINT_CSS_OLD =
   'body{font-family:Arial,Helvetica,sans-serif !important;color:#111;font-size:11px;line-height:1.45;}'
   + '.bd{padding:4mm 12mm 0 !important;}'
   + '.zco{display:flex;align-items:center;gap:12px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #000;}'
@@ -466,7 +466,7 @@ const ZOHO_PRINT_CSS =
   + '.zsig{display:flex;justify-content:flex-end;margin-top:14px;}.zsig>div{width:70mm;text-align:center;font-size:11px;}'
   + '.zsig .ln{border-top:1px solid #000;margin-top:34px;padding-top:4px;font-size:10.5px;color:#333;}';
 
-function buildZohoDocPrint(o) {
+function buildZohoDocPrintOld(o) {
   const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl = (v) => esc(v).replace(/\n/g, '<br>');
@@ -577,6 +577,176 @@ function buildZohoDocPrint(o) {
   return { blocks, thead, tblOpen };
 }
 
+// ─── GST tax-invoice print (framed page, full-height item grid, HSN tax summary) ───
+// Built from document data (not cloned from the screen) so every page is identical in layout.
+const ZOHO_PRINT_CSS =
+  'body{font-family:Arial,Helvetica,sans-serif !important;color:#111;font-size:11px;line-height:1.45;}'
+  + '.bd{left:10mm !important;right:10mm !important;padding:0 !important;margin:2mm 0;border:1px solid #000;}'
+  + '.zco{display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid #000;}'
+  + '.zco img{width:56px;height:56px;object-fit:contain;}.zconame{font-size:16px;font-weight:700;}.zcosm{font-size:10.5px;color:#333;}'
+  + '.zh1{text-align:center;font-size:15px;font-weight:700;letter-spacing:1px;padding:6px 10px;border-bottom:1px solid #000;}'
+  + '.zbadge{display:inline-block;margin-left:10px;font-size:9px;font-weight:700;letter-spacing:.8px;padding:1px 7px;border:1px solid #000;border-radius:3px;vertical-align:middle;}'
+  + '.zmeta{display:flex;border-bottom:1px solid #000;}.zmeta>div{flex:1;padding:5px 10px;min-width:0;}.zmeta>div+div{border-left:1px solid #000;}'
+  + '.zmeta .k{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:.6px;}.zmeta .v{font-size:11.5px;font-weight:700;overflow-wrap:break-word;}'
+  + '.zparty{display:flex;border-bottom:1px solid #000;}'
+  + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid #000;}'
+  + '.zlbl{font-size:9.5px;font-weight:700;letter-spacing:.8px;color:#444;text-transform:uppercase;margin-bottom:3px;}'
+  + '.zpn{font-size:12.5px;font-weight:700;margin-bottom:2px;}.zps{font-size:10.5px;color:#222;overflow-wrap:break-word;}'
+  + '.zt{width:100%;border-collapse:collapse;table-layout:fixed;border:0;}'
+  + '.zt th{background:#1F4E79;color:#fff;border:1px solid #000;padding:6px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+  + '.zt td{border:1px solid #000;padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
+  + '.zt tr>*:first-child{border-left:0;}.zt tr>*:last-child{border-right:0;}'
+  + '.zt thead th{border-top:0;}'
+  + '.zt .c{text-align:center;white-space:nowrap;}.zt .r{text-align:right;white-space:nowrap;}.zt .l{text-align:left;}'
+  + '.zt td.d{white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;}'
+  + '.zt td.amt{font-weight:700;}'
+  + '.zt tr.fill td{border-top:0;border-bottom:0;padding:0;}'
+  + '.zsum{display:flex;border-top:1px solid #000;}.zsumL{flex:1;min-width:0;padding:7px 10px;}.zsumR{width:80mm;flex:none;border-left:1px solid #000;}'
+  + '.zwords{font-size:11px;font-style:italic;font-weight:700;margin-bottom:6px;}.zbank div{font-size:10.5px;margin-bottom:1px;}.zbank b{font-weight:700;}'
+  + '.ztot{width:100%;border-collapse:collapse;}.ztot td{padding:5px 10px;font-size:11px;border-bottom:1px solid #bbb;white-space:nowrap;}'
+  + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:#E6EEF6;font-size:13px;font-weight:700;border-top:1.5px solid #000;border-bottom:0;}'
+  + '.ztax{width:100%;border-collapse:collapse;table-layout:fixed;border-top:1px solid #000;}'
+  + '.ztax th{background:#E6EEF6;border:1px solid #000;padding:4px 5px;font-size:10px;font-weight:700;text-align:center;}'
+  + '.ztax td{border:1px solid #000;padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
+  + '.ztax tr>*:first-child{border-left:0;}.ztax tr>*:last-child{border-right:0;}.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
+  + '.ztc{padding:0 10px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
+  + '.zsig{display:flex;justify-content:space-between;padding:6px 10px 8px;border-top:1px solid #000;font-size:11px;}'
+  + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:#1F4E79;}';
+
+function buildZohoDocPrint(o) {
+  const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nl = (v) => esc(v).replace(/\n/g, '<br>');
+  const isPL = doc.type === 'packing_list';
+  const title = doc.type === 'invoice' ? 'TAX INVOICE' : String(t.label || doc.type).toUpperCase();
+  const blocks = [];
+  const B = (h) => blocks.push({ h, t: '' });
+  const TL = (h) => blocks.push({ h, t: 'tail' });
+
+  if (withCompany) {
+    B('<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + esc(bi.name) + '</div>'
+      + '<div class="zcosm">' + nl(bi.address) + '</div>'
+      + '<div class="zcosm">' + esc(cc.taxIdLabel) + ': ' + esc(bi.gstin) + (bi.phone ? ' &nbsp;·&nbsp; ' + esc(bi.phone) : '') + (bi.email ? ' &nbsp;·&nbsp; ' + esc(bi.email) : '') + '</div></div></div>');
+  }
+
+  B('<div class="zh1">' + esc(title) + (doc.status === 'draft' ? '<span class="zbadge">DRAFT</span>' : '') + '</div>');
+
+  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
+  if (meta.length) B('<div class="zmeta">' + meta.map(r => '<div><div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div></div>').join('') + '</div>');
+
+  const pl = [];
+  if (party) {
+    pl.push('<div class="zpn">' + esc(party.name) + '</div>');
+    if (party.address) pl.push('<div class="zps">' + nl(party.address) + '</div>');
+    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
+    if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
+    if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
+  } else pl.push('<div class="zps">' + (isVendorDoc ? 'No vendor selected' : 'No customer selected') + '</div>');
+  let right;
+  if (doc.shipToName || doc.shipToAddress) {
+    right = '<div class="zlbl">Ship To</div>' + (doc.shipToName ? '<div class="zpn">' + esc(doc.shipToName) + '</div>' : '') + (doc.shipToAddress ? '<div class="zps">' + nl(doc.shipToAddress) + '</div>' : '');
+  } else {
+    right = '<div class="zlbl">' + (isVendorDoc ? 'Deliver To' : 'Supplier') + '</div><div class="zpn">' + esc(bi.name) + '</div>'
+      + (bi.gstin ? '<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(bi.gstin) + '</div>' : '')
+      + (bi.state ? '<div class="zps"><b>State:</b> ' + esc(bi.state) + '</div>' : '')
+      + (bi.phone && !withCompany ? '<div class="zps"><b>Ph:</b> ' + esc(bi.phone) + '</div>' : '');
+  }
+  B('<div class="zparty"><div><div class="zlbl">' + (isVendorDoc ? 'Vendor' : 'Bill To') + '</div>' + pl.join('') + '</div><div>' + right + '</div></div>');
+
+  const cols = [{ k: 'sl', l: 'SNo', w: 6, a: 'c' }, { k: 'name', l: 'Item Description', w: -1, a: 'l' }];
+  if (!isPL && cc.splitTax) cols.push({ k: 'hsn', l: 'HSN/SAC', w: 11, a: 'c' });
+  cols.push({ k: 'qty', l: 'Qty', w: 7, a: 'r' });
+  if (isPL) cols.push({ k: 'pk', l: 'Pkgs', w: 8, a: 'r' }, { k: 'nw', l: 'Net Wt (kg)', w: 12, a: 'r' }, { k: 'gw', l: 'Gross Wt (kg)', w: 13, a: 'r' }, { k: 'dm', l: 'Dimensions', w: 13, a: 'c' });
+  else {
+    cols.push({ k: 'rate', l: 'Rate', w: 13, a: 'r' });
+    if (cc.hasTax) cols.push({ k: 'tax', l: (cc.taxLabel || 'Tax') + ' %', w: 8, a: 'r' });
+    cols.push({ k: 'amt', l: 'Amount', w: 16, a: 'r' });
+  }
+  const fixed = cols.filter(c => c.w > 0).reduce((a, c) => a + c.w, 0);
+  const tblOpen = '<table class="zt"><colgroup>' + cols.map(c => '<col style="width:' + (c.w < 0 ? 100 - fixed : c.w) + '%">').join('') + '</colgroup>';
+  const thead = '<thead><tr>' + cols.map(c => '<th style="text-align:' + (c.a === 'r' ? 'right' : c.a === 'c' ? 'center' : 'left') + '">' + esc(c.l) + '</th>').join('') + '</tr></thead>';
+  const items = doc.items || [];
+  const priceCells = (it, rs) => {
+    const span = rs > 1 ? ' rowspan="' + rs + '"' : '';
+    const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const cell = (cls, v) => '<td class="' + cls + '"' + span + '>' + v + '</td>';
+    let h = '';
+    if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
+    h += cell('r', esc(it.qty || 0));
+    if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
+    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(it.gst || 0)); h += cell('r amt', esc(fmt(amount))); }
+    return h;
+  };
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    const gid = it.mergeGroupId;
+    const grp = [it];
+    if (gid) { let j = i + 1; while (j < items.length && items[j].mergeGroupId === gid) { grp.push(items[j]); j++; } }
+    const rs = grp.length;
+    const rows = grp.map((g, gi) => '<tr><td class="c">' + (i + gi + 1) + '</td><td class="l d">' + nl(g.name || '') + '</td>' + (gi === 0 ? priceCells(g, rs) : '') + '</tr>').join('');
+    blocks.push({ h: rows, t: 'trow' });
+    i += rs;
+  }
+
+  // Tail (pinned to bottom of the last page): totals, HSN tax summary, terms, signatures
+  const taxRows = !cc.hasTax ? [] : cc.splitTax ? (totals.sameState ? [['CGST', totals.cgst], ['SGST', totals.sgst]] : [['IGST', totals.igst]]) : [[cc.taxLabel, totals.vat]];
+  let left = '', rightTot = '';
+  if (isPL) {
+    const sum = (k) => items.reduce((s, it) => s + (Number(it[k]) || 0), 0);
+    const rr = [['Total Packages', sum('packages')], ['Total Net Weight', sum('netWeight').toFixed(2) + ' kg'], ['Total Gross Weight', sum('grossWeight').toFixed(2) + ' kg'], ['Port of Loading', doc.portOfLoading], ['Port of Discharge', doc.portOfDischarge], ['Vessel / Flight', doc.vesselFlight], ['B/L or AWB No.', doc.blNumber], ['Country of Origin', doc.countryOfOrigin]].filter(r => r[1] !== undefined && r[1] !== '' && r[1] !== null);
+    rightTot = '<table class="ztot">' + rr.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '</table>';
+  } else {
+    const rows = [['Sub Total', fmt(totals.subtotal)]];
+    if (totals.discountTotal > 0) rows.push(['Less: Discount', '− ' + fmt(totals.discountTotal)]);
+    taxRows.forEach(r => rows.push([r[0], fmt(r[1] || 0)]));
+    rightTot = '<table class="ztot">' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '<tr class="g"><td>Total</td><td>' + esc(fmt(totals.grandTotal)) + '</td></tr></table>';
+    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(numToWords(Math.round(totals.grandTotal))) + (cc.splitTax ? ' Rupees Only.' : ' Only.') + '</div>';
+    if (bi.bankName || bi.bankAccount || bi.upi) {
+      left += '<div class="zbank"><div class="zlbl">Bank Details</div>'
+        + (bi.bankName ? '<div><b>Bank:</b> ' + esc(bi.bankName) + '</div>' : '')
+        + (bi.bankAccount ? '<div><b>A/C No:</b> ' + esc(bi.bankAccount) + '</div>' : '')
+        + (bi.ifsc ? '<div><b>IFSC:</b> ' + esc(bi.ifsc) + '</div>' : '')
+        + (bi.upi ? '<div><b>UPI:</b> ' + esc(bi.upi) + '</div>' : '') + '</div>';
+    }
+  }
+  if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
+  TL('<div class="zsum"><div class="zsumL">' + left + '</div><div class="zsumR">' + rightTot + '</div></div>');
+
+  if (!isPL && cc.hasTax && cc.splitTax) {
+    const grp = {};
+    items.forEach(it => {
+      const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0); if (!amt) return;
+      const k = (it.hsn || '-') + '|' + (Number(it.gst) || 0);
+      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: Number(it.gst) || 0, taxable: 0 }).taxable += amt;
+    });
+    const rowsT = Object.values(grp);
+    if (rowsT.length) {
+      const split = !!totals.sameState;
+      const hdr = split
+        ? '<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th rowspan="2">Total Tax</th></tr><tr><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>'
+        : '<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Value</th><th colspan="2">IGST</th><th rowspan="2">Total Tax</th></tr><tr><th>Rate</th><th>Amount</th></tr>';
+      let tt = 0, tx = 0;
+      const body = rowsT.map(r => {
+        const tax = r.taxable * r.rate / 100; tt += r.taxable; tx += tax;
+        return split
+          ? '<tr><td>' + esc(r.hsn) + '</td><td>' + esc(fmt(r.taxable)) + '</td><td>' + r.rate / 2 + '%</td><td>' + esc(fmt(tax / 2)) + '</td><td>' + r.rate / 2 + '%</td><td>' + esc(fmt(tax / 2)) + '</td><td>' + esc(fmt(tax)) + '</td></tr>'
+          : '<tr><td>' + esc(r.hsn) + '</td><td>' + esc(fmt(r.taxable)) + '</td><td>' + r.rate + '%</td><td>' + esc(fmt(tax)) + '</td><td>' + esc(fmt(tax)) + '</td></tr>';
+      }).join('');
+      const foot = split
+        ? '<tr class="t"><td>Total</td><td>' + esc(fmt(tt)) + '</td><td></td><td>' + esc(fmt(tx / 2)) + '</td><td></td><td>' + esc(fmt(tx / 2)) + '</td><td>' + esc(fmt(tx)) + '</td></tr>'
+        : '<tr class="t"><td>Total</td><td>' + esc(fmt(tt)) + '</td><td></td><td>' + esc(fmt(tx)) + '</td><td>' + esc(fmt(tx)) + '</td></tr>';
+      TL('<table class="ztax"><thead>' + hdr + '</thead><tbody>' + body + foot + '</tbody></table>');
+    }
+  }
+
+  const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid #000">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
+
+  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div><div class="ln">' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
+  return { blocks, thead, tblOpen };
+}
+
 // Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
 // table row-by-row, and prints real A4 sheets each carrying the header + footer. Works
 // around Chromium multi-page bugs (thead no-repeat, position:fixed clipping).
@@ -659,16 +829,21 @@ function printPaginated(sel, bi, pre) {
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
     const script = '(function(){'
-      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];'
       + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;curBody=null;}'
       + 'function startTbl(){var w=document.createElement("div");w.innerHTML=TBLOPEN+THEADHTML+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'np();'
-      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];'
+      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail"){TAIL.push(B.h);continue;}'
       + 'if(B.t==="trow"){if(!curBody)startTbl();var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
       + 'if(!fits()){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);np();startTbl();curBody.insertAdjacentHTML("beforeend",B.h);} }'
       + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(!fits()){bd.removeChild(node);np();bd.appendChild(node);} }'
       + '}'
+      + 'if(TAIL.length){var tw=document.createElement("div");tw.style.display="flow-root";tw.innerHTML=TAIL.join("");bd.appendChild(tw);'
+      + 'if(!fits()){bd.removeChild(tw);np();bd.appendChild(tw);}'
+      + 'else if(curBody){var tH=tw.offsetHeight;bd.removeChild(tw);var lastEl=bd.lastElementChild;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;'
+      + 'if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}'
+      + 'bd.appendChild(tw);} }'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
       + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
