@@ -363,7 +363,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', businessInfo)}><Printer size={15}/> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -644,11 +644,11 @@ function qrSvg(text, size) {
 // Print templates (user-supplied sample designs). Each is a set of CSS variables for the shared builder.
 const ZOHO_THEMES = {
   gst:    { label: 'GST Tax Invoice', desc: 'Framed page, blue header, HSN tax summary + QR', swatch: 'linear-gradient(90deg,#1F4E79,#E6EEF6)', v: { ac: '#1F4E79', thbg: '#1F4E79', thfg: '#fff', gl: '#000', tint: '#E6EEF6', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
-  wave:   { label: 'Corporate Blue', desc: 'Clean blue boxes, light-blue table header', swatch: 'linear-gradient(90deg,#DCE6F2,#1F4E79)', v: { ac: '#1F4E79', thbg: '#DCE6F2', thfg: '#1F3A5F', gl: '#000', tint: '#DCE6F2', frame: 'none', sb: '1px solid #000', ta: 'left', tc: '#1F4E79', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
-  purple: { label: 'Modern Purple', desc: 'Purple header row, soft grid, zebra rows', swatch: 'linear-gradient(90deg,#5B3FA8,#EEE9F8)', v: { ac: '#5B3FA8', thbg: '#5B3FA8', thfg: '#fff', gl: '#CFC6E8', tint: '#EEE9F8', frame: 'none', sb: '1px solid #CFC6E8', ta: 'left', tc: '#5B3FA8', tfs: '20px', zebra: '#F7F4FC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
-  green:  { label: 'Fresh Green', desc: 'Green title + header, light-green striped rows', swatch: 'linear-gradient(90deg,#6AAB57,#E3F0DC)', v: { ac: '#4C9A3A', thbg: '#6AAB57', thfg: '#fff', gl: '#9CC890', tint: '#DDEED6', frame: 'none', sb: '1px solid #9CC890', ta: 'right', tc: '#4C9A3A', tfs: '22px', zebra: '#E3F0DC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  wave:   { label: 'Corporate Blue', desc: 'Clean blue boxes, light-blue table header', swatch: 'linear-gradient(90deg,#DCE6F2,#1F4E79)', v: { ac: '#1F4E79', thbg: '#DCE6F2', thfg: '#1F3A5F', gl: '#000', tint: '#DCE6F2', frame: 'none', sb: '1px solid #000', ta: 'center', tc: '#1F4E79', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  purple: { label: 'Modern Purple', desc: 'Purple header row, soft grid, zebra rows', swatch: 'linear-gradient(90deg,#5B3FA8,#EEE9F8)', v: { ac: '#5B3FA8', thbg: '#5B3FA8', thfg: '#fff', gl: '#CFC6E8', tint: '#EEE9F8', frame: 'none', sb: '1px solid #CFC6E8', ta: 'center', tc: '#5B3FA8', tfs: '20px', zebra: '#F7F4FC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  green:  { label: 'Fresh Green', desc: 'Green title + header, light-green striped rows', swatch: 'linear-gradient(90deg,#6AAB57,#E3F0DC)', v: { ac: '#4C9A3A', thbg: '#6AAB57', thfg: '#fff', gl: '#9CC890', tint: '#DDEED6', frame: 'none', sb: '1px solid #9CC890', ta: 'center', tc: '#4C9A3A', tfs: '22px', zebra: '#E3F0DC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
   tally:  { label: 'Tally Classic', desc: 'Cyan company band, compact bordered grid', swatch: 'linear-gradient(90deg,#BDE5F4,#fff)', v: { ac: '#0B6E8F', thbg: '#BDE5F4', thfg: '#000', gl: '#000', tint: '#BDE5F4', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '14px', zebra: 'transparent', cband: '#BDE5F4', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
-  classic:{ label: 'Classic', desc: 'Our original serif look, soft borders', swatch: 'linear-gradient(90deg,#F1EFE9,#B9B4A6)', v: { ac: '#1E2A4A', thbg: '#F1EFE9', thfg: '#000', gl: '#B9B4A6', tint: '#F1EFE9', frame: 'none', sb: '1px solid #B9B4A6', ta: 'left', tc: '#1E2A4A', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Georgia,"Times New Roman",serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
+  classic:{ label: 'Classic', desc: 'Our original serif look, soft borders', swatch: 'linear-gradient(90deg,#F1EFE9,#B9B4A6)', v: { ac: '#1E2A4A', thbg: '#F1EFE9', thfg: '#000', gl: '#B9B4A6', tint: '#F1EFE9', frame: 'none', sb: '1px solid #B9B4A6', ta: 'center', tc: '#1E2A4A', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Georgia,"Times New Roman",serif', bpad: '0 2mm', tw: '100%', tm: '0' } },
   formal: { label: 'Formal B/W', desc: 'Our original black & white bordered format', swatch: 'linear-gradient(90deg,#f0f0f0,#000)', v: { ac: '#000', thbg: '#F0F0F0', thfg: '#000', gl: '#000', tint: '#F0F0F0', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
 };
 function zohoThemeCss(id) {
@@ -680,14 +680,16 @@ function printLetterFromHtml(html, biz) {
     const dd = new DOMParser().parseFromString(html, 'text/html');
     const page = dd.querySelector('.page');
     if (!page) { printHTML(html); return; }
-    page.querySelectorAll('.letterhead, .lh, .draft-watermark, .draft-wm').forEach(n => n.remove());
+    const _wm = dd.querySelector('.draft-watermark, .draft-wm') ? 'DRAFT' : '';
+    dd.querySelectorAll('.draft-watermark, .draft-wm').forEach(n => n.remove());
+    page.querySelectorAll('.letterhead, .lh').forEach(n => n.remove());
     page.querySelectorAll('.ref').forEach(r => { if (!r.children.length) { r.style.display = 'block'; r.style.textAlign = 'right'; } });
     const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
     Array.from(page.children).forEach(el => blocks.push({ t: '', h: el.outerHTML }));
-    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true });
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: _wm });
   } catch (e) { console.error(e); printHTML(html); }
 }
 
@@ -745,7 +747,7 @@ function buildZohoDocPrint(o) {
       + '<div class="zcosm">' + esc(cc.taxIdLabel) + ': ' + esc(bi.gstin) + (bi.phone ? ' &nbsp;·&nbsp; ' + esc(bi.phone) : '') + (bi.email ? ' &nbsp;·&nbsp; ' + esc(bi.email) : '') + '</div></div></div>');
   }
 
-  B('<div class="zh1">' + esc(title) + (doc.status === 'draft' ? '<span class="zbadge">DRAFT</span>' : '') + '</div>');
+  B('<div class="zh1">' + esc(title) + '' + '</div>');
 
   const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
   if (meta.length) B('<div class="zmeta">' + meta.map(r => '<div><div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div></div>').join('') + '</div>');
@@ -866,7 +868,7 @@ function buildZohoDocPrint(o) {
   if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
 
   TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div><div class="ln">' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
-  return { blocks, thead, tblOpen };
+  return { blocks, thead, tblOpen, watermark: doc.status === 'draft' ? 'DRAFT' : '' };
 }
 
 // Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
@@ -895,6 +897,7 @@ async function printPaginated(sel, bi, pre, gen) {
       return fb;
     };
     const noLH = !lhHdrUrl && !lhFtrUrl;
+    const WM = (pre && pre.watermark) || (gen && src && src.querySelector('.draft-watermark') ? 'DRAFT' : '');
     const HDRMM = lhHdrUrl ? await mmOf('.lh-pad-header img', lhHdrUrl, 60, 55) : ((pre || gen) ? 8 : 0);
     const FTRMM = lhFtrUrl ? await mmOf('.lh-pad-footer img', lhFtrUrl, 46, 40) : ((pre || gen) ? 12 : 0);
 
@@ -1002,8 +1005,8 @@ async function printPaginated(sel, bi, pre, gen) {
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
     const script = '(function(){'
-      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];'
-      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);bd=b;curBody=null;}'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];var WMT=typeof WM==="string"?WM:"";'
+      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);if(WMT){var w=document.createElement("div");w.className="wm";w.textContent=WMT;s.appendChild(w);}out.appendChild(s);bd=b;curBody=null;}'
       + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
@@ -1032,6 +1035,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + FTRMM + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:120px;font-weight:900;letter-spacing:12px;color:rgba(185,28,28,0.10);white-space:nowrap;pointer-events:none;z-index:5;font-family:Arial,sans-serif;}'
       + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
       + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
       + '.doc-items-table tbody td{border:1px solid #000;padding:6px 7px;font-size:11px;color:#000;vertical-align:top;white-space:nowrap;overflow:hidden;}'
@@ -1045,7 +1049,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -7269,7 +7273,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','petty-cash-statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -7850,7 +7854,7 @@ function StdDocHeader({ businessInfo, title, subtitle }) {
   const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
   const cParts = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean);
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
+    <div className="vph" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
       <div>
         <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>
         {bi.address && <div style={{ fontSize: 11.5, color: '#666', marginTop: 3, maxWidth: 340 }}>{bi.address}</div>}
@@ -7947,7 +7951,7 @@ function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], ven
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','voucher.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print / PDF</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print / PDF</button>
       </div>
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
@@ -8020,7 +8024,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
@@ -9138,7 +9142,7 @@ function GRNPrint({ grn, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -9198,7 +9202,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -11581,7 +11585,7 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payroll-summary.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -11670,7 +11674,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payslips.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15}/> Print All ({lines.length})</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print All ({lines.length})</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
         {lines.map((l, i) => (
@@ -12010,7 +12014,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
           <div style={{ display: 'flex', gap: 8 }}>
             {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area',`service-order-${order.number||'so'}.pdf`)}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={14}/> Print</button>
+            <button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={14}/> Print</button>
             <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
           </div>
         </div>
@@ -15916,7 +15920,7 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -25698,7 +25702,7 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => printView('.print-area', businessInfo)} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
