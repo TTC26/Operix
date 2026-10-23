@@ -91,6 +91,28 @@ const PLAN_MODULES = {
 };
 
 // ─── Document types config ────────────────────────────────────────────────────
+// Company document-number prefix (Settings → Business profile → "Document number prefix", e.g. EWI).
+// Every new document number becomes  PREFIX/TYPE/FY/NNN  (prefix blank = old format).
+// Auto prefix from the company name when the user hasn't set one: "ELCAB Wires Industry" → EWI, "Thirumal Trading Company" → TTC.
+function autoDocPrefix(name) {
+  const skip = /^(and|the|of|pvt|private|ltd|limited|llp|inc|co|corp)$/i;
+  const w = String(name || '').replace(/[^A-Za-z0-9 ]+/g, ' ').split(/\s+/).filter(x => x && !skip.test(x));
+  if (!w.length) return '';
+  if (w.length === 1) return w[0].slice(0, 3).toUpperCase();
+  return w.map(x => x[0]).join('').slice(0, 4).toUpperCase();
+}
+function docCo() {
+  try {
+    const b = window.__operixBI || {};
+    const set = String(b.docPrefix || '').trim().replace(/[\/\s]+$/, '');
+    return set || autoDocPrefix(b.name || b.companyName);
+  } catch (e) { return ''; }
+}
+function withCo(n) { const c = docCo(); return c ? c + '/' + n : n; }
+function fyNow(d) { const t = d ? new Date(d) : new Date(); const y = t.getMonth() + 1 >= 4 ? t.getFullYear() : t.getFullYear() - 1; return String(y).slice(-2) + '-' + String(y + 1).slice(-2); }
+// Standard number:  COMPANY/DOC/FY/SERIAL   e.g. EWI/INV/26-27/001
+function dn(code, n, pad) { return withCo(code + '/' + fyNow() + '/' + String(n).padStart(pad || 3, '0')); }
+function lastNum(x) { const m = String(x || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
 const DOC_TYPES = {
   invoice:      { label: 'Invoice',           prefix: 'INV', icon: FileText,      color: '#1E2A4A', party: 'customer' },
   delivery:     { label: 'Delivery note',     prefix: 'DC',  icon: Truck,         color: '#3D7A5C', party: 'customer' },
@@ -3508,6 +3530,14 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             </div>
           ));
         })()}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Document number prefix <span style={{ color: '#999', fontWeight: 400 }}>(auto from company name if left blank)</span></label>
+          <input value={form.docPrefix || ''} onChange={(e) => setForm((p) => ({ ...p, docPrefix: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }))}
+            placeholder={autoDocPrefix(form.name) || 'e.g. EWI'} maxLength={8} style={styles.input} />
+          <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+            New documents are numbered <b>{(form.docPrefix || autoDocPrefix(form.name) || 'XYZ')}/INV/26-27/001</b> style (company / document / financial year / serial) across invoices, quotations, vouchers, GRN, TDS, etc. Leave blank to use initials of your company name; or type your own (letters only). Existing numbers are not changed.
+          </div>
+        </div>
 
         {userRole === 'admin' && (<>
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Branding &amp; Letterhead</div>
@@ -7449,9 +7479,9 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, curren
   });
 
   function genVoucherNo() {
-    const nums = entries.map(e => parseInt((e.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = entries.map(e => lastNum(e.voucherNo));
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
-    return 'PCH-' + String(next).padStart(3, '0');
+    return dn('PCH', next);
   }
 
   function saveEntry(entry) {
@@ -7847,9 +7877,9 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
 
   function genVoucherNo(type) {
     const prefix = type === 'payment' ? 'PV' : 'RV';
-    const nums = displayList.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = displayList.filter(v => v.type === type).map(v => lastNum(v.voucherNo));
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
-    return prefix + '-' + String(next).padStart(3, '0');
+    return dn(prefix, next);
   }
 
   function saveVoucher(v) {
@@ -8778,8 +8808,8 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
   const returns = isMultiBiz ? allReturns.filter(r => (r.bizType||'trading') === currentBizType) : allReturns;
 
   function nextNo(prefix, arr, field) {
-    const nums = arr.map(r => parseInt((r[field]||'').replace(/\D/g,''))||0);
-    return prefix + String((nums.length ? Math.max(...nums) : 0)+1).padStart(3,'0');
+    const nums = arr.map(r => lastNum(r[field]));
+    return dn(prefix.replace(/-$/, ''), (nums.length ? Math.max(...nums) : 0)+1);
   }
 
   function addStockEntries(docId, docNo, date, itemsList, type, sourceType) {
@@ -9682,8 +9712,8 @@ function StoreIssueList({ storeIssues: allIssues, setStoreIssues, items, setStoc
   const storeIssues = isMultiBiz ? (allIssues || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allIssues || []);
 
   function nextNumber() {
-    const nums = storeIssues.map(s=>parseInt((s.sivNumber||'').replace(/\D/g,''))||0);
-    return `SIV-${String(Math.max(0,...nums)+1).padStart(4,'0')}`;
+    const nums = storeIssues.map(s=>lastNum(s.sivNumber));
+    return dn('SIV', Math.max(0,...nums)+1, 4);
   }
   function blank() {
     return { id:'', sivNumber:nextNumber(), date:new Date().toISOString().slice(0,10), issuedTo:'', purpose:'', projectRef:'', productionRef:'', lines:[], issuedBy:'', receivedBy:'', notes:'', approvalStatus:'draft', approvalNote:'' };
@@ -9894,8 +9924,8 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
   const poList = (documents || []).filter(d => d.type === 'purchase');
 
   function nextGRN() {
-    const nums = grns.map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
-    return 'GRN-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
+    const nums = grns.map(g => lastNum(g.number));
+    return dn('GRN', (nums.length ? Math.max(...nums) : 0) + 1, 4);
   }
 
   function updateGRNStatus(id, patch) {
@@ -10430,7 +10460,7 @@ function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSav
   const country = businessInfo?.country || 'india';
 
   function nextRef() {
-    return 'OL-' + new Date().getFullYear() + '-' + String((existingCount || 0) + 1).padStart(3, '0');
+    return dn('OL', (existingCount || 0) + 1);
   }
 
   const blank = {
@@ -10735,7 +10765,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
   const blank = isWarn ? {
     id: crypto.randomUUID(),
     type: 'warning',
-    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
+    refNo: withCo(prefix + fyNow() + '/' + String(count).padStart(3, '0')),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     warnType: 'written',
@@ -10748,7 +10778,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
   } : {
     id: crypto.randomUUID(),
     type: 'termination',
-    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
+    refNo: withCo(prefix + fyNow() + '/' + String(count).padStart(3, '0')),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     terminationDate: '',
@@ -12187,7 +12217,7 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
   function blankOrder() {
     return {
       id: crypto.randomUUID(),
-      number: 'SO-' + String((serviceOrders.length || 0) + 1).padStart(4, '0'),
+      number: dn('SO', (serviceOrders.length || 0) + 1, 4),
       date: new Date().toISOString().slice(0, 10),
       customerId: '',
       customerSnapshot: null,
@@ -12631,8 +12661,8 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
 
   function nextNumber() {
     const yr = new Date().getFullYear();
-    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
-    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    return dn('PR', count);
   }
 
   // Combined BOM list (manufacturing + project)
@@ -13088,8 +13118,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const quotes = (documents || []).filter(d => d.type === 'quotation' && d.status !== 'deleted');
   function fy() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return String(y).slice(2) + '-' + String(y + 1).slice(2); }
-  function nextNo() { const p = 'EWI/TDS/' + fy() + '/'; const n = all.filter(r => (r.number || '').startsWith(p)).length + 1; return p + String(n).padStart(3, '0'); }
-  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: 'EWI/TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
+  function nextNo() { const n = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1; return dn('TDS', n); }
+  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: 'TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
   const setV = (k, val) => setEditing(e => ({ ...e, v: { ...e.v, [k]: val } }));
   function pickPreset(name) { if (!name) return; setEditing(e => ({ ...e, v: { ...TDS_BASE, ...TDS_PRESETS[name] } })); }
   function pickQuote(id) {
@@ -13207,8 +13237,8 @@ function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', 
 
   function nextNo(type) {
     const yr = new Date().getFullYear();
-    const n = (Array.isArray(fatReports) ? fatReports : []).filter(r => (r.number || '').includes('/' + yr + '/')).length + 1;
-    return (type || 'FAT') + '/' + yr + '/' + String(n).padStart(3, '0');
+    const n = (Array.isArray(fatReports) ? fatReports : []).filter(r => (r.number || '').includes('/' + fyNow() + '/')).length + 1;
+    return dn(type || 'FAT', n);
   }
   function blank() {
     return { id: Date.now().toString(), testType: 'FAT', number: nextNo('FAT'), date: today, product: '', iec: '', isCode: '',
@@ -13442,8 +13472,8 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
 
   function nextPRNumber() {
     const yr = new Date().getFullYear();
-    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
-    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    return dn('PR', count);
   }
   function createPR(rep) {
     if (!setPurchaseReqs) return;
@@ -14045,8 +14075,8 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
 
   function nextNumber() {
     const yr = new Date().getFullYear();
-    const count = (Array.isArray(moms) ? moms : []).filter(m => (m.number || '').includes('MOM/' + yr)).length + 1;
-    return 'MOM/' + yr + '/' + String(count).padStart(3, '0');
+    const count = (Array.isArray(moms) ? moms : []).filter(m => (m.number || '').includes('MOM/' + fyNow() + '/')).length + 1;
+    return dn('MOM', count);
   }
 
   function startNew() { setEditing({ ...blank(), id: Date.now().toString(), number: nextNumber() }); }
@@ -16967,9 +16997,8 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, currentBizT
 
   // Auto-generate ENQ number (per-division counter in multi-biz)
   function nextEnqNumber() {
-    if (!bizEnquiries.length) return 'ENQ-001';
-    const nums = bizEnquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
-    return 'ENQ-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = bizEnquiries.map(e => lastNum(e.number));
+    return dn('ENQ', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function openNew() {
@@ -17424,9 +17453,8 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
   const [filterStatus, setFilterStatus] = useState('All');
 
   function nextConNum() {
-    if (!contracts.length) return 'CON-001';
-    const nums = contracts.map(c => parseInt((c.number || '').replace(/\D/g, '')) || 0);
-    return 'CON-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = contracts.map(c => lastNum(c.number));
+    return dn('CON', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function handleSave(form) {
@@ -18193,9 +18221,8 @@ function ChannelPartnerList({ channelPartners, setChannelPartners, documents, te
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   function nextCPNum() {
-    if (!channelPartners.length) return 'CP-001';
-    const nums = channelPartners.map(p => parseInt((p.number || '').replace(/\D/g, '')) || 0);
-    return 'CP-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = channelPartners.map(p => lastNum(p.number));
+    return dn('CP', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function handleSave(form) {
@@ -19115,7 +19142,7 @@ function QATestingView({ productionOrders, setProductionOrders, pdvs, setPdvs, s
 
   function raiseCapaFromNCR(order) {
     const bom = boms.find(b => b.id === order.bomId);
-    const num = `CAR-${String((capaRecords||[]).length + 1).padStart(3,'0')}`;
+    const num = dn('CAR', (capaRecords||[]).length + 1);
     const capa = {
       id: crypto.randomUUID(), number: num,
       date: new Date().toISOString().slice(0,10),
@@ -19715,7 +19742,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     if (!items.length) { alert('Nothing new to bill — all activities already billed up to their current progress.'); return; }
     const amt = items.reduce((s,i)=> s + (i.contractValue*(i.thisQty-i.previousQty)/100), 0);
     if (!window.confirm('Create a progress invoice (RA Bill) for '+items.length+' activit'+(items.length===1?'y':'ies')+' — value '+Math.round(amt).toLocaleString()+'? Review & print it in Billing → RA Billing.')) return;
-    const num = 'RAB-'+String((raBillings.length||0)+1).padStart(3,'0');
+    const num = dn('RAB', (raBillings.length||0)+1);
     const ym = new Date().toISOString().slice(0,7);
     const bill = { id: crypto.randomUUID(), billNumber:num, projectId:selProject, customerId:(project?.customerId||''), tenderId:'', periodFrom:ym+'-01', periodTo:new Date().toISOString().slice(0,10), date:new Date().toISOString().slice(0,10), items, taxRate:0, placeOfSupply:'', status:'draft', approvalStatus:'draft', notes:'Auto-generated from Activity Planner progress.', source:'activity', updatedAt:Date.now() };
     setRaBillings(prev => [...prev, bill]);
@@ -21320,7 +21347,7 @@ function ServiceHistoryView({ serviceHistory = [], setServiceHistory, siteProjec
 
   function blank() {
     const n = serviceHistory.length+1;
-    return { id:'', serviceNo:`SVC-${String(n).padStart(3,'0')}`, date:today, projectId:'', assetId:'', serviceType:'Preventive', technician:'', description:'', findings:'', partsUsed:'', nextDueDate:'', status:'Completed' };
+    return { id:'', serviceNo:dn('SVC', n), date:today, projectId:'', assetId:'', serviceType:'Preventive', technician:'', description:'', findings:'', partsUsed:'', nextDueDate:'', status:'Completed' };
   }
   function save(rec){ const t={...rec,id:rec.id||crypto.randomUUID()}; setServiceHistory(prev=>prev.find(x=>x.id===t.id)?prev.map(x=>x.id===t.id?t:x):[...prev,t]); setEditing(null); }
   function del(id){ if(window.confirm('Delete this service record?')) setServiceHistory(prev=>prev.filter(x=>x.id!==id)); }
@@ -21606,7 +21633,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
   const approvedOmit = list.filter(v => v.status === 'Approved' && v.type === 'Omission').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
   const net = approvedAdd - approvedOmit;
   const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
-  function nextNo() { const nums = scoped.map(v => parseInt(String(v.voNo || '').replace(/\D/g, '')) || 0); return 'VO-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0'); }
+  function nextNo() { const nums = scoped.map(v => lastNum(v.voNo)); return dn('VO', (nums.length ? Math.max(...nums) : 0) + 1); }
   function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setVariations(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
   function del(id) { if (!window.confirm('Delete this VO?')) return; setVariations(prev => prev.filter(x => x.id !== id)); }
   function setStatus(id, status) { setVariations(prev => prev.map(x => x.id === id ? { ...x, status } : x)); }
@@ -23442,7 +23469,7 @@ function PMScheduleView({ pmSchedules, setPmSchedules, assets, fmWorkOrders, set
   }
   function raisePMWorkOrder(pm) {
     const asset = assets.find(a=>a.id===pm.assetId);
-    const wo = { id:crypto.randomUUID(), woNumber:`WO-${String(fmWorkOrders.length+1).padStart(4,'0')}`, type:'preventive', assetId:pm.assetId, assetName:asset?.name||'', title:pm.title, priority:'medium', raisedDate:today, dueDate:pm.nextDueDate||'', assignedTo:pm.assignedTo||'', instructions:pm.instructions||'', status:'open', pmRef:pm.id, cost:0 };
+    const wo = { id:crypto.randomUUID(), woNumber:dn('WO', fmWorkOrders.length+1, 4), type:'preventive', assetId:pm.assetId, assetName:asset?.name||'', title:pm.title, priority:'medium', raisedDate:today, dueDate:pm.nextDueDate||'', assignedTo:pm.assignedTo||'', instructions:pm.instructions||'', status:'open', pmRef:pm.id, cost:0 };
     setFmWorkOrders(prev=>[...prev, wo]);
     setPmSchedules(prev=>prev.map(s=>s.id===pm.id?{ ...s, lastDoneDate:today, nextDueDate:calcNext(today,s.frequency) }:s));
     alert(`Work Order ${wo.woNumber} created.`);
@@ -23558,7 +23585,7 @@ function FMWorkOrderView({ fmWorkOrders, setFmWorkOrders, assets, fmSpareParts, 
   const ST_BG     = { open:'#cfe2ff', in_progress:'#fff3cd', on_hold:'#f0ece5', completed:'#d4edda', cancelled:'#f0ece5' };
 
   function blank() {
-    return { id:'', woNumber:`WO-${String(fmWorkOrders.length+1).padStart(4,'0')}`, type:'corrective', assetId:'', title:'', description:'', priority:'medium', raisedDate:today, dueDate:'', assignedTo:'', status:'open', completedDate:'', cost:0, sparesUsed:[], notes:'' };
+    return { id:'', woNumber:dn('WO', fmWorkOrders.length+1, 4), type:'corrective', assetId:'', title:'', description:'', priority:'medium', raisedDate:today, dueDate:'', assignedTo:'', status:'open', completedDate:'', cost:0, sparesUsed:[], notes:'' };
   }
   function save(wo) {
     const rec = { ...wo, id:wo.id||crypto.randomUUID(), approvalStatus:wo.approvalStatus||'draft', approvalNote:wo.approvalNote||'', updatedAt:Date.now() };
@@ -23699,7 +23726,7 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
   const sellerState = businessInfo?.state || '';
 
   function blank() {
-    const n = `AMC-${String(amcContracts.length+1).padStart(3,'0')}`;
+    const n = dn('AMC', amcContracts.length+1);
     return { id:'', contractNo:n, customerId:'', title:'', startDate:'', endDate:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', slaResponse:'4', slaPriority:'P2', coveredAssets:[], scope:'', billingCycle:'Annual', status:'active', notes:'' };
   }
   function save(c) {
@@ -24430,7 +24457,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const fmt = makeFmt(businessInfo);
 
   function blank() {
-    return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
+    return { id:'', number:dn('TND', tenders.length+1), customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
   }
   const BUILDUP_CATS = ['Materials', 'Manhours', 'Equipment', 'Subcontract'];
   const BUILDUP_SUBCATS = ['Civil', 'Electrical', 'Mechanical', 'Plumbing', 'HVAC', 'Fire Fighting', 'ELV', 'General'];
@@ -24483,8 +24510,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     setEditing(null);
   }
   function nextQuoteNo() {
-    const nums = (tenders||[]).map(x => parseInt(String(x.quoteNo||'').replace(/\D/g,''))||0);
-    return 'QTN-' + String((nums.length?Math.max(...nums):0)+1).padStart(3,'0');
+    const nums = (tenders||[]).map(x => lastNum(x.quoteNo));
+    return dn('QTN', (nums.length?Math.max(...nums):0)+1);
   }
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
@@ -27103,7 +27130,7 @@ function CAPAView({ capaRecords, setCapaRecords, vendors, customers, userRole })
   const STATUS_BG    = { open:'#f8d7da', in_progress:'#fff3cd', pending_verification:'#cfe2ff', closed:'#d4edda' };
 
   function blankCAPA() {
-    const num = `CAR-${String(capaRecords.length+1).padStart(3,'0')}`;
+    const num = dn('CAR', capaRecords.length+1);
     return { id:'', number:num, date: new Date().toISOString().slice(0,10), source:'NCR', sourceRef:'', description:'', rootCause:'', actionPlan:'', responsibility:'', targetDate:'', effectivenessCheck:'', closedDate:'', status:'open' };
   }
   function save(rec) {
@@ -27227,7 +27254,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   const CLAUSES = ['4.1 Context','4.2 Interested Parties','5.1 Leadership','6.1 Risk & Opportunity','7.1 Resources','7.2 Competence','7.5 Documentation','8.1 Planning','8.4 External Providers','8.5 Production Control','8.6 Release','8.7 NC Output','9.1 Monitoring','9.2 Internal Audit','9.3 MRM','10.2 CAPA'];
 
   function blankAudit() {
-    const num = `IA-${new Date().getFullYear()}-${String(internalAudits.length+1).padStart(2,'0')}`;
+    const num = dn('IA', internalAudits.length+1, 2);
     return { id:'', number:num, scheduledDate:'', conductedDate:'', auditor:'', auditee:'', scope:'', clauses:[], findings:[], status:'scheduled', summary:'' };
   }
   function blankFinding() {
@@ -27242,7 +27269,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
     setInternalAudits(prev=>prev.map(x=>x.id===id?{...x,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:x));
   }
   function raiseCAPAFromFinding(audit, finding) {
-    const num = `CAR-${String(capaRecords.length+1).padStart(3,'0')}`;
+    const num = dn('CAR', capaRecords.length+1);
     const capa = { id: crypto.randomUUID(), number: num, date: new Date().toISOString().slice(0,10), source:'Internal Audit', sourceRef: audit.number, description: finding.description, rootCause:'', actionPlan:'', responsibility:'', targetDate:'', effectivenessCheck:'', closedDate:'', status:'open' };
     setCapaRecords(prev=>[...prev, capa]);
     setInternalAudits(prev=>prev.map(a=>a.id===audit.id ? { ...a, findings: a.findings.map(f=>f.id===finding.id ? { ...f, capaRaised:true, capaRef:num } : f) } : a));
@@ -27820,7 +27847,7 @@ export default function App() {
       getFY(d.date) === fy &&
       (!isMultiBiz || (d.bizType || 'trading') === bizType)
     );
-    return `${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`;
+    return withCo(`${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`);
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
