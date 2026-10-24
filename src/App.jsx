@@ -12638,9 +12638,9 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
-function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
+function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
   const today = new Date().toISOString().slice(0, 10);
-  const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
+  const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '', make: '', spec: '' });
   const blank = () => ({
     type: 'project', linkId: '', linkName: '',
     date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
@@ -12652,6 +12652,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   });
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
+  const [pasteTxt, setPasteTxt] = React.useState('');
 
   const canApprove = userRole === 'admin' || userRole === 'manager';
 
@@ -12725,6 +12726,42 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
     setEditing(e => ({ ...e, items: rows }));
   }
 
+  // CAPEX: paste a supplier / customer machine list (Excel copy or CSV): Machine | Make/Model | Specification | Qty | Est. cost
+  function importCapexPaste() {
+    const rows = String(pasteTxt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+      const c = (l.indexOf('\t') >= 0 ? l.split('\t') : l.split(',')).map(x => x.trim());
+      const num = (v) => { const n = parseFloat(String(v || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? '' : n; };
+      return { ...blankItem(), name: c[0] || '', make: c[1] || '', spec: c[2] || '', qty: num(c[3]) || 1, rate: num(c[4]) };
+    }).filter(r => r.name && !/^(machine|name|item|description)$/i.test(r.name));
+    if (!rows.length) { alert('Nothing to import. Paste rows as: Machine, Make/Model, Specification, Qty, Est. cost'); return; }
+    setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...rows] }));
+    setPasteTxt('');
+  }
+  // CAPEX: once the machine is received, create Asset Register entries (one per unit) — never touches the item master / stock.
+  function receiveToAssets(m) {
+    if (!setAssets) { alert('Asset Register is not available.'); return; }
+    const lines = (m.items || []).filter(it => (it.name || '').trim());
+    const total = lines.reduce((s2, it) => s2 + Math.max(1, Math.round(parseFloat(it.qty) || 1)), 0);
+    if (!window.confirm('Receive ' + total + ' machine(s) into the Asset Register for ' + m.number + '?\n\nThey are added under Plant & Machinery (Admin → Asset Register). Item master and stock are not affected.')) return;
+    const yr = new Date().getFullYear();
+    const pfx = 'AV-PLT-' + yr + '-';
+    let n = (Array.isArray(assets) ? assets : []).filter(a => a.assetId && String(a.assetId).startsWith(pfx)).length;
+    const made = [];
+    lines.forEach(it => {
+      const q = Math.max(1, Math.round(parseFloat(it.qty) || 1));
+      for (let k = 0; k < q; k++) {
+        n += 1;
+        made.push({ id: crypto.randomUUID(), assetId: pfx + String(n).padStart(3, '0'), name: it.name, category: 'Plant & Machinery', subtype: '', status: 'draft', condition: 'good',
+          notes: 'Received against ' + m.number + (m.poNumber ? ' / PO ' + m.poNumber : '') + (it.spec ? ' · ' + it.spec : ''),
+          location: m.linkName || '', floor: '', building: '', make: it.make || '', model: '', serialNo: '', purchaseDate: new Date().toISOString().slice(0, 10), warrantyExpiry: '', installDate: '',
+          numberPlate: '', chassisNo: '', engineNo: '', maintenanceRecords: [], fuelLogs: [], purchaseCost: parseFloat(it.rate) || 0, sourcePR: m.number, bizType: m.bizType || 'manufacturing' });
+      }
+    });
+    setAssets(prev => [...(Array.isArray(prev) ? prev : []), ...made]);
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, assetsCreated: made.length, assetsCreatedAt: new Date().toISOString() } : x));
+    alert(made.length + ' asset(s) added. Open Admin → Asset Register to add serial no., location, warranty and approve them.');
+  }
+
   const linkOptions = () => {
     if (editing.type === 'project') return (siteProjects || []).map(p => ({ id: p.id, name: p.name || p.projectName || p.title || ('Project ' + p.id) }));
     if (editing.type === 'production') return (productionOrders || []).map(p => ({ id: p.id, name: (p.number || p.orderNo || p.product || p.productName || ('WO ' + p.id)) }));
@@ -12739,7 +12776,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   const th = { padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11, background: '#F8F5EE' };
   const td = { padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#333', fontSize: 12, verticalAlign: 'top' };
   const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
-  const typeLabel = t => t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
+  const typeLabel = t => t === 'capex' ? 'Capex (Plant & Machinery)' : t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
 
   // ── PRINT ──
   if (viewDoc) {
@@ -12758,7 +12795,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PURCHASE REQUISITION</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>{m.type === 'capex' ? 'CAPEX REQUISITION — PLANT & MACHINERY' : 'PURCHASE REQUISITION'}</div>
               <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.approvalStatus || 'draft').toUpperCase()}</div>
             </div>
           </div>
@@ -12770,9 +12807,18 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </tbody>
           </table>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
-            <thead><tr>{['#', 'Item / Material', 'UOM', 'Qty', 'Purpose'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item / Material', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
-              {rows.map((it, i) => (
+              {rows.map((it, i) => m.type === 'capex' ? (
+                <tr key={i}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{it.name}</td>
+                  <td style={td}>{it.make || '—'}</td>
+                  <td style={td}>{it.spec || '—'}</td>
+                  <td style={td}>{it.qty || '—'}</td>
+                  <td style={td}>{it.rate ? (parseFloat(it.rate) || 0).toLocaleString('en-IN') : '—'}</td>
+                </tr>
+              ) : (
                 <tr key={i}>
                   <td style={td}>{i + 1}</td>
                   <td style={td}>{it.name}</td>
@@ -12811,7 +12857,10 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               <div><label style={lbl}>Priority</label><select style={inp} value={e.priority} onChange={ev => upd({ priority: ev.target.value })}><option>Normal</option><option>Urgent</option></select></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 12 }}>
-              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option></select></div>
+              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option><option value="capex">Capex — Plant &amp; Machinery</option></select></div>
+              {e.type === 'capex' ? (
+              <div><label style={lbl}>Department / plant area</label><input style={inp} value={e.linkName || ''} onChange={ev => upd({ linkName: ev.target.value, linkId: 'capex' })} placeholder="e.g. Extrusion line, Wire drawing shop" /></div>
+              ) : (
               <div><label style={lbl}>{typeLabel(e.type)}</label>
                 <select style={inp} value={e.linkId} onChange={ev => { const o = opts.find(x => String(x.id) === ev.target.value); upd({ linkId: ev.target.value, linkName: o ? o.name : '' }); }}>
                   <option value="">— Select —</option>
@@ -12819,10 +12868,12 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                 </select>
                 {opts.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>No {typeLabel(e.type).toLowerCase()} records yet.</div>}
               </div>
+              )}
             </div>
             <div><label style={lbl}>Requested by</label><input style={inp} value={e.requestedBy} onChange={ev => upd({ requestedBy: ev.target.value })} placeholder="Name / department" /></div>
           </div>
 
+          {e.type !== 'capex' && (
           <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
             <label style={lbl}>Request via Project BOM  <span style={{ fontWeight: 400, color: '#999' }}>— or leave blank &amp; add items manually (non-BOM)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
@@ -12832,7 +12883,44 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </div>
             <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>{allBoms.length === 0 ? 'No Project BOMs yet — add items manually below (non-BOM).' : 'Via BOM: pick a Project BOM to auto-load its items. Non-BOM: skip this and add items manually below.'}</div>
           </div>
+          )}
 
+          {e.type === 'capex' ? (
+          <div style={card}>
+            <label style={lbl}>Machines / equipment required <span style={{ fontWeight: 400, color: '#999' }}>— free entry, not linked to the item master</span></label>
+            <div style={{ background: '#F8FAF0', border: '1px solid #DCE8C4', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Got a list from the supplier / customer? Copy rows from Excel (or CSV) and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
+              <textarea style={{ ...inp, minHeight: 56, fontFamily: 'monospace', fontSize: 11.5 }} value={pasteTxt} onChange={ev => setPasteTxt(ev.target.value)} placeholder={'Wire drawing machine\tXYZ WD-24\t24 die, 1.2-3.5mm\t1\t2500000'} />
+              <button style={{ ...styles.secondaryBtn, marginTop: 6, fontSize: 12 }} onClick={importCapexPaste}>Add pasted rows ↓</button>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>{['#', 'Machine / Equipment', 'Make / Model', 'Specification / Capacity', 'Qty', 'Est. cost (each)', 'Amount', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Est. cost (each)' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.items || []).map((it, i) => {
+                  const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+                  return (
+                  <tr key={i}>
+                    <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Machine name" /></td>
+                    <td style={td}><input style={inp} value={it.make || ''} onChange={ev => setRow(i, 'make', ev.target.value)} placeholder="Make / model" /></td>
+                    <td style={td}><input style={inp} value={it.spec || ''} onChange={ev => setRow(i, 'spec', ev.target.value)} placeholder="Capacity, power, size…" /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 64 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 110, textAlign: 'right' }} value={it.rate ?? ''} onChange={ev => setRow(i, 'rate', ev.target.value)} placeholder="0" /></td>
+                    <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{amt ? amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delRow(i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot><tr>
+                <td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Capex Total</td>
+                <td style={{ ...td, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{(e.items || []).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td></td>
+              </tr></tfoot>
+            </table>
+            <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add machine</button>
+          </div>
+          ) : (
           <div style={card}>
             <label style={lbl}>Items required</label>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -12867,10 +12955,11 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </table>
             <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add item</button>
           </div>
+          )}
 
           <div style={card}>
-            <label style={lbl}>Remarks</label>
-            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder="Any notes for the purchase team" />
+            <label style={lbl}>{e.type === 'capex' ? 'Justification / remarks (why this machine, supplier quote ref)' : 'Remarks'}</label>
+            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder={e.type === 'capex' ? 'Purpose, capacity need, supplier / quote reference' : 'Any notes for the purchase team'} />
           </div>
 
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
@@ -12904,7 +12993,9 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 8px', borderRadius: 20, background: '#F0EDE0', color: STATUS_COL[st] || '#888' }}>{st.toUpperCase()}</span>
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.number}</div>
                   {m.priority === 'Urgent' && <span style={{ fontSize: 10, fontWeight: 700, color: '#B91C1C' }}>● URGENT</span>}
+                  {m.type === 'capex' && <span style={{ fontSize: 10, fontWeight: 700, color: '#6B5BAE', background: '#EFEAFB', borderRadius: 20, padding: '2px 8px' }}>CAPEX</span>}
                   {m.convertedToPO && <span style={{ fontSize: 10, fontWeight: 700, color: '#2C7A3F' }}>→ PO created</span>}
+                  {m.assetsCreated ? <span style={{ fontSize: 10, fontWeight: 700, color: '#1E7A9A' }}>→ {m.assetsCreated} asset(s) in Asset Register</span> : null}
                 </div>
                 <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{fmtDate(m.date)} · {typeLabel(m.type)}: {m.linkName || '—'}{m.requiredBy ? ' · required by ' + fmtDate(m.requiredBy) : ''}</div>
                 <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>📦 {(m.items || []).filter(it => it.name).length} items{m.requestedBy ? ' · by ' + m.requestedBy : ''}</div>
@@ -12915,6 +13006,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                   <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#2C7A3F' }} onClick={() => setStatus(m, 'approved')}>Approve</button>
                   <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => setStatus(m, 'rejected')}>Reject</button>
                 </>}
+                {m.type === 'capex' && m.convertedToPO && !m.assetsCreated && setAssets && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => receiveToAssets(m)}>Receive → Asset Register</button>}
                 {st === 'approved' && !m.convertedToPO && onConvertToPO && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => onConvertToPO(m)}>Convert to PO →</button>}
                 <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => setViewDoc(m)}><Printer size={13} /> Print</button>
                 <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => startEdit(m)}><Pencil size={13} /></button>
@@ -29253,11 +29345,13 @@ export default function App() {
             userRole={userRole}
             currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
+            assets={assets}
+            setAssets={setAssets}
             onConvertToPO={(pr) => {
               const its = (pr.items || []).filter(it => it.name).map(it => {
                 const m = (items || []).find(x => String(x.id) === String(it.itemId));
                 const base = EMPTY_ITEM_ROW(businessInfo);
-                return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
+                return { ...base, itemId: it.itemId || '', name: it.name + (pr.type === 'capex' ? (it.make ? ' — ' + it.make : '') + (it.spec ? ' (' + it.spec + ')' : '') : ''), qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
               });
               startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
