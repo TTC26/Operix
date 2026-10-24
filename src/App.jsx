@@ -12735,38 +12735,62 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
     setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...rows] }));
     setPasteTxt('');
   }
-  // Import lines from an Excel / CSV file. Header names are matched loosely (machine/item/name, make/model, spec/capacity, qty, rate/cost/price, uom, hsn).
+  // Import lines from an Excel / CSV file. Finds the real header row (titles/addresses above it are ignored), maps columns by heading,
+  // skips Total / GST / Freight rows, and stops at the first Total row.
   function importPRFile(ev) {
     const file = ev.target.files && ev.target.files[0]; const el = ev.target; if (!file) return;
     const capex = editing && editing.type === 'capex';
     fileToCsvText(file).then((text) => {
       const rows = parseCsvText(text);
       if (!rows.length) { alert('The file is empty.'); return; }
-      const hdr = rows[0].map(h => String(h).toLowerCase());
-      const find = (names) => { for (const nm of names) { const i = hdr.findIndex(h => h === nm || h.includes(nm)); if (i >= 0) return i; } return -1; };
-      const iName = find(['machine', 'equipment', 'item name', 'item', 'description', 'name', 'material', 'product']);
-      const hasHdr = iName >= 0;
-      const iMake = find(['make', 'model', 'brand', 'manufacturer']);
-      const iSpec = find(['specification', 'spec', 'capacity', 'rating', 'size']);
-      const iQty = find(['qty', 'quantity', 'nos']);
-      const iRate = find(['est. cost', 'est cost', 'rate', 'cost', 'price', 'amount']);
-      const iUom = find(['uom', 'unit']);
-      const iHsn = find(['hsn', 'sac']);
-      const num = (v) => { const n = parseFloat(String(v || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? '' : n; };
+      const low = (v) => String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim();
+      const SYN = {
+        name: ['item description', 'description of goods', 'description', 'machine name', 'machine', 'equipment', 'particulars', 'item name', 'material', 'product', 'item', 'name'],
+        qty: ['quantity', 'qty', 'nos', 'no. of units', 'units required'],
+        rate: ['unit price', 'unit rate', 'unit cost', 'rate', 'est. cost', 'est cost', 'estimated cost', 'price', 'cost'],
+        amount: ['total amount', 'line total', 'amount', 'total', 'value'],
+        uom: ['uom', 'unit of measure', 'unit'],
+        hsn: ['hsn/sac', 'hsn code', 'hsn', 'sac'],
+        make: ['make / model', 'make/model', 'make', 'model', 'brand', 'manufacturer'],
+        spec: ['specification', 'specifications', 'spec', 'capacity', 'rating', 'technical details', 'size'],
+      };
+      const NOT = { rate: /total|amount|value|gst|tax|disc/, name: /code|no\.?$|s\.?\s?no|sl/, qty: /rate|price|amount/ , uom: /price|rate/ };
+      const colOf = (hdr, key) => {
+        for (const nm of SYN[key]) { const i = hdr.findIndex(h => h === nm); if (i >= 0) return i; }
+        for (const nm of SYN[key]) { const i = hdr.findIndex(h => h.length < 40 && h.includes(nm) && !(NOT[key] && NOT[key].test(h))); if (i >= 0) return i; }
+        return -1;
+      };
+      // header row = the row (in the first 25) that matches the most heading keywords, must include a name column
+      let hRow = -1, best = 1, hdr = [];
+      rows.slice(0, 25).forEach((r, ri) => {
+        const h = r.map(low);
+        const score = ['name', 'qty', 'rate', 'uom', 'hsn', 'make', 'spec', 'amount'].reduce((n, k) => n + (colOf(h, k) >= 0 ? 1 : 0), 0);
+        if (colOf(h, 'name') >= 0 && score > best) { best = score; hRow = ri; hdr = h; }
+      });
+      if (hRow < 0) { alert('Could not find a heading row. First row of your file should have headings like: ' + (capex ? 'Machine, Make/Model, Specification, Qty, Est. cost' : 'Item, UOM, Qty, Rate, HSN') + '.'); return; }
+      const ix = {}; Object.keys(SYN).forEach(k => { ix[k] = colOf(hdr, k); });
+      const cell = (r, k) => (ix[k] >= 0 && r[ix[k]] != null ? String(r[ix[k]]).trim() : '');
+      const num = (v) => { const m = String(v == null ? '' : v).match(/-?\d[\d,]*\.?\d*|-?\.\d+/); if (!m) return ''; const n = parseFloat(m[0].replace(/,/g, '')); return isNaN(n) ? '' : n; };
+      const TOTAL = /^(sub\s*-?\s*total|grand\s*total|total|net\s*(total|amount)|gst|igst|cgst|sgst|tax|freight|discount|round(ing)?\s*off|amount\s*in\s*words|in words)\b/i;
       const out = [];
-      rows.slice(hasHdr ? 1 : 0).forEach(c => {
-        const g = (i, d) => (i >= 0 ? (c[i] || '') : d);
-        const name = hasHdr ? g(iName, '') : (c[0] || '');
-        if (!name) return;
-        if (capex) out.push({ ...blankItem(), name, make: hasHdr ? g(iMake, '') : (c[1] || ''), spec: hasHdr ? g(iSpec, '') : (c[2] || ''), qty: num(hasHdr ? g(iQty, '') : c[3]) || 1, rate: num(hasHdr ? g(iRate, '') : c[4]) });
+      for (let ri = hRow + 1; ri < rows.length; ri++) {
+        const r = rows[ri];
+        if (r.some(c => /^(sub\s*-?\s*total|grand\s*total|total)\b/i.test(String(c).trim()))) break;      // totals reached → stop
+        const name = cell(r, 'name');
+        if (!name || TOTAL.test(name)) continue;
+        const q = num(cell(r, 'qty')); let rt = num(cell(r, 'rate')); const am = num(cell(r, 'amount'));
+        if (rt === '' && am !== '' && q) rt = Math.round((am / q) * 100) / 100;
+        if (q === '' && rt === '' && am === '') continue;                                                     // not a line item
+        if (capex) out.push({ ...blankItem(), name, make: cell(r, 'make'), spec: cell(r, 'spec'), qty: q || 1, rate: rt });
         else {
           const m = (items || []).find(x => String(x.name || '').toLowerCase() === name.toLowerCase());
-          out.push({ ...blankItem(), itemId: m ? m.id : '', name, uom: g(iUom, m ? (m.unit || '') : ''), hsn: g(iHsn, m ? (m.hsn || '') : ''), qty: num(hasHdr ? g(iQty, '') : c[1]) || 1, rate: num(g(iRate, '')) || (m ? (m.purchaseRate ?? '') : '') });
+          out.push({ ...blankItem(), itemId: m ? m.id : '', name, uom: cell(r, 'uom') || (m ? (m.unit || '') : ''), hsn: cell(r, 'hsn') || (m ? (m.hsn || '') : ''), qty: q || 1, rate: rt !== '' ? rt : (m ? (m.purchaseRate ?? '') : '') });
         }
-      });
-      if (!out.length) { alert('No rows found. First row should be headings, e.g. ' + (capex ? 'Machine, Make/Model, Specification, Qty, Est. cost' : 'Item, UOM, Qty, Rate, HSN') + '.'); return; }
+      }
+      if (!out.length) { alert('No item rows found under the heading row.'); return; }
+      const nm = (k) => ix[k] >= 0 ? '"' + (rows[hRow][ix[k]] || '') + '"' : '—';
       setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...out] }));
-      alert('Added ' + out.length + ' line(s) from the file. Please review quantities and rates.');
+      alert('Added ' + out.length + ' line(s) from row ' + (hRow + 1) + ' onwards.\n\nColumns read:\n  Name → ' + nm('name') + '\n  Qty → ' + nm('qty') + '\n  Rate → ' + nm('rate') + (capex ? '\n  Make → ' + nm('make') + '\n  Specification → ' + nm('spec') : '\n  UOM → ' + nm('uom') + '\n  HSN → ' + nm('hsn')) + '\n\nTotal / GST rows were skipped. Please review.');
     }).catch(() => alert('Could not read the file.')).finally(() => { el.value = ''; });
   }
   // CAPEX: once the machine is received, create Asset Register entries (one per unit) — never touches the item master / stock.
