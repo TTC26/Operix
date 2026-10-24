@@ -2873,13 +2873,12 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
   }
   function handleItemImport(e){
     const file = e.target.files && e.target.files[0]; if(!file) return;
-    const rdr = new FileReader();
-    rdr.onload = () => {
+    const inputEl = e.target;
+    fileToCsvText(file).then((text) => {
       try {
-        const text = String(rdr.result || '');
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if(!lines.length){ alert('The file is empty.'); e.target.value=''; return; }
-        const parseLine = (l) => l.split(',').map(c => c.replace(/^"|"$/g,'').trim());
+        const lines = parseCsvText(text);
+        if(!lines.length){ alert('The file is empty.'); inputEl.value=''; return; }
+        const parseLine = (l) => l;
         const headers = parseLine(lines[0]).map(h => h.toLowerCase());
         const idx = (arr) => { for(const nm of arr){ const i = headers.indexOf(nm); if(i>=0) return i; } return -1; };
         const iName = idx(['name','item','item name','description','product']);
@@ -2918,13 +2917,12 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
             gst: get(iGst)!=='' ? num(get(iGst)) : defGst,
           });
         }
-        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); e.target.value=''; return; }
+        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); inputEl.value=''; return; }
         setItems(prev => [...(prev||[]), ...newItems]);
         alert('✅ Imported ' + newItems.length + ' items (item codes auto-assigned).');
-      } catch(err){ alert('Could not read the file. Please use a CSV (save Excel as CSV) with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
-      e.target.value = '';
-    };
-    rdr.readAsText(file);
+      } catch(err){ alert('Could not read the file. Use an Excel / CSV file with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
+      inputEl.value = '';
+    }).catch(() => { alert('Could not read the file.'); inputEl.value = ''; });
   }
   return (
     <div style={styles.page}>
@@ -2934,7 +2932,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
-        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
+        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from an Excel (.xlsx) or CSV file">⬆ Import Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
         {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
         {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
@@ -12737,6 +12735,40 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
     setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...rows] }));
     setPasteTxt('');
   }
+  // Import lines from an Excel / CSV file. Header names are matched loosely (machine/item/name, make/model, spec/capacity, qty, rate/cost/price, uom, hsn).
+  function importPRFile(ev) {
+    const file = ev.target.files && ev.target.files[0]; const el = ev.target; if (!file) return;
+    const capex = editing && editing.type === 'capex';
+    fileToCsvText(file).then((text) => {
+      const rows = parseCsvText(text);
+      if (!rows.length) { alert('The file is empty.'); return; }
+      const hdr = rows[0].map(h => String(h).toLowerCase());
+      const find = (names) => { for (const nm of names) { const i = hdr.findIndex(h => h === nm || h.includes(nm)); if (i >= 0) return i; } return -1; };
+      const iName = find(['machine', 'equipment', 'item name', 'item', 'description', 'name', 'material', 'product']);
+      const hasHdr = iName >= 0;
+      const iMake = find(['make', 'model', 'brand', 'manufacturer']);
+      const iSpec = find(['specification', 'spec', 'capacity', 'rating', 'size']);
+      const iQty = find(['qty', 'quantity', 'nos']);
+      const iRate = find(['est. cost', 'est cost', 'rate', 'cost', 'price', 'amount']);
+      const iUom = find(['uom', 'unit']);
+      const iHsn = find(['hsn', 'sac']);
+      const num = (v) => { const n = parseFloat(String(v || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? '' : n; };
+      const out = [];
+      rows.slice(hasHdr ? 1 : 0).forEach(c => {
+        const g = (i, d) => (i >= 0 ? (c[i] || '') : d);
+        const name = hasHdr ? g(iName, '') : (c[0] || '');
+        if (!name) return;
+        if (capex) out.push({ ...blankItem(), name, make: hasHdr ? g(iMake, '') : (c[1] || ''), spec: hasHdr ? g(iSpec, '') : (c[2] || ''), qty: num(hasHdr ? g(iQty, '') : c[3]) || 1, rate: num(hasHdr ? g(iRate, '') : c[4]) });
+        else {
+          const m = (items || []).find(x => String(x.name || '').toLowerCase() === name.toLowerCase());
+          out.push({ ...blankItem(), itemId: m ? m.id : '', name, uom: g(iUom, m ? (m.unit || '') : ''), hsn: g(iHsn, m ? (m.hsn || '') : ''), qty: num(hasHdr ? g(iQty, '') : c[1]) || 1, rate: num(g(iRate, '')) || (m ? (m.purchaseRate ?? '') : '') });
+        }
+      });
+      if (!out.length) { alert('No rows found. First row should be headings, e.g. ' + (capex ? 'Machine, Make/Model, Specification, Qty, Est. cost' : 'Item, UOM, Qty, Rate, HSN') + '.'); return; }
+      setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...out] }));
+      alert('Added ' + out.length + ' line(s) from the file. Please review quantities and rates.');
+    }).catch(() => alert('Could not read the file.')).finally(() => { el.value = ''; });
+  }
   // CAPEX: once the machine is received, create Asset Register entries (one per unit) — never touches the item master / stock.
   function receiveToAssets(m) {
     if (!setAssets) { alert('Asset Register is not available.'); return; }
@@ -12889,7 +12921,8 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           <div style={card}>
             <label style={lbl}>Machines / equipment required <span style={{ fontWeight: 400, color: '#999' }}>— free entry, not linked to the item master</span></label>
             <div style={{ background: '#F8FAF0', border: '1px solid #DCE8C4', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Got a list from the supplier / customer? Copy rows from Excel (or CSV) and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
+              <label style={{ ...styles.secondaryBtn, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 8, fontSize: 12 }}>⬆ Import from Excel / CSV file<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={importPRFile} style={{ display: 'none' }} /></label>
+              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Or copy rows from Excel and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
               <textarea style={{ ...inp, minHeight: 56, fontFamily: 'monospace', fontSize: 11.5 }} value={pasteTxt} onChange={ev => setPasteTxt(ev.target.value)} placeholder={'Wire drawing machine\tXYZ WD-24\t24 die, 1.2-3.5mm\t1\t2500000'} />
               <button style={{ ...styles.secondaryBtn, marginTop: 6, fontSize: 12 }} onClick={importCapexPaste}>Add pasted rows ↓</button>
             </div>
@@ -12922,7 +12955,10 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
           ) : (
           <div style={card}>
-            <label style={lbl}>Items required</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ ...lbl, marginBottom: 0 }}>Items required</label>
+              <label style={{ ...styles.ghostBtn, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }} title="Headings: Item, UOM, Qty, Rate, HSN">⬆ Import from Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={importPRFile} style={{ display: 'none' }} /></label>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>{['#', 'Item Code', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -24381,6 +24417,30 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
 }
 
 let _xlsxPromise = null;
+// Read a .xlsx / .xls / .csv file and return CSV text (first sheet) — lets every importer accept Excel directly.
+async function fileToCsvText(file) {
+  if (/\.xlsx?$/i.test(file.name || '')) {
+    const X = await loadXLSX();
+    const buf = await file.arrayBuffer();
+    const wb = X.read(buf, { type: 'array' });
+    return X.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+  }
+  return await file.text();
+}
+function parseCsvText(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  const t = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cur.trim()); cur = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i + 1] === '\n') i++; row.push(cur.trim()); cur = ''; if (row.some(c => c !== '')) rows.push(row); row = []; }
+    else cur += ch;
+  }
+  row.push(cur.trim()); if (row.some(c => c !== '')) rows.push(row);
+  return rows;
+}
 function loadXLSX() {
   if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
   if (_xlsxPromise) return _xlsxPromise;
