@@ -157,6 +157,7 @@ const CONVERT_TO = {
   quotation: ['invoice'],
   invoice:   ['delivery', 'packing_list', 'creditnote'],
   delivery:  ['packing_list'],
+  packing_list: ['delivery'],
   purchase:  ['purchasebill'],
 };
 
@@ -1267,6 +1268,33 @@ async function printPaginated(sel, bi, pre, gen) {
       clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
       clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
       clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
+      // Letterhead already carries the company name / address / contacts → drop the duplicate company block from the
+      // top of the view and keep only the document title (e.g. "PURCHASE REQUISITION  PR/26-27/001").
+      if (lhHdrUrl && bi && bi.name) {
+        try {
+          const first = clone.firstElementChild;
+          if (first && (first.textContent || '').length < 500) {
+            const nz = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toLowerCase();
+            const nameN = [bi.name, bi.companyName].filter(Boolean).map(nz);
+            const addrN = nz(bi.address);
+            const ids = [bi.phone, bi.email, bi.gstin, bi.website].filter(Boolean).map(nz);
+            Array.from(first.querySelectorAll('div,span,p,h1,h2,h3,b,strong,small')).forEach(el => {
+              if (!el.isConnected) return;
+              if (Array.from(el.children).some(ch => ch.tagName !== 'BR')) return;
+              const t = nz(el.textContent); if (!t) return;
+              const isCo = nameN.includes(t) || (t.length > 6 && addrN && addrN.includes(t)) || (t.length < 110 && ids.some(x => x && t.includes(x)));
+              if (!isCo) return;
+              let n = el;
+              while (n.parentElement && n.parentElement !== first.parentElement && !(n.parentElement.textContent || '').replace(/\s+/g, '').replace(n.textContent.replace(/\s+/g, ''), '').length) n = n.parentElement;
+              n.remove();
+            });
+            const hasText = (e) => (e.textContent || '').trim() || e.querySelector('img,table');
+            Array.from(first.querySelectorAll('div,span')).reverse().forEach(e => { if (!hasText(e)) e.remove(); });
+            if (!hasText(first)) first.remove();
+            else if (first.style.display === 'flex' && first.children.length === 1) { first.style.justifyContent = 'center'; first.children[0].style.textAlign = 'center'; }
+          }
+        } catch (e) {}
+      }
       // Seal & signature: drop them above the "Authorised Signatory" line (and equalise the other party's gap),
       // or append a signature block when the view has none. Switched by Settings + the per-print toggle.
       let _needSealAppend = false, _sealImgs = '';
@@ -2873,13 +2901,12 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
   }
   function handleItemImport(e){
     const file = e.target.files && e.target.files[0]; if(!file) return;
-    const rdr = new FileReader();
-    rdr.onload = () => {
+    const inputEl = e.target;
+    fileToCsvText(file).then((text) => {
       try {
-        const text = String(rdr.result || '');
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if(!lines.length){ alert('The file is empty.'); e.target.value=''; return; }
-        const parseLine = (l) => l.split(',').map(c => c.replace(/^"|"$/g,'').trim());
+        const lines = parseCsvText(text);
+        if(!lines.length){ alert('The file is empty.'); inputEl.value=''; return; }
+        const parseLine = (l) => l;
         const headers = parseLine(lines[0]).map(h => h.toLowerCase());
         const idx = (arr) => { for(const nm of arr){ const i = headers.indexOf(nm); if(i>=0) return i; } return -1; };
         const iName = idx(['name','item','item name','description','product']);
@@ -2918,13 +2945,12 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
             gst: get(iGst)!=='' ? num(get(iGst)) : defGst,
           });
         }
-        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); e.target.value=''; return; }
+        if(!newItems.length){ alert('No items found. First row should have column names like: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); inputEl.value=''; return; }
         setItems(prev => [...(prev||[]), ...newItems]);
         alert('✅ Imported ' + newItems.length + ' items (item codes auto-assigned).');
-      } catch(err){ alert('Could not read the file. Please use a CSV (save Excel as CSV) with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
-      e.target.value = '';
-    };
-    rdr.readAsText(file);
+      } catch(err){ alert('Could not read the file. Use an Excel / CSV file with a header row: name, unit, category, hsn, opening stock, purchase rate, sale rate.'); }
+      inputEl.value = '';
+    }).catch(() => { alert('Could not read the file.'); inputEl.value = ''; });
   }
   return (
     <div style={styles.page}>
@@ -2934,7 +2960,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
-        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
+        <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from an Excel (.xlsx) or CSV file">⬆ Import Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
         {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
         {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
@@ -4879,7 +4905,7 @@ function DocRow({ doc, customers, vendors, onClick, businessInfo, showBizBadge =
         <div style={{ ...styles.docRowTitle, display: 'flex', alignItems: 'center', gap: 6 }}>
           {doc.number}
           {doc.linkedFrom && (
-            <span title={`Based on ${DOC_TYPES[doc.linkedFrom.docType]?.label} ${doc.linkedFrom.docNumber}`}
+            <span title={`Based on ${DOC_TYPES[doc.linkedFrom.docType]?.label || doc.linkedFrom.label || 'document'} ${doc.linkedFrom.docNumber}`}
               style={{ fontSize: 10, background: '#EDE8FA', color: '#6B5BAE', borderRadius: 4, padding: '1px 5px', fontWeight: 500 }}>
               🔗 {doc.linkedFrom.docNumber}
             </span>
@@ -6459,7 +6485,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
       {/* Linked-from banner */}
       {doc.linkedFrom && (
         <div style={{ background: '#F0EEF9', border: '1px solid #C8C0E8', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: '#4A3F8A', display: 'flex', alignItems: 'center', gap: 8 }} className="no-print">
-          🔗 <span>Based on <strong>{DOC_TYPES[doc.linkedFrom.docType]?.label}</strong> — {doc.linkedFrom.docNumber}</span>
+          🔗 <span>Based on <strong>{DOC_TYPES[doc.linkedFrom.docType]?.label || doc.linkedFrom.label || 'Document'}</strong> — {doc.linkedFrom.docNumber}</span>
         </div>
       )}
 
@@ -12737,6 +12763,64 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
     setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...rows] }));
     setPasteTxt('');
   }
+  // Import lines from an Excel / CSV file. Finds the real header row (titles/addresses above it are ignored), maps columns by heading,
+  // skips Total / GST / Freight rows, and stops at the first Total row.
+  function importPRFile(ev) {
+    const file = ev.target.files && ev.target.files[0]; const el = ev.target; if (!file) return;
+    const capex = editing && editing.type === 'capex';
+    fileToCsvText(file).then((text) => {
+      const rows = parseCsvText(text);
+      if (!rows.length) { alert('The file is empty.'); return; }
+      const low = (v) => String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim();
+      const SYN = {
+        name: ['item description', 'description of goods', 'description', 'machine name', 'machine', 'equipment', 'particulars', 'item name', 'material', 'product', 'item', 'name'],
+        qty: ['quantity', 'qty', 'nos', 'no. of units', 'units required'],
+        rate: ['unit price', 'unit rate', 'unit cost', 'rate', 'est. cost', 'est cost', 'estimated cost', 'price', 'cost'],
+        amount: ['total amount', 'line total', 'amount', 'total', 'value'],
+        uom: ['uom', 'unit of measure', 'unit'],
+        hsn: ['hsn/sac', 'hsn code', 'hsn', 'sac'],
+        make: ['make / model', 'make/model', 'make', 'model', 'brand', 'manufacturer'],
+        spec: ['specification', 'specifications', 'spec', 'capacity', 'rating', 'technical details', 'size'],
+      };
+      const NOT = { rate: /total|amount|value|gst|tax|disc/, name: /code|no\.?$|s\.?\s?no|sl/, qty: /rate|price|amount/ , uom: /price|rate/ };
+      const colOf = (hdr, key) => {
+        for (const nm of SYN[key]) { const i = hdr.findIndex(h => h === nm); if (i >= 0) return i; }
+        for (const nm of SYN[key]) { const i = hdr.findIndex(h => h.length < 40 && h.includes(nm) && !(NOT[key] && NOT[key].test(h))); if (i >= 0) return i; }
+        return -1;
+      };
+      // header row = the row (in the first 25) that matches the most heading keywords, must include a name column
+      let hRow = -1, best = 1, hdr = [];
+      rows.slice(0, 25).forEach((r, ri) => {
+        const h = r.map(low);
+        const score = ['name', 'qty', 'rate', 'uom', 'hsn', 'make', 'spec', 'amount'].reduce((n, k) => n + (colOf(h, k) >= 0 ? 1 : 0), 0);
+        if (colOf(h, 'name') >= 0 && score > best) { best = score; hRow = ri; hdr = h; }
+      });
+      if (hRow < 0) { alert('Could not find a heading row. First row of your file should have headings like: ' + (capex ? 'Machine, Make/Model, Specification, Qty, Est. cost' : 'Item, UOM, Qty, Rate, HSN') + '.'); return; }
+      const ix = {}; Object.keys(SYN).forEach(k => { ix[k] = colOf(hdr, k); });
+      const cell = (r, k) => (ix[k] >= 0 && r[ix[k]] != null ? String(r[ix[k]]).trim() : '');
+      const num = (v) => { const m = String(v == null ? '' : v).match(/-?\d[\d,]*\.?\d*|-?\.\d+/); if (!m) return ''; const n = parseFloat(m[0].replace(/,/g, '')); return isNaN(n) ? '' : n; };
+      const TOTAL = /^(sub\s*-?\s*total|grand\s*total|total|net\s*(total|amount)|gst|igst|cgst|sgst|tax|freight|discount|round(ing)?\s*off|amount\s*in\s*words|in words)\b/i;
+      const out = [];
+      for (let ri = hRow + 1; ri < rows.length; ri++) {
+        const r = rows[ri];
+        if (r.some(c => /^(sub\s*-?\s*total|grand\s*total|total)\b/i.test(String(c).trim()))) break;      // totals reached → stop
+        const name = cell(r, 'name');
+        if (!name || TOTAL.test(name)) continue;
+        const q = num(cell(r, 'qty')); let rt = num(cell(r, 'rate')); const am = num(cell(r, 'amount'));
+        if (rt === '' && am !== '' && q) rt = Math.round((am / q) * 100) / 100;
+        if (q === '' && rt === '' && am === '') continue;                                                     // not a line item
+        if (capex) out.push({ ...blankItem(), name, make: cell(r, 'make'), spec: cell(r, 'spec'), qty: q || 1, rate: rt });
+        else {
+          const m = (items || []).find(x => String(x.name || '').toLowerCase() === name.toLowerCase());
+          out.push({ ...blankItem(), itemId: m ? m.id : '', name, uom: cell(r, 'uom') || (m ? (m.unit || '') : ''), hsn: cell(r, 'hsn') || (m ? (m.hsn || '') : ''), qty: q || 1, rate: rt !== '' ? rt : (m ? (m.purchaseRate ?? '') : '') });
+        }
+      }
+      if (!out.length) { alert('No item rows found under the heading row.'); return; }
+      const nm = (k) => ix[k] >= 0 ? '"' + (rows[hRow][ix[k]] || '') + '"' : '—';
+      setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...out] }));
+      alert('Added ' + out.length + ' line(s) from row ' + (hRow + 1) + ' onwards.\n\nColumns read:\n  Name → ' + nm('name') + '\n  Qty → ' + nm('qty') + '\n  Rate → ' + nm('rate') + (capex ? '\n  Make → ' + nm('make') + '\n  Specification → ' + nm('spec') : '\n  UOM → ' + nm('uom') + '\n  HSN → ' + nm('hsn')) + '\n\nTotal / GST rows were skipped. Please review.');
+    }).catch(() => alert('Could not read the file.')).finally(() => { el.value = ''; });
+  }
   // CAPEX: once the machine is received, create Asset Register entries (one per unit) — never touches the item master / stock.
   function receiveToAssets(m) {
     if (!setAssets) { alert('Asset Register is not available.'); return; }
@@ -12889,7 +12973,8 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           <div style={card}>
             <label style={lbl}>Machines / equipment required <span style={{ fontWeight: 400, color: '#999' }}>— free entry, not linked to the item master</span></label>
             <div style={{ background: '#F8FAF0', border: '1px solid #DCE8C4', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Got a list from the supplier / customer? Copy rows from Excel (or CSV) and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
+              <label style={{ ...styles.secondaryBtn, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 8, fontSize: 12 }}>⬆ Import from Excel / CSV file<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={importPRFile} style={{ display: 'none' }} /></label>
+              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Or copy rows from Excel and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
               <textarea style={{ ...inp, minHeight: 56, fontFamily: 'monospace', fontSize: 11.5 }} value={pasteTxt} onChange={ev => setPasteTxt(ev.target.value)} placeholder={'Wire drawing machine\tXYZ WD-24\t24 die, 1.2-3.5mm\t1\t2500000'} />
               <button style={{ ...styles.secondaryBtn, marginTop: 6, fontSize: 12 }} onClick={importCapexPaste}>Add pasted rows ↓</button>
             </div>
@@ -12922,7 +13007,10 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
           ) : (
           <div style={card}>
-            <label style={lbl}>Items required</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ ...lbl, marginBottom: 0 }}>Items required</label>
+              <label style={{ ...styles.ghostBtn, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }} title="Headings: Item, UOM, Qty, Rate, HSN">⬆ Import from Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={importPRFile} style={{ display: 'none' }} /></label>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>{['#', 'Item Code', 'Item (master)', 'Item / Material name', 'HSN', 'UOM', 'Qty', 'Rate', 'Amount', 'Purpose', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Rate' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -24381,6 +24469,30 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
 }
 
 let _xlsxPromise = null;
+// Read a .xlsx / .xls / .csv file and return CSV text (first sheet) — lets every importer accept Excel directly.
+async function fileToCsvText(file) {
+  if (/\.xlsx?$/i.test(file.name || '')) {
+    const X = await loadXLSX();
+    const buf = await file.arrayBuffer();
+    const wb = X.read(buf, { type: 'array' });
+    return X.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+  }
+  return await file.text();
+}
+function parseCsvText(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  const t = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) { if (ch === '"') { if (t[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cur.trim()); cur = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i + 1] === '\n') i++; row.push(cur.trim()); cur = ''; if (row.some(c => c !== '')) rows.push(row); row = []; }
+    else cur += ch;
+  }
+  row.push(cur.trim()); if (row.some(c => c !== '')) rows.push(row);
+  return rows;
+}
 function loadXLSX() {
   if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
   if (_xlsxPromise) return _xlsxPromise;
@@ -27977,6 +28089,13 @@ export default function App() {
       terms: srcDoc.terms || '',
       discount: srcDoc.discount || 0,
       placeOfSupply: srcDoc.placeOfSupply || '',
+      refNumber: srcDoc.refNumber || '',
+      // shipping / transport details travel with the goods (invoice → delivery note → packing list)
+      shipmentType: srcDoc.shipmentType || 'domestic', shipToSameAsBilling: !!srcDoc.shipToSameAsBilling,
+      shipToName: srcDoc.shipToName || '', shipToAddress: srcDoc.shipToAddress || '',
+      portOfLoading: srcDoc.portOfLoading || '', portOfDischarge: srcDoc.portOfDischarge || '', vesselFlight: srcDoc.vesselFlight || '',
+      blNumber: srcDoc.blNumber || '', countryOfOrigin: srcDoc.countryOfOrigin || '', shippingMarks: srcDoc.shippingMarks || '',
+      vehicleNo: srcDoc.vehicleNo || '', vehicleMode: srcDoc.vehicleMode || '', driverName: srcDoc.driverName || '', driverMobile: srcDoc.driverMobile || '',
       linkedFrom: { id: srcDoc.id, docType: srcDoc.type, docNumber: srcDoc.number },
     });
     setView('doceditor');
@@ -28507,6 +28626,9 @@ export default function App() {
                 customerId: enq.customerId,
                 customerSnapshot: cust || null,
                 notes: enq.notes || '',
+                refNumber: enq.number || '',
+                // the enquiry's "Product / Service interest" becomes the first line's description
+                ...(enq.interest ? { items: [{ ...EMPTY_ITEM_ROW(businessInfo), name: enq.interest, qty: 1 }] } : {}),
               });
             }}
           />
@@ -29353,7 +29475,7 @@ export default function App() {
                 const base = EMPTY_ITEM_ROW(businessInfo);
                 return { ...base, itemId: it.itemId || '', name: it.name + (pr.type === 'capex' ? (it.make ? ' — ' + it.make : '') + (it.spec ? ' (' + it.spec + ')' : '') : ''), qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
               });
-              startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
+              startNewDoc('purchase', pr.bizType || 'trading', { ...(its.length ? { items: its } : {}), linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number, label: pr.type === 'capex' ? 'Capex Requisition' : 'Purchase Requisition', number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
             }}
           />
