@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
-import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite } from './firebase';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails, loadBranding, saveBranding } from './firebase';
 
 
 // ─── constants.js ──────────────────────────────────────────────
@@ -51,7 +51,12 @@ const ROLE_MODULES = {
 
 // ─── Subscription / plan config ──────────────────────────────────────────────
 // Emails that bypass all plan gates (dev / owner accounts)
-const TEST_EMAILS = ['srm10988@gmail.com', 'info.thirumaltrading@gmail.com'];
+const TEST_EMAILS = ['info.orytech@gmail.com', 'srm10988@gmail.com', 'info.thirumaltrading@gmail.com', 'elcabwiresindustry@outlook.com'];
+const isTestEmail = (e) => !!e && TEST_EMAILS.includes(String(e).toLowerCase().trim());
+// Super-admins: the only accounts allowed to manage the live paywall-bypass list
+// from inside the app (Settings → Super Admin). Everyone else never sees the panel.
+const SUPER_ADMINS = ['info.orytech@gmail.com'];
+const isSuperAdmin = (e) => !!e && SUPER_ADMINS.includes(String(e).toLowerCase().trim());
 
 // Sections each plan unlocks (in addition to 'common' which every plan gets)
 const PLAN_MODULES = {
@@ -68,7 +73,7 @@ const PLAN_MODULES = {
     'hr','payroll',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis',
+    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -86,6 +91,28 @@ const PLAN_MODULES = {
 };
 
 // ─── Document types config ────────────────────────────────────────────────────
+// Company document-number prefix (Settings → Business profile → "Document number prefix", e.g. EWI).
+// Every new document number becomes  PREFIX/TYPE/FY/NNN  (prefix blank = old format).
+// Auto prefix from the company name when the user hasn't set one: "ELCAB Wires Industry" → EWI, "Thirumal Trading Company" → TTC.
+function autoDocPrefix(name) {
+  const skip = /^(and|the|of|pvt|private|ltd|limited|llp|inc|co|corp)$/i;
+  const w = String(name || '').replace(/[^A-Za-z0-9 ]+/g, ' ').split(/\s+/).filter(x => x && !skip.test(x));
+  if (!w.length) return '';
+  if (w.length === 1) return w[0].slice(0, 3).toUpperCase();
+  return w.map(x => x[0]).join('').slice(0, 4).toUpperCase();
+}
+function docCo() {
+  try {
+    const b = window.__operixBI || {};
+    const set = String(b.docPrefix || '').trim().replace(/[\/\s]+$/, '');
+    return set || autoDocPrefix(b.name || b.companyName);
+  } catch (e) { return ''; }
+}
+function withCo(n) { const c = docCo(); return c ? c + '/' + n : n; }
+function fyNow(d) { const t = d ? new Date(d) : new Date(); const y = t.getMonth() + 1 >= 4 ? t.getFullYear() : t.getFullYear() - 1; return String(y).slice(-2) + '-' + String(y + 1).slice(-2); }
+// Standard number:  COMPANY/DOC/FY/SERIAL   e.g. EWI/INV/26-27/001
+function dn(code, n, pad) { return withCo(code + '/' + fyNow() + '/' + String(n).padStart(pad || 3, '0')); }
+function lastNum(x) { const m = String(x || '').match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
 const DOC_TYPES = {
   invoice:      { label: 'Invoice',           prefix: 'INV', icon: FileText,      color: '#1E2A4A', party: 'customer' },
   delivery:     { label: 'Delivery note',     prefix: 'DC',  icon: Truck,         color: '#3D7A5C', party: 'customer' },
@@ -95,6 +122,35 @@ const DOC_TYPES = {
   purchasebill: { label: 'Purchase bill',     prefix: 'PB',  icon: ShoppingCart,  color: '#8A6FD6', party: 'vendor'   },
   creditnote:   { label: 'Credit/Debit note', prefix: 'CDN', icon: FileMinus,     color: '#B5453A', party: 'customer' },
 };
+
+// ─── Payment modes (shared across vouchers, petty cash, and all suite forms) ──
+const PAYMENT_MODES = ['Cash', 'Cheque', 'Demand Draft (DD)', 'NEFT', 'RTGS', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+
+// ─── GST state codes (India) — for "Place of Supply: State (code)" on documents ──
+const GST_STATE_CODES = {
+  'jammu and kashmir': '01', 'jammu & kashmir': '01', 'himachal pradesh': '02', 'punjab': '03',
+  'chandigarh': '04', 'uttarakhand': '05', 'haryana': '06', 'delhi': '07', 'rajasthan': '08',
+  'uttar pradesh': '09', 'bihar': '10', 'sikkim': '11', 'arunachal pradesh': '12', 'nagaland': '13',
+  'manipur': '14', 'mizoram': '15', 'tripura': '16', 'meghalaya': '17', 'assam': '18',
+  'west bengal': '19', 'jharkhand': '20', 'odisha': '21', 'orissa': '21', 'chhattisgarh': '22',
+  'madhya pradesh': '23', 'gujarat': '24', 'daman and diu': '25', 'dadra and nagar haveli': '26',
+  'dadra and nagar haveli and daman and diu': '26', 'maharashtra': '27', 'karnataka': '29',
+  'goa': '30', 'lakshadweep': '31', 'kerala': '32', 'tamil nadu': '33', 'tamilnadu': '33',
+  'puducherry': '34', 'pondicherry': '34', 'andaman and nicobar islands': '35', 'telangana': '36',
+  'andhra pradesh': '37', 'ladakh': '38', 'other territory': '97',
+};
+function gstStateCode(name) {
+  const k = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/&/g, 'and');
+  return GST_STATE_CODES[k] || '';
+}
+// Returns "Tamil Nadu (33)". If a code is already present, or no match, returns input unchanged.
+function withStateCode(name) {
+  const s = String(name || '').trim();
+  if (!s) return '';
+  if (/\(\s*\d{1,2}\s*\)/.test(s)) return s; // already has a (code)
+  const code = gstStateCode(s);
+  return code ? s + ' (' + code + ')' : s;
+}
 
 // ─── Convert map ──────────────────────────────────────────────────────────────
 const CONVERT_TO = {
@@ -187,6 +243,15 @@ const COUNTRY_CONFIG = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// Ensure a user-typed link is an absolute URL so it opens externally instead of
+// being treated as a path inside the app (the cause of "link not working").
+function normalizeUrl(u) {
+  let s = String(u || '').trim();
+  if (!s) return '';
+  if (/^(mailto:|tel:)/i.test(s)) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  return 'https://' + s.replace(/^\/+/, '');
+}
 function currency(n, sym, locale) {
   if (isNaN(n) || n == null) n = 0;
   const s = sym !== undefined ? sym : '₹';
@@ -200,6 +265,8 @@ function makeFmt(businessInfo) {
 }
 
 function computeTotals(doc, sellerState, country) {
+  // A deleted (cancelled) document counts as nil everywhere — reports, GST, outstanding.
+  if (doc && doc.status === 'deleted') doc = { ...doc, items: [] };
   let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
@@ -280,9 +347,34 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
+  const [autoWide, setAutoWide] = React.useState(false);
+  React.useEffect(() => {
+    // Auto-detect if content overflows an A4 portrait width -> switch print to landscape.
+    const t = setTimeout(() => {
+      const body = document.querySelector('.doc-print-area .pa-body');
+      if (!body) return;
+      const pw = body.style.width, pm = body.style.maxWidth;
+      body.style.width = '760px'; body.style.maxWidth = '760px';
+      let wide = body.scrollWidth > 768;
+      body.querySelectorAll('table').forEach(tb => { if (tb.scrollWidth > tb.clientWidth + 2) wide = true; });
+      body.style.width = pw; body.style.maxWidth = pm;
+      setAutoWide(wide);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [useLH]);
   const cur = (cc) => (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency || '';
   return (
     <>
+      {autoWide && <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
+      {/* Letterhead edge-to-edge + footer pinned to page bottom (same rules as the
+         main document editor, so every print across the app looks identical). */}
+      {useLH && !autoWide && <style>{`@media print {
+        html, body { margin:0 !important; padding:0 !important; }
+        @page { size: A4; margin: 0 !important; }
+        .doc-print-area .pa-body { padding-top: 14px !important; padding-bottom: 110px !important; }
+        .doc-print-area .lh-pad-footer { position: fixed !important; left:0 !important; right:0 !important; bottom:0 !important; width:100% !important; margin:0 !important; background:#fff !important; z-index:9999 !important; }
+        .doc-print-area .lh-pad-footer img { width:100% !important; display:block !important; }
+      }`}</style>}
       <div className="no-print" onClick={onClose}
         style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:998 }}/>
       <div className="no-print" style={{ position:'fixed', top:16, right:24, zIndex:1001, display:'flex', gap:8 }}>
@@ -295,11 +387,12 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <button style={styles.primaryBtn} onClick={()=>window.print()}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
+        <DocFontStyle businessInfo={businessInfo} />
         {useLH && <LetterheadHeader bi={businessInfo} />}
-        <div style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
+        <div className="pa-body" style={{ padding: useLH ? '24px 56px 48px' : '48px 56px' }}>
           {!useLH && businessInfo && (
             <div style={{ marginBottom:24, borderBottom:'2px solid #1E2A4A', paddingBottom:16 }}>
               <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A' }}>{businessInfo.name||'Company Name'}</div>
@@ -310,7 +403,9 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
           )}
           {children}
           {useLH && businessInfo?.letterheadFooter && (
-            <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'100%', display:'block', marginTop:32 }}/>
+            <div className="lh-pad-footer" style={{ marginTop:32, marginLeft:-56, marginRight:-56 }}>
+              <img src={businessInfo.letterheadFooter} alt="footer" style={{ width:'100%', display:'block' }}/>
+            </div>
           )}
         </div>
       </div>
@@ -334,7 +429,15 @@ async function downloadDocPDF(elOrSelector, filename) {
     if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     const el = typeof elOrSelector === 'string' ? document.querySelector(elOrSelector) : elOrSelector;
     if (!el) { alert('Nothing to download'); return; }
-    const canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+    // html2canvas ignores @media print, so force the print layout via a class during capture
+    // (hides editor-only rows/controls, shows the clean columnar print rows).
+    el.classList.add('pdf-exporting');
+    let canvas;
+    try {
+      canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+    } finally {
+      el.classList.remove('pdf-exporting');
+    }
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageW = pdf.internal.pageSize.getWidth();
@@ -356,6 +459,993 @@ async function downloadDocPDF(elOrSelector, filename) {
     console.error('PDF error:', e);
     alert('PDF generation failed. Use Print → Save as PDF instead.');
   }
+}
+
+// ─── Zoho / Swipe-style document print (built from data, not cloned from the screen) ───
+const ZOHO_PRINT_CSS_OLD =
+  'body{font-family:Arial,Helvetica,sans-serif !important;color:#111;font-size:11px;line-height:1.45;}'
+  + '.bd{padding:4mm 12mm 0 !important;}'
+  + '.zco{display:flex;align-items:center;gap:12px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #000;}'
+  + '.zco img{width:56px;height:56px;object-fit:contain;}.zconame{font-size:16px;font-weight:700;}.zcosm{font-size:10.5px;color:#333;}'
+  + '.zttl{display:flex;justify-content:space-between;align-items:flex-start;margin:2px 0 10px;}'
+  + '.zh1{font-size:22px;font-weight:700;letter-spacing:.5px;color:#000;}'
+  + '.zbadge{display:inline-block;margin-top:4px;font-size:9.5px;font-weight:700;letter-spacing:.8px;padding:2px 8px;border:1px solid #000;border-radius:3px;}'
+  + '.zmeta{border-collapse:collapse;font-size:11px;}.zmeta td{padding:2px 0 2px 14px;white-space:nowrap;}.zmeta td:first-child{color:#444;text-align:right;}.zmeta td:last-child{font-weight:700;text-align:right;}'
+  + '.zparty{display:flex;border:1px solid #000;margin-bottom:10px;}'
+  + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid #000;}'
+  + '.zlbl{font-size:9.5px;font-weight:700;letter-spacing:.8px;color:#444;text-transform:uppercase;margin-bottom:3px;}'
+  + '.zpn{font-size:12.5px;font-weight:700;margin-bottom:2px;}.zps{font-size:10.5px;color:#222;overflow-wrap:break-word;}'
+  + '.zt{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #000;}'
+  + '.zt th{background:#EDEDED;border:1px solid #000;padding:6px 6px;font-size:10.5px;font-weight:700;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+  + '.zt td{border:1px solid #000;padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
+  + '.zt .c{text-align:center;white-space:nowrap;}.zt .r{text-align:right;white-space:nowrap;}.zt .l{text-align:left;}'
+  + '.zt td.d{white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;}'
+  + '.zt td.amt{font-weight:700;}'
+  + '.zsum{display:flex;gap:14px;margin-top:10px;}.zsumL{flex:1;min-width:0;}.zsumR{width:78mm;flex:none;}'
+  + '.zbox{border:1px solid #000;padding:6px 9px;margin-bottom:6px;}.zwords{font-size:11px;font-style:italic;font-weight:700;}'
+  + '.ztot{width:100%;border-collapse:collapse;border:1px solid #000;}.ztot td{padding:5px 9px;font-size:11px;border-bottom:1px solid #bbb;white-space:nowrap;}'
+  + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:#EDEDED;font-size:13px;font-weight:700;border-top:1.5px solid #000;border-bottom:none;}'
+  + '.zbank div{font-size:10.5px;margin-bottom:1px;}.zbank b{font-weight:700;}'
+  + '.ztc{margin-top:8px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
+  + '.zsig{display:flex;justify-content:flex-end;margin-top:14px;}.zsig>div{width:70mm;text-align:center;font-size:11px;}'
+  + '.zsig .ln{border-top:1px solid #000;margin-top:34px;padding-top:4px;font-size:10.5px;color:#333;}';
+
+function buildZohoDocPrintOld(o) {
+  const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nl = (v) => esc(v).replace(/\n/g, '<br>');
+  const isPL = doc.type === 'packing_list';
+  const title = doc.type === 'invoice' ? 'TAX INVOICE' : String(t.label || doc.type).toUpperCase();
+  const blocks = [];
+  const B = (h) => blocks.push({ h, t: '' });
+
+  if (withCompany) {
+    B('<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + esc(bi.name) + '</div>'
+      + '<div class="zcosm">' + nl(bi.address) + '</div>'
+      + '<div class="zcosm">' + esc(cc.taxIdLabel) + ': ' + esc(bi.gstin) + (bi.phone ? ' &nbsp;·&nbsp; ' + esc(bi.phone) : '') + (bi.email ? ' &nbsp;·&nbsp; ' + esc(bi.email) : '') + '</div></div></div>');
+  }
+
+  // Title + meta
+  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
+  B('<div class="zttl"><div><div class="zh1">' + esc(title) + '</div>' + (doc.status === 'draft' ? '<div class="zbadge">DRAFT</div>' : '') + '</div>'
+    + '<table class="zmeta">' + meta.map(r => '<tr><td>' + esc(r[0]) + ' :</td><td>' + esc(r[1]) + '</td></tr>').join('') + '</table></div>');
+
+  // Parties
+  const pl = [];
+  if (party) {
+    pl.push('<div class="zpn">' + esc(party.name) + '</div>');
+    if (party.address) pl.push('<div class="zps">' + nl(party.address) + '</div>');
+    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
+    if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
+    if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
+  } else pl.push('<div class="zps">' + (isVendorDoc ? 'No vendor selected' : 'No customer selected') + '</div>');
+  let right;
+  if (doc.shipToName || doc.shipToAddress) {
+    right = '<div class="zlbl">Ship To</div>' + (doc.shipToName ? '<div class="zpn">' + esc(doc.shipToName) + '</div>' : '') + (doc.shipToAddress ? '<div class="zps">' + nl(doc.shipToAddress) + '</div>' : '');
+  } else {
+    right = '<div class="zlbl">' + (isVendorDoc ? 'Deliver To' : 'Supplier') + '</div><div class="zpn">' + esc(bi.name) + '</div>'
+      + (bi.gstin ? '<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(bi.gstin) + '</div>' : '')
+      + (bi.state ? '<div class="zps"><b>State:</b> ' + esc(bi.state) + '</div>' : '')
+      + (bi.phone && !withCompany ? '<div class="zps"><b>Ph:</b> ' + esc(bi.phone) + '</div>' : '');
+  }
+  B('<div class="zparty"><div><div class="zlbl">' + (isVendorDoc ? 'Vendor' : 'Bill To') + '</div>' + pl.join('') + '</div><div>' + right + '</div></div>');
+
+  // Items table (columns + widths)
+  const cols = [{ k: 'sl', l: '#', w: 5, a: 'c' }, { k: 'name', l: 'Item & Description', w: -1, a: 'l' }];
+  if (!isPL && cc.splitTax) cols.push({ k: 'hsn', l: 'HSN/SAC', w: 11, a: 'c' });
+  cols.push({ k: 'qty', l: 'Qty', w: 7, a: 'r' });
+  if (isPL) cols.push({ k: 'pk', l: 'Pkgs', w: 8, a: 'r' }, { k: 'nw', l: 'Net Wt (kg)', w: 12, a: 'r' }, { k: 'gw', l: 'Gross Wt (kg)', w: 13, a: 'r' }, { k: 'dm', l: 'Dimensions', w: 13, a: 'c' });
+  else {
+    cols.push({ k: 'rate', l: 'Rate', w: 13, a: 'r' });
+    if (cc.hasTax) cols.push({ k: 'tax', l: (cc.taxLabel || 'Tax') + ' %', w: 8, a: 'r' });
+    cols.push({ k: 'amt', l: 'Amount', w: 16, a: 'r' });
+  }
+  const fixed = cols.filter(c => c.w > 0).reduce((a, c) => a + c.w, 0);
+  const flexW = 100 - fixed;
+  const tblOpen = '<table class="zt"><colgroup>' + cols.map(c => '<col style="width:' + (c.w < 0 ? flexW : c.w) + '%">').join('') + '</colgroup>';
+  const thead = '<thead><tr>' + cols.map(c => '<th class="' + c.a + '" style="text-align:' + (c.a === 'r' ? 'right' : c.a === 'c' ? 'center' : 'left') + '">' + esc(c.l) + '</th>').join('') + '</tr></thead>';
+  const items = doc.items || [];
+  const priceCells = (it, rs) => {
+    const span = rs > 1 ? ' rowspan="' + rs + '"' : '';
+    const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const cell = (cls, v) => '<td class="' + cls + '"' + span + '>' + v + '</td>';
+    let h = '';
+    if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
+    h += cell('r', esc(it.qty || 0));
+    if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
+    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(it.gst || 0)); h += cell('r amt', esc(fmt(amount))); }
+    return h;
+  };
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    const gid = it.mergeGroupId;
+    let grp = [it];
+    if (gid) { let j = i + 1; while (j < items.length && items[j].mergeGroupId === gid) { grp.push(items[j]); j++; } }
+    const rs = grp.length;
+    const rows = grp.map((g, gi) => '<tr><td class="c">' + (i + gi + 1) + '</td><td class="l d">' + nl(g.name || '') + '</td>' + (gi === 0 ? priceCells(g, rs) : '') + '</tr>').join('');
+    blocks.push({ h: rows, t: 'trow' });
+    i += rs;
+  }
+
+  // Summary (words / bank | totals)
+  const taxRows = !cc.hasTax ? [] : cc.splitTax ? (totals.sameState ? [['CGST', totals.cgst], ['SGST', totals.sgst]] : [['IGST', totals.igst]]) : [[cc.taxLabel, totals.vat]];
+  let left = '', rightTot = '';
+  if (isPL) {
+    const sum = (k) => items.reduce((s, it) => s + (Number(it[k]) || 0), 0);
+    const rr = [['Total Packages', sum('packages')], ['Total Net Weight', sum('netWeight').toFixed(2) + ' kg'], ['Total Gross Weight', sum('grossWeight').toFixed(2) + ' kg'], ['Port of Loading', doc.portOfLoading], ['Port of Discharge', doc.portOfDischarge], ['Vessel / Flight', doc.vesselFlight], ['B/L or AWB No.', doc.blNumber], ['Country of Origin', doc.countryOfOrigin]].filter(r => r[1] !== undefined && r[1] !== '' && r[1] !== null);
+    rightTot = '<table class="ztot">' + rr.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '</table>';
+  } else {
+    const rows = [['Sub Total', fmt(totals.subtotal)]];
+    if (totals.discountTotal > 0) rows.push(['Less: Discount', '− ' + fmt(totals.discountTotal)]);
+    taxRows.forEach(r => rows.push([r[0], fmt(r[1] || 0)]));
+    rightTot = '<table class="ztot">' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '<tr class="g"><td>Total</td><td>' + esc(fmt(totals.grandTotal)) + '</td></tr></table>';
+    left += '<div class="zbox"><div class="zlbl">Total in words</div><div class="zwords">' + esc(numToWords(Math.round(totals.grandTotal))) + (cc.splitTax ? ' Rupees Only.' : ' Only.') + '</div></div>';
+    if (bi.bankName || bi.bankAccount || bi.upi) {
+      left += '<div class="zbox zbank"><div class="zlbl">Bank Details</div>'
+        + (bi.bankName ? '<div><b>Bank:</b> ' + esc(bi.bankName) + '</div>' : '')
+        + (bi.bankAccount ? '<div><b>A/C No:</b> ' + esc(bi.bankAccount) + '</div>' : '')
+        + (bi.ifsc ? '<div><b>IFSC:</b> ' + esc(bi.ifsc) + '</div>' : '')
+        + (bi.upi ? '<div><b>UPI:</b> ' + esc(bi.upi) + '</div>' : '') + '</div>';
+    }
+  }
+  if (doc.notes) left += '<div class="zbox"><div class="zlbl">Notes</div><div class="zps">' + nl(doc.notes) + '</div></div>';
+  B('<div class="zsum"><div class="zsumL">' + left + '</div><div class="zsumR">' + rightTot + '</div></div>');
+
+  // Terms
+  const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
+  terms.forEach((line, k) => B('<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>'));
+
+  // Signature
+  B('<div class="zsig"><div><div style="font-weight:700">For ' + esc(bi.name) + '</div><div class="ln">' + esc(bi.signatory || 'Authorized Signatory') + '</div></div></div>');
+  return { blocks, thead, tblOpen };
+}
+
+// ─── Minimal QR code generator (byte mode, ECC level M, versions 1–10) → SVG string ───
+function qrSvg(text, size) {
+  try {
+    const bytes = Array.from(unescape(encodeURIComponent(String(text))), c => c.charCodeAt(0));
+    const ECC = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26], NB = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+    const rawMods = (v) => { let r = (16 * v + 128) * v + 64; if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; } return r; };
+    let ver = 1;
+    for (; ver <= 10; ver++) { const cap = Math.floor(rawMods(ver) / 8) - ECC[ver] * NB[ver]; if (4 + (ver < 10 ? 8 : 16) + 8 * bytes.length <= cap * 8) break; }
+    if (ver > 10) return '';
+    const dataCw = Math.floor(rawMods(ver) / 8) - ECC[ver] * NB[ver];
+    const bits = [];
+    const put = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
+    put(0, Math.min(4, dataCw * 8 - bits.length));
+    while (bits.length % 8) bits.push(0);
+    for (let p = 0xEC; bits.length < dataCw * 8; p ^= 0xEC ^ 0x11) put(p, 8);
+    const data = []; for (let i = 0; i < bits.length; i += 8) { let b = 0; for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k]; data.push(b); }
+    const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; };
+    const eccLen = ECC[ver], nBlocks = NB[ver];
+    const div = new Array(eccLen).fill(0); div[eccLen - 1] = 1;
+    for (let i = 0, root = 1; i < eccLen; i++) { for (let j = 0; j < eccLen; j++) { div[j] = mul(div[j], root); if (j + 1 < eccLen) div[j] ^= div[j + 1]; } root = mul(root, 2); }
+    const raw = Math.floor(rawMods(ver) / 8), nShort = nBlocks - raw % nBlocks, shortLen = Math.floor(raw / nBlocks);
+    const blocks = []; let off = 0;
+    for (let i = 0; i < nBlocks; i++) {
+      const len = shortLen - eccLen + (i < nShort ? 0 : 1);
+      const d = data.slice(off, off + len); off += len;
+      const rem = new Array(eccLen).fill(0);
+      d.forEach(b => { const f = b ^ rem.shift(); rem.push(0); div.forEach((c, k) => { rem[k] ^= mul(c, f); }); });
+      if (i < nShort) d.push(0);
+      blocks.push(d.concat(rem));
+    }
+    const all = [];
+    for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== shortLen - eccLen || j >= nShort) all.push(b[i]); });
+    const N = ver * 4 + 17;
+    const M = Array.from({ length: N }, () => new Array(N).fill(false)), F = Array.from({ length: N }, () => new Array(N).fill(false));
+    const setFn = (x, y, v) => { M[y][x] = v; F[y][x] = true; };
+    for (let i = 0; i < N; i++) { setFn(6, i, i % 2 === 0); setFn(i, 6, i % 2 === 0); }
+    const finder = (x, y) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const d = Math.max(Math.abs(dx), Math.abs(dy)), xx = x + dx, yy = y + dy; if (xx >= 0 && xx < N && yy >= 0 && yy < N) setFn(xx, yy, d !== 2 && d !== 4); } };
+    finder(3, 3); finder(N - 4, 3); finder(3, N - 4);
+    const pos = [];
+    if (ver > 1) { const n = Math.floor(ver / 7) + 2, step = Math.ceil((ver * 4 + 4) / (n * 2 - 2)) * 2; for (let p = N - 7, k = 0; k < n - 1; k++, p -= step) pos.unshift(p); pos.unshift(6); }
+    pos.forEach((px, i) => pos.forEach((py, j) => { if ((i === 0 && j === 0) || (i === 0 && j === pos.length - 1) || (i === pos.length - 1 && j === 0)) return; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setFn(px + dx, py + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1); }));
+    const fmt = (mask) => {
+      const d = (0 << 3) | mask; let r = d; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+      const b = ((d << 10) | r) ^ 0x5412, g = (i) => ((b >>> i) & 1) !== 0;
+      for (let i = 0; i <= 5; i++) setFn(8, i, g(i)); setFn(8, 7, g(6)); setFn(8, 8, g(7)); setFn(7, 8, g(8));
+      for (let i = 9; i < 15; i++) setFn(14 - i, 8, g(i));
+      for (let i = 0; i < 8; i++) setFn(N - 1 - i, 8, g(i));
+      for (let i = 8; i < 15; i++) setFn(8, N - 15 + i, g(i));
+      setFn(8, N - 8, true);
+    };
+    fmt(0);
+    if (ver >= 7) { let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25); const b = (ver << 12) | r; for (let i = 0; i < 18; i++) { const c = ((b >>> i) & 1) !== 0, a = N - 11 + i % 3, bb = Math.floor(i / 3); setFn(a, bb, c); setFn(bb, a, c); } }
+    let k = 0;
+    for (let right = N - 1; right >= 1; right -= 2) { if (right === 6) right = 5; for (let v = 0; v < N; v++) for (let j = 0; j < 2; j++) { const x = right - j, up = ((right + 1) & 2) === 0, y = up ? N - 1 - v : v; if (!F[y][x] && k < all.length * 8) { M[y][x] = ((all[k >>> 3] >>> (7 - (k & 7))) & 1) !== 0; k++; } } }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!F[y][x] && (x + y) % 2 === 0) M[y][x] = !M[y][x];
+    fmt(0);
+    let d = '';
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (M[y][x]) d += 'M' + (x + 2) + ',' + (y + 2) + 'h1v1h-1z';
+    const px = size || 90;
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (N + 4) + ' ' + (N + 4) + '" width="' + px + '" height="' + px + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+  } catch (e) { return ''; }
+}
+
+// Print templates (user-supplied sample designs). Each is a set of CSS variables for the shared builder.
+const ZOHO_THEMES = {
+  gst:    { label: 'GST Tax Invoice', desc: 'Framed page, blue header, HSN tax summary + QR', swatch: 'linear-gradient(90deg,#1F4E79,#E6EEF6)', v: { ac: '#1F4E79', thbg: '#1F4E79', thfg: '#fff', gl: '#000', tint: '#E6EEF6', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+  wave:   { label: 'Corporate Blue', desc: 'Clean blue boxes, light-blue table header', swatch: 'linear-gradient(90deg,#DCE6F2,#1F4E79)', v: { ac: '#1F4E79', thbg: '#DCE6F2', thfg: '#1F3A5F', gl: '#000', tint: '#DCE6F2', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#1F4E79', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: '100%', tm: '0' } },
+  purple: { label: 'Modern Purple', desc: 'Purple header row, soft grid, zebra rows', swatch: 'linear-gradient(90deg,#5B3FA8,#EEE9F8)', v: { ac: '#5B3FA8', thbg: '#5B3FA8', thfg: '#fff', gl: '#CFC6E8', tint: '#EEE9F8', frame: '1px solid #CFC6E8', sb: 'none', ta: 'center', tc: '#5B3FA8', tfs: '20px', zebra: '#F7F4FC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: '100%', tm: '0' } },
+  green:  { label: 'Fresh Green', desc: 'Green title + header, light-green striped rows', swatch: 'linear-gradient(90deg,#6AAB57,#E3F0DC)', v: { ac: '#4C9A3A', thbg: '#6AAB57', thfg: '#fff', gl: '#9CC890', tint: '#DDEED6', frame: '1px solid #9CC890', sb: 'none', ta: 'center', tc: '#4C9A3A', tfs: '22px', zebra: '#E3F0DC', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: '100%', tm: '0' } },
+  tally:  { label: 'Tally Classic', desc: 'Cyan company band, compact bordered grid', swatch: 'linear-gradient(90deg,#BDE5F4,#fff)', v: { ac: '#0B6E8F', thbg: '#BDE5F4', thfg: '#000', gl: '#000', tint: '#BDE5F4', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '14px', zebra: 'transparent', cband: '#BDE5F4', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+  classic:{ label: 'Classic', desc: 'Our original serif look, soft borders', swatch: 'linear-gradient(90deg,#F1EFE9,#B9B4A6)', v: { ac: '#1E2A4A', thbg: '#F1EFE9', thfg: '#000', gl: '#B9B4A6', tint: '#F1EFE9', frame: '1px solid #B9B4A6', sb: 'none', ta: 'center', tc: '#1E2A4A', tfs: '20px', zebra: 'transparent', cband: 'transparent', font: 'Georgia,"Times New Roman",serif', bpad: '0', tw: '100%', tm: '0' } },
+  formal: { label: 'Formal B/W', desc: 'Our original black & white bordered format', swatch: 'linear-gradient(90deg,#f0f0f0,#000)', v: { ac: '#000', thbg: '#F0F0F0', thfg: '#000', gl: '#000', tint: '#F0F0F0', frame: '1px solid #000', sb: 'none', ta: 'center', tc: '#000', tfs: '15px', zebra: 'transparent', cband: 'transparent', font: 'Arial,Helvetica,sans-serif', bpad: '0', tw: 'calc(100% + 2px)', tm: '0 -1px' } },
+};
+function zohoThemeCss(id) {
+  const th = ZOHO_THEMES[id] || ZOHO_THEMES.gst;
+  return ':root{' + Object.keys(th.v).map(k => '--' + k + ':' + th.v[k] + ';').join('') + '}';
+}
+
+// Generic-mode CSS: restyles any cloned data table to the same blue-header / black-grid look.
+const ZOHO_GEN_CSS =
+  '.bd{padding:3mm 5mm !important;border:1px solid var(--gl) !important;}'
+  + 'table.gdata{border-collapse:collapse;width:100%;margin:2px 0;}'
+  + 'table.gdata th{background:var(--thbg) !important;color:var(--thfg) !important;border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;font-weight:700 !important;}'
+  + 'table.gdata td{border:1px solid var(--gl) !important;padding:5px 6px !important;font-size:10.5px !important;color:#000 !important;vertical-align:top;}'
+  + 'table.gplain td,table.gplain th{padding:3px 5px;}'
+  + 'img{max-width:100%;}';
+
+// HR letters (offer / warning / termination): same letterhead-or-logo header on every page, letter body flowed across pages.
+const LETTER_CSS =
+  '.bd{border:none !important;padding:6mm 16mm 0 !important;font-size:13px;line-height:1.7;}'
+  + '.bd p{line-height:1.75;margin:0 0 12px;}.bd h2{text-align:center;color:#1E2A4A;font-size:15px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 20px;}'
+  + '.bd h3{color:#1E2A4A;font-size:13.5px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid #ccc;text-transform:uppercase;letter-spacing:.4px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
+  + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
+  + '.bd td{border:1px solid var(--gl);padding:6px 10px;}.bd tr:nth-child(even) td{background:#F8F8F8;}.bd .total td{font-weight:700;background:var(--tint) !important;}'
+  + '.bd .sig{margin-top:44px;display:flex;justify-content:space-between;align-items:flex-end;gap:40px;}.bd .sig-box{text-align:center;flex:1;max-width:220px;}.bd .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;color:#444;}';
+
+function printLetterFromHtml(html, biz, opts) {
+  try {
+    biz = biz || (typeof window !== 'undefined' && window.__operixBI) || {};
+    const dd = new DOMParser().parseFromString(html, 'text/html');
+    const page = dd.querySelector('.page');
+    if (!page) { printHTML(html); return; }
+    const _wm = dd.querySelector('.draft-watermark, .draft-wm') ? 'DRAFT' : '';
+    dd.querySelectorAll('.draft-watermark, .draft-wm').forEach(n => n.remove());
+    page.querySelectorAll('.letterhead, .lh').forEach(n => n.remove());
+    page.querySelectorAll('.ref').forEach(r => { if (!r.children.length) { r.style.display = 'block'; r.style.textAlign = 'right'; } });
+    const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
+    const blocks = [];
+    if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
+    if ((biz.seal || biz.signature) && biz.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false)) {
+      const sb = page.querySelector('.sig-box');
+      const sp = sb && sb.firstElementChild;
+      const sbs = page.querySelectorAll('.sig-box');
+      sbs.forEach((b2, bi2) => { if (bi2 > 0 && b2.firstElementChild) b2.firstElementChild.style.height = '66px'; });
+      if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
+    }
+    const kids = Array.from(page.children);
+    for (let ki = 0; ki < kids.length; ki++) {
+      const el = kids[ki];
+      if (/^H[23]$/.test(el.tagName) && kids[ki + 1]) { blocks.push({ t: '', h: '<div>' + el.outerHTML + kids[ki + 1].outerHTML + '</div>' }); ki++; }
+      else blocks.push({ t: '', h: el.outerHTML });
+    }
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
+  } catch (e) { console.error(e); printHTML(html); }
+}
+
+// Print any on-screen document view in the standard framed format (letterhead if configured).
+function printView(sel, bi, opts) { return printPaginated(sel, bi, null, opts || true); }
+
+// Per-print switch for seal & signature (shown only when a seal/signature is uploaded and enabled in Settings).
+function SealToggle({ businessInfo }) {
+  const [on, setOn] = React.useState(typeof window === 'undefined' || window.__sealOn !== false);
+  if (!(businessInfo && (businessInfo.seal || businessInfo.signature)) || businessInfo.printSeal === false) return null;
+  return (
+    <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
+      style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+      🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+    </button>
+  );
+}
+
+// ─── GST tax-invoice print (framed page, full-height item grid, HSN tax summary) ───
+// Built from document data (not cloned from the screen) so every page is identical in layout.
+const ZOHO_PRINT_CSS =
+  'body{font-family:var(--font) !important;color:#111;font-size:11px;line-height:1.45;}'
+  + '.bd{left:10mm !important;right:10mm !important;padding:var(--bpad) !important;margin:2mm 0;border:var(--frame);}'
+  + '.zco{display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--cband);border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
+  + '.zco img{width:56px;height:56px;object-fit:contain;}.zconame{font-size:16px;font-weight:700;}.zcosm{font-size:10.5px;color:#333;}'
+  + '.zh1{text-align:var(--ta);color:var(--tc);font-size:var(--tfs);font-weight:700;letter-spacing:1px;padding:6px 10px;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
+  + '.zbadge{display:inline-block;margin-left:10px;font-size:9px;font-weight:700;letter-spacing:.8px;padding:1px 7px;border:1px solid #000;border-radius:3px;vertical-align:middle;}'
+  + '.zmeta{display:flex;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}.zmeta>div{flex:1;padding:5px 10px;min-width:0;}.zmeta>div+div{border-left:1px solid var(--gl);}'
+  + '.zmeta .k{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:.6px;}.zmeta .v{font-size:11.5px;font-weight:700;overflow-wrap:break-word;}'
+  + '.zparty{display:flex;border-bottom:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}'
+  + '.zparty>div{flex:1;padding:7px 10px;min-width:0;}.zparty>div+div{border-left:1px solid var(--gl);}'
+  + '.zlbl{font-size:9.5px;font-weight:700;letter-spacing:.8px;color:#444;text-transform:uppercase;margin-bottom:3px;}'
+  + '.zpn{font-size:12.5px;font-weight:700;margin-bottom:2px;}.zps{font-size:10.5px;color:#222;overflow-wrap:break-word;}'
+  + '.zt{width:var(--tw);margin:var(--tm);border-collapse:collapse;table-layout:fixed;border:0;}'
+  + '.zt th{background:var(--thbg);color:var(--thfg);border:1px solid var(--gl);padding:6px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+  + '.zt tbody tr:nth-child(even) td{background:var(--zebra);}.zt td{border:1px solid var(--gl);padding:6px 6px;font-size:11px;vertical-align:top;color:#000;}'
+  + '.zt thead th{border-top:0;}'
+  + '.zt .c{text-align:center;white-space:nowrap;}.zt .r{text-align:right;white-space:nowrap;}.zt .l{text-align:left;}'
+  + '.zt td.d{white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;}'
+  + '.zt td.amt{font-weight:700;}'
+  + '.zt tr.fill td{border-top:0;border-bottom:0;padding:0;}'
+  + '.zsum{display:flex;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);}.zsumL{flex:1;min-width:0;padding:7px 10px;}.zsumR{width:80mm;flex:none;border-left:1px solid var(--gl);}'
+  + '.zwords{font-size:11px;font-style:italic;font-weight:700;margin-bottom:6px;}.zbank div{font-size:10.5px;margin-bottom:1px;}.zbank b{font-weight:700;}'
+  + '.ztot{width:100%;border-collapse:collapse;}.ztot td{padding:5px 10px;font-size:11px;border-bottom:1px solid #bbb;white-space:nowrap;}'
+  + '.ztot td:last-child{text-align:right;font-weight:700;}.ztot tr.g td{background:var(--tint);font-size:13px;font-weight:700;border-top:1.5px solid var(--ac);border-bottom:0;}'
+  + '.ztax{width:var(--tw);margin:var(--tm);border-collapse:collapse;table-layout:fixed;border-top:1px solid var(--gl);}'
+  + '.ztax th{background:var(--tint);border:1px solid var(--gl);padding:4px 5px;font-size:10px;font-weight:700;text-align:center;}'
+  + '.ztax td{border:1px solid var(--gl);padding:4px 5px;font-size:10.5px;text-align:right;white-space:nowrap;}.ztax td:first-child{text-align:center;}'
+  + '.ztax tr.t td{font-weight:700;background:#F5F5F5;}'
+  + '.ztc{padding:0 10px;font-size:10px;color:#333;}.ztc .h{font-weight:700;font-size:10.5px;color:#000;margin-bottom:2px;}'
+  + '.zsig{display:flex;justify-content:space-between;align-items:flex-end;padding:6px 10px 8px;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb);border-bottom:var(--sb);font-size:11px;}'
+  + '.zsig>div{width:62mm;text-align:center;}.zsig .ln{border-top:1px solid #000;margin-top:38px;padding-top:4px;font-size:10.5px;color:var(--ac);}';
+
+function buildZohoDocPrint(o) {
+  const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nl = (v) => esc(v).replace(/\n/g, '<br>');
+  const isPL = doc.type === 'packing_list';
+  const title = doc.type === 'invoice' ? 'TAX INVOICE' : String(t.label || doc.type).toUpperCase();
+  const blocks = [];
+  const B = (h) => blocks.push({ h, t: '' });
+  const TL = (h) => blocks.push({ h, t: 'tail' });
+
+  if (withCompany) {
+    B('<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + esc(bi.name) + '</div>'
+      + '<div class="zcosm">' + nl(bi.address) + '</div>'
+      + '<div class="zcosm">' + esc(cc.taxIdLabel) + ': ' + esc(bi.gstin) + (bi.phone ? ' &nbsp;·&nbsp; ' + esc(bi.phone) : '') + (bi.email ? ' &nbsp;·&nbsp; ' + esc(bi.email) : '') + '</div></div></div>');
+  }
+
+  B('<div class="zh1">' + esc(title) + '' + '</div>');
+
+  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
+  if (meta.length) B('<div class="zmeta">' + meta.map(r => '<div><div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div></div>').join('') + '</div>');
+
+  const pl = [];
+  if (party) {
+    pl.push('<div class="zpn">' + esc(party.name) + '</div>');
+    if (party.address) pl.push('<div class="zps">' + nl(party.address) + '</div>');
+    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
+    if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
+    if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
+  } else pl.push('<div class="zps">' + (isVendorDoc ? 'No vendor selected' : 'No customer selected') + '</div>');
+  let right;
+  if (doc.shipToName || doc.shipToAddress) {
+    right = '<div class="zlbl">Ship To</div>' + (doc.shipToName ? '<div class="zpn">' + esc(doc.shipToName) + '</div>' : '') + (doc.shipToAddress ? '<div class="zps">' + nl(doc.shipToAddress) + '</div>' : '');
+  } else {
+    right = '<div class="zlbl">' + (isVendorDoc ? 'Deliver To' : 'Supplier') + '</div><div class="zpn">' + esc(bi.name) + '</div>'
+      + (bi.gstin ? '<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(bi.gstin) + '</div>' : '')
+      + (bi.state ? '<div class="zps"><b>State:</b> ' + esc(bi.state) + '</div>' : '')
+      + (bi.phone && !withCompany ? '<div class="zps"><b>Ph:</b> ' + esc(bi.phone) + '</div>' : '');
+  }
+  B('<div class="zparty"><div><div class="zlbl">' + (isVendorDoc ? 'Vendor' : 'Bill To') + '</div>' + pl.join('') + '</div><div>' + right + '</div></div>');
+
+  const cols = [{ k: 'sl', l: 'SNo', w: 6, a: 'c' }, { k: 'name', l: 'Item Description', w: -1, a: 'l' }];
+  if (!isPL && cc.splitTax) cols.push({ k: 'hsn', l: 'HSN/SAC', w: 11, a: 'c' });
+  cols.push({ k: 'qty', l: 'Qty', w: 7, a: 'r' });
+  if (isPL) cols.push({ k: 'pk', l: 'Pkgs', w: 8, a: 'r' }, { k: 'nw', l: 'Net Wt (kg)', w: 12, a: 'r' }, { k: 'gw', l: 'Gross Wt (kg)', w: 13, a: 'r' }, { k: 'dm', l: 'Dimensions', w: 13, a: 'c' });
+  else {
+    cols.push({ k: 'rate', l: 'Rate', w: 13, a: 'r' });
+    if (cc.hasTax) cols.push({ k: 'tax', l: (cc.taxLabel || 'Tax') + ' %', w: 8, a: 'r' });
+    cols.push({ k: 'amt', l: 'Amount', w: 16, a: 'r' });
+  }
+  const fixed = cols.filter(c => c.w > 0).reduce((a, c) => a + c.w, 0);
+  const tblOpen = '<table class="zt"><colgroup>' + cols.map(c => '<col style="width:' + (c.w < 0 ? 100 - fixed : c.w) + '%">').join('') + '</colgroup>';
+  const thead = '<thead><tr>' + cols.map(c => '<th style="text-align:' + (c.a === 'r' ? 'right' : c.a === 'c' ? 'center' : 'left') + '">' + esc(c.l) + '</th>').join('') + '</tr></thead>';
+  const items = doc.items || [];
+  const priceCells = (it, rs) => {
+    const span = rs > 1 ? ' rowspan="' + rs + '"' : '';
+    const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const cell = (cls, v) => '<td class="' + cls + '"' + span + '>' + v + '</td>';
+    let h = '';
+    if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
+    h += cell('r', esc(it.qty || 0));
+    if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
+    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(it.gst || 0)); h += cell('r amt', esc(fmt(amount))); }
+    return h;
+  };
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    const gid = it.mergeGroupId;
+    const grp = [it];
+    if (gid) { let j = i + 1; while (j < items.length && items[j].mergeGroupId === gid) { grp.push(items[j]); j++; } }
+    const rs = grp.length;
+    const rows = grp.map((g, gi) => '<tr><td class="c">' + (i + gi + 1) + '</td><td class="l d">' + nl(g.name || '') + '</td>' + (gi === 0 ? priceCells(g, rs) : '') + '</tr>').join('');
+    blocks.push({ h: rows, t: 'trow' });
+    i += rs;
+  }
+
+  // Tail (pinned to bottom of the last page): totals, HSN tax summary, terms, signatures
+  const taxRows = !cc.hasTax ? [] : cc.splitTax ? (totals.sameState ? [['CGST', totals.cgst], ['SGST', totals.sgst]] : [['IGST', totals.igst]]) : [[cc.taxLabel, totals.vat]];
+  let left = '', rightTot = '';
+  if (isPL) {
+    const sum = (k) => items.reduce((s, it) => s + (Number(it[k]) || 0), 0);
+    const rr = [['Total Packages', sum('packages')], ['Total Net Weight', sum('netWeight').toFixed(2) + ' kg'], ['Total Gross Weight', sum('grossWeight').toFixed(2) + ' kg'], ['Port of Loading', doc.portOfLoading], ['Port of Discharge', doc.portOfDischarge], ['Vessel / Flight', doc.vesselFlight], ['B/L or AWB No.', doc.blNumber], ['Country of Origin', doc.countryOfOrigin]].filter(r => r[1] !== undefined && r[1] !== '' && r[1] !== null);
+    rightTot = '<table class="ztot">' + rr.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '</table>';
+  } else {
+    const rows = [['Sub Total', fmt(totals.subtotal)]];
+    if (totals.discountTotal > 0) rows.push(['Less: Discount', '− ' + fmt(totals.discountTotal)]);
+    taxRows.forEach(r => rows.push([r[0], fmt(r[1] || 0)]));
+    rightTot = '<table class="ztot">' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '<tr class="g"><td>Total</td><td>' + esc(fmt(totals.grandTotal)) + '</td></tr></table>';
+    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(numToWords(Math.round(totals.grandTotal))) + (cc.splitTax ? ' Rupees Only.' : ' Only.') + '</div>';
+    if (bi.bankName || bi.bankAccount || bi.upi) {
+      left += '<div class="zbank"><div class="zlbl">Bank Details</div>'
+        + (bi.bankName ? '<div><b>Bank:</b> ' + esc(bi.bankName) + '</div>' : '')
+        + (bi.bankAccount ? '<div><b>A/C No:</b> ' + esc(bi.bankAccount) + '</div>' : '')
+        + (bi.ifsc ? '<div><b>IFSC:</b> ' + esc(bi.ifsc) + '</div>' : '')
+        + (bi.upi ? '<div><b>UPI:</b> ' + esc(bi.upi) + '</div>' : '') + '</div>';
+    }
+  }
+  if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
+  let qrBlock = '';
+  if (!isPL) {
+    const qrTxt = ['DOC:' + (t.label || doc.type) + ' ' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.gstin || bi.name || ''), 'TO:' + ((party && (party.gstin || party.taxId)) || (party && party.name) || ''), 'AMT:' + Math.round(totals.grandTotal || 0)].join('|');
+    const svg = qrSvg(qrTxt, 84);
+    if (svg) qrBlock = '<div style="flex:none;text-align:center;margin-left:10px"><div style="border:1px solid #000;padding:2px;line-height:0">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div>';
+  }
+  TL('<div class="zsum"><div class="zsumL" style="display:flex;justify-content:space-between;align-items:flex-start"><div style="min-width:0;flex:1">' + left + '</div>' + qrBlock + '</div><div class="zsumR">' + rightTot + '</div></div>');
+
+  if (!isPL && cc.hasTax && cc.splitTax) {
+    const grp = {};
+    items.forEach(it => {
+      const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0); if (!amt) return;
+      const k = (it.hsn || '-') + '|' + (Number(it.gst) || 0);
+      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: Number(it.gst) || 0, taxable: 0 }).taxable += amt;
+    });
+    const rowsT = Object.values(grp);
+    if (rowsT.length) {
+      const split = !!totals.sameState;
+      const hdr = split
+        ? '<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th rowspan="2">Total Tax</th></tr><tr><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>'
+        : '<tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable Value</th><th colspan="2">IGST</th><th rowspan="2">Total Tax</th></tr><tr><th>Rate</th><th>Amount</th></tr>';
+      let tt = 0, tx = 0;
+      const body = rowsT.map(r => {
+        const tax = r.taxable * r.rate / 100; tt += r.taxable; tx += tax;
+        return split
+          ? '<tr><td>' + esc(r.hsn) + '</td><td>' + esc(fmt(r.taxable)) + '</td><td>' + r.rate / 2 + '%</td><td>' + esc(fmt(tax / 2)) + '</td><td>' + r.rate / 2 + '%</td><td>' + esc(fmt(tax / 2)) + '</td><td>' + esc(fmt(tax)) + '</td></tr>'
+          : '<tr><td>' + esc(r.hsn) + '</td><td>' + esc(fmt(r.taxable)) + '</td><td>' + r.rate + '%</td><td>' + esc(fmt(tax)) + '</td><td>' + esc(fmt(tax)) + '</td></tr>';
+      }).join('');
+      const foot = split
+        ? '<tr class="t"><td>Total</td><td>' + esc(fmt(tt)) + '</td><td></td><td>' + esc(fmt(tx / 2)) + '</td><td></td><td>' + esc(fmt(tx / 2)) + '</td><td>' + esc(fmt(tx)) + '</td></tr>'
+        : '<tr class="t"><td>Total</td><td>' + esc(fmt(tt)) + '</td><td></td><td>' + esc(fmt(tx)) + '</td><td>' + esc(fmt(tx)) + '</td></tr>';
+      TL('<table class="ztax"><thead>' + hdr + '</thead><tbody>' + body + foot + '</tbody></table>');
+    }
+  }
+
+  const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
+
+  const sealHtml = ((bi.seal || bi.signature) && bi.printSeal !== false) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
+  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln"' + (sealHtml ? ' style="margin-top:2px"' : '') + '>' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
+  return { blocks, thead, tblOpen, watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
+}
+
+// Build a landscape-width version of a portrait letterhead image from the SAME source: the image keeps its
+// natural scale (no distortion); the extra width is filled by repeating a blank column in the widest
+// uniform gap near the middle (or by extending the edge columns), so logo/text/wave stay crisp and aligned.
+const _wideCache = {};
+async function fitLetterheadWide(url, ratio) {
+  const key = ratio + '|' + (url ? url.length : 0) + '|' + (url ? url.slice(-40) : '');
+  if (_wideCache[key]) return _wideCache[key];
+  try {
+    const img = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; setTimeout(() => res(null), 4000); });
+    if (!img || !img.naturalWidth) return url;
+    const w = img.naturalWidth, h = img.naturalHeight, W2 = Math.round(w * ratio), extra = W2 - w;
+    if (extra <= 0) return url;
+    const c0 = document.createElement('canvas'); c0.width = w; c0.height = h;
+    const x0 = c0.getContext('2d'); x0.drawImage(img, 0, 0);
+    const d = x0.getImageData(0, 0, w, h).data;
+    // longest run of (near-)identical neighbouring columns within the middle 20–80%
+    const colDiff = (i) => { let t = 0; for (let y = 0; y < h; y += 2) { const a = (y * w + i) * 4, b = (y * w + i + 1) * 4; t += Math.abs(d[a] - d[b]) + Math.abs(d[a + 1] - d[b + 1]) + Math.abs(d[a + 2] - d[b + 2]); } return t / (h / 2); };
+    let best = { len: 0, at: 0 }, run = 0, start = 0;
+    for (let i = Math.floor(w * 0.2); i < Math.floor(w * 0.8); i++) {
+      if (colDiff(i) < 3) { if (!run) start = i; run++; if (run > best.len) best = { len: run, at: start + Math.floor(run / 2) }; } else run = 0;
+    }
+    const c = document.createElement('canvas'); c.width = W2; c.height = h;
+    const g = c.getContext('2d');
+    if (best.len >= 12) {
+      const sp = best.at;
+      g.drawImage(img, 0, 0, sp, h, 0, 0, sp, h);
+      g.drawImage(img, sp, 0, 1, h, sp, 0, extra + 1, h);
+      g.drawImage(img, sp + 1, 0, w - sp - 1, h, sp + extra + 1, 0, w - sp - 1, h);
+    } else {
+      const L = Math.floor(extra / 2), R = extra - L;
+      g.drawImage(img, 0, 0, 1, h, 0, 0, L + 1, h);
+      g.drawImage(img, L, 0);
+      g.drawImage(img, w - 1, 0, 1, h, L + w - 1, 0, R + 1, h);
+    }
+    const out = c.toDataURL('image/png');
+    _wideCache[key] = out;
+    return out;
+  } catch (e) { return url; }
+}
+
+// ─── Overseas / export commercial offer (quotation) ───────────────────────────────────────────
+const OV_CURRENCIES = { INR: 'Indian Rupees', USD: 'US Dollars', EUR: 'Euros', GBP: 'Pounds Sterling', AED: 'UAE Dirhams', SAR: 'Saudi Riyals', QAR: 'Qatari Riyals', OMR: 'Omani Rials', KWD: 'Kuwaiti Dinars', BHD: 'Bahraini Dinars', SGD: 'Singapore Dollars', AUD: 'Australian Dollars', LKR: 'Sri Lankan Rupees' };
+const OV_DEFAULT_TERMS = [
+  ['Prices', 'In {CUR} per metre, on Ex-Works basis as per Incoterms 2020.'],
+  ['Offer validity', '7 days from the offer date. Thereafter, subject to our written re-confirmation.'],
+  ['Payment terms', '40% advance with the PO and balance 60% against Proforma Invoice before dispatch. All bank charges outside India are to the Buyer\'s account.'],
+  ['Delivery', 'Within 4–6 weeks from receipt of a technically and commercially clear PO, approved TDS/QAP, manufacturing clearance and advance payment, whichever is later. Part shipments allowed.'],
+  ['Quantity / drum length tolerance', '± 5% per item. Invoicing will be on the actual quantity supplied.'],
+  ['Packing', 'Export-worthy, seaworthy wooden / steel drums with ends sealed. Drum schedule will be shared on order confirmation. Drums are non-returnable.'],
+  ['Taxes & duties', 'Export supply is zero-rated in India. Import customs duty, VAT and any other levies at the destination are to the Buyer\'s account. Any other applicable taxes, duties or levies, if any, are not included in the quoted prices and shall be charged extra.'],
+  ['Inspection & testing', 'Routine and acceptance tests as per the relevant standard at the manufacturing works. Test certificates will be provided with each shipment. Third-party inspection, if required, will be at the Buyer\'s cost, including the cable consumed in testing. Fresh type tests are not included.'],
+  ['Documents', 'Commercial Invoice, Packing List, Bill of Lading / Airway Bill, Certificate of Origin, and Test Certificates. Legalization / attestation, if required, will be charged at actuals.'],
+  ['Technical approval', 'Supply will be against the Buyer-approved TDS/QAP. Approval is to be given within 2 weeks of the PO, failing which the delivery schedule and prices may be revised.'],
+  ['Warranty', '14 months from the date of dispatch against manufacturing defects only. Our liability is limited to repair or replacement of the defective length.'],
+  ['Liquidated damages', 'Not applicable.'],
+  ['Storage after readiness', 'If the Buyer does not lift the material within 15 days of readiness, storage and handling charges will apply at actuals.'],
+  ['Cancellation', 'Orders once accepted cannot be cancelled. Costs incurred up to the date of any cancellation shall be borne by the Buyer.'],
+  ['Limitation of liability', 'Our total liability shall not exceed the value of the order. Neither party is liable for indirect or consequential losses.'],
+  ['Force majeure', 'Neither party shall be liable for delay or failure due to events beyond its reasonable control. Time for performance will be extended accordingly.'],
+  ['Governing law & disputes', 'Governed by the laws of India. Disputes will first be settled amicably, failing which by arbitration at Chennai, India in English.'],
+];
+const OV_DEFAULT_PRICEVAR = 'Prices are firm only within the offer validity. Thereafter, or for orders where metal is not booked, prices are variable as per the prevailing LME Copper and Aluminium prices on the date of metal booking.\nMetal booking will be done on receipt of a technically and commercially clear PO, advance payment and the Buyer\'s written instruction.\nThe revised firm prices will be confirmed in writing and shall apply for the rest of the order.';
+const OV_DEFAULT_ENCL = 'Technical Data Sheets (TDS) for each cable item\nDrum schedule — on order confirmation';
+
+function ovInitDefaults(doc, bi) {
+  const cur = doc.ovCurrency || 'INR';
+  return {
+    overseas: true,
+    ovCurrency: cur,
+    ovUnit: doc.ovUnit || 'm',
+    ovRevision: doc.ovRevision || '',
+    ovValidUntil: doc.ovValidUntil || '',
+    ovKindAttn: doc.ovKindAttn || '',
+    ovSubject: doc.ovSubject || '',
+    ovReference: doc.ovReference || '',
+    ovIntro: doc.ovIntro || ('Thank you for your enquiry. We, ' + ((bi && bi.name) || 'our company') + ', are pleased to submit our offer for the supply of the items listed below, in accordance with the enclosed Technical Data Sheets and the commercial terms set out in this offer. We trust our offer meets your requirements and look forward to your valued order.'),
+    ovBasis: doc.ovBasis || ('Prices in ' + cur + ' per metre on Ex-Works basis (Incoterms 2020).'),
+    ovPriceVar: doc.ovPriceVar != null && doc.ovPriceVar !== '' ? doc.ovPriceVar : OV_DEFAULT_PRICEVAR,
+    ovTerms: (doc.ovTerms && doc.ovTerms.length) ? doc.ovTerms : OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', cur) })),
+    ovEnclosures: doc.ovEnclosures != null && doc.ovEnclosures !== '' ? doc.ovEnclosures : OV_DEFAULT_ENCL,
+    ovSignName: doc.ovSignName || (bi && bi.signatory) || '',
+    ovSignDesig: doc.ovSignDesig || 'MD',
+    ovSignContact: doc.ovSignContact || (bi && bi.phone) || '',
+  };
+}
+
+function numToWordsIntl(n) {
+  n = Math.floor(Math.abs(Number(n) || 0));
+  if (n === 0) return 'Zero';
+  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (x) => x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? '-' + a[x % 10] : '');
+  const three = (x) => (x >= 100 ? a[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' : '') : '') + (x % 100 ? two(x % 100) : '');
+  const parts = []; const sc = ['', ' Thousand', ' Million', ' Billion', ' Trillion'];
+  let i = 0;
+  while (n > 0) { const c = n % 1000; if (c) parts.unshift(three(c) + sc[i]); n = Math.floor(n / 1000); i++; }
+  return parts.join(' ');
+}
+
+const OV_CSS =
+  '.ov-page{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#111;line-height:1.4;}'
+  + '.ov-co{display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1.5px solid #1F3A7A;margin-bottom:8px;}'
+  + '.ov-co img{height:54px;object-fit:contain;}.ov-co .r{text-align:right;font-size:10px;color:#333;line-height:1.45;}.ov-co .r b{font-size:11.5px;color:#1F3A7A;}'
+  + '.ov-title{text-align:center;font-size:15.5px;font-weight:700;color:#1F3A7A;padding:5px 0 4px;border-top:1.5px solid #1F3A7A;border-bottom:1px solid #1F3A7A;margin-bottom:6px;letter-spacing:.3px;}'
+  + '.ov-refs{display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:6px;}.ov-refs>div+div{text-align:right;}'
+  + '.ov-h{font-size:11.5px;font-weight:700;color:#1F3A7A;border-bottom:1.5px solid #1F3A7A;padding-bottom:2px;margin:9px 0 5px;text-transform:uppercase;}'
+  + '.ov-note{font-style:italic;font-size:10px;margin-bottom:4px;}'
+  + '.ov-t{width:100%;border-collapse:collapse;table-layout:fixed;}'
+  + '.ov-t th{background:#1F3A7A;color:#fff;border:1px solid #1F3A7A;padding:3px 5px;font-size:10px;text-align:center;}'
+  + '.ov-t td{border:1px solid #444;padding:2.5px 5px;font-size:10px;vertical-align:top;}'
+  + '.ov-t td.c{text-align:center;}.ov-t td.r{text-align:right;white-space:nowrap;}.ov-t td.d{overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;}'
+  + '.ov-t tr.tq td{font-weight:700;}.ov-t tr.tv td{background:#DCE4F4;font-weight:700;}'
+  + '.ov-t td.k{font-weight:700;background:#F3F5FA;}'
+  + '.ov-p{font-size:10.5px;margin:0 0 3px;}.ov-sm{font-size:10px;margin:0 0 2px;}'
+  + '.ov-words{font-weight:700;font-size:10.5px;margin:6px 0;}'
+  + '.ov-ul{margin:3px 0 3px 18px;padding:0;font-size:10.5px;}.ov-sign{margin-top:6px;font-size:10.5px;}';
+
+function buildOverseasQuotePrint(o) {
+  const { doc, bi, party, withCompany } = o;
+  const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nl = (v) => esc(v).replace(/\n/g, '<br>');
+  const cur = doc.ovCurrency || 'INR';
+  const curName = OV_CURRENCIES[cur] || cur;
+  const money = (n, dp) => Number(n || 0).toLocaleString(cur === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const items = doc.items || [];
+  const unitOf = (it) => (it.unit && it.unit !== 'pcs') ? it.unit : (doc.ovUnit || 'm');
+  const amtOf = (it) => (Number(it.qty) || 0) * (Number(it.rate) || 0);
+  const total = items.reduce((s, it) => s + amtOf(it), 0);
+  const totQty = items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  const units = Array.from(new Set(items.map(unitOf)));
+  const blocks = [];
+  const B = (h) => blocks.push({ h, t: '' });
+  const fmtDate = (d) => { if (!d) return ''; const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '.' + m[2] + '.' + m[1] : d; };
+
+  if (withCompany) {
+    B('<div class="ov-co"><div>' + (bi.logo ? '<img src="' + bi.logo + '">' : '<b style="font-size:16px;color:#1F3A7A">' + esc(bi.name) + '</b>') + '</div><div class="r"><b>' + esc(bi.name) + '</b><br>' + nl(bi.address) + (bi.phone ? '<br>Phone: ' + esc(bi.phone) : '') + (bi.email ? '<br>Email: ' + esc(bi.email) : '') + '</div></div>');
+  }
+  B('<div class="ov-title">COMMERCIAL OFFER / QUOTATION</div>');
+  B('<div class="ov-refs"><div>Offer Ref.: ' + esc(doc.number || '') + (doc.ovRevision ? '<br>Revision: ' + esc(doc.ovRevision) : '') + '</div><div>Date: ' + esc(fmtDate(doc.date)) + (doc.ovValidUntil ? '<br>Valid until: ' + esc(fmtDate(doc.ovValidUntil)) : '') + '</div></div>');
+  B('<div class="ov-p">To,<br><b>' + (party ? esc(party.name) : '—') + '</b>' + (party && party.address ? '<br>' + nl(party.address) : '') + '</div>');
+  if (doc.ovKindAttn) B('<div class="ov-p"><b>Kind Attention: ' + esc(doc.ovKindAttn) + '</b></div>');
+  if (doc.ovSubject) B('<div class="ov-p"><b>Subject: ' + esc(doc.ovSubject) + '</b></div>');
+  if (doc.ovReference) B('<div class="ov-p">Reference: ' + esc(doc.ovReference) + '</div>');
+  B('<div class="ov-p" style="margin-top:8px">Dear Sir/Madam,</div>');
+  if (doc.ovIntro) B('<div class="ov-p">' + nl(doc.ovIntro) + '</div>');
+
+  B('<div class="ov-h">1. Price Schedule</div>');
+  if (doc.ovBasis) B('<div class="ov-note">' + esc(doc.ovBasis) + '</div>');
+  const cols = [{ w: 7, l: 'S. No.' }, { w: -1, l: 'Description of Goods' }, { w: 10, l: 'Qty' }, { w: 7, l: 'Unit' }, { w: 15, l: 'Unit Rate<br>(' + esc(cur) + ')' }, { w: 17, l: 'Amount<br>(' + esc(cur) + ')' }];
+  const fixed = cols.filter(c => c.w > 0).reduce((a, c) => a + c.w, 0);
+  const o1 = '<table class="ov-t"><colgroup>' + cols.map(c => '<col style="width:' + (c.w < 0 ? 100 - fixed : c.w) + '%">').join('') + '</colgroup>';
+  const th1 = '<thead><tr>' + cols.map(c => '<th>' + c.l + '</th>').join('') + '</tr></thead>';
+  items.forEach((it, i) => {
+    blocks.push({ t: 'trow', id: 1, o: o1, th: th1, h: '<tr><td class="c">' + (i + 1) + '</td><td class="d">' + nl(it.name || '') + '</td><td class="c">' + money(it.qty, (Number(it.qty) % 1) ? 2 : 0) + '</td><td class="c">' + esc(unitOf(it)) + '</td><td class="r">' + money(it.rate, 4) + '</td><td class="r">' + money(amtOf(it), 2) + '</td></tr>' });
+  });
+  blocks.push({ t: 'trow', id: 1, o: o1, th: th1, h: '<tr class="tq"><td colspan="2" style="text-align:right">Total Quantity</td><td class="c">' + money(totQty, totQty % 1 ? 2 : 0) + '</td><td class="c">' + (units.length === 1 ? esc(units[0]) : '') + '</td><td></td><td></td></tr><tr class="tv"><td colspan="5" style="text-align:right">TOTAL OFFER VALUE (' + esc(cur) + ')</td><td class="r">' + money(total, 2) + '</td></tr>' });
+  const whole = Math.floor(total + 1e-9), cents = Math.round((total - whole) * 100);
+  B('<div class="ov-words">Amount in words: ' + esc(curName) + ' ' + esc(cur === 'INR' ? numToWords(whole) : numToWordsIntl(whole)) + (cents ? ' and ' + esc(numToWordsIntl(cents)) + (cur === 'INR' ? ' Paise' : ' Cents') : '') + ' Only</div>');
+
+  if (doc.ovPriceVar) {
+    B('<div class="ov-h">2. Price Variation</div>');
+    String(doc.ovPriceVar).split('\n').filter(l => l.trim()).forEach(l => B('<div class="ov-p">' + esc(l.trim()) + '</div>'));
+  }
+  const terms = (doc.ovTerms || []).filter(t => (t.k || t.v));
+  if (terms.length) {
+    B('<div class="ov-h">3. Commercial Terms &amp; Conditions</div>');
+    const o2 = '<table class="ov-t"><colgroup><col style="width:6%"><col style="width:23%"><col style="width:71%"></colgroup>';
+    terms.forEach((t, i) => blocks.push({ t: 'trow', id: 2, o: o2, th: '', h: '<tr><td class="c">' + (i + 1) + '</td><td class="k">' + esc(t.k) + '</td><td class="d">' + esc(t.v) + '</td></tr>' }));
+  }
+  const encl = String(doc.ovEnclosures || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (encl.length) B('<div><div class="ov-h">4. Enclosures</div><ul class="ov-ul">' + encl.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>');
+  // signature block: mobile number only — any e-mail address is stripped from the contact line
+  const _sigContact = String(doc.ovSignContact || '').split('|').map(x => x.trim()).filter(x => x && x.indexOf('@') < 0).join(' | ').replace(/^(mob(ile)?\.?\s*:?\s*)/i, '');
+  const sealOn = (bi.seal || bi.signature) && bi.printSeal !== false;
+  const sealHtml = sealOn ? '<div style="height:54px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:52px;max-width:80px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:38px;max-width:100px;object-fit:contain">' : '') + '</div>' : '<div style="height:34px"></div>';
+  B('<div class="ov-sign"><div class="ov-p">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + '<div style="font-weight:700">Authorized Signatory</div>' + (doc.ovSignName ? '<div>' + esc(doc.ovSignName) + '</div>' : '') + '<div>' + esc(doc.ovSignDesig || 'MD') + '</div>' + (_sigContact ? '<div>Mob: ' + esc(_sigContact) + '</div>' : '') + '</div>');
+
+  return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:3mm 14mm 0 !important;font-size:10.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
+    pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
+}
+
+// Screen preview of the offer (same blocks as the print, assembled into one page)
+function ovBlocksToHtml(r) {
+  let html = '', cur = null, buf = '';
+  const flush = () => { if (cur) { html += cur.o + (cur.th || '') + '<tbody>' + buf + '</tbody></table>'; cur = null; buf = ''; } };
+  r.blocks.forEach(b => {
+    if (b.t === 'trow') { if (cur && cur.id !== b.id) flush(); if (!cur) cur = b; buf += b.h; }
+    else { flush(); html += b.h; }
+  });
+  flush();
+  return html;
+}
+
+function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
+  const upd = (k, v) => setDoc((d) => ({ ...d, [k]: v }));
+  const ro = isEditable ? {} : styles.inputReadOnly;
+  const lbl = { ...styles.label, fontSize: 11.5 };
+  const f = (k, label, ph, type) => (
+    <div style={{ ...styles.formGroup, flex: 1 }}>
+      <label style={lbl}>{label}</label>
+      <input type={type || 'text'} value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} placeholder={ph || ''} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
+    </div>
+  );
+  const ta = (k, label, rows) => (
+    <div style={styles.formGroup}>
+      <label style={lbl}>{label}</label>
+      <textarea value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} style={{ ...styles.input, minHeight: rows || 60, resize: 'vertical', ...ro }} readOnly={!isEditable} />
+    </div>
+  );
+  const terms = doc.ovTerms || [];
+  const setTerm = (i, k, v) => upd('ovTerms', terms.map((t, j) => j === i ? { ...t, [k]: v } : t));
+  return (
+    <div style={{ border: '1px solid #C9D6F0', background: '#F5F8FE', borderRadius: 10, padding: '12px 12px 4px', marginBottom: 14 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13, color: '#1F3A7A', marginBottom: 8, cursor: isEditable ? 'pointer' : 'default' }}>
+        <input type="checkbox" checked={!!doc.overseas} disabled={!isEditable}
+          onChange={(e) => {
+            if (e.target.checked) setDoc((d) => ({ ...d, ...ovInitDefaults(d, businessInfo), items: (d.items || []).map(it => ({ ...it, gst: 0 })) }));
+            else upd('overseas', false);
+          }} />
+        🌍 Overseas / Export quotation (Commercial Offer format)
+      </label>
+      {doc.overseas && (<>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ ...styles.formGroup, flex: 1 }}>
+            <label style={lbl}>Currency</label>
+            <select value={doc.ovCurrency || 'INR'} onChange={(e) => {
+              const nc = e.target.value, oc = doc.ovCurrency || 'INR';
+              setDoc((d) => ({ ...d, ovCurrency: nc,
+                ovBasis: (d.ovBasis || '').split(oc).join(nc),
+                ovTerms: (d.ovTerms || []).map((t, i) => i === 0 ? { ...t, v: (t.v || '').split(oc).join(nc) } : t) }));
+            }} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+              {Object.keys(OV_CURRENCIES).map(c => <option key={c} value={c}>{c} — {OV_CURRENCIES[c]}</option>)}
+            </select>
+          </div>
+          {f('ovUnit', 'Default unit', 'm')}
+        </div>
+        {(doc.ovCurrency || 'INR') !== 'INR' && (() => {
+          const cur = doc.ovCurrency || 'INR';
+          const fx = parseFloat(doc.ovFx) || 0;
+          const converted = (doc.items || []).some(it => it.baseRate != null);
+          return (
+            <div style={{ background: '#fff', border: '1px dashed #9FB4E0', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1F3A7A', marginBottom: 6 }}>💱 Convert existing INR rates → {cur}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
+                1 {cur} =
+                <input type="number" step="0.0001" value={doc.ovFx || ''} onChange={(e) => upd('ovFx', e.target.value)} placeholder="e.g. 88.50" readOnly={!isEditable} style={{ ...styles.input, width: 110, padding: '4px 8px' }} />
+                INR
+              </div>
+              {isEditable && (<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" disabled={!fx} onClick={() => setDoc((d) => ({ ...d, items: (d.items || []).map(it => { const base = it.baseRate != null ? Number(it.baseRate) : (Number(it.rate) || 0); return { ...it, baseRate: base, rate: Math.round((base / fx) * 10000) / 10000 }; }) }))}
+                  style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '4px 10px', opacity: fx ? 1 : 0.5 }}>Convert all rates to {cur}</button>
+                {converted && <button type="button" onClick={() => setDoc((d) => ({ ...d, items: (d.items || []).map(it => { if (it.baseRate == null) return it; const { baseRate, ...rest } = it; return { ...rest, rate: baseRate }; }) }))}
+                  style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>↩ Restore original INR rates</button>}
+              </div>)}
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 5 }}>{converted ? 'Original INR rates are saved — "Restore" brings them back. Changing the rate above and pressing Convert again re-calculates from the originals.' : 'Enter today\'s rate and press Convert — the INR rates are kept safely so nothing is lost.'}</div>
+            </div>
+          );
+        })()}
+        <div style={{ display: 'flex', gap: 10 }}>{f('ovRevision', 'Revision', 'Rev. 1')}{f('ovValidUntil', 'Valid until', '', 'date')}</div>
+        {f('ovKindAttn', 'Kind Attention', 'Mr. …')}
+        {f('ovSubject', 'Subject', 'Offer for supply of …')}
+        {f('ovReference', 'Reference', 'Your enquiry dated …')}
+        {ta('ovIntro', 'Introduction paragraph', 80)}
+        {f('ovBasis', 'Price basis note (under "Price Schedule")')}
+        {ta('ovPriceVar', 'Price variation clause (one paragraph per line)', 90)}
+        <div style={styles.formGroup}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <label style={{ ...lbl, marginBottom: 0 }}>Commercial terms &amp; conditions <span style={{ background: '#E1E8F7', borderRadius: 10, padding: '1px 8px', fontSize: 11 }}>{terms.length}</span></label>
+            {isEditable && (<div style={{ display: 'flex', gap: 6 }}>
+              <button type="button" onClick={() => upd('ovTerms', [...terms, { k: '', v: '' }])} style={{ ...styles.primaryBtn, fontSize: 11.5, padding: '4px 10px' }}><Plus size={12} /> Add term</button>
+              <button type="button" onClick={() => { if (window.confirm('Reset all terms to the standard list?')) upd('ovTerms', OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', doc.ovCurrency || 'INR') }))); }} style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>Reset</button>
+            </div>)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+            {terms.map((t, i) => (
+              <div key={i} style={{ background: '#fff', border: '1px solid #E3E8F4', borderRadius: 6, padding: 6 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: '#999', minWidth: 16 }}>{i + 1}</span>
+                  <input value={t.k} onChange={(e) => setTerm(i, 'k', e.target.value)} placeholder="Heading" readOnly={!isEditable} style={{ ...styles.input, padding: '4px 8px', fontSize: 12, fontWeight: 600, flex: 1 }} />
+                  {isEditable && <button type="button" onClick={() => upd('ovTerms', terms.filter((_, j) => j !== i))} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>}
+                </div>
+                <textarea value={t.v} onChange={(e) => setTerm(i, 'v', e.target.value)} placeholder="Term text" readOnly={!isEditable} style={{ ...styles.input, minHeight: 48, resize: 'vertical', fontSize: 12, padding: '4px 8px' }} />
+              </div>
+            ))}
+          </div>
+        </div>
+        {ta('ovEnclosures', 'Enclosures (one per line)', 60)}
+        <div style={{ display: 'flex', gap: 10 }}>{f('ovSignName', 'Signatory name (optional)')}{f('ovSignDesig', 'Designation', 'MD')}</div>
+        {f('ovSignContact', 'Mobile number', '+91 …')}
+      </>)}
+    </div>
+  );
+}
+
+// Generic letterhead-aware paginator: clones a rendered .print-area, splits the items
+// table row-by-row, and prints real A4 sheets each carrying the header + footer. Works
+// around Chromium multi-page bugs (thead no-repeat, position:fixed clipping).
+async function printPaginated(sel, bi, pre, gen) {
+  try {
+    if (!bi || typeof bi !== 'object') bi = (typeof window !== 'undefined' && window.__operixBI) || {};
+    const _qa = typeof sel === 'string' ? document.querySelectorAll(sel) : null;
+    const src = _qa ? _qa[_qa.length - 1] : sel;
+    const _logoMode = ((!pre && gen) || (pre && pre.letter)) && bi && bi.printHeader === 'logo';
+    // Landscape: honour the @page size of the view being printed (or pre.landscape).
+    let LS = !!(pre && pre.landscape);
+    if (gen) { try { const _m = Array.from(document.querySelectorAll('style')).map(x => x.textContent || '').join('\n').match(/size:\s*A4\s*(landscape|portrait)/gi); if (_m && _m.length) LS = /landscape/i.test(_m[_m.length - 1]); } catch (e) {} }
+    let lhHdrUrl = bi && bi.letterhead && !_logoMode ? bi.letterhead : '';
+    let lhFtrUrl = bi && bi.letterheadFooter && !_logoMode ? bi.letterheadFooter : '';
+    const SW = LS ? 297 : 210, SH = LS ? 209 : 296;
+    if (!pre && !gen && (!src || (!lhHdrUrl && !lhFtrUrl))) { window.print(); return; }
+    if (!pre && gen && !src) { window.print(); return; }
+
+    // Measure letterhead natural heights (mm at full A4 width), capped. Falls back to
+    // loading the image off-screen when the page doesn't already contain it.
+    const mmOf = async (imgSel, url, cap, fb, W) => {
+      W = W || 210;
+      const im = (src && imgSel) ? src.querySelector(imgSel) : null;
+      if (im && im.naturalWidth) return Math.min(Math.ceil(W * im.naturalHeight / im.naturalWidth), cap);
+      try {
+        const pm = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; setTimeout(() => res(null), 3000); });
+        if (pm && pm.naturalWidth) return Math.min(Math.ceil(W * pm.naturalHeight / pm.naturalWidth), cap);
+      } catch (e) {}
+      return fb;
+    };
+    const noLH = !lhHdrUrl && !lhFtrUrl;
+    const _hdrBandMm = lhHdrUrl ? await mmOf('.lh-pad-header img', lhHdrUrl, LS ? 56 : 60, LS ? 40 : 55, 210) : 0;
+    const _ftrBandMm = lhFtrUrl ? await mmOf('.lh-pad-footer img', lhFtrUrl, LS ? 36 : 46, LS ? 28 : 40, 210) : 0;
+    if (LS) { // same source, widened for landscape (no distortion)
+      if (lhHdrUrl) lhHdrUrl = await fitLetterheadWide(lhHdrUrl, 297 / 210);
+      if (lhFtrUrl) lhFtrUrl = await fitLetterheadWide(lhFtrUrl, 297 / 210);
+    }
+    const WM = (pre && pre.watermark) || (gen && src && src.querySelector('.draft-watermark') ? 'DRAFT' : '');
+    const HDRMM = lhHdrUrl ? _hdrBandMm : ((pre || gen) ? 8 : 0);
+    const FTRMM = lhFtrUrl ? _ftrBandMm : ((pre || gen) ? 12 : 0);
+
+    let blocks = [], theadHTML = '', tblOpen = '';
+    if (pre) { blocks = pre.blocks; theadHTML = pre.thead; tblOpen = pre.tblOpen; } else if (gen) {
+      // Generic mode: any on-screen print view → framed sheets. Every data table is split row-by-row
+      // with its own header repeated on each page; other content flows block by block.
+      src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
+      src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
+      src.querySelectorAll('select').forEach(s2 => { try { Array.from(s2.options).forEach(o => o.removeAttribute('selected')); if (s2.selectedIndex >= 0) s2.options[s2.selectedIndex].setAttribute('selected', 'selected'); } catch (e) {} });
+      const clone = src.cloneNode(true);
+      clone.querySelectorAll('.no-print, .di-screen, .di-screen-row, .lh-pad-header, .lh-pad-footer, .vph').forEach(n => n.remove());
+      clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
+      clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
+      clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
+      // Seal & signature: drop them above the "Authorised Signatory" line (and equalise the other party's gap),
+      // or append a signature block when the view has none. Switched by Settings + the per-print toggle.
+      let _needSealAppend = false, _sealImgs = '';
+      const _sealOn = !!(bi && (bi.seal || bi.signature) && bi.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false));
+      if (_sealOn) {
+        _sealImgs = '<div class="zseal" style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>';
+        const _re = /authori[sz]ed\s*(signator|sign)/i;
+        const _cands = Array.from(clone.querySelectorAll('div,td,th,p,span,b,strong,label')).filter(el => _re.test(el.textContent || '') && !Array.from(el.children).some(ch => _re.test(ch.textContent || '')));
+        if (_cands.length) {
+          _cands.forEach(el => {
+            const hold = document.createElement('div'); hold.innerHTML = _sealImgs; const node = hold.firstElementChild;
+            const prev = el.previousElementSibling;
+            const _mb = parseFloat(el.style && el.style.marginBottom) || 0;
+            if (prev && !(prev.textContent || '').trim() && !prev.querySelector('img')) prev.replaceWith(node);
+            else if (_mb >= 20 && el.parentNode) { el.style.marginBottom = '2px'; el.parentNode.insertBefore(node, el.nextSibling); } // label, gap, line  →  label, seal, line
+            else if (el.parentNode) el.parentNode.insertBefore(node, el);
+            const box = el.parentElement, cont = box && box.parentElement;
+            if (cont) {
+              if (cont.style.display === 'flex') cont.style.alignItems = 'flex-end';
+              else if (cont.style.display === 'grid') cont.style.alignItems = 'end';
+              Array.from(cont.children).filter(b => b !== box).forEach(b => { const f = b.firstElementChild; if (f && !(f.textContent || '').trim() && !f.querySelector('img')) f.style.height = '66px'; });
+            }
+          });
+        } else if (!(gen && gen.sealAppend === false)) _needSealAppend = true;
+      }
+      const _headTxt = (clone.textContent || '').replace(/\s+/g, ' ').slice(0, 500);
+      if (noLH && bi && !(bi.name && _headTxt.includes(bi.name))) {
+        const e2 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        blocks.push({ t: '', h: '<div class="zco">' + (bi.logo ? '<img src="' + bi.logo + '">' : '') + '<div><div class="zconame">' + e2(bi.name) + '</div><div class="zcosm">' + e2(bi.address) + '</div><div class="zcosm">' + (bi.gstin ? 'GSTIN: ' + e2(bi.gstin) : '') + (bi.phone ? ' · ' + e2(bi.phone) : '') + (bi.email ? ' · ' + e2(bi.email) : '') + '</div></div></div>' });
+      }
+      let tid = 0;
+      const walkG = (el) => {
+        if (el.tagName === 'TABLE') {
+          tid++;
+          const isData = !!el.querySelector('th');
+          const thead = el.querySelector('thead');
+          const head = thead ? thead.outerHTML : '';
+          const trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
+          const trs2 = trs.length ? trs : Array.from(el.querySelectorAll(':scope > tr'));
+          const cls = (isData ? 'gdata ' : 'gplain ') + (el.className || '');
+          const open = '<table class="' + cls + '" style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+          let i = 0;
+          while (i < trs2.length) {
+            let span = 1;
+            trs2[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+            blocks.push({ h: trs2.slice(i, i + span).map(r => r.outerHTML).join(''), t: 'trow', id: tid, o: open, th: head });
+            i += span;
+          }
+        } else if (el.querySelector && el.querySelector('table') && el.children.length && el.style.display !== 'flex' && el.style.display !== 'grid') {
+          Array.from(el.children).forEach(walkG);
+        } else {
+          blocks.push({ h: el.outerHTML, t: '' });
+        }
+      };
+      Array.from(clone.children).forEach(walkG);
+      if (_needSealAppend) {
+        const _e3 = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        blocks.push({ t: '', h: '<div style="display:flex;justify-content:flex-end;margin-top:18px"><div style="text-align:center;min-width:60mm">' + _sealImgs + '<div style="border-top:1px solid #333;padding-top:4px;font-size:11px;color:#444">For ' + _e3(bi.name) + '<br/>' + _e3(bi.signatory || 'Authorised Signatory') + '</div></div></div>' });
+      }
+    } else {
+    // Persist live form values into attributes so the clone keeps them (cloneNode drops them).
+    src.querySelectorAll('input').forEach(i => { try { i.setAttribute('value', i.value); } catch (e) {} });
+    src.querySelectorAll('textarea').forEach(t => { try { t.textContent = t.value; } catch (e) {} });
+    src.querySelectorAll('select').forEach(sel => { try { Array.from(sel.options).forEach(o => o.removeAttribute('selected')); if (sel.selectedIndex >= 0) sel.options[sel.selectedIndex].setAttribute('selected', 'selected'); } catch (e) {} });
+    // Clone + resolve print visibility (show di-print, drop screen-only bits + letterhead nodes).
+    const clone = src.cloneNode(true);
+    clone.querySelectorAll('.no-print, .di-screen, .di-screen-row').forEach(n => n.remove());
+    clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; const td = n.closest('td'); if (td) td.classList.add('tdwrap'); });
+    clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
+    clone.querySelectorAll('.lh-pad-header, .lh-pad-footer').forEach(n => n.remove());
+
+    // Fixed, sensible column widths (by header label) so numbers never collapse/wrap and
+    // the description column takes the remaining space. table-layout:fixed keeps pages aligned.
+    let colHTML = '';
+    const headThs = Array.from(clone.querySelectorAll('.doc-items-table thead tr:last-child > *'));
+    if (headThs.length) {
+      const widthFor = (lbl) => {
+        if (/DESCRIP|PARTICULAR|ITEM|PRODUCT|GOODS|NAME/.test(lbl)) return -1; // flexible
+        if (/^\s*(SL|#|S\.?\s*NO|SR|SI)\s*$/.test(lbl)) return 5;
+        if (/HSN|SAC/.test(lbl)) return 11;
+        if (/QTY|QUANT|NOS|UNIT\b/.test(lbl)) return 7;
+        if (/RATE|PRICE/.test(lbl)) return 13;
+        if (/GST|TAX|CGST|SGST|IGST|VAT/.test(lbl)) return 8;
+        if (/AMOUNT|TOTAL|VALUE/.test(lbl)) return 16;
+        if (/DIMENSION|SIZE/.test(lbl)) return 11;
+        return 9;
+      };
+      const ws = headThs.map(th => widthFor((th.textContent || '').trim().toUpperCase()));
+      const fixedSum = ws.filter(w => w > 0).reduce((a, b) => a + b, 0);
+      const flexN = ws.filter(w => w < 0).length || 1;
+      const flexW = Math.max(16, (100 - fixedSum) / flexN);
+      colHTML = '<colgroup>' + ws.map(w => '<col style="width:' + (w < 0 ? flexW : w).toFixed(2) + '%">').join('') + '</colgroup>';
+    }
+
+    // Build an ordered block list; item-table rows are flowed into ONE table per page
+    // (the paginator re-creates the table + its thead on each page) so columns always align.
+    tblOpen = '<table class="doc-items-table ditbl" style="width:100%;border-collapse:collapse;table-layout:fixed;">' + colHTML;
+    const walk = (el) => {
+      if (el.classList && el.classList.contains('doc-items-table')) {
+        const thead = el.querySelector('thead');
+        theadHTML = thead ? ('<thead>' + thead.innerHTML + '</thead>') : '';
+        const trs = Array.from(el.querySelectorAll('tbody > tr'));
+        let i = 0;
+        while (i < trs.length) {
+          // keep rowSpan groups together so a grouped item never splits across pages
+          let span = 1;
+          trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+          blocks.push({ h: trs.slice(i, i + span).map(r => r.outerHTML).join(''), t: 'trow' });
+          i += span;
+        }
+      } else {
+        blocks.push({ h: el.outerHTML, t: '' });
+      }
+    };
+    Array.from(clone.children).forEach(walk);
+    }
+
+    const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
+    const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
+
+    const script = '(function(){'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];var PGF=typeof PGFT==="string"?PGFT:"";var WMT=typeof WM==="string"?WM:"";'
+      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);if(WMT){var w=document.createElement("div");w.className="wm";w.textContent=WMT;s.appendChild(w);}out.appendChild(s);bd=b;curBody=null;}'
+      + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
+      + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
+      + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
+      + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
+      + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
+      + 'np();var LASTROW=-1,TH=0;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
+      + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
+      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
+      + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
+      + 'var mv=false;if(fits()&&i===LASTROW&&TH>0&&used()+TH>bd.clientHeight){var rh=curBody.lastChild.offsetHeight;mv=(bd.clientHeight-(used()-rh))<140;}if(!fits()||mv){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",B.h);} }'
+      + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;placeNode(node);}'
+      + '}'
+      + 'if(TAIL.length){var tw=document.createElement("div");tw.style.display="flow-root";tw.innerHTML=TAIL.join("");bd.appendChild(tw);'
+      + 'if(!fits()){bd.removeChild(tw);np();bd.appendChild(tw);var fp=bd.clientHeight-(tw.offsetTop+tw.offsetHeight)-3;if(fp>0&&bd.children.length>1)tw.style.marginTop=fp+"px";}'
+      + 'else if(curBody){var tH=tw.offsetHeight;bd.removeChild(tw);var lastEl=bd.lastElementChild;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;'
+      + 'if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}'
+      + 'bd.appendChild(tw);} }'
+      + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
+      + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
+      + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
+      + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
+      + '})();';
+
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Print</title><style>'
+      + '@page{size:' + (LS ? 'A4 landscape' : 'A4') + ';margin:0;}html,body{margin:0;padding:0;}'
+      + 'body{font-family:Georgia,"Times New Roman",serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+      + '.sheet{position:relative;width:' + SW + 'mm;height:' + SH + 'mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
+      + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
+      + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
+      + '.pgf{position:absolute;left:0;right:0;bottom:' + (FTRMM + 1) + 'mm;text-align:center;font-size:9px;color:#666;font-family:Arial,sans-serif;}'
+      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + ((pre && pre.pgf) ? 6 : 0)) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:120px;font-weight:900;letter-spacing:12px;color:rgba(185,28,28,0.10);white-space:nowrap;pointer-events:none;z-index:5;font-family:Arial,sans-serif;}'
+      + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
+      + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+      + '.doc-items-table tbody td{border:1px solid #000;padding:6px 7px;font-size:11px;color:#000;vertical-align:top;white-space:nowrap;overflow:hidden;}'
+      + '.doc-items-table td.tdwrap{white-space:normal;overflow-wrap:break-word;word-break:break-word;}'
+      + '.doc-items-table td.tdwrap *{white-space:normal !important;max-width:100%;}'
+      + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
+      + ((pre || gen) ? zohoThemeCss(bi && bi.template) + ZOHO_PRINT_CSS : '')
+      + (gen ? ZOHO_GEN_CSS : '')
+      + (pre && pre.css ? pre.css : '')
+      + '</style></head><body>'
+      + '<div id="out"></div>'
+      + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
+      + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify((pre && pre.pgf) || '') + ';' + script + '</scr' + 'ipt>'
+      + '</body></html>';
+
+    const ifr = document.createElement('iframe');
+    ifr.setAttribute('aria-hidden', 'true');
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document;
+    d.open(); d.write(html); d.close();
+    setTimeout(() => { try { if (ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) {} }, 60000);
+  } catch (e) { console.error('printPaginated failed', e); window.print(); }
 }
 
 function parseOCRText(text) {
@@ -405,7 +1495,7 @@ const styles = {
   app: { display: 'flex', minHeight: '100vh', background: '#F3F7F2', color: '#3A3F4B', fontSize: 14 },
   sidebar: { width: 220, background: '#234F3A', color: '#DCEAE0', display: 'flex', flexDirection: 'column', padding: '24px 14px', gap: 4, position: 'sticky', top: 0, height: '100vh', overflowY: 'auto' },
   brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px', marginBottom: 24 },
-  brandMark: { width: 34, height: 34, borderRadius: 8, background: '#C9A24B', color: '#1E2A4A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
+  brandMark: { width: 34, height: 34, borderRadius: 8, background: '#3D7A5C', color: '#C9A24B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontFamily: 'Lora, serif', fontSize: 18 },
   brandName: { fontSize: 17, fontWeight: 600, color: '#FFFFFF' },
   brandSub: { fontSize: 11, color: '#9FBCAC', letterSpacing: '0.04em' },
   navGroup: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 4 },
@@ -455,7 +1545,7 @@ const styles = {
   secondaryBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#F5F3EE', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 16px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   ghostBtn: { display: 'flex', alignItems: 'center', gap: 6, background: '#fff', color: '#1E2A4A', border: '1px solid #DDD8CC', borderRadius: 8, padding: '9px 14px', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' },
   iconBtn: { background: 'none', border: 'none', padding: 6, borderRadius: 6, display: 'flex', alignItems: 'center', cursor: 'pointer' },
-  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13, position: 'relative', overflow: 'visible' },
+  preview: { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '40px 48px', boxShadow: '0 2px 12px rgba(30,42,74,0.07)', minHeight: 680, fontSize: 13, position: 'relative', overflow: 'hidden' },
   previewHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   previewBrand: { fontSize: 19, fontWeight: 600, color: '#1E2A4A' },
   previewSmall: { fontSize: 12, color: '#888780', marginTop: 2, lineHeight: 1.5 },
@@ -531,7 +1621,7 @@ function sendNotificationEmail(businessInfo, type, vars = {}) {
   } else { doSend(); }
   function doSend() {
     const params = {
-      company_name: businessInfo.name || 'Operix',
+      company_name: businessInfo.name || 'Oryqen',
       doc_ref: vars.docRef || '',
       party: vars.party || '',
       submitter: vars.submitter || '',
@@ -804,7 +1894,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontWeight: 700, fontFamily: 'Georgia, serif', fontSize: 24, color: '#1E2A4A',
             }}>O</div>
-            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 24, color: '#fff', letterSpacing: '-0.3px' }}>Operix</div>
+            <div style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 24, color: '#fff', letterSpacing: '-0.3px' }}>Oryqen</div>
           </div>
           <div style={{ fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 700, color: '#fff', marginBottom: 10, lineHeight: 1.2 }}>
             What does your business do?
@@ -924,7 +2014,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
           }}
         >
           {selected.length && companyName.trim()
-            ? `Enter Operix →`
+            ? `Enter Oryqen →`
             : selected.length ? 'Enter your company name to continue' : 'Select an activity to continue'}
         </button>
 
@@ -961,7 +2051,7 @@ function ActivityHomeScreen({ activeTypes, businessInfo, onEnter }) {
       <div style={{ textAlign: 'center', marginBottom: 44 }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div style={{ width: 44, height: 44, borderRadius: 13, background: '#C9A24B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#1E2A4A' }}>O</div>
-          <div style={{ fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#fff' }}>Operix</div>
+          <div style={{ fontFamily: 'Georgia,serif', fontWeight: 700, fontSize: 22, color: '#fff' }}>Oryqen</div>
         </div>
         {businessInfo?.name && (
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 10 }}>{businessInfo.name}</div>
@@ -1059,8 +2149,15 @@ function TrialBanner({ daysLeft, onUpgrade }) {
 }
 
 // ─── Paywall Screen ───────────────────────────────────────────────────────────
-function PaywallScreen({ businessInfo, onLogout, isStaff }) {
+const PLAN_PRICES = { trading: 1000, manufacturing: 20000, service: 15000, fmamc: 15000, all: 25000 };
+const PLAN_LABELS = { trading: 'Trading', manufacturing: 'Manufacturing', service: 'MEP / Service', fmamc: 'FM / AMC', all: 'All Modules' };
+function PaywallScreen({ businessInfo, onLogout, isStaff, activeTypes = [] }) {
   const [showContact, setShowContact] = React.useState(false);
+  const _types = (activeTypes && activeTypes.length) ? activeTypes : (businessInfo?.types || []);
+  const _isAll = _types.length > 1;
+  const _planKey = _isAll ? 'all' : (_types[0] || 'all');
+  const _price = _isAll ? PLAN_PRICES.all : (PLAN_PRICES[_planKey] || PLAN_PRICES.all);
+  const _planName = _isAll ? 'All Modules' : (PLAN_LABELS[_planKey] || 'All Modules');
 
   const panelStyle = {
     width: '100%', maxWidth: 480, background: '#FAF8F4', borderRadius: 20,
@@ -1088,18 +2185,18 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
           <>
             <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#1E2A4A', marginBottom: 10 }}>Your free trial has ended</div>
             <div style={{ fontSize: 14, color: '#666', lineHeight: 1.6, marginBottom: 28 }}>
-              Subscribe to keep your data and continue using Operix.
+              Subscribe to keep your data and continue using Oryqen.
             </div>
 
             {/* Plan card */}
             <div style={{ background: '#1E2A4A', borderRadius: 14, padding: '24px 28px', marginBottom: 24, textAlign: 'left' }}>
-              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Operix Pro</div>
+              <div style={{ color: '#C9A24B', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 }}>Oryqen — {_planName}</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, marginBottom: 16 }}>
-                <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹999</span>
+                <span style={{ color: '#fff', fontSize: 38, fontWeight: 700, fontFamily: 'Georgia, serif' }}>₹{_price.toLocaleString('en-IN')}</span>
                 <span style={{ color: '#9BABB8', fontSize: 13, marginBottom: 8 }}>/month</span>
               </div>
               {[
-                'All modules — Trading, Manufacturing, Services',
+                (_isAll ? 'All modules — Trading, Manufacturing, MEP & FM' : _planName + ' module — full access'),
                 'Unlimited documents & storage',
                 'Staff accounts & role management',
                 'Letterpad printing & contracts',
@@ -1111,18 +2208,28 @@ function PaywallScreen({ businessInfo, onLogout, isStaff }) {
               ))}
             </div>
 
+            {/* All plans reference */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20, textAlign: 'left' }}>
+              {[['trading','Trading'],['manufacturing','Manufacturing'],['service','MEP / Service'],['fmamc','FM / AMC'],['all','All Modules']].map(([k,l]) => (
+                <div key={k} style={{ background: k===_planKey?'#EEF2FF':'#F1EFE9', border: k===_planKey?'1px solid #C9A24B':'1px solid #EAE6DB', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
+                  <div style={{ color: '#666', fontWeight: 600 }}>{l}</div>
+                  <div style={{ color: '#1E2A4A', fontWeight: 700 }}>₹{PLAN_PRICES[k].toLocaleString('en-IN')}<span style={{ fontSize: 10, color: '#999', fontWeight: 400 }}>/mo</span></div>
+                </div>
+              ))}
+            </div>
+
             {/* Subscribe button — wire Razorpay here later */}
             <button
               onClick={() => setShowContact(true)}
               style={{ width: '100%', padding: '14px', background: '#C9A24B', color: '#1E2A4A', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}
             >
-              Subscribe — ₹999/month
+              Subscribe — ₹{_price.toLocaleString('en-IN')}/month
             </button>
 
             {showContact && (
               <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '14px 16px', marginBottom: 12, fontSize: 13, color: '#1E40AF', textAlign: 'left' }}>
                 📩 Payment gateway coming soon! To activate your subscription now, contact us at{' '}
-                <strong>support@operix.in</strong> with your business name and we'll activate manually.
+                <strong>support@oryqen.in</strong> with your business name and we'll activate manually.
               </div>
             )}
           </>
@@ -1232,7 +2339,7 @@ function AuthScreen() {
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" />
       <div style={styles.loginCard}>
         <div style={styles.brandMark}>O</div>
-        <div className="serif" style={styles.loginTitle}>Operix</div>
+        <div className="serif" style={styles.loginTitle}>Oryqen</div>
         <div style={styles.muted}>A complete business management platform.</div>
 
         {mode !== 'forgot' && (
@@ -1529,7 +2636,7 @@ function printAllCustomers(customers, businessInfo) {
   </thead>
   <tbody>${rows}</tbody>
 </table>
-<div class="footer">Operix · ${date}</div>
+<div class="footer">Oryqen · ${date}</div>
 </div></body></html>`;
   printHTML(html);
 }
@@ -1709,18 +2816,61 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 // ─── Items ─────────────────────────────────────────────────────
 
 const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+// 2-digit category code → first two digits of the 10-digit item code (CCTTNNNNNN)
+const ITEM_CATEGORY_CODES = {
+  'Raw Material': '01', 'Alloy / Metal': '02', 'Steel / Iron': '03', 'Packing Material': '04',
+  'Consumable': '05', 'Spare Part': '06', 'Finished Good': '07', 'Semi-Finished': '08',
+  'Trading Item': '09', 'Service': '10', 'Other': '99',
+};
+// Build a 10-digit item code: CC (category) + TT (material/type) + NNNNNN (running serial).
+// The material→2-digit map is kept in businessInfo.itemTypeCodes so codes stay stable and reusable.
+function makeItemCode({ category, materialType, currentId, items = [], businessInfo = {}, persistTypeCodes }) {
+  const catCode = ITEM_CATEGORY_CODES[category] || '99';
+  const tname = String(materialType || '').trim().toLowerCase();
+  let reg = { ...(businessInfo.itemTypeCodes || {}) };
+  let typeCode = '00';
+  if (tname) {
+    if (reg[tname]) typeCode = reg[tname];
+    else {
+      const used = new Set(Object.values(reg));
+      let n = 1; while (n < 100 && used.has(String(n).padStart(2, '0'))) n++;
+      typeCode = String(n).padStart(2, '0');
+      reg[tname] = typeCode;
+      if (persistTypeCodes) persistTypeCodes(reg);
+    }
+  }
+  const prefix = catCode + typeCode;
+  let mx = 0;
+  (items || []).forEach(it => {
+    const c = String(it.itemCode || '');
+    if (c.length === 10 && c.slice(0, 4) === prefix && it.id !== currentId) { const nn = parseInt(c.slice(4)) || 0; if (nn > mx) mx = nn; }
+  });
+  return prefix + String(mx + 1).padStart(6, '0');
+}
 
 function ItemsList({ items, setEditing, setItems, businessInfo }) {
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [catFilter, setCatFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [showPrint, setShowPrint] = useState(false);
   const filtered = items.filter(it => {
     const matchCat = !catFilter || it.category === catFilter;
     const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  const splitTax = cc.splitTax;
+  async function exportItemsXlsx() {
+    const head = ['Item Code', 'Name', 'Category', ...(splitTax ? ['HSN/SAC'] : []), 'Unit', 'Opening Stock', 'Min Stock', 'Purchase Rate', 'Sale Rate', ...(cc.hasTax ? [cc.taxLabel + ' %'] : [])];
+    const aoa = [head, ...filtered.map(it => [
+      it.itemCode || '', it.name || '', it.category || '', ...(splitTax ? [it.hsn || ''] : []),
+      it.unit || '', Number(it.openingStock) || 0, Number(it.minStock) || 0,
+      Number(it.purchaseRate ?? it.rate) || 0, Number(it.saleRate ?? it.rate) || 0, ...(cc.hasTax ? [Number(it.gst) || 0] : []),
+    ])];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Items'); XLSX.writeFile(wb, 'Item-Master.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'Item-Master.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
   function handleItemImport(e){
     const file = e.target.files && e.target.files[0]; if(!file) return;
     const rdr = new FileReader();
@@ -1785,6 +2935,8 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
         <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
         <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from a CSV file (save your Excel as CSV first)">⬆ Import CSV<input type="file" accept=".csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
+        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+        {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -1814,29 +2966,73 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
           </div>
         ))}
       </div>
+
+      {showPrint && (
+        <DocPrintOverlay onClose={() => setShowPrint(false)} filename="Item-Master.pdf" businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>ITEM MASTER</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}{catFilter ? ' · ' + catFilter : ''} · {new Date().toLocaleDateString('en-IN')}</div>
+          <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F1EFE9' }}>{['Code', 'Name', 'Category', ...(cc.splitTax ? ['HSN'] : []), 'Unit', 'Op.Stock', 'Buy', 'Sell', ...(cc.hasTax ? [cc.taxLabel + '%'] : [])].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: h === 'Name' || h === 'Category' ? 'left' : 'right', borderBottom: '1px solid #CCC', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {filtered.map(it => (
+                <tr key={it.id}>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontFamily: 'monospace' }}>{it.itemCode || ''}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{it.name}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE' }}>{it.category || ''}</td>
+                  {cc.splitTax && <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{it.hsn || ''}</td>}
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{it.unit || ''}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{Number(it.openingStock) || 0}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</td>
+                  <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{fmt(it.saleRate ?? it.rate ?? 0)}</td>
+                  {cc.hasTax && <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', textAlign: 'right' }}>{Number(it.gst) || 0}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DocPrintOverlay>
+      )}
     </div>
   );
 }
 
-function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
+function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
-  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', ...item });
+  const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', materialType: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  // Existing material/type names (for quick reuse via the datalist)
+  const knownTypes = [...new Set((items || []).map(it => (it.materialType || '').trim()).filter(Boolean))].sort();
+  function generateCode() {
+    if (!form.category) { alert('Please select a Category first — it sets the first two digits.'); return; }
+    const code = makeItemCode({
+      category: form.category, materialType: form.materialType, currentId: form.id,
+      items, businessInfo,
+      persistTypeCodes: setBusinessInfo ? (reg) => setBusinessInfo(prev => ({ ...prev, itemTypeCodes: reg })) : null,
+    });
+    set('itemCode', code);
+  }
   return (
     <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
       {/* Item code + category */}
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
-          <label style={styles.label}>Item Code</label>
-          <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={styles.input} placeholder="e.g. RM-001, ST-002" />
+          <label style={styles.label}>Item Code <span style={{ color: '#999', fontWeight: 400 }}>(10-digit: CC-TT-NNNNNN)</span></label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={form.itemCode||''} onChange={e => set('itemCode', e.target.value)} style={{ ...styles.input, fontFamily: 'monospace', letterSpacing: 1 }} placeholder="auto — click Generate" />
+            <button type="button" onClick={generateCode} style={{ ...styles.ghostBtn, whiteSpace: 'nowrap', flexShrink: 0 }} title="Generate 10-digit code from Category + Material">⚙ Generate</button>
+          </div>
         </div>
         <div style={{ ...styles.formGroup, flex: 1 }}>
-          <label style={styles.label}>Category</label>
+          <label style={styles.label}>Category <span style={{ color: '#999', fontWeight: 400 }}>(1st 2 digits)</span></label>
           <select value={form.category||''} onChange={e=>set('category',e.target.value)} style={styles.input}>
             <option value=''>— Select —</option>
-            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+            {ITEM_CATEGORIES.map(c=><option key={c} value={c}>{ITEM_CATEGORY_CODES[c] ? ITEM_CATEGORY_CODES[c] + ' · ' : ''}{c}</option>)}
           </select>
         </div>
+      </div>
+      <div style={{ ...styles.formGroup }}>
+        <label style={styles.label}>Material / Type <span style={{ color: '#999', fontWeight: 400 }}>(next 2 digits — e.g. Copper, Steel)</span></label>
+        <input value={form.materialType||''} onChange={e => set('materialType', e.target.value)} style={styles.input} placeholder="e.g. Copper, Steel, Aluminium" list="item-material-types" />
+        <datalist id="item-material-types">{knownTypes.map(t => <option key={t} value={t} />)}</datalist>
       </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
@@ -1855,13 +3051,30 @@ function ItemModal({ item, onSave, onClose, businessInfo = {} }) {
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
           <label style={styles.label}>Purchase rate (cost price)</label>
-          <input type="number" value={form.purchaseRate ?? form.rate ?? 0} onChange={e => set('purchaseRate', Number(e.target.value))} style={styles.input} placeholder="0.00" />
+          <input type="number" value={form.purchaseRate ?? form.rate ?? 0} onChange={e => {
+            const pr = Number(e.target.value) || 0;
+            const mg = parseFloat(form.marginPct);
+            setForm(p => ({ ...p, purchaseRate: pr, ...(!isNaN(mg) ? { saleRate: Math.round(pr * (1 + mg / 100) * 100) / 100 } : {}) }));
+          }} style={styles.input} placeholder="0.00" />
+        </div>
+        <div style={{ ...styles.formGroup, flex: 1 }}>
+          <label style={styles.label}>Margin % <span style={{ color: '#999', fontWeight: 400 }}>(auto-calcs sale)</span></label>
+          <input type="number" value={form.marginPct ?? ''} onChange={e => {
+            const mg = e.target.value === '' ? '' : (parseFloat(e.target.value) || 0);
+            const pr = Number(form.purchaseRate ?? form.rate) || 0;
+            setForm(p => ({ ...p, marginPct: mg, ...(mg !== '' ? { saleRate: Math.round(pr * (1 + mg / 100) * 100) / 100 } : {}) }));
+          }} style={styles.input} placeholder="e.g. 20" />
         </div>
         <div style={{ ...styles.formGroup, flex: 1 }}>
           <label style={styles.label}>Sale rate (selling price)</label>
-          <input type="number" value={form.saleRate ?? form.rate ?? 0} onChange={e => set('saleRate', Number(e.target.value))} style={styles.input} placeholder="0.00" />
+          <input type="number" value={form.saleRate ?? form.rate ?? 0} onChange={e => {
+            const sr = Number(e.target.value) || 0;
+            const pr = Number(form.purchaseRate ?? form.rate) || 0;
+            setForm(p => ({ ...p, saleRate: sr, marginPct: pr > 0 ? Math.round(((sr / pr) - 1) * 10000) / 100 : p.marginPct }));
+          }} style={styles.input} placeholder="0.00" />
         </div>
       </div>
+      <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: -6, marginBottom: 6 }}>Enter a Margin % to auto-calculate the sale rate, or type the sale rate directly — both stay in sync.</div>
       {cc.hasTax && (
         <div style={{ display: 'flex', gap: 12 }}>
           <div style={{ ...styles.formGroup, flex: 1 }}>
@@ -2020,7 +3233,7 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
 
   async function execute() {
     // Block test accounts from self-deleting
-    if (TEST_EMAILS.includes(user?.email)) {
+    if (isTestEmail(user?.email)) {
       setError('Test accounts cannot be deleted through this flow.');
       return;
     }
@@ -2189,12 +3402,31 @@ function LockedModuleScreen() {
   );
 }
 
-function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete }) {
+function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBackup, onBackupNow, onListCloudBackups, onRestoreCloud, onTestConnection, onSaved, userRole = 'admin', isOwner = false, userEmail = '', onRequestDelete, onRepairTags, isMultiBiz = false, isSuperAdmin = false, bypassEmails = [], onSaveBypass }) {
+  const [bpNew, setBpNew] = React.useState('');
+  const [bpBusy, setBpBusy] = React.useState(false);
+  async function addBypass() {
+    const e = bpNew.trim().toLowerCase();
+    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { alert('Enter a valid email address.'); return; }
+    if (bypassEmails.includes(e)) { alert('That email is already on the free list.'); setBpNew(''); return; }
+    setBpBusy(true);
+    try { await onSaveBypass([...bypassEmails, e]); setBpNew(''); } catch (err) { alert('Could not save: ' + (err.message || err)); }
+    setBpBusy(false);
+  }
+  async function removeBypass(e) {
+    if (!window.confirm('Remove ' + e + ' from the free-access list? They will fall back to the trial/paywall.')) return;
+    setBpBusy(true);
+    try { await onSaveBypass(bypassEmails.filter(x => x !== e)); } catch (err) { alert('Could not save: ' + (err.message || err)); }
+    setBpBusy(false);
+  }
   const [form, setForm] = useState(businessInfo);
   const [saved, setSaved] = useState(false);
   const [cloudBackups, setCloudBackups] = useState(null);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudMsg, setCloudMsg] = useState('');
+  const [lhDim, setLhDim] = useState(null);   // header image {w,h}
+  const [lhfDim, setLhfDim] = useState(null);  // footer image {w,h}
+  const LH_REC_W = 1654;                        // recommended full-page width (A4 @200dpi)
   useEffect(() => setForm(businessInfo), [businessInfo]);
 
   function handleSave() {
@@ -2236,6 +3468,17 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
     const reader = new FileReader();
     reader.onload = () => setForm(p => ({ ...p, letterheadFooter: reader.result }));
     reader.readAsDataURL(file);
+  }
+
+  function handleSealUpload(key) {
+    return (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 200 * 1024) { alert('Please choose an image under 200 KB (transparent PNG works best).'); return; }
+      const reader = new FileReader();
+      reader.onload = () => setForm(p => ({ ...p, [key]: reader.result }));
+      reader.readAsDataURL(file);
+    };
   }
 
   function handleLogoUpload(e) {
@@ -2287,8 +3530,87 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             </div>
           ));
         })()}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Document number prefix <span style={{ color: '#999', fontWeight: 400 }}>(auto from company name if left blank)</span></label>
+          <input value={form.docPrefix || ''} onChange={(e) => setForm((p) => ({ ...p, docPrefix: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }))}
+            placeholder={autoDocPrefix(form.name) || 'e.g. EWI'} maxLength={8} style={styles.input} />
+          <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+            New documents are numbered <b>{(form.docPrefix || autoDocPrefix(form.name) || 'XYZ')}/INV/26-27/001</b> style (company / document / financial year / serial) across invoices, quotations, vouchers, GRN, TDS, etc. Leave blank to use initials of your company name; or type your own (letters only). Existing numbers are not changed.
+          </div>
+        </div>
 
         {userRole === 'admin' && (<>
+        <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Branding &amp; Letterhead</div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 12, lineHeight: 1.6 }}>
+          Upload your <b>logo</b> for the standard templates, or upload a full <b>letterhead</b> image (your printed pad design) to print documents on your own letterhead. When a letterhead is set, every document's Print / PDF screen shows a <b>"📃 Use Letterhead"</b> toggle.
+        </div>
+
+        {/* Logo */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Company Logo <span style={{ color: '#999', fontWeight: 400 }}>(for standard templates — PNG/JPG, under 500 KB)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.logo && <img src={form.logo} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 8, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.logo ? 'Change logo' : '⬆ Upload logo'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} /></label>
+            {form.logo && <button type="button" onClick={() => setForm(p => ({ ...p, logo: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+        </div>
+
+        {/* Letterhead header */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Letterhead (header image) <span style={{ color: '#999', fontWeight: 400 }}>(full page width — <b>≈1654 px wide</b>; any height, it auto-fits; under 1.5 MB)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.letterhead && <img src={form.letterhead} alt="letterhead" onLoad={e => setLhDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 60, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterhead ? 'Change letterhead' : '⬆ Upload letterhead'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadUpload} /></label>
+            {form.letterhead && <button type="button" onClick={() => { setForm(p => ({ ...p, letterhead: '' })); setLhDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+          {form.letterhead && lhDim && (lhDim.w >= 1400
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhDim.w} × {lhDim.h} px (full width, auto-fits)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhDim.w} × {lhDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
+        </div>
+
+        {/* Letterhead footer (optional) */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Letterhead Footer (optional) <span style={{ color: '#999', fontWeight: 400 }}>(full page width — <b>≈1654 px wide</b>; any height, it auto-fits)</span></label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {form.letterheadFooter && <img src={form.letterheadFooter} alt="footer" onLoad={e => setLhfDim({ w: e.target.naturalWidth, h: e.target.naturalHeight })} style={{ width: 160, maxHeight: 50, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+            <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form.letterheadFooter ? 'Change footer' : '⬆ Upload footer'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLetterheadFooterUpload} /></label>
+            {form.letterheadFooter && <button type="button" onClick={() => { setForm(p => ({ ...p, letterheadFooter: '' })); setLhfDim(null); }} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+          </div>
+          {form.letterheadFooter && lhfDim && (lhfDim.w >= 1400
+            ? <div style={{ fontSize: 11.5, color: '#1A7A3E', marginTop: 5 }}>✓ Good — {lhfDim.w} × {lhfDim.h} px (full width, auto-fits)</div>
+            : <div style={{ fontSize: 11.5, color: '#B5453A', marginTop: 5 }}>⚠ Low resolution ({lhfDim.w} × {lhfDim.h} px) — use a wider image (<b>≈{LH_REC_W} px wide</b>) for a crisp print.</div>)}
+        </div>
+        {/* Company seal + authorised signature (printed beside the signatory line) */}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Company Seal &amp; Signature <span style={{ color: '#999', fontWeight: 400 }}>(optional — transparent PNG, under 200 KB each; printed above the "Authorised Signatory" line on invoices, letters and contracts)</span></label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={form.printSeal !== false} onChange={(e) => setForm(p => ({ ...p, printSeal: e.target.checked }))} />
+            Print seal &amp; signature on documents <span style={{ color: '#999' }}>(untick to leave the space blank for hand-signing; invoice &amp; contract screens also have a per-document switch)</span>
+          </label>
+          {[['seal', 'Company seal'], ['signature', 'Authorised signature']].map(([key, lbl]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, width: 130, color: '#555' }}>{lbl}</span>
+              {form[key] && <img src={form[key]} alt={lbl} style={{ width: 56, height: 56, objectFit: 'contain', border: '1px solid #EAE6DB', borderRadius: 6, background: '#fff' }} />}
+              <label style={{ ...styles.ghostBtn, cursor: 'pointer' }}>{form[key] ? 'Change' : '⬆ Upload'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSealUpload(key)} /></label>
+              {form[key] && <button type="button" onClick={() => setForm(p => ({ ...p, [key]: '' }))} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Remove</button>}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 11.5, color: '#888780', marginBottom: 12 }}>Landscape prints (payroll sheet, employee register, wide contracts) are generated automatically from this same header/footer — text and logo stay undistorted; only blank space is widened.</div>
+        {(form.letterhead || form.letterheadHtml) && <div style={{ fontSize: 11.5, color: '#1A7A3E', marginBottom: 12 }}>✓ Letterhead set — open any document → Print → tap "📃 Use Letterhead" to print on it.</div>}
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Document Font <span style={{ color: '#999', fontWeight: 400 }}>(applies to all printed documents)</span></label>
+          <select value={form.docFont || 'serif'} onChange={e => setForm(p => ({ ...p, docFont: e.target.value }))} style={{ ...styles.input, fontFamily: (DOC_FONTS[form.docFont] || DOC_FONTS.serif).stack }}>
+            {Object.entries(DOC_FONTS).map(([k, v]) => <option key={k} value={k} style={{ fontFamily: v.stack }}>{v.label}</option>)}
+          </select>
+          <div style={{ marginTop: 8, padding: '10px 14px', border: '1px solid #EAE6DB', borderRadius: 8, background: '#fff', fontFamily: (DOC_FONTS[form.docFont] || DOC_FONTS.serif).stack }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>Preview — {businessInfo?.name || 'Your Company'}</div>
+            <div style={{ fontSize: 12.5, color: '#555', marginTop: 2 }}>Invoice No: INV/26-27/001 · Amount: ₹1,23,456.00 — The quick brown fox.</div>
+          </div>
+        </div>
+
         <div style={{ ...styles.sectionDivider, marginTop: 8 }}>Region &amp; Tax</div>
 
         <div style={styles.formGroup}>
@@ -2384,7 +3706,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
             { id:'fmamc',         label:'🏢 FM / AMC',             desc:'Facility management — assets, PM schedules, work orders, SLA contracts' },
           ];
           const cur = form.activeTypes || [form.companyType || 'trading'];
-          const typeLocked = !TEST_EMAILS.includes(userEmail) && cur.length > 0;
+          const typeLocked = !isTestEmail(userEmail) && cur.length > 0;
           if (typeLocked) {
             return (
               <div style={styles.formGroup}>
@@ -2434,20 +3756,43 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
         </>)}
 
         <div style={styles.formGroup}>
-          <label style={styles.label}>Print template</label>
-          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
-            {templates.map((t) => (
-              <button key={t.id} onClick={() => setForm((p) => ({ ...p, template: t.id }))}
-                style={{ flexShrink: 0, width: 130, border: form.template === t.id ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 8px', cursor: 'pointer', textAlign: 'center', background: form.template === t.id ? '#F0EFE9' : '#FAF8F4' }}>
-                <div style={{ height: 36, borderRadius: 6, marginBottom: 7, background: t.swatch, border: '1px solid rgba(0,0,0,0.06)' }} />
-                <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1E2A4A' }}>{t.label}</div>
-                <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{t.desc}</div>
-              </button>
-            ))}
+          <label style={styles.label}>Print format &amp; header</label>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 8, lineHeight: 1.6 }}>
+            Every printed document (invoices, vouchers, GRN, pay slips, etc.) uses one standard framed format. Choose what goes on top of each page:
           </div>
-          {/* Live mini preview */}
-          <div style={{ marginTop: 14, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '16px 18px', fontSize: 11 }}>
-            <TemplateMiniPreview template={form.template || 'classic'} name={form.name || 'Your Company'} />
+          {(() => {
+            const cur = form.printHeader || ((form.letterhead || form.letterheadFooter) ? 'letterhead' : 'logo');
+            const opt = (id, title, desc) => (
+              <button key={id} type="button" onClick={() => setForm((p) => ({ ...p, printHeader: id }))}
+                style={{ flex: 1, minWidth: 180, textAlign: 'left', border: cur === id ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', background: cur === id ? '#F0EFE9' : '#FAF8F4' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A' }}>{cur === id ? '● ' : '○ '}{title}</div>
+                <div style={{ fontSize: 11.5, color: '#888780', marginTop: 3 }}>{desc}</div>
+              </button>
+            );
+            return (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {opt('logo', 'Logo + company details', 'Uses the logo uploaded above with your name, address, GSTIN, phone and email.')}
+                {opt('letterhead', 'Letterhead images', 'Uses the header and footer letterhead images on every page.')}
+              </div>
+            );
+          })()}
+          <div style={{ fontSize: 11.5, color: '#888780', marginTop: 8 }}>Invoice / quotation screens also have a per-document "Use Letterhead" toggle that overrides this.</div>
+        </div>
+
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Print template <span style={{ color: '#999', fontWeight: 400 }}>(used for every printed document)</span></label>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
+            {Object.entries(ZOHO_THEMES).map(([id, t]) => {
+              const sel = (ZOHO_THEMES[form.template] ? form.template : 'gst') === id;
+              return (
+                <button key={id} type="button" onClick={() => setForm((p) => ({ ...p, template: id }))}
+                  style={{ flexShrink: 0, width: 150, border: sel ? '2px solid #1E2A4A' : '2px solid #EAE6DB', borderRadius: 10, padding: '10px 8px', cursor: 'pointer', textAlign: 'center', background: sel ? '#F0EFE9' : '#FAF8F4' }}>
+                  <div style={{ height: 40, borderRadius: 6, marginBottom: 7, background: t.swatch, border: '1px solid rgba(0,0,0,0.08)' }} />
+                  <div style={{ fontWeight: 600, fontSize: 12.5, color: '#1E2A4A' }}>{sel ? '✓ ' : ''}{t.label}</div>
+                  <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{t.desc}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -2507,7 +3852,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                       const file = ev.target.files && ev.target.files[0];
                       if (!file) return;
                       const rdr = new FileReader();
-                      rdr.onload = () => { try { const bk = JSON.parse(rdr.result); if (window.confirm('Restore all data from this backup file? This re-saves every record to the server.')) onRestoreBackup(bk); } catch (e) { alert('That file is not a valid Operix backup.'); } };
+                      rdr.onload = () => { try { const bk = JSON.parse(rdr.result); if (window.confirm('Restore all data from this backup file? This re-saves every record to the server.')) onRestoreBackup(bk); } catch (e) { alert('That file is not a valid Oryqen backup.'); } };
                       rdr.readAsText(file);
                       ev.target.value = '';
                     }} />
@@ -2550,6 +3895,48 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                 setCloudBusy(false);
               }} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>🔌 Test server connection</button>
               {cloudMsg && <div style={{ fontSize: 12, color: '#3D7A5C', marginTop: 8 }}>{cloudMsg}</div>}
+            </div>
+            )}
+
+            {/* ── Super Admin — paywall bypass list (only you) ── */}
+            {isSuperAdmin && (
+            <div style={{ background: '#1E2A4A', borderRadius: 12, padding: '20px 24px', marginTop: 20, color: '#fff' }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>🛡️ Super Admin · Free-access accounts</div>
+              <div style={{ fontSize: 12, color: '#C7D0E0', marginBottom: 14, lineHeight: 1.6 }}>
+                Emails added here skip the trial &amp; paywall — full access, free. Changes apply to everyone instantly, on every device. Only you (super-admin) can see or edit this.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                <input value={bpNew} onChange={e => setBpNew(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addBypass(); }} placeholder="user@example.com" style={{ flex: 1, minWidth: 200, border: '1px solid #3D4E6E', background: '#16223D', color: '#fff', borderRadius: 8, padding: '9px 12px', fontSize: 13 }} />
+                <button disabled={bpBusy} onClick={addBypass} style={{ background: '#C9A24B', color: '#1E2A4A', border: 'none', borderRadius: 8, padding: '9px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{bpBusy ? '…' : '+ Grant free access'}</button>
+              </div>
+              {bypassEmails.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8FA0BC', fontStyle: 'italic' }}>No free accounts yet. Add an email above.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {bypassEmails.map(e => (
+                    <div key={e} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#16223D', border: '1px solid #2C3B5A', borderRadius: 8, padding: '8px 12px' }}>
+                      <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{e}</span>
+                      <button disabled={bpBusy} onClick={() => removeBypass(e)} style={{ background: 'none', border: 'none', color: '#E88', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: '#7C8CA8', marginTop: 12 }}>{bypassEmails.length} account{bypassEmails.length !== 1 ? 's' : ''} with free access · built-in test accounts always bypass and aren't shown here.</div>
+            </div>
+            )}
+
+            {/* ── Data health / division tag repair ── */}
+            {userRole === 'admin' && onRepairTags && (
+            <div style={{ background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 12, padding: '20px 24px', marginTop: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 4 }}>🩺 Data health — division tags</div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 1.6 }}>
+                {isMultiBiz
+                  ? 'Scan your records and show how they are tagged across your business activities, and flag any tagged to a division your account no longer uses.'
+                  : 'Make sure every record is tagged to your business so nothing is hidden from the dashboard or lists. Safe to run any time.'}
+              </div>
+              <button onClick={() => onRepairTags()} style={{ ...styles.secondaryBtn, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                🩺 {isMultiBiz ? 'Scan division tags' : 'Check & repair tags'}
+              </button>
             </div>
             )}
 
@@ -2612,7 +3999,7 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
                 <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '16px 20px' }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: '#B91C1C', marginBottom: 4 }}>Delete Account</div>
                   <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
-                    Permanently delete your Operix account and all associated data. This cannot be undone.
+                    Permanently delete your Oryqen account and all associated data. This cannot be undone.
                   </div>
                   <button
                     onClick={() => onRequestDelete && onRequestDelete()}
@@ -2755,6 +4142,7 @@ function StaffModal({ ownerUid, companyName = '', onSaved, onClose, employees = 
     { value: 'inventory', label: 'Inventory / Stores',desc: 'Items, stock, GRN, store issue, bin card.' },
     { value: 'accounts',  label: 'Accounts',          desc: 'Petty cash, vouchers, tax reports.' },
     { value: 'hr',        label: 'HR / Payroll',       desc: 'Employees, payroll, attendance.' },
+    { value: 'foreman',   label: 'Foreman / Site Eng.', desc: 'Marks attendance for their own labour group(s) only.' },
     { value: 'viewer',    label: 'Viewer (read-only)', desc: 'Can view all documents but cannot create or edit.' },
   ];
 
@@ -2959,7 +4347,30 @@ function ActivityColumn({ bizType, label, color, icon, docs, stats, customers, v
   );
 }
 
-function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [] }) {
+function Dashboard({ stats, documents, customers, vendors, businessInfo, startNewDoc, openDoc, setView, vouchers = [], pettyCash = {}, productionOrders = [], rawMaterials = [], items = [], companyType = 'trading', activeTypes = ['trading'], isMultiBiz = false, siteProjects = [], siteAttendance = [], serviceOrders = [], employees = [], labourGroups = [], userRole = '', raBillings = [], siteActivities = [] }) {
+  const _fmtD = makeFmt(businessInfo);
+  // RA bill total INCLUDING tax — matches the RA Billing screen's grand total
+  // (subtotal of work done + GST/VAT), so the dashboard figure reconciles with it.
+  const _raCC = COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other;
+  const _raSellerState = businessInfo?.state || '';
+  const _raSub = rb => (rb.items||[]).reduce((s,i)=>s+((parseFloat(i.contractValue)||0)*((parseFloat(i.thisQty)||0)-(parseFloat(i.previousQty)||0))/100),0);
+  const _raTot = rb => { const sub = _raSub(rb); return _raCC.hasTax ? (calcModuleTax(sub, rb.taxRate||0, _raCC, rb.placeOfSupply, _raSellerState).grandTotal || sub) : sub; };
+  // Billed = RA project billing (with tax) + approved sales invoices (Sales linked in).
+  const _raBilled = (raBillings||[]).reduce((s,rb)=>s+_raTot(rb),0);
+  const _billed = _raBilled + (stats?.totalRevenue||0);
+  // Received counts BOTH: money recorded against RA bills (receivedAmount, or the
+  // full bill once marked Paid) AND cash recorded in Accounts as receipt vouchers.
+  const _raReceived = (raBillings||[]).reduce((s,rb)=> s + (parseFloat(rb.receivedAmount) || (rb.status==='paid' ? _raTot(rb) : 0)), 0);
+  const _received = _raReceived + (stats?.totalReceived||0);
+  const _outstanding = Math.max(0, _billed - _received);
+  const _showBilling = (activeTypes.includes('service')||activeTypes.includes('fmamc')) && (raBillings||[]).length>0;
+  const _absAlerts = (['admin','manager','hr'].includes(userRole) ? employees : []).map(emp => {
+    const dset = new Set();
+    (siteAttendance||[]).forEach(r => { if(r.date && (r.records||[]).some(x=>x.employeeId===emp.id && x.status==='absent')) dset.add(r.date); });
+    const uniq=[...dset].sort(); let mr=0, run=0, prev=null, endD='';
+    uniq.forEach(ds=>{ const d=new Date(ds); if(prev && Math.round((d-prev)/86400000)===1) run++; else run=1; if(run>=mr){ mr=run; endD=ds; } prev=d; });
+    return { emp, mr, endD };
+  }).filter(a=>a.mr>=3);
   const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
@@ -2991,6 +4402,28 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
         <h1 className="serif" style={styles.h1}>Good day, {(businessInfo.name || 'there').split(' ')[0]}</h1>
         <p style={styles.muted}>{isMultiBiz ? `${activeTypes.length} business activities running` : `Here's what's happening across your business.`}</p>
       </div>
+
+      {_absAlerts.length > 0 && (
+        <div onClick={()=>setView('siteattendance')} style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:10, padding:'12px 16px', marginBottom:16, cursor:'pointer', display:'flex', alignItems:'flex-start', gap:10 }}>
+          <AlertTriangle size={18} style={{ color:'#B91C1C', marginTop:1, flexShrink:0 }} />
+          <div>
+            <div style={{ fontWeight:700, color:'#B91C1C', fontSize:13.5, marginBottom:4 }}>Continuous Absence Alert ({_absAlerts.length})</div>
+            <div style={{ fontSize:12.5, color:'#991B1B' }}>{_absAlerts.map(a=>a.emp.name+' ('+a.mr+' days'+(a.endD?', to '+a.endD:'')+')').join(' · ')}</div>
+            <div style={{ fontSize:11, color:'#B91C1C', marginTop:3, textDecoration:'underline' }}>Open Site Attendance →</div>
+          </div>
+        </div>
+      )}
+
+      {_showBilling && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px,1fr))', gap:12, marginBottom:18 }}>
+          {[['Project Billed', _billed, '#1E2A4A', 'rabilling'],['Received', _received, '#1A7A3E', 'paymenttracking'],['Outstanding', _outstanding, _outstanding>0?'#B5453A':'#1A7A3E', 'paymenttracking']].map(([l,v,c,go])=>(
+            <div key={l} onClick={()=>setView(go)} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'14px 16px', cursor:'pointer' }}>
+              <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+              <div style={{ fontSize:22, fontWeight:700, color:c, marginTop:2 }}>{_fmtD(Math.round(v))}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Payment Due Alerts ───────────────────────────────────────────────── */}
       {allAlerts.length > 0 && (
@@ -3469,6 +4902,7 @@ function StatusBadge({ status }) {
     approved:  { bg: '#EAF3DE', color: '#3B6D11', label: 'Approved' },
     rejected:  { bg: '#FBEAE7', color: '#B5453A', label: 'Rejected' },
     paid:      { bg: '#D6F0E0', color: '#1A5C35', label: 'Paid' },
+    deleted:   { bg: '#FBEAE7', color: '#B5453A', label: 'Deleted' },
   };
   const s = map[status] || map.draft;
   return <span style={{ ...styles.badge, background: s.bg, color: s.color }}>{s.label}</span>;
@@ -3526,7 +4960,7 @@ function ApprovalActions({ item, onUpdate, userRole, compact = false }) {
   );
 }
 
-function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'] }) {
+function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, deleteDoc, startNewDoc, activeTypes = ['trading'], userRole = 'admin' }) {
   const isMultiBiz = activeTypes.length > 1;
   const [filterBizType, setFilterBizType] = React.useState(
     activeTypes.length === 1 ? activeTypes[0] : 'all'
@@ -3580,9 +5014,9 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
       ) : (
         <div style={styles.list}>
           {visibleDocs.map((d) => (
-            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1 }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} showBizBadge={isMultiBiz} /></div>
-              <button onClick={() => deleteDoc(d.id)} style={styles.iconBtn} title="Delete"><Trash2 size={15} color="#B5453A" /></button>
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: d.status === 'deleted' ? 0.55 : 1 }}>
+              <div style={{ flex: 1, textDecoration: d.status === 'deleted' ? 'line-through' : 'none' }}><DocRow doc={d} customers={customers} vendors={vendors} onClick={() => openDoc(d)} businessInfo={{ state: '' }} showBizBadge={isMultiBiz} /></div>
+              {userRole === 'admin' && d.status !== 'deleted' && <button onClick={() => deleteDoc(d.id)} style={styles.iconBtn} title="Delete (admin only)"><Trash2 size={15} color="#B5453A" /></button>}
             </div>
           ))}
         </div>
@@ -3627,13 +5061,14 @@ const SECTION_VIEWS = {
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
-  engineering: ['partsmaster', 'engdocs'],
-  production:  ['rawmaterials', 'bom', 'productionorders'],
-  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting'],
+  engineering: ['partsmaster', 'engdocs', 'tds'],
+  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
+  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
   hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
+  mep_clients: ['customers', 'enquiries', 'items'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
-  admin:       ['staff', 'contracts', 'termslibrary', 'mom'],
+  admin:       ['staff', 'contracts', 'termslibrary', 'mom', 'investors'],
   fmamc:       ['fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts'],
   shared:      ['customers', 'vendors', 'items', 'documents', 'enquiries', 'channelpartners'],
 };
@@ -3641,11 +5076,11 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','offerletter','warnletter','termletter'],
-  admin:         ['staff','contracts','termslibrary','mom','assetregister'],
+  admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
 
 const BizTypeCtx = React.createContext(null);
@@ -3794,14 +5229,7 @@ function ComingSoon({ label = 'This module' }) {
     </div>
   );
 }
-const COMING_SOON = {
-  boq: 'BOQ', estimation: 'Estimation',
-  subcontractbilling: 'Subcontract Billing', paymenttracking: 'Payment Tracking',
-  subworkorders: 'Work Orders', subprogress: 'Subcontractor Progress', subcertification: 'Certification',
-  hseinspections: 'Inspections', toolbox: 'Toolbox Talks', incidents: 'Incidents',
-  dlpdefects: 'DLP / Defects', pmaintenance: 'Preventive Maintenance', servicehistory: 'Service History',
-  projectreports: 'Project Reports',
-};
+const COMING_SOON = {};
 
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
@@ -3818,7 +5246,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 8px 14px' }}>
         <div style={styles.brandMark}>O</div>
         <div style={{ flex: 1 }}>
-          <div className="serif" style={styles.brandName}>Operix</div>
+          <div className="serif" style={styles.brandName}>Oryqen</div>
           <div style={styles.brandSub}>Business Suite</div>
         </div>
         {/* Settings icon — admin only */}
@@ -3949,16 +5377,19 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Engineering" />
                 <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
                 <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+                <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
 
                 <SubLabel label="Production" />
                 <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
                 <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+                <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
 
                 <SubLabel label="Quality" />
                 <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
                 <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
                 <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
                 <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+                <NavBtn id="fatsat"         label="FAT / SAT / STP"   icon={ClipboardList} />
                 <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
                 <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
                 <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
@@ -4095,6 +5526,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {showService && (<>
             <div style={{ padding: '10px 14px 4px', fontSize: 11, fontWeight: 800, letterSpacing: '0.09em', color: '#1A7A3E', textTransform: 'uppercase' }}>MEP ERP</div>
 
+            <Section sectionKey="mep_clients" label="Clients & Sales">
+              <NavBtn id="customers" label="Clients / Customers" icon={Users} />
+              <NavBtn id="enquiries" label="Enquiries"          icon={FileSignature} />
+              <NavBtn id="items"     label="Item Master"         icon={Package} />
+            </Section>
+
             <Section sectionKey="mep_projects" label="Projects">
               <NavBtn id="siteprojects" label="Project Master"    icon={MapPin} />
               <NavBtn id="contracts"    label="Contracts / T&C"   icon={FileSignature} />
@@ -4115,6 +5552,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="activityplanner" label="Activity Planner" icon={ClipboardList} />
               <NavBtn id="progressboard"   label="Progress Board"   icon={BarChart2} />
               <NavBtn id="manpower"        label="Manpower"         icon={Users} />
+              <NavBtn id="siteattendance"  label="Attendance & Salary" icon={Users} />
             </Section>
 
             <Section sectionKey="mep_billing" label="Billing & Commercial">
@@ -4126,16 +5564,14 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
             <Section sectionKey="mep_subcon" label="Subcontractors">
               <NavBtn id="subcontractors"   label="Subcontractor Master" icon={Truck} />
-              <NavBtn id="subworkorders"    label="Work Orders"          icon={FileSignature} />
-              <NavBtn id="subprogress"      label="Progress"             icon={BarChart2} />
-              <NavBtn id="subcertification" label="Certification"        icon={CheckSquare} />
             </Section>
 
             <Section sectionKey="mep_hse" label="HSE">
-              <NavBtn id="hseinspections" label="Inspections"    icon={CheckSquare} />
-              <NavBtn id="toolbox"        label="Toolbox Talks"  icon={BookOpen} />
-              <NavBtn id="incidents"      label="Incidents"      icon={AlertTriangle} />
-              <NavBtn id="hse"            label="Safety Reports" icon={Shield} />
+              <NavBtn id="hseinspections" label="Inspections"     icon={CheckSquare} />
+              <NavBtn id="toolbox"        label="Toolbox Talks"   icon={BookOpen} />
+              <NavBtn id="hsepermits"     label="Permits to Work" icon={FileText} />
+              <NavBtn id="incidents"      label="Incidents"       icon={AlertTriangle} />
+              <NavBtn id="hse"            label="Safety Reports"  icon={Shield} />
             </Section>
 
             <Section sectionKey="mep_handover" label="Handover & DLP">
@@ -4282,6 +5718,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="engineering" label="Engineering">
               <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
               <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
+              <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
             </Section>
           )}
 
@@ -4291,6 +5728,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
               <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
               <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
+              <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
             </Section>
           )}
 
@@ -4301,6 +5739,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
               <NavBtn id="inprocessqa"    label="Inprocess QA"      icon={CheckSquare} />
               <NavBtn id="qatesting"      label="QA Testing"        icon={CheckCircle} />
+              <NavBtn id="fatsat"         label="FAT / SAT / STP"   icon={ClipboardList} />
               <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
               <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
               <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
@@ -4349,6 +5788,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
           <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+          {showProduction && <NavBtn id="investors" label="Investors & Shares" icon={Briefcase} />}
         </BizSection>
       ) : (
         <Section sectionKey="admin" label="Admin">
@@ -4357,6 +5797,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           <NavBtn id="termslibrary" label="Terms Library" icon={BookOpen} />
           <NavBtn id="mom"          label="Minutes of Meeting" icon={ClipboardList} />
           <NavBtn id="assetregister" label="Asset Register" icon={Package} />
+          {showProduction && <NavBtn id="investors" label="Investors & Shares" icon={Briefcase} />}
         </Section>
       ))}
 
@@ -4761,13 +6202,14 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [] }) {
+function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
   const [hsnSearchRow, setHsnSearchRow] = useState(null); // rowId being searched
   const [mepPickerOpen, setMepPickerOpen] = useState(false);
-  const [useLH, setUseLH] = useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
+  const [useSeal, setUseSeal] = useState(true);
+  const [useLH, setUseLH] = useState(businessInfo?.printHeader ? (businessInfo.printHeader === 'letterhead' && !!(businessInfo?.letterhead||businessInfo?.letterheadFooter||businessInfo?.letterheadHtml)) : !!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [showScan, setShowScan] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [mergeSel, setMergeSel] = useState([]);
@@ -4777,18 +6219,28 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
     setDoc((d) => {
       const sel = (d.items || []).filter((it) => selSet.has(it.id));
       if (sel.length < 2) return d;
+      const gid = crypto.randomUUID();
       const totalAmt = sel.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
-      const names = sel.map((it) => (it.name || '').trim()).filter(Boolean);
-      const merged = { ...EMPTY_ITEM_ROW(businessInfo), id: crypto.randomUUID(), name: names.join('\n'), qty: 1, rate: totalAmt, gst: sel[0].gst, discount: 0, hsn: sel[0].hsn || '' };
+      // Keep each item as its own row (own Sl + Description). The FIRST becomes the
+      // group head and carries the single combined price (Qty 1 × total); the rest
+      // are description-only children whose price columns are covered by the head's
+      // row-span, so the printed table shows one merged HSN/Qty/Rate/GST/Amount block.
+      const grouped = sel.map((it, i) => i === 0
+        ? { ...it, mergeGroupId: gid, mergeHead: true, qty: 1, rate: totalAmt, discount: 0 }
+        : { ...it, mergeGroupId: gid, mergeHead: false, qty: 0, rate: 0, gst: 0, discount: 0 });
       let inserted = false;
       const out = [];
       for (const it of d.items) {
-        if (selSet.has(it.id)) { if (!inserted) { out.push(merged); inserted = true; } }
+        if (selSet.has(it.id)) { if (!inserted) { out.push(...grouped); inserted = true; } }
         else out.push(it);
       }
       return { ...d, items: out };
     });
     setMergeSel([]);
+  }
+  function unmergeGroup(gid) {
+    if (!gid) return;
+    setDoc((d) => ({ ...d, items: (d.items || []).map((it) => it.mergeGroupId === gid ? { ...it, mergeGroupId: undefined, mergeHead: undefined } : it) }));
   }
   const bizBadge = BIZ_BADGE[doc.bizType];
   const showBizBadge = !!bizBadge;
@@ -4800,7 +6252,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const totals = computeTotals(doc, businessInfo.state, businessInfo.country);
   const customer = partyList.find((c) => c.id === doc.customerId);
   const displayParty = customer || doc.customerSnapshot; // fallback to snapshot when live record unavailable
-  const template = businessInfo.template || 'classic';
+  // Screen preview: bordered "formal" layout for the new templates, original look for "classic". Print uses buildZohoDocPrint + the chosen theme.
+  const template = 'classic'; // editor layout (has the editable items table); the chosen print template is applied by buildZohoDocPrint
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
 
@@ -4809,18 +6262,13 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   const isForwarded = doc.status === 'submitted' || doc.status === 'verified';
   const inReview = isForwarded; // alias for layout checks below
   // Editable if: admin/manager always, or any role when doc is in draft/rejected (preparing stage)
-  const isEditable =
+  const isDeleted = doc.status === 'deleted';
+  const isEditable = !isDeleted && (
     userRole === 'admin' || userRole === 'manager' ||
-    (doc.status === 'draft' || doc.status === 'rejected');
+    (doc.status === 'draft' || doc.status === 'rejected'));
 
+  // Saving only saves. Nothing is downloaded automatically — use Print / PDF when you want a copy.
   async function handleSaveAndDownload(status) {
-    setPdfLoading(true);
-    try {
-      const el = document.querySelector('.print-area');
-      const fname = `${(DOC_TYPES[doc.type]?.label || doc.type).replace(/\s+/g,'-')}-${doc.number || 'draft'}.pdf`;
-      if (el) await downloadDocPDF(el, fname);
-    } catch(e) { console.error(e); }
-    setPdfLoading(false);
     onSave(status);
   }
 
@@ -4909,7 +6357,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: bizBadge.bg, color: bizBadge.color, letterSpacing: '0.04em' }}>{bizBadge.label}</span>
             )}
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="doc-actions" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto', justifyContent: 'flex-end' }}>
+          <style>{`.doc-actions button, .doc-actions select { white-space: nowrap; }`}</style>
           {/* Previous docs dropdown */}
           {sameDocs.length > 0 && (
             <select value="" onChange={e => { if (e.target.value && onOpenDoc) onOpenDoc(e.target.value); }}
@@ -4943,9 +6392,18 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}
             </button>
           )}
+          {(businessInfo?.seal || businessInfo?.signature) && businessInfo.printSeal !== false && (
+            <button onClick={() => setUseSeal(v => !v)} style={{ ...styles.ghostBtn, ...(useSeal ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+              🖋 {useSeal ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+            </button>
+          )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button onClick={() => window.print()} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
-          <button onClick={async () => { setPdfLoading(true); await downloadDocPDF('.print-area', `${(DOC_TYPES[doc.type]?.label||doc.type).replace(/\s+/g,'-')}-${doc.number||'draft'}.pdf`); setPdfLoading(false); }} style={styles.ghostBtn} disabled={pdfLoading}>{pdfLoading ? '⏳' : <Download size={15}/>} {pdfLoading ? 'Generating...' : 'Download PDF'}</button>
+          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => { const b = document.getElementById('doc-print-btn'); if (b) b.click(); }} style={styles.ghostBtn} title="Opens the print dialog — choose 'Save as PDF'"><Download size={15}/> Save as PDF</button>
+          {userRole === 'admin' && !isDeleted && onDeleteDoc && documents.some(d => d.id === doc.id) && (
+            <button onClick={() => onDeleteDoc(doc.id)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}><Trash2 size={15} /> Delete</button>
+          )}
+          {isDeleted && <span style={{ fontSize: 12.5, fontWeight: 700, color: '#B5453A', background: '#FBEAE7', borderRadius: 8, padding: '6px 12px' }}>🗑 DELETED — read only</span>}
 
           {/* ── PREPARER (any non-admin): draft or rejected → Save / Forward ── */}
           {userRole !== 'admin' && (doc.status === 'draft' || doc.status === 'rejected') && (
@@ -4961,7 +6419,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
           )}
 
           {/* ── ADMIN / MANAGER: forwarded or any editable status ── */}
-          {(userRole === 'admin' || userRole === 'manager') && !rejectMode && (
+          {(userRole === 'admin' || userRole === 'manager') && !rejectMode && !isDeleted && (
             <>
               {/* Can always save as draft */}
               {!isApproved && <button onClick={() => handleSaveAndDownload('draft')} style={styles.ghostBtn}>💾 Save Draft</button>}
@@ -5012,6 +6470,12 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         </div>
       )}
 
+      {isDeleted && (
+        <div style={{ background: '#FBEAE7', border: '1px solid #E9B8B3', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: '#B5453A' }} className="no-print">
+          🗑 <strong>This document was deleted{doc.deletedBy ? ' by ' + doc.deletedBy : ''}.</strong> It stays in the list for number tracking but cannot be edited, approved or forwarded.
+        </div>
+      )}
+
       {/* Approval status banner for locked docs */}
       {(inReview || isApproved) && (
         <div style={{ background: isApproved ? '#EAF3DE' : '#E6EEF9', border: `1px solid ${isApproved ? '#B8D9A0' : '#B0C8E9'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: isApproved ? '#3B6D11' : '#2255A0' }} className="no-print">
@@ -5054,8 +6518,23 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
 
           {(doc.type === 'purchase' || doc.type === 'purchasebill') && (
             <div style={styles.formGroup}>
-              <label style={styles.label}>{doc.type === 'purchase' ? 'Reference / requisition no.' : 'Vendor bill / invoice no.'}</label>
-              <input value={doc.refNumber} onChange={(e) => update('refNumber', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              <label style={styles.label}>{doc.type === 'purchase' ? 'Requisition No. / Reference' : 'Vendor bill / invoice no.'}</label>
+              {doc.type === 'purchase' ? (<>
+                <input value={doc.refNumber || ''} onChange={(e) => {
+                  const v = e.target.value;
+                  update('refNumber', v);
+                  // If they picked an existing PR, remember the link too
+                  const pr = (purchaseReqs || []).find(p => (p.number || '') === v);
+                  update('prId', pr ? pr.id : '');
+                }} list="pr-number-list" placeholder="Pick a PR or type a reference" style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+                <datalist id="pr-number-list">
+                  {(purchaseReqs || []).filter(p => p && p.number && (!doc.bizType || (p.bizType || 'trading') === doc.bizType)).map(p => (
+                    <option key={p.id} value={p.number}>{p.linkName || p.title || p.department || ''}</option>
+                  ))}
+                </datalist>
+              </>) : (
+                <input value={doc.refNumber} onChange={(e) => update('refNumber', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
+              )}
             </div>
           )}
 
@@ -5172,6 +6651,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </>);
           })()}
 
+          {doc.type === 'quotation' && <OverseasQuoteFields doc={doc} setDoc={setDoc} isEditable={isEditable} businessInfo={businessInfo} />}
+
           <div style={styles.formGroup}>
             <label style={styles.label}>Notes</label>
             <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 60, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="Additional notes for this document…" />
@@ -5266,8 +6747,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
                         title="Rate"
                       />
-                      {cc.hasTax && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
-                      {cc.hasTax && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {doc.overseas && doc.type === 'quotation' && (<input value={(it.unit && it.unit !== 'pcs') ? it.unit : ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} title="Unit" placeholder={doc.ovUnit || 'm'} style={{ width: 34, border: '1px solid #E3E8F4', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1F3A7A', textAlign: 'center', outline: 'none', padding: '2px 3px' }} />)}
+                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
+                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
                       {isEditable && (
                         <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
                       )}
@@ -5291,10 +6773,11 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
         </div>
 
         <div style={styles.preview} className="print-area">
+          <DocFontStyle businessInfo={businessInfo} />
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
           {useLH && <LetterheadHeader bi={businessInfo} />}
           {/* ── DRAFT watermark — visible on screen + print when not approved ── */}
-          {doc.status === 'draft' && (
+          {(doc.status === 'draft' || doc.status === 'deleted') && (
             <div style={{
               position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
               pointerEvents: 'none', zIndex: 9, display: 'flex',
@@ -5305,10 +6788,15 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 color: 'rgba(185, 28, 28, 0.10)',
                 transform: 'rotate(-35deg)', userSelect: 'none',
                 whiteSpace: 'nowrap', fontFamily: 'Arial, sans-serif',
-              }}>DRAFT</span>
+              }}>{doc.status === 'deleted' ? 'DELETED' : 'DRAFT'}</span>
             </div>
           )}
+          {doc.overseas && doc.type === 'quotation' && (() => {
+            const _r = buildOverseasQuotePrint({ doc, bi: businessInfo, party: displayParty, withCompany: !(useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter)) });
+            return <div className="ov-page" style={{ padding: '4px 2px' }} dangerouslySetInnerHTML={{ __html: '<style>' + OV_CSS + '</style>' + ovBlocksToHtml(_r) }} />;
+          })()}
           {(() => {
+            if (doc.overseas && doc.type === 'quotation') return null;
             // ── Letterhead mode: skip template header entirely ──
             if (useLH && businessInfo?.letterhead) {
               return (
@@ -5611,7 +7099,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             return null;
           })()}
 
-          {(template !== 'formal' && template !== 'prestige') && (<>
+          {(template !== 'formal' && template !== 'prestige') && !(doc.overseas && doc.type === 'quotation') && (<>
 
           {doc.type === 'packing_list' ? (
             <>
@@ -5673,8 +7161,25 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           )}
 
-          <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }`}</style>
-          <table style={styles.table}>
+          <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }
+            /* Editor uses a stacked block per item; print uses the columnar table row */
+            .di-screen-row { display: table-row; } .di-print-row { display: none; }
+            @media print { .di-screen-row { display: none !important; } .di-print-row { display: table-row !important; } }
+            /* PDF export (html2canvas) can't read @media print — mirror the print layout here */
+            .pdf-exporting .di-screen-row, .pdf-exporting .no-print { display: none !important; }
+            .pdf-exporting .di-print-row { display: table-row !important; }
+            .pdf-exporting .di-screen { display: none !important; } .pdf-exporting .di-print { display: block !important; }
+            .pdf-exporting .di-input { border: none !important; background: transparent !important; box-shadow: none !important; color: #000 !important; }
+            /* Professional bordered item table — only in print / PDF, editor stays clean */
+            @media print {
+              .doc-items-table { border: 1.5px solid #1E2A4A !important; border-collapse: collapse !important; }
+              .doc-items-table thead th { border: 1px solid #1E2A4A !important; background: #F1EFE9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 7px 8px !important; }
+              .doc-items-table tbody td { border: 1px solid #B9B4A6 !important; padding: 7px 8px !important; }
+            }
+            .pdf-exporting.doc-items-table, .pdf-exporting .doc-items-table { border: 1.5px solid #1E2A4A !important; border-collapse: collapse !important; }
+            .pdf-exporting .doc-items-table thead th { border: 1px solid #1E2A4A !important; background: #F1EFE9 !important; padding: 7px 8px !important; }
+            .pdf-exporting .doc-items-table tbody td { border: 1px solid #B9B4A6 !important; padding: 7px 8px !important; }`}</style>
+          <table className="doc-items-table" style={{ ...styles.table, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ ...styles.th, width: 34, textAlign: 'center' }}>Sl</th>
@@ -5695,65 +7200,89 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               </tr>
             </thead>
             <tbody>
-              {doc.items.map((it, idx) => {
+              {(() => {
+                // Column count for the full-width stacked editor cell
+                let _cols = 2; // Sl + Item
+                if (doc.type !== 'packing_list' && cc.splitTax) _cols++;
+                _cols++; // Qty
+                if (doc.type === 'packing_list') _cols += 4; else { _cols++; if (cc.hasTax) _cols++; _cols++; }
+                if (isEditable) _cols++;
+                const _fieldLbl = { fontSize: 10.5, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 2 };
+                // Merge-group map: members share mergeGroupId; the head carries the price.
+                const _groups = {};
+                doc.items.forEach((it) => { if (it.mergeGroupId) { (_groups[it.mergeGroupId] = _groups[it.mergeGroupId] || []).push(it.id); } });
+                return doc.items.map((it, idx) => {
                 const amount = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+                const _gid = it.mergeGroupId;
+                const _grpIds = _gid ? _groups[_gid] : null;
+                const _span = _grpIds ? _grpIds.length : 1;
+                const _isHead = !_gid || it.mergeHead || (_grpIds && _grpIds[0] === it.id);
+                const _isChild = _gid && !_isHead;
+                const numIn = (val, onCh, w) => <input type="number" className="di-input" value={val} onChange={onCh} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: w, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />;
+                // Price cells — shown once per group (rowSpan on head), omitted on children.
+                const priceCells = doc.type === 'packing_list' ? (<>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 56)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.packages ?? 1, (e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.netWeight ?? 0, (e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0), 72)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.grossWeight ?? 0, (e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0), 72)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 96, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H" readOnly={!isEditable} /></td>
+                </>) : (<>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.rate, (e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0), 84)}</td>
+                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmt(amount)}</td>
+                </>);
                 return (
                   <tr key={it.id}>
-                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8 }}>{isEditable && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick to merge rows into one line" style={{ cursor: 'pointer', display: 'block', margin: '0 auto 5px', width: 15, height: 15 }} />}{idx + 1}</td>
-                    <td style={styles.td}>
-                      {isEditable && <select className="no-print" value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={styles.inlineSelect}>
-                        <option value="">Custom item</option>
-                        {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                      </select>}
-                      {isEditable
-                        ? <>
-                            <div className="di-screen" style={{ display: 'grid', minWidth: 180, width: '100%' }}>
-                              <div style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', border: '1px solid transparent', fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 28 }}>{(it.name || 'Item description') + ' '}</div>
-                              <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', height: '100%', width: '100%' }} />
-                            </div>
-                            <div className="di-print" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>
-                          </>
-                        : <div style={{ ...styles.inlineInput, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, minWidth: 180 }}>{it.name || <span style={{ color: '#bbb' }}>Item description</span>}</div>}
+                    {/* Sl + merge tick */}
+                    <td style={{ ...styles.td, textAlign: 'center', color: '#888780', verticalAlign: 'top', paddingTop: 8, whiteSpace: 'nowrap' }}>
+                      {isEditable && !_gid && <input type="checkbox" className="no-print" checked={mergeSel.includes(it.id)} onChange={() => toggleMerge(it.id)} title="Tick 2+ rows then Group" style={{ cursor: 'pointer', display: 'block', margin: '0 auto 4px', width: 14, height: 14 }} />}
+                      {idx + 1}
                     </td>
-                    {doc.type !== 'packing_list' && cc.splitTax && (
-                      <td style={styles.td}>
+                    {/* Item: picker + group tag (screen only) + auto-grow description */}
+                    <td style={{ ...styles.td, verticalAlign: 'top' }}>
+                      {isEditable && <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 240 }}>
+                          <option value="">Custom item</option>
+                          {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                        {_gid && <span style={{ fontSize: 10, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 7px', whiteSpace: 'nowrap' }}>{_isHead ? '⑃ group ' + _span : '↳ grouped'}</span>}
+                        {_gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 7px' }} title="Split group">Unmerge</button>}
+                      </div>}
+                      {isEditable
+                        ? <div style={{ display: 'grid', width: '100%' }}>
+                            <div className="di-screen" style={{ gridArea: '1 / 1', visibility: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', minHeight: 24, fontFamily: 'inherit' }}>{(it.name || 'Item description') + ' '}</div>
+                            <textarea className="di-input di-screen" value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" style={{ gridArea: '1 / 1', ...styles.inlineInput, ...styles.inlineInputEditable, resize: 'none', overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', height: '100%' }} />
+                            <div className="di-print" style={{ gridArea: '1 / 1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px', color: '#000' }}>{it.name}</div>
+                          </div>
+                        : <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35, fontSize: 13, padding: '4px 6px' }}>{it.name}</div>}
+                    </td>
+                    {/* HSN (once per group) */}
+                    {doc.type !== 'packing_list' && cc.splitTax && !_isChild && (
+                      <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                           <input className="di-input" value={it.hsn} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} style={{ ...styles.inlineInput, width: 60, ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} />
-                          {isEditable && cc.splitTax && (
-                            <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>
-                              🔍
-                            </button>
-                          )}
+                          {isEditable && <button type="button" className="no-print" title="Search HSN/SAC code" onClick={() => setHsnSearchRow(it.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', color: '#888780', flexShrink: 0 }}>🔍</button>}
                         </div>
                       </td>
                     )}
-                    <td style={styles.td}><input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 60, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                    {doc.type === 'packing_list' ? (<>
-                      <td style={styles.td}><input type="number" className="di-input" value={it.packages ?? 1} onChange={(e) => updateItem(it.id, 'packages', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" className="di-input" value={it.netWeight ?? 0} onChange={(e) => updateItem(it.id, 'netWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input type="number" className="di-input" value={it.grossWeight ?? 0} onChange={(e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 80, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      <td style={styles.td}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 110, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H cm" readOnly={!isEditable} /></td>
-                    </>) : (<>
-                      <td style={styles.td}><input type="number" className="di-input" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 90, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>
-                      {cc.hasTax && <td style={styles.td}><input type="number" className="di-input" value={it.gst} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} onFocus={(e) => e.target.select()} style={{ ...styles.inlineInput, width: 55, textAlign: 'right', ...(isEditable ? styles.inlineInputEditable : {}) }} readOnly={!isEditable} /></td>}
-                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: 500 }}>{fmt(amount)}</td>
-                    </>)}
-                    {isEditable && <td className="no-print" style={styles.td}>
-                      <button onClick={() => removeRow(it.id)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
+                    {!_isChild && priceCells}
+                    {isEditable && <td className="no-print" style={{ ...styles.td, verticalAlign: 'top' }}>
+                      <button onClick={() => removeRow(it.id)} style={styles.iconBtn} title="Remove line"><Trash2 size={14} color="#B5453A" /></button>
                     </td>}
                   </tr>
                 );
-              })}
+                });
+              })()}
             </tbody>
           </table>
 
           {isEditable && <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={addRow} style={styles.addRowBtn}><Plus size={14} /> Add line item</button>
-            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Merge {mergeSel.length} items into one line</button>}
+            {mergeSel.length >= 2 && <button onClick={mergeSelected} style={{ ...styles.addRowBtn, background: '#1A7A3E', color: '#fff', border: 'none' }}>⑃ Group {mergeSel.length} items (one shared price)</button>}
             {mergeSel.length >= 1
-              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to merge)' : ''}</span>
-              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick the checkbox on rows to merge them into a single line</span>}
+              ? <span style={{ fontSize: 11.5, color: '#888780' }}>{mergeSel.length} selected {mergeSel.length < 2 ? '(tick 2+ rows to group)' : ''}</span>
+              : <span style={{ fontSize: 11.5, color: '#B0AC9F' }}>Tip: tick rows then Group — each keeps its Sl &amp; description, with one shared HSN/Qty/Rate/Amount</span>}
           </div>}
 
           {/* ── Packing List weight totals ── */}
@@ -5872,7 +7401,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 8 }}>
               {/* Seal / Stamp area */}
               <div style={{ border: '1px dashed #DDD8CC', borderRadius: 8, minHeight: 72, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 11, color: '#C8C4BB', letterSpacing: '0.05em' }}>SEAL / STAMP</span>
+                {businessInfo.seal ? <img src={businessInfo.seal} alt="seal" style={{ height: 64, maxWidth: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 11, color: '#C8C4BB', letterSpacing: '0.05em' }}>SEAL / STAMP</span>}
               </div>
               {/* Signatory */}
               <div style={{ textAlign: 'center' }}>
@@ -5950,9 +7479,9 @@ function PettyCashList({ pettyCash, setPettyCash, businessInfo, userRole, curren
   });
 
   function genVoucherNo() {
-    const nums = entries.map(e => parseInt((e.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = entries.map(e => lastNum(e.voucherNo));
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
-    return 'PCH-' + String(next).padStart(3, '0');
+    return dn('PCH', next);
   }
 
   function saveEntry(entry) {
@@ -6150,7 +7679,7 @@ function PettyCashForm({ entry, onSave, onClose, currentUserName = '' }) {
         <div style={styles.formGroup}>
           <label style={styles.label}>Payment Mode</label>
           <select value={form.mode} onChange={e => set('mode', e.target.value)} style={styles.input}>
-            {['Cash', 'Cheque', 'NEFT', 'UPI', 'Other'].map(m => <option key={m}>{m}</option>)}
+            {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
         <div style={styles.formGroup}>
@@ -6190,7 +7719,7 @@ function StatementPanel({ rows, openingBalance, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','petty-cash-statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, { sealAppend: false })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -6348,9 +7877,9 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
 
   function genVoucherNo(type) {
     const prefix = type === 'payment' ? 'PV' : 'RV';
-    const nums = displayList.filter(v => v.type === type).map(v => parseInt((v.voucherNo || '').replace(/\D/g, '')) || 0);
+    const nums = displayList.filter(v => v.type === type).map(v => lastNum(v.voucherNo));
     const next = (nums.length ? Math.max(...nums) : 0) + 1;
-    return prefix + '-' + String(next).padStart(3, '0');
+    return dn(prefix, next);
   }
 
   function saveVoucher(v) {
@@ -6484,7 +8013,7 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
         <VoucherForm voucher={editing} customers={customers} vendors={vendors} documents={documents} onSave={saveVoucher} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printVoucher && (
-        <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} onClose={() => setPrintVoucher(null)} />
+        <VoucherPrintModal voucher={printVoucher} businessInfo={businessInfo} customers={customers} vendors={vendors} onClose={() => setPrintVoucher(null)} />
       )}
       {statementParty && (
         <PartyStatementModal party={statementParty} vouchers={list} businessInfo={businessInfo} onClose={() => setStatementParty(null)} />
@@ -6642,7 +8171,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
         <div style={styles.formGroup}>
           <label style={styles.label}>Payment Mode</label>
           <select value={form.mode} onChange={e => set('mode', e.target.value)} style={styles.input}>
-            {['Cash', 'Cheque', 'NEFT', 'RTGS', 'UPI', 'Other'].map(m => <option key={m}>{m}</option>)}
+            {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
         <div style={styles.formGroup}>
@@ -6662,42 +8191,60 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   );
 }
 
-// Injects CSS so letterpad header/footer are fixed on every printed page
+// Letterhead header/footer flow INLINE (not fixed) so the document content always
+// starts cleanly below the header — no overlap, no manual height guessing. The
+// header image spans the full page width; content follows it naturally.
+// Document font choices (applied to all printed documents). Web-safe stacks so
+// they render identically on screen and in print — no missing-font fallback.
+const DOC_FONTS = {
+  serif:   { label: 'Georgia (classic serif)',  stack: "Georgia, 'Times New Roman', serif" },
+  times:   { label: 'Times New Roman',           stack: "'Times New Roman', Times, serif" },
+  arial:   { label: 'Arial / Helvetica',         stack: "Arial, Helvetica, sans-serif" },
+  calibri: { label: 'Calibri / Segoe',           stack: "Calibri, 'Segoe UI', Candara, Arial, sans-serif" },
+  tahoma:  { label: 'Verdana / Tahoma',          stack: "Verdana, Tahoma, Geneva, sans-serif" },
+  roboto:  { label: 'Roboto (modern)',           stack: "Roboto, 'Helvetica Neue', Arial, sans-serif" },
+};
+// Forces the chosen font across the whole printed document (screen + print), so the
+// text auto-adjusts cleanly in the selected style everywhere.
+function DocFontStyle({ businessInfo }) {
+  const stack = (DOC_FONTS[businessInfo && businessInfo.docFont] || DOC_FONTS.serif).stack;
+  return <style>{`
+    .print-area, .print-area *:not([class*="draft-watermark"]),
+    .doc-print-area, .doc-print-area *:not([class*="draft-watermark"]) {
+      font-family: ${stack} !important;
+    }
+  `}</style>;
+}
+
 function LetterpadPrintStyle() {
   return (
     <style>{`
-      /* ── Screen: force footer to fill full width edge-to-edge ── */
-      @media screen {
-        .lh-pad-footer {
-          height: 130px !important;
-          padding: 0 !important;
-          overflow: hidden !important;
-        }
-        .lh-pad-footer img {
-          width: 100% !important;
-          height: 130px !important;
-          object-fit: cover !important;
-          object-position: center !important;
-          display: block !important;
-        }
-        .lh-pad-header img {
-          width: 100% !important;
-          height: auto !important;
-          display: block !important;
-        }
-      }
-      /* ── Print: fixed position so header/footer repeat on every page ── */
+      .lh-pad-header img, .lh-pad-footer img { width: 100% !important; height: auto !important; display: block !important; }
+      /* On-screen preview: bleed out of the card padding (40px top/btm, 48px sides). */
+      .lh-pad-header { margin: -40px -48px 16px -48px !important; width: auto !important; background: #fff !important; }
+      .lh-pad-footer { margin: 18px -48px -40px -48px !important; width: auto !important; background: #fff !important; }
+      /* Print: remove the browser's page margins so the letterhead reaches the paper
+         edges; keep the body text inset. */
       @media print {
-        .lh-pad-header {
-          position: fixed !important; top: 0 !important; left: 0 !important;
-          right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
+        html, body { margin: 0 !important; padding: 0 !important; }
+        @page { size: A4; margin: 0 !important; }
+        .print-area {
+          margin: 0 !important; width: 100% !important; max-width: none !important;
+          border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+          padding: 0 40px 96px 40px !important;
         }
+        .lh-pad-header { margin: 0 -40px 14px -40px !important; }
+        /* Footer pinned to the bottom of the page, independent of content length */
         .lh-pad-footer {
-          position: fixed !important; bottom: 0 !important; left: 0 !important;
-          right: 0 !important; width: 100% !important; background: white !important; z-index: 9999 !important;
+          position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+          width: 100% !important; margin: 0 !important; background: #fff !important; z-index: 9999 !important;
         }
-        .print-area { padding-top: 215px !important; padding-bottom: 135px !important; }
       }
+      /* PDF export (html2canvas) can't read @media print — bleed the letterhead to
+         the captured element edges here too. */
+      .pdf-exporting { padding: 0 40px 0 40px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+      .pdf-exporting .lh-pad-header { margin: 0 -40px 14px -40px !important; }
+      .pdf-exporting .lh-pad-footer { margin: 16px -40px 0 -40px !important; }
     `}</style>
   );
 }
@@ -6753,7 +8300,7 @@ function StdDocHeader({ businessInfo, title, subtitle }) {
   const cc = COUNTRY_CONFIG[bi.country || 'india'] || COUNTRY_CONFIG.india;
   const cParts = [bi.gstin ? ((cc.taxIdLabel || 'GSTIN') + ': ' + bi.gstin) : '', bi.phone || '', bi.email || '', bi.website || ''].filter(Boolean);
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
+    <div className="vph" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 22, borderBottom: '2px solid #1E2A4A' }}>
       <div>
         <div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{bi.name || bi.companyName}</div>
         {bi.address && <div style={{ fontSize: 11.5, color: '#666', marginTop: 3, maxWidth: 340 }}>{bi.address}</div>}
@@ -6783,7 +8330,7 @@ function VoucherPrintHeader({ businessInfo, useLH }) {
     );
   }
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 16, borderBottom: '2px solid #1E2A4A' }}>
+    <div className="vph" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14, marginBottom: 16, borderBottom: '2px solid #1E2A4A' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         {businessInfo.logo && <img src={businessInfo.logo} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6, background: '#fff' }} />}
         <div>
@@ -6817,16 +8364,27 @@ function VoucherSignatory({ businessInfo, leftLabel }) {
   );
 }
 
-function VoucherPrintModal({ voucher, businessInfo, onClose }) {
+function VoucherPrintModal({ voucher, businessInfo, onClose, customers = [], vendors = [] }) {
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const isPayment = voucher.type === 'payment';
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
   const fmt = (n) => currency(n, cc.currency);
-  const details = [
-    ['Account Head', voucher.accountHead],
+  // Resolve the party's full address (for the "Paid To / Received From" block)
+  const _party = [...(vendors || []), ...(customers || [])].find(p => (p.name || '') === voucher.party);
+  const partyAddr = voucher.partyAddress || _party?.address || '';
+  const partyState = _party?.state || '';
+  const amtInWords = (() => {
+    const words = numToWords(Math.floor(Math.abs(parseFloat(voucher.amount) || 0)));
+    return (cc.currency === '₹' ? 'Indian Rupee ' : (cc.currency || '') + ' ') + words + ' Only';
+  })();
+  const placeOfSupply = voucher.placeOfSupply || partyState || businessInfo.state || '';
+  const rows = [
+    ['Payment Date', voucher.date],
+    ...(voucher.refNo ? [['Reference Number', voucher.refNo]] : []),
     ['Payment Mode', voucher.mode],
-    ...(voucher.refNo ? [['Reference / Cheque No', voucher.refNo]] : []),
-    ...(voucher.narration ? [['Narration', voucher.narration]] : []),
+    ...(placeOfSupply ? [['Place Of Supply', withStateCode(placeOfSupply)]] : []),
+    [isPayment ? 'Amount Paid In Words' : 'Amount Received In Words', amtInWords],
+    ...((voucher.narration || voucher.accountHead) ? [['Description', voucher.narration || voucher.accountHead]] : []),
   ];
 
   return (
@@ -6839,43 +8397,52 @@ function VoucherPrintModal({ voucher, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','voucher.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print / PDF</button>
       </div>
       {/* Print area — only this shows on print */}
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
-        {/* Title */}
-        <div style={{ textAlign: 'right', marginBottom: 20 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: isPayment ? '#B91C1C' : '#1A7A3E', letterSpacing: '0.07em' }}>
-            {isPayment ? 'PAYMENT VOUCHER' : 'RECEIPT VOUCHER'}
+        {/* Centered title with gold accent */}
+        <div style={{ textAlign: 'center', margin: '28px 0 30px' }}>
+          <div style={{ fontSize: 21, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.05em', fontFamily: 'Georgia, serif' }}>
+            {isPayment ? 'PAYMENT VOUCHER' : 'PAYMENT RECEIPT'}
           </div>
-          <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>No: <strong>{voucher.voucherNo}</strong> &nbsp;·&nbsp; Date: <strong>{voucher.date}</strong></div>
+          <div style={{ width: 64, height: 3, background: '#C9A24B', borderRadius: 2, margin: '8px auto 0' }} />
+          <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>No: {voucher.voucherNo}</div>
         </div>
-        {/* Party */}
-        <div style={{ background: '#F8F5EE', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
-          <div style={{ fontSize: 10, color: '#888780', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>{isPayment ? 'Paid To' : 'Received From'}</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#1E2A4A' }}>{voucher.party}</div>
+        {/* Body: label/value column on the left + shaded amount box top-right */}
+        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', marginBottom: 40 }}>
+          <table style={{ flex: 1, fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              {rows.map(([label, val]) => (
+                <tr key={label}>
+                  <td style={{ padding: '10px 0', color: '#888780', width: '38%', fontWeight: 400, verticalAlign: 'top', whiteSpace: 'nowrap' }}>{label}</td>
+                  <td style={{ padding: '10px 10px 10px 0', color: '#1E2A4A', fontWeight: 700, borderBottom: '1px solid #EDEAE1' }}>{val}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ width: 220, flexShrink: 0, background: isPayment ? 'linear-gradient(135deg, #1E2A4A 0%, #2D3E6A 100%)' : 'linear-gradient(135deg, #15663A 0%, #1E9150 100%)', color: '#fff', borderRadius: 12, padding: '20px 22px', textAlign: 'center', boxShadow: '0 6px 18px rgba(30,42,74,0.18)' }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#C9A24B', fontWeight: 700, marginBottom: 8 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'Georgia, serif' }}>{fmt(voucher.amount || 0)}</div>
+          </div>
         </div>
-        {/* Detail rows */}
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 20 }}>
-          <tbody>
-            {details.map(([label, val]) => (
-              <tr key={label}>
-                <td style={{ padding: '8px 0', color: '#888780', width: '36%', fontWeight: 500, borderBottom: '1px solid #F0EDE5' }}>{label}</td>
-                <td style={{ padding: '8px 0', color: '#1E2A4A', borderBottom: '1px solid #F0EDE5' }}>{val}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {/* Amount */}
-        <div style={{ background: isPayment ? '#FEF2F2' : '#EEF7F1', borderRadius: 8, padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 14, color: isPayment ? '#B91C1C' : '#1A7A3E', fontWeight: 600 }}>Amount {isPayment ? 'Paid' : 'Received'}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: isPayment ? '#B91C1C' : '#1A7A3E' }}>{fmt(voucher.amount || 0)}</div>
+        {/* Footer: Paid To / Received From  +  Authorized Signature */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 50 }}>
+          <div style={{ maxWidth: '55%' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', marginBottom: 8 }}>{isPayment ? 'Paid To' : 'Received From'}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1E2A4A' }}>{voucher.party || '—'}</div>
+            {partyAddr && <div style={{ fontSize: 12, color: '#555', marginTop: 3, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{partyAddr}</div>}
+          </div>
+          <div style={{ textAlign: 'center', minWidth: 200 }}>
+            <div style={{ fontSize: 12.5, color: '#555', marginBottom: 46 }}>Authorized Signature</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', borderTop: '1px solid #333', paddingTop: 6 }}>For {businessInfo?.name || businessInfo?.companyName || 'the Company'}</div>
+            <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Proprietor</div>
+          </div>
         </div>
-        <VoucherSignatory businessInfo={businessInfo} leftLabel={isPayment ? 'Paid By' : 'Received By'} />
         {/* Bank details */}
         {(businessInfo.bankName || businessInfo.bankAccount) && (
-          <div style={{ marginTop: 20, paddingTop: 14, borderTop: '1px dashed #EAE6DB', fontSize: 11, color: '#888780' }}>
+          <div style={{ marginTop: 28, paddingTop: 14, borderTop: '1px dashed #EAE6DB', fontSize: 11, color: '#888780' }}>
             <strong style={{ color: '#555' }}>Bank: </strong>
             {businessInfo.bankName && <span>{businessInfo.bankName} </span>}
             {businessInfo.bankAccount && <span>· A/C: {businessInfo.bankAccount} </span>}
@@ -6903,7 +8470,7 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15} /> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','statement.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, { sealAppend: false })}><Printer size={15} /> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
         <VoucherPrintHeader businessInfo={businessInfo} useLH={useLH} />
@@ -7033,8 +8600,8 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
   }
 
   function printStock(){
-    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'\u2014')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'\u2014')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
-    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' \u2014 filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    const body=rows.map(r=>{const it=r.item||{}; return '<tr><td>'+(it.itemCode||'—')+'</td><td>'+(it.name||'')+'</td><td>'+(it.hsn||'—')+'</td><td style="text-align:right">'+(r.qty||0)+'</td><td>'+(it.unit||'')+'</td><td style="text-align:right">'+String(fmt(Math.max(0,r.value||0)))+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>Stock Position</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:12px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}td,th{border:1px solid #ccc;padding:6px 9px;text-align:left}th{background:#1E2A4A;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Stock Position'+(search?' — filter: '+search:'')+'</h3><div style="font-size:11px;color:#888">Printed: '+new Date().toLocaleDateString('en-IN')+'</div><table><thead><tr><th>Item Code</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th><th>Value</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -7241,8 +8808,8 @@ function VerticalRackModule({ rackStore, setRackStore, items, grns = [], storeIs
   const returns = isMultiBiz ? allReturns.filter(r => (r.bizType||'trading') === currentBizType) : allReturns;
 
   function nextNo(prefix, arr, field) {
-    const nums = arr.map(r => parseInt((r[field]||'').replace(/\D/g,''))||0);
-    return prefix + String((nums.length ? Math.max(...nums) : 0)+1).padStart(3,'0');
+    const nums = arr.map(r => lastNum(r[field]));
+    return dn(prefix.replace(/-$/, ''), (nums.length ? Math.max(...nums) : 0)+1);
   }
 
   function addStockEntries(docId, docNo, date, itemsList, type, sourceType) {
@@ -7453,8 +9020,8 @@ function RackDetailModal({ rack, inward, outward, returns, items, grns, storeIss
 
   const tabSt = t => ({ padding:'6px 16px', fontSize:12, fontWeight:activeTab===t?600:400, borderBottom:activeTab===t?'2px solid #2C3E6B':'2px solid transparent', color:activeTab===t?'#2C3E6B':'#888', cursor:'pointer', background:'none', border:'none' });
   function printRack(){
-    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'\u2014')+'</td></tr>';}).join('');
-    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' \u2014 '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
+    const body=slots.map(sl=>{const d=slotData[sl]||{qty:0,items:[]};return '<tr><td>'+sl+'</td><td style="text-align:right">'+(d.qty||0)+'</td><td>'+((d.items||[]).join(', ')||'—')+'</td></tr>';}).join('');
+    printHTML('<!DOCTYPE html><html><head><title>'+(rack.name||'Rack')+'</title><style>body{font-family:Arial;padding:24px;color:#222}h2{margin:0 0 2px}h3{margin-top:14px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#2C3E6B;color:#fff}</style></head><body><h2>'+(businessInfo&&businessInfo.name||'')+'</h2><div style="font-size:12px;color:#666">'+(businessInfo&&businessInfo.address||'')+'</div><h3>Rack: '+(rack.name||'')+' — '+rows+'R \u00d7 '+cols+'C ('+slots.length+' slots)</h3><table><thead><tr><th>Slot</th><th>Qty</th><th>Items</th></tr></thead><tbody>'+body+'</tbody></table></body></html>');
   }
 
   return (
@@ -8021,7 +9588,7 @@ function GRNPrint({ grn, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -8081,7 +9648,7 @@ function StoreIssuePrint({ siv, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -8145,8 +9712,8 @@ function StoreIssueList({ storeIssues: allIssues, setStoreIssues, items, setStoc
   const storeIssues = isMultiBiz ? (allIssues || []).filter(s => (s.bizType || 'trading') === currentBizType) : (allIssues || []);
 
   function nextNumber() {
-    const nums = storeIssues.map(s=>parseInt((s.sivNumber||'').replace(/\D/g,''))||0);
-    return `SIV-${String(Math.max(0,...nums)+1).padStart(4,'0')}`;
+    const nums = storeIssues.map(s=>lastNum(s.sivNumber));
+    return dn('SIV', Math.max(0,...nums)+1, 4);
   }
   function blank() {
     return { id:'', sivNumber:nextNumber(), date:new Date().toISOString().slice(0,10), issuedTo:'', purpose:'', projectRef:'', productionRef:'', lines:[], issuedBy:'', receivedBy:'', notes:'', approvalStatus:'draft', approvalNote:'' };
@@ -8357,8 +9924,8 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
   const poList = (documents || []).filter(d => d.type === 'purchase');
 
   function nextGRN() {
-    const nums = grns.map(g => parseInt((g.number || '').replace(/\D/g,'')) || 0);
-    return 'GRN-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
+    const nums = grns.map(g => lastNum(g.number));
+    return dn('GRN', (nums.length ? Math.max(...nums) : 0) + 1, 4);
   }
 
   function updateGRNStatus(id, patch) {
@@ -8693,7 +10260,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 
@@ -8767,7 +10334,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -8893,7 +10460,7 @@ function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSav
   const country = businessInfo?.country || 'india';
 
   function nextRef() {
-    return 'OL-' + new Date().getFullYear() + '-' + String((existingCount || 0) + 1).padStart(3, '0');
+    return dn('OL', (existingCount || 0) + 1);
   }
 
   const blank = {
@@ -8957,7 +10524,7 @@ function OfferLetterForm({ ol, existingCount = 0, employees, businessInfo, onSav
         <h2 className="serif" style={S.h1}>{ol ? 'Edit Offer Letter' : 'New Offer Letter'}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={S.ghostBtn} onClick={onClose}>Cancel</button>
-          <button style={S.ghostBtn} onClick={() => printOfferLetterDoc({ ...form }, businessInfo)}><Printer size={14} /> Preview</button>
+          <SealToggle businessInfo={businessInfo} /><button style={S.ghostBtn} onClick={() => printOfferLetterDoc({ ...form }, businessInfo)}><Printer size={14} /> Preview</button>
           <button style={S.primaryBtn} onClick={() => onSave(form)}>Save</button>
         </div>
       </div>
@@ -9198,7 +10765,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
   const blank = isWarn ? {
     id: crypto.randomUUID(),
     type: 'warning',
-    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
+    refNo: withCo(prefix + fyNow() + '/' + String(count).padStart(3, '0')),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     warnType: 'written',
@@ -9211,7 +10778,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
   } : {
     id: crypto.randomUUID(),
     type: 'termination',
-    refNo: prefix + new Date().getFullYear() + '/' + String(count).padStart(3, '0'),
+    refNo: withCo(prefix + fyNow() + '/' + String(count).padStart(3, '0')),
     employeeId: '',
     issueDate: new Date().toISOString().slice(0, 10),
     terminationDate: '',
@@ -9261,7 +10828,7 @@ function HRLetterForm({ letterType, existingCount = 0, letter, employees, busine
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 className="serif" style={styles.h1}>{letter ? 'Edit' : 'New'} {isWarn ? 'Warning Letter' : 'Termination Letter'}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button style={styles.ghostBtn} onClick={() => printHRLetter(form, selEmp, businessInfo)}><Printer size={14} /> Preview</button>
+          <SealToggle businessInfo={businessInfo} /><button style={styles.ghostBtn} onClick={() => printHRLetter(form, selEmp, businessInfo)}><Printer size={14} /> Preview</button>
           <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
           <button style={styles.primaryBtn} onClick={() => onSave(form)}>Save Letter</button>
         </div>
@@ -9425,7 +10992,7 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  printHTML(html);
+  printLetterFromHtml(html, biz);
 }
 
 function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
@@ -9435,6 +11002,53 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
 
   const country = businessInfo?.country || 'india';
   const isGulf  = GULF_COUNTRIES_HR.includes(country);
+  const [printMode, setPrintMode] = useState(null); // null | 'ask' | 'all' | 'standard'
+  const fmtEmp = makeFmt(businessInfo);
+  const idLabel = country === 'uae' ? 'Emirates ID' : 'Civil ID';
+  const docCols = isGulf
+    ? [['Passport', e=>e.passportNo, e=>e.passportExpiry], ['Visa', e=>e.visaNo, e=>e.visaExpiry], [idLabel, e=>e.emiratesId, e=>e.emiratesIdExpiry], ['Labour Card', e=>e.labourCardNo, e=>e.labourCardExpiry]]
+    : [['Aadhaar', e=>e.aadharNo, null], ['PAN', e=>e.panNo, null]];
+  async function downloadEmpTemplate() {
+    const aoa=[['Emp ID','Name','Designation','Department','Phone','Email','Nationality','Joining Date','Basic Salary'],
+      ['','RAJESH KUMAR','Electrician','Electrical','','','Indian','2026-07-01',1500],
+      ['','MOHAMMED ALI','Helper','Electrical','','','Indian','2026-07-01',1000]];
+    try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:10},{wch:24},{wch:16},{wch:14},{wch:14},{wch:20},{wch:12},{wch:12},{wch:12}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Employees'); XLSX.writeFile(wb,'Employees-Import-Template.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Employees-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importEmpXlsx(e) {
+    const file=e.target.files&&e.target.files[0]; if(!file) return;
+    const nm=(file.name||'').toLowerCase();
+    if(!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)){ alert('Please import an Excel (.xlsx) or CSV file. A PDF/image cannot be read — download the ⬇ Template, fill it, and import that.'); e.target.value=''; return; }
+    try {
+      let rows=[];
+      if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+      else { const text=await file.text(); if(text.slice(0,5)==='%PDF-'||text.slice(0,2)==='PK'){ alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+      const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+      const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+      const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+      const hasHeader=head.some(h=>/name|design|depart|phone|email|nation|salary|basic|emp/.test(h));
+      let idx,start;
+      if(hasHeader){ start=1; idx={ empId:find('emp id','empid','emp no','id'), name:find('name'), designation:find('design','desig','role','trade','category'), department:find('depart','dept','discipl'), phone:find('phone','mobile','contact'), email:find('email','mail'), nationality:find('nation'), joining:find('join','doj'), basic:find('basic','salary','wage') }; }
+      else { start=0; idx={empId:-1,name:0,designation:1,department:-1,phone:-1,email:-1,nationality:-1,joining:-1,basic:-1}; }
+      const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
+      let count = employees.length;
+      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||('EMP-'+String(count).padStart(4,'0')), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
+      if(!added.length){ alert('No rows with a Name found. Check the Name column.'); e.target.value=''; return; }
+      setEmployees(prev=>[...prev, ...added]);
+      alert(added.length+' employee(s) added. Click each row to fill full details (documents, bank, salary breakup).');
+    } catch(err){ alert('Import failed: '+err.message); }
+    e.target.value='';
+  }
+  async function exportEmpXlsx() {
+    const head = ['Emp ID','Name','Designation','Department','Nationality','Phone','Email','DOB','Joining','Status', ...docCols.flatMap(c=>c[2]?[c[0],c[0]+' Expiry']:[c[0]]), 'Basic','HRA','DA','Other','Gross'];
+    const aoa = [head, ...[...employees].sort((a,b)=>(a.name||'')>(b.name||'')?1:-1).map(e=>{
+      const basic=parseFloat(e.basicSalary)||0,hra=parseFloat(e.hra)||0,da=parseFloat(e.da)||0,oth=parseFloat(e.otherAllowances)||0;
+      const docVals = docCols.flatMap(c=>c[2]?[c[1](e)||'',c[2](e)||'']:[c[1](e)||'']);
+      return [e.empId||'',e.name||'',e.designation||'',e.department||'',e.nationality||'',e.phone||'',e.email||'',e.dob||'',e.joiningDate||'',e.status||'', ...docVals, basic,hra,da,oth,basic+hra+da+oth];
+    })];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Employees'); XLSX.writeFile(wb,'Employees.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Employees.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
 
   const allAlerts = employees.flatMap(emp =>
     getEmpDocAlerts(emp, isGulf, country).map(a => ({ ...a, emp }))
@@ -9458,35 +11072,11 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
     setActiveEmp(null);
   }
 
-  if (subView === 'edit') {
-    return (
-      <EmployeeHRForm
-        employee={activeEmp}
-        count={employees.length}
-        businessInfo={businessInfo}
-        isGulf={isGulf}
-        country={country}
-        onSave={saveEmployee}
-        onClose={() => setSubView(activeEmp ? 'detail' : 'list')}
-      />
-    );
-  }
-
-  if (subView === 'detail' && activeEmp) {
-    const fresh = employees.find(e => e.id === activeEmp.id) || activeEmp;
-    return (
-      <EmployeeDetailView
-        emp={fresh}
-        businessInfo={businessInfo}
-        isGulf={isGulf}
-        country={country}
-        canEdit={canEdit}
-        onEdit={() => { setActiveEmp(fresh); setSubView('edit'); }}
-        onDelete={() => deleteEmployee(fresh.id)}
-        onBack={() => setSubView('list')}
-      />
-    );
-  }
+  const scrollToPanel = () => setTimeout(() => { const el = document.getElementById('emp-detail-panel'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+  function openEmp(emp) { setActiveEmp(emp); setSubView('detail'); scrollToPanel(); }
+  function editEmp(emp) { setActiveEmp(emp); setSubView('edit'); scrollToPanel(); }
+  function addEmp() { setActiveEmp(null); setSubView('edit'); scrollToPanel(); }
+  function closePanel() { setSubView('list'); setActiveEmp(null); }
 
   return (
     <div style={styles.page}>
@@ -9501,7 +11091,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
               {allAlerts.slice(0, 10).map((a, i) => (
                 <span key={i}
                   style={{ fontSize: 11.5, background: a.status === 'expired' ? '#FEE2E2' : '#FEF9C3', color: a.status === 'expired' ? '#B91C1C' : '#92400E', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
-                  onClick={() => { setActiveEmp(a.emp); setSubView('detail'); }}>
+                  onClick={() => openEmp(a.emp)}>
                   <AlertTriangle size={10} />{a.emp.name} — {a.label} {a.days <= 0 ? 'EXPIRED' : `in ${a.days}d`}
                 </span>
               ))}
@@ -9516,11 +11106,17 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           <h2 className="serif" style={styles.h1}>Employees</h2>
           <div style={styles.muted}>{employees.length} employee{employees.length !== 1 ? 's' : ''}</div>
         </div>
-        {canEdit && (
-          <button style={styles.primaryBtn} onClick={() => { setActiveEmp(null); setSubView('edit'); }}>
-            <Plus size={15} /> Add Employee
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {employees.length > 0 && <button style={styles.ghostBtn} onClick={exportEmpXlsx} title="Export to Excel (.xlsx)">⭳ Excel</button>}
+          {employees.length > 0 && <button style={styles.ghostBtn} onClick={() => setPrintMode('ask')} title="Print list"><Printer size={14} /> Print</button>}
+          {canEdit && <button style={styles.ghostBtn} onClick={downloadEmpTemplate} title="Download employee import template (Excel)">⬇ Template</button>}
+          {canEdit && <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Bulk-add employees from Excel/CSV — Name, Designation, etc.">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importEmpXlsx} /></label>}
+          {canEdit && (
+            <button style={styles.primaryBtn} onClick={addEmp}>
+              <Plus size={15} /> Add Employee
+            </button>
+          )}
+        </div>
       </div>
 
       {employees.length === 0 ? (
@@ -9539,8 +11135,8 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
               {[...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1).map(emp => {
                 const alerts = getEmpDocAlerts(emp, isGulf, country);
                 return (
-                  <tr key={emp.id} style={{ cursor: 'pointer', background: alerts.length > 0 ? '#FFFBEB' : undefined }}
-                    onClick={() => { setActiveEmp(emp); setSubView('detail'); }}>
+                  <tr key={emp.id} style={{ cursor: 'pointer', background: activeEmp?.id === emp.id ? '#EEF2FF' : alerts.length > 0 ? '#FFFBEB' : undefined }}
+                    onClick={() => openEmp(emp)}>
                     <td style={{ ...styles.td, fontFamily: 'monospace', fontWeight: 600 }}>{emp.empId}</td>
                     <td style={{ ...styles.td, fontWeight: 600 }}>{emp.name}</td>
                     <td style={styles.td}>{emp.designation}</td>
@@ -9566,7 +11162,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
                     <td style={styles.td} onClick={e => e.stopPropagation()}>
                       {canEdit && (
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button style={styles.iconBtn} onClick={() => { setActiveEmp(emp); setSubView('edit'); }}><Pencil size={14} /></button>
+                          <button style={styles.iconBtn} onClick={() => editEmp(emp)}><Pencil size={14} /></button>
                           <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteEmployee(emp.id)}><Trash2 size={14} /></button>
                         </div>
                       )}
@@ -9578,6 +11174,93 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           </table>
         </div>
       )}
+      {subView === 'edit' && (
+        <div id="emp-detail-panel" style={{ marginTop: 22, borderTop: '3px solid #C9A24B', borderRadius: 4 }}>
+          <EmployeeHRForm
+            employee={activeEmp}
+            count={employees.length}
+            businessInfo={businessInfo}
+            isGulf={isGulf}
+            country={country}
+            onSave={saveEmployee}
+            onClose={() => { if (activeEmp) { setSubView('detail'); } else { closePanel(); } }}
+          />
+        </div>
+      )}
+      {subView === 'detail' && activeEmp && (() => {
+        const fresh = employees.find(e => e.id === activeEmp.id) || activeEmp;
+        return (
+          <div id="emp-detail-panel" style={{ marginTop: 22, borderTop: '3px solid #C9A24B', borderRadius: 4 }}>
+            <EmployeeDetailView
+              emp={fresh}
+              businessInfo={businessInfo}
+              isGulf={isGulf}
+              country={country}
+              canEdit={canEdit}
+              onEdit={() => editEmp(fresh)}
+              onDelete={() => deleteEmployee(fresh.id)}
+              onBack={closePanel}
+            />
+          </div>
+        );
+      })()}
+      {printMode === 'ask' && (
+        <>
+          <div className="no-print" onClick={() => setPrintMode(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1200 }} />
+          <div className="no-print" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: '#fff', borderRadius: 12, padding: '22px 26px', zIndex: 1201, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}>Print Employee List</div>
+            <div style={{ fontSize: 12.5, color: '#888', marginBottom: 16 }}>Choose how much detail to include.</div>
+            <button onClick={() => setPrintMode('all')} style={{ ...styles.primaryBtn, width: '100%', justifyContent: 'center', marginBottom: 10 }}>All Details &nbsp;·&nbsp; landscape</button>
+            <button onClick={() => setPrintMode('standard')} style={{ ...styles.ghostBtn, width: '100%', justifyContent: 'center' }}>Standard Details</button>
+            <button onClick={() => setPrintMode(null)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 12, marginTop: 12, width: '100%', cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </>
+      )}
+      {(printMode === 'all' || printMode === 'standard') && (() => {
+        const allMode = printMode === 'all';
+        const money = e => { const b = parseFloat(e.basicSalary) || 0; return b; };
+        const grossOf = e => { const b = parseFloat(e.basicSalary) || 0; return b + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0); };
+        const baseCols = [
+          ['#', (e, i) => i + 1, 'center'],
+          ['Emp ID', e => e.empId, 'left'],
+          ['Name', e => e.name, 'left'],
+          ['Designation', e => e.designation || '—', 'left'],
+          ['Dept', e => e.department || '—', 'left'],
+          ['Phone', e => e.phone || '—', 'left'],
+          ['Joining', e => e.joiningDate || '—', 'left'],
+          ['Status', e => e.status || 'active', 'left'],
+        ];
+        const cols = allMode ? [
+          ...baseCols.slice(0, 5),
+          ['Nationality', e => e.nationality || '—', 'left'],
+          ...baseCols.slice(5),
+          ...docCols.map(c => [c[0], e => { const no = c[1](e) || '—'; const exp = c[2] ? c[2](e) : null; return exp ? no + ' (exp ' + exp + ')' : no; }, 'left']),
+          ['Basic', e => money(e) ? fmtEmp(money(e)) : '—', 'right'],
+          ['Gross', e => grossOf(e) ? fmtEmp(grossOf(e)) : '—', 'right'],
+        ] : baseCols;
+        const rows = [...employees].sort((a, b) => (a.name || '') > (b.name || '') ? 1 : -1);
+        return (
+          <DocPrintOverlay onClose={() => setPrintMode(null)} filename="Employees.pdf" businessInfo={businessInfo}>
+            <style>{allMode ? `@media print { @page { size: A4 landscape; margin: 9mm; } }` : `@media print { @page { size: A4 portrait; margin: 12mm; } }`}</style>
+            <div style={{ textAlign: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>{allMode ? 'EMPLOYEE REGISTER' : 'EMPLOYEE LIST'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{employees.length} employee{employees.length !== 1 ? 's' : ''} &middot; {new Date().toLocaleDateString()}</div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: allMode ? 9.5 : 11, fontFamily: 'Arial, sans-serif' }}>
+              <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>
+                {cols.map((c, i) => <th key={i} style={{ padding: '4px 6px', textAlign: c[2], fontWeight: 700, whiteSpace: 'nowrap' }}>{c[0]}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map((e, i) => (
+                  <tr key={e.id} style={{ borderBottom: '1px solid #ddd', background: i % 2 ? '#F6F5F2' : '#fff' }}>
+                    {cols.map((c, ci) => <td key={ci} style={{ padding: '4px 6px', textAlign: c[2], whiteSpace: c[2] === 'right' ? 'nowrap' : 'normal', fontFamily: c[0] === 'Emp ID' ? 'monospace' : 'inherit', fontWeight: c[0] === 'Name' ? 600 : 400 }}>{c[1](e, i)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -10020,7 +11703,8 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
 
 
 // ─── Payroll ──────────────────────────────────────────────────────────────────
-function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole }) {
+function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false }) {
+  const runs = isMultiBiz ? (payrollRuns||[]).filter(r => (r.bizType || 'trading') === currentBizType) : (payrollRuns||[]);
   const [showModal, setShowModal] = useState(false);
   const [printRun, setPrintRun] = useState(null);
   const [printMode, setPrintMode] = useState(null); // 'summary' | 'individual'
@@ -10058,14 +11742,14 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 className="serif" style={styles.h1}>Payroll</h2>
-          <div style={styles.muted}>{payrollRuns.length} payroll run{payrollRuns.length !== 1 ? 's' : ''}</div>
+          <div style={styles.muted}>{runs.length} payroll run{runs.length !== 1 ? 's' : ''}</div>
         </div>
         {(userRole === 'admin' || userRole === 'accounts') && (
           <button style={styles.primaryBtn} onClick={() => setShowModal(true)}><Plus size={15}/> Process Payroll</button>
         )}
       </div>
 
-      {payrollRuns.length === 0 ? (
+      {runs.length === 0 ? (
         <div style={styles.emptyBox}>No payroll processed yet. Click "Process Payroll" to run monthly payroll.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
@@ -10074,7 +11758,7 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
               <tr>{['Period','Employees','Gross','Deductions','Net Payable','Status',''].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {[...payrollRuns].sort((a,b)=>a.period<b.period?1:-1).map(r => {
+              {[...runs].sort((a,b)=>a.period<b.period?1:-1).map(r => {
                 const sb = STATUS_BADGE[r.status] || STATUS_BADGE.draft;
                 return (
                   <tr key={r.id}>
@@ -10116,8 +11800,8 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
                             ✓ Mark Paid
                           </button>
                         )}
-                        {r.status !== 'paid' && r.status !== 'submitted' && (
-                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
+                        {(userRole === 'admin' || (r.status !== 'paid' && r.status !== 'submitted')) && (
+                          <button style={{ ...styles.iconBtn, color: '#B5453A' }} title="Delete payroll run" onClick={() => deleteRun(r.id)}><Trash2 size={14}/></button>
                         )}
                       </div>
                     </td>
@@ -10132,8 +11816,10 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
         <PayrollModal
           employees={activeEmp}
           payrollRuns={payrollRuns}
+          currentBizType={currentBizType}
+          isMultiBiz={isMultiBiz}
           businessInfo={businessInfo}
-          onSave={(run) => { setPayrollRuns(prev => [...prev, run]); setShowModal(false); }}
+          onSave={(run) => { setPayrollRuns(prev => [...prev, { ...run, bizType: currentBizType }]); setShowModal(false); }}
           onClose={() => setShowModal(false)}
         />
       )}
@@ -10141,7 +11827,7 @@ function PayrollView({ employees, payrollRuns, setPayrollRuns, businessInfo, use
   );
 }
 
-function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose }) {
+function PayrollModal({ employees, payrollRuns, currentBizType = 'trading', isMultiBiz = false, businessInfo, onSave, onClose }) {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
   const [year, setYear]   = useState(String(now.getFullYear()));
@@ -10190,7 +11876,7 @@ function PayrollModal({ employees, payrollRuns, businessInfo, onSave, onClose })
     });
   }
 
-  const existingRun = payrollRuns.find(r => r.month === month && r.year === year);
+  const existingRun = (payrollRuns||[]).find(r => r.month === month && r.year === year && (!isMultiBiz || (r.bizType||'trading')===currentBizType));
   const totalNet    = lines.reduce((s,l)=>s+(l.net||0), 0);
   const totalGross  = lines.reduce((s,l)=>s+(l.gross||0), 0);
   const totalDed    = lines.reduce((s,l)=>s+(l.totalDeductions||0), 0);
@@ -10339,12 +12025,13 @@ function PaySlipPrint({ run, businessInfo, onClose }) {
   const period = `${MONTHS.find(m=>m[0]===run?.month)?.[1] || run?.month} ${run?.year}`;
   return (
     <div>
+      <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
       <div className="no-print" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998 }} />
       <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payroll-summary.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 48px' }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -10433,7 +12120,7 @@ function IndividualPaySlips({ run, businessInfo, onClose }) {
         <button style={styles.ghostBtn} onClick={onClose}><X size={15}/> Close</button>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','payslips.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15}/> Print All ({lines.length})</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print All ({lines.length})</button>
       </div>
       <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto' }}>
         {lines.map((l, i) => (
@@ -10530,7 +12217,7 @@ function ServiceOrdersView({ serviceOrders, setServiceOrders, customers, busines
   function blankOrder() {
     return {
       id: crypto.randomUUID(),
-      number: 'SO-' + String((serviceOrders.length || 0) + 1).padStart(4, '0'),
+      number: dn('SO', (serviceOrders.length || 0) + 1, 4),
       date: new Date().toISOString().slice(0, 10),
       customerId: '',
       customerSnapshot: null,
@@ -10773,7 +12460,7 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
           <div style={{ display: 'flex', gap: 8 }}>
             {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLH(v=>!v)} style={{ ...styles.ghostBtn, ...(useLH?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLH?'Letterhead ON':'Use Letterhead'}</button>}
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area',`service-order-${order.number||'so'}.pdf`)}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={14}/> Print</button>
+            <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={14}/> Print</button>
             <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
           </div>
         </div>
@@ -10849,9 +12536,9 @@ function ServiceOrderPrint({ order, businessInfo, onClose }) {
             </table>
           </div>
           {order.notes && <div style={{ marginTop: 16, fontSize: 12, color: '#555' }}><strong>Notes: </strong>{order.notes}</div>}
-          <div style={{ marginTop: 36, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#555' }}>
-            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 140 }}>Customer Signature</div></div>
-            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 140 }}>Authorised Signatory</div></div>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 12, color: '#555' }}>
+            <div style={{ textAlign: 'center', width: 160 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Customer Signature</div></div>
+            <div style={{ textAlign: 'center', width: 160 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Authorised Signatory</div></div>
           </div>
           {useLH && businessInfo?.letterheadFooter && (
             <div className="lh-pad-footer" style={{ background: '#fff' }}>
@@ -10903,7 +12590,7 @@ function PrintModal({ title, children, onClose }) {
           <span style={{ fontWeight: 700, fontSize: 15 }}>{title}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area','bin-card.pdf')}><Download size={14}/> PDF</button>
-            <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={14}/> Print / Save PDF</button>
+            <SealToggle businessInfo={window.__operixBI} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', undefined)}><Printer size={14}/> Print / Save PDF</button>
             <button style={styles.secondaryBtn} onClick={onClose}><X size={14}/> Close</button>
           </div>
         </div>
@@ -10951,9 +12638,9 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
-function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO }) {
+function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
   const today = new Date().toISOString().slice(0, 10);
-  const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '' });
+  const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '', make: '', spec: '' });
   const blank = () => ({
     type: 'project', linkId: '', linkName: '',
     date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
@@ -10965,6 +12652,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   });
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
+  const [pasteTxt, setPasteTxt] = React.useState('');
 
   const canApprove = userRole === 'admin' || userRole === 'manager';
 
@@ -10974,8 +12662,8 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
 
   function nextNumber() {
     const yr = new Date().getFullYear();
-    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + yr)).length + 1;
-    return 'PR/' + yr + '/' + String(count).padStart(3, '0');
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    return dn('PR', count);
   }
 
   // Combined BOM list (manufacturing + project)
@@ -11038,6 +12726,42 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
     setEditing(e => ({ ...e, items: rows }));
   }
 
+  // CAPEX: paste a supplier / customer machine list (Excel copy or CSV): Machine | Make/Model | Specification | Qty | Est. cost
+  function importCapexPaste() {
+    const rows = String(pasteTxt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+      const c = (l.indexOf('\t') >= 0 ? l.split('\t') : l.split(',')).map(x => x.trim());
+      const num = (v) => { const n = parseFloat(String(v || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? '' : n; };
+      return { ...blankItem(), name: c[0] || '', make: c[1] || '', spec: c[2] || '', qty: num(c[3]) || 1, rate: num(c[4]) };
+    }).filter(r => r.name && !/^(machine|name|item|description)$/i.test(r.name));
+    if (!rows.length) { alert('Nothing to import. Paste rows as: Machine, Make/Model, Specification, Qty, Est. cost'); return; }
+    setEditing(e => ({ ...e, items: [...(e.items || []).filter(it => (it.name || '').trim()), ...rows] }));
+    setPasteTxt('');
+  }
+  // CAPEX: once the machine is received, create Asset Register entries (one per unit) — never touches the item master / stock.
+  function receiveToAssets(m) {
+    if (!setAssets) { alert('Asset Register is not available.'); return; }
+    const lines = (m.items || []).filter(it => (it.name || '').trim());
+    const total = lines.reduce((s2, it) => s2 + Math.max(1, Math.round(parseFloat(it.qty) || 1)), 0);
+    if (!window.confirm('Receive ' + total + ' machine(s) into the Asset Register for ' + m.number + '?\n\nThey are added under Plant & Machinery (Admin → Asset Register). Item master and stock are not affected.')) return;
+    const yr = new Date().getFullYear();
+    const pfx = 'AV-PLT-' + yr + '-';
+    let n = (Array.isArray(assets) ? assets : []).filter(a => a.assetId && String(a.assetId).startsWith(pfx)).length;
+    const made = [];
+    lines.forEach(it => {
+      const q = Math.max(1, Math.round(parseFloat(it.qty) || 1));
+      for (let k = 0; k < q; k++) {
+        n += 1;
+        made.push({ id: crypto.randomUUID(), assetId: pfx + String(n).padStart(3, '0'), name: it.name, category: 'Plant & Machinery', subtype: '', status: 'draft', condition: 'good',
+          notes: 'Received against ' + m.number + (m.poNumber ? ' / PO ' + m.poNumber : '') + (it.spec ? ' · ' + it.spec : ''),
+          location: m.linkName || '', floor: '', building: '', make: it.make || '', model: '', serialNo: '', purchaseDate: new Date().toISOString().slice(0, 10), warrantyExpiry: '', installDate: '',
+          numberPlate: '', chassisNo: '', engineNo: '', maintenanceRecords: [], fuelLogs: [], purchaseCost: parseFloat(it.rate) || 0, sourcePR: m.number, bizType: m.bizType || 'manufacturing' });
+      }
+    });
+    setAssets(prev => [...(Array.isArray(prev) ? prev : []), ...made]);
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, assetsCreated: made.length, assetsCreatedAt: new Date().toISOString() } : x));
+    alert(made.length + ' asset(s) added. Open Admin → Asset Register to add serial no., location, warranty and approve them.');
+  }
+
   const linkOptions = () => {
     if (editing.type === 'project') return (siteProjects || []).map(p => ({ id: p.id, name: p.name || p.projectName || p.title || ('Project ' + p.id) }));
     if (editing.type === 'production') return (productionOrders || []).map(p => ({ id: p.id, name: (p.number || p.orderNo || p.product || p.productName || ('WO ' + p.id)) }));
@@ -11052,7 +12776,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   const th = { padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: '#1E2A4A', borderBottom: '1px solid #EAE6DB', fontSize: 11, background: '#F8F5EE' };
   const td = { padding: '6px 8px', borderBottom: '1px solid #F0EDE5', color: '#333', fontSize: 12, verticalAlign: 'top' };
   const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
-  const typeLabel = t => t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
+  const typeLabel = t => t === 'capex' ? 'Capex (Plant & Machinery)' : t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
 
   // ── PRINT ──
   if (viewDoc) {
@@ -11062,7 +12786,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
-          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+          <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.print-area', businessInfo)}><Printer size={15} /> Print</button>
         </div>
         <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
           <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -11071,7 +12795,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               <div style={{ fontSize: 11, color: '#888780', marginTop: 2 }}>{businessInfo.address}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>PURCHASE REQUISITION</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#C9A24B', letterSpacing: '0.05em' }}>{m.type === 'capex' ? 'CAPEX REQUISITION — PLANT & MACHINERY' : 'PURCHASE REQUISITION'}</div>
               <div style={{ fontSize: 11, color: '#888780', marginTop: 3 }}>{m.number} · {(m.approvalStatus || 'draft').toUpperCase()}</div>
             </div>
           </div>
@@ -11083,9 +12807,18 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </tbody>
           </table>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
-            <thead><tr>{['#', 'Item / Material', 'UOM', 'Qty', 'Purpose'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item / Material', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
-              {rows.map((it, i) => (
+              {rows.map((it, i) => m.type === 'capex' ? (
+                <tr key={i}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{it.name}</td>
+                  <td style={td}>{it.make || '—'}</td>
+                  <td style={td}>{it.spec || '—'}</td>
+                  <td style={td}>{it.qty || '—'}</td>
+                  <td style={td}>{it.rate ? (parseFloat(it.rate) || 0).toLocaleString('en-IN') : '—'}</td>
+                </tr>
+              ) : (
                 <tr key={i}>
                   <td style={td}>{i + 1}</td>
                   <td style={td}>{it.name}</td>
@@ -11124,7 +12857,10 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               <div><label style={lbl}>Priority</label><select style={inp} value={e.priority} onChange={ev => upd({ priority: ev.target.value })}><option>Normal</option><option>Urgent</option></select></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 12 }}>
-              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option></select></div>
+              <div><label style={lbl}>Against</label><select style={inp} value={e.type} onChange={ev => upd({ type: ev.target.value, linkId: '', linkName: '' })}><option value="project">Project</option><option value="production">Work / Production order</option><option value="customer">Customer</option><option value="capex">Capex — Plant &amp; Machinery</option></select></div>
+              {e.type === 'capex' ? (
+              <div><label style={lbl}>Department / plant area</label><input style={inp} value={e.linkName || ''} onChange={ev => upd({ linkName: ev.target.value, linkId: 'capex' })} placeholder="e.g. Extrusion line, Wire drawing shop" /></div>
+              ) : (
               <div><label style={lbl}>{typeLabel(e.type)}</label>
                 <select style={inp} value={e.linkId} onChange={ev => { const o = opts.find(x => String(x.id) === ev.target.value); upd({ linkId: ev.target.value, linkName: o ? o.name : '' }); }}>
                   <option value="">— Select —</option>
@@ -11132,10 +12868,12 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                 </select>
                 {opts.length === 0 && <div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>No {typeLabel(e.type).toLowerCase()} records yet.</div>}
               </div>
+              )}
             </div>
             <div><label style={lbl}>Requested by</label><input style={inp} value={e.requestedBy} onChange={ev => upd({ requestedBy: ev.target.value })} placeholder="Name / department" /></div>
           </div>
 
+          {e.type !== 'capex' && (
           <div style={{ ...card, background: '#F8FAF0', border: '1px solid #DCE8C4' }}>
             <label style={lbl}>Request via Project BOM  <span style={{ fontWeight: 400, color: '#999' }}>— or leave blank &amp; add items manually (non-BOM)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px auto', gap: 8, alignItems: 'end' }}>
@@ -11145,7 +12883,44 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </div>
             <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>{allBoms.length === 0 ? 'No Project BOMs yet — add items manually below (non-BOM).' : 'Via BOM: pick a Project BOM to auto-load its items. Non-BOM: skip this and add items manually below.'}</div>
           </div>
+          )}
 
+          {e.type === 'capex' ? (
+          <div style={card}>
+            <label style={lbl}>Machines / equipment required <span style={{ fontWeight: 400, color: '#999' }}>— free entry, not linked to the item master</span></label>
+            <div style={{ background: '#F8FAF0', border: '1px solid #DCE8C4', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, color: '#666', marginBottom: 6 }}>Got a list from the supplier / customer? Copy rows from Excel (or CSV) and paste: <b>Machine, Make/Model, Specification, Qty, Est. cost</b></div>
+              <textarea style={{ ...inp, minHeight: 56, fontFamily: 'monospace', fontSize: 11.5 }} value={pasteTxt} onChange={ev => setPasteTxt(ev.target.value)} placeholder={'Wire drawing machine\tXYZ WD-24\t24 die, 1.2-3.5mm\t1\t2500000'} />
+              <button style={{ ...styles.secondaryBtn, marginTop: 6, fontSize: 12 }} onClick={importCapexPaste}>Add pasted rows ↓</button>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>{['#', 'Machine / Equipment', 'Make / Model', 'Specification / Capacity', 'Qty', 'Est. cost (each)', 'Amount', ''].map(h => <th key={h} style={{ ...th, textAlign: (h === 'Est. cost (each)' || h === 'Amount') ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.items || []).map((it, i) => {
+                  const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+                  return (
+                  <tr key={i}>
+                    <td style={{ ...td, color: '#888' }}>{i + 1}</td>
+                    <td style={td}><input style={inp} value={it.name} onChange={ev => setRow(i, 'name', ev.target.value)} placeholder="Machine name" /></td>
+                    <td style={td}><input style={inp} value={it.make || ''} onChange={ev => setRow(i, 'make', ev.target.value)} placeholder="Make / model" /></td>
+                    <td style={td}><input style={inp} value={it.spec || ''} onChange={ev => setRow(i, 'spec', ev.target.value)} placeholder="Capacity, power, size…" /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 64 }} value={it.qty} onChange={ev => setRow(i, 'qty', ev.target.value)} /></td>
+                    <td style={td}><input type="number" style={{ ...inp, width: 110, textAlign: 'right' }} value={it.rate ?? ''} onChange={ev => setRow(i, 'rate', ev.target.value)} placeholder="0" /></td>
+                    <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>{amt ? amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }}><button onClick={() => delRow(i)} style={{ ...styles.ghostBtn, padding: '2px 8px', color: '#B91C1C' }}>✕</button></td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot><tr>
+                <td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 600 }}>Estimated Capex Total</td>
+                <td style={{ ...td, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{(e.items || []).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td></td>
+              </tr></tfoot>
+            </table>
+            <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add machine</button>
+          </div>
+          ) : (
           <div style={card}>
             <label style={lbl}>Items required</label>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -11180,10 +12955,11 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </table>
             <button style={{ ...styles.ghostBtn, fontSize: 12, marginTop: 8 }} onClick={addRow}>+ Add item</button>
           </div>
+          )}
 
           <div style={card}>
-            <label style={lbl}>Remarks</label>
-            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder="Any notes for the purchase team" />
+            <label style={lbl}>{e.type === 'capex' ? 'Justification / remarks (why this machine, supplier quote ref)' : 'Remarks'}</label>
+            <textarea style={{ ...inp, minHeight: 50, resize: 'vertical' }} value={e.remarks} onChange={ev => upd({ remarks: ev.target.value })} placeholder={e.type === 'capex' ? 'Purpose, capacity need, supplier / quote reference' : 'Any notes for the purchase team'} />
           </div>
 
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
@@ -11217,7 +12993,9 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 8px', borderRadius: 20, background: '#F0EDE0', color: STATUS_COL[st] || '#888' }}>{st.toUpperCase()}</span>
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>{m.number}</div>
                   {m.priority === 'Urgent' && <span style={{ fontSize: 10, fontWeight: 700, color: '#B91C1C' }}>● URGENT</span>}
+                  {m.type === 'capex' && <span style={{ fontSize: 10, fontWeight: 700, color: '#6B5BAE', background: '#EFEAFB', borderRadius: 20, padding: '2px 8px' }}>CAPEX</span>}
                   {m.convertedToPO && <span style={{ fontSize: 10, fontWeight: 700, color: '#2C7A3F' }}>→ PO created</span>}
+                  {m.assetsCreated ? <span style={{ fontSize: 10, fontWeight: 700, color: '#1E7A9A' }}>→ {m.assetsCreated} asset(s) in Asset Register</span> : null}
                 </div>
                 <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{fmtDate(m.date)} · {typeLabel(m.type)}: {m.linkName || '—'}{m.requiredBy ? ' · required by ' + fmtDate(m.requiredBy) : ''}</div>
                 <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>📦 {(m.items || []).filter(it => it.name).length} items{m.requestedBy ? ' · by ' + m.requestedBy : ''}</div>
@@ -11228,6 +13006,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
                   <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#2C7A3F' }} onClick={() => setStatus(m, 'approved')}>Approve</button>
                   <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px', color: '#B91C1C' }} onClick={() => setStatus(m, 'rejected')}>Reject</button>
                 </>}
+                {m.type === 'capex' && m.convertedToPO && !m.assetsCreated && setAssets && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => receiveToAssets(m)}>Receive → Asset Register</button>}
                 {st === 'approved' && !m.convertedToPO && onConvertToPO && <button style={{ ...styles.secondaryBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => onConvertToPO(m)}>Convert to PO →</button>}
                 <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => setViewDoc(m)}><Printer size={13} /> Print</button>
                 <button style={{ ...styles.ghostBtn, fontSize: 12, padding: '5px 10px' }} onClick={() => startEdit(m)}><Pencil size={13} /></button>
@@ -11237,6 +13016,1123 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── FAT / SAT / STP test standards (IEC + equivalent IS) per product ─────────
+// Reference standards for electrical equipment acceptance testing. Verify against
+// the latest edition / project spec before use.
+const PRODUCT_TEST_STANDARDS = {
+  'Power Transformer (Oil)': { iec: 'IEC 60076', is: 'IS 2026', tests: [
+    ['Winding resistance measurement', 'IEC 60076-1', 'Balanced across phases, within ±2% of calculated'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-1', 'Ratio within ±0.5% of rated; vector group confirmed'],
+    ['Insulation resistance / Polarisation Index', 'IEC 60076 / IS 2026', 'IR ≥ 1000 MΩ; PI ≥ 1.3'],
+    ['No-load loss & no-load current', 'IEC 60076-1', 'Within guaranteed value + tolerance (+15%)'],
+    ['Load loss & impedance voltage', 'IEC 60076-1', 'Impedance within ±10% of declared'],
+    ['Separate-source AC voltage withstand (HV)', 'IEC 60076-3', 'Withstand 1 min, no breakdown'],
+    ['Induced overvoltage withstand', 'IEC 60076-3', 'Withstand, no breakdown'],
+    ['Transformer oil dielectric strength (BDV)', 'IEC 60156 / IS 6792', '≥ 60 kV (new oil)'],
+  ]},
+  'Distribution Transformer (Oil)': { iec: 'IEC 60076', is: 'IS 1180', tests: [
+    ['Winding resistance measurement', 'IEC 60076-1', 'Balanced within ±2%'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-1', 'Ratio within ±0.5%; vector group confirmed'],
+    ['Insulation resistance', 'IS 1180 / IEC 60076', 'IR ≥ specified MΩ'],
+    ['No-load & load loss, impedance', 'IEC 60076-1', 'Within guaranteed + tolerance'],
+    ['Power-frequency withstand (HV)', 'IEC 60076-3', '1 min, no breakdown'],
+    ['Oil dielectric strength (BDV)', 'IEC 60156 / IS 6792', '≥ 60 kV'],
+  ]},
+  'Dry-Type Transformer': { iec: 'IEC 60076-11', is: 'IS 11171', tests: [
+    ['Winding resistance measurement', 'IEC 60076-11', 'Balanced within ±2%'],
+    ['Voltage ratio, polarity & vector group', 'IEC 60076-11', 'Within ±0.5%'],
+    ['Insulation resistance / PI', 'IEC 60076-11', 'IR ≥ specified; PI ≥ 1.5'],
+    ['No-load & load loss', 'IEC 60076-11', 'Within guaranteed + tolerance'],
+    ['Power-frequency / induced withstand', 'IEC 60076-11', 'No breakdown'],
+    ['Partial discharge measurement', 'IEC 60076-11', '≤ specified pC'],
+  ]},
+  'LV Power Cable (≤1.1 kV)': { iec: 'IEC 60502-1', is: 'IS 7098 (Part 1)', tests: [
+    ['Conductor resistance', 'IEC 60228 / IS 8130', '≤ max DC resistance for size'],
+    ['Insulation resistance', 'IEC 60502-1', '≥ specified MΩ·km'],
+    ['High-voltage (AC) withstand', 'IEC 60502-1', '3.5 kV, 5 min, no breakdown'],
+    ['Sheath spark test', 'IEC 60502-1', 'Continuous, no puncture'],
+    ['Insulation / sheath thickness', 'IEC 60502-1', 'Within tolerance'],
+  ]},
+  'MV/HV XLPE Cable (3.3–33 kV)': { iec: 'IEC 60502-2', is: 'IS 7098 (Part 2)', tests: [
+    ['Conductor resistance', 'IEC 60228', '≤ max for size'],
+    ['Partial discharge test', 'IEC 60502-2', '≤ 10 pC at 1.73 U₀'],
+    ['High-voltage AC withstand', 'IEC 60502-2', 'Per voltage class, no breakdown'],
+    ['Insulation resistance', 'IEC 60502-2', '≥ specified'],
+    ['Dissipation factor (tan δ)', 'IEC 60502-2', 'Within limit'],
+  ]},
+  'LV Switchgear Panel (PCC/MCC)': { iec: 'IEC 61439-1/2', is: 'IS 8623 (Part 1/2)', tests: [
+    ['Continuity of protective bonding circuit', 'IEC 61439-1', '≤ 0.1 Ω'],
+    ['Insulation resistance', 'IEC 61439-1', '≥ specified MΩ'],
+    ['Power-frequency dielectric withstand', 'IEC 61439-1', '2.5 kV, 1 min, no breakdown'],
+    ['Operation / functional test', 'IEC 61439-1', 'All devices operate correctly'],
+    ['Wiring, labelling & tightness check', 'IEC 61439-1', 'Per drawing / torque chart'],
+    ['Protective device settings verification', 'IEC 61439-1', 'Per relay / setting schedule'],
+  ]},
+  'MV Switchgear (up to 36 kV)': { iec: 'IEC 62271-200', is: 'IS 3427', tests: [
+    ['Power-frequency voltage withstand', 'IEC 62271-1', 'Per rated insulation level'],
+    ['Insulation resistance', 'IEC 62271-200', '≥ specified'],
+    ['Main circuit contact resistance', 'IEC 62271-1', '≤ specified µΩ'],
+    ['Mechanical operation test', 'IEC 62271-1', 'Smooth open/close, correct timing'],
+    ['Interlock & functional test', 'IEC 62271-200', 'All interlocks operate correctly'],
+  ]},
+  'Bus Duct / Busway': { iec: 'IEC 61439-6', is: 'IS 8623 (Part 1)', tests: [
+    ['Continuity of protective circuit', 'IEC 61439-6', '≤ specified'],
+    ['Insulation resistance', 'IEC 61439-6', '≥ specified'],
+    ['Power-frequency dielectric withstand', 'IEC 61439-6', 'Per rated, no breakdown'],
+    ['Joint / bolt torque check', 'IEC 61439-6', 'Per torque specification'],
+    ['Dimensional & routing check', 'IEC 61439-6', 'Per approved GA drawing'],
+  ]},
+  'LT Induction Motor': { iec: 'IEC 60034-1', is: 'IS 325', tests: [
+    ['Winding resistance (per phase)', 'IEC 60034-1', 'Balanced within 2%'],
+    ['Insulation resistance & PI', 'IEC 60034-1', 'IR ≥ specified; PI ≥ 1.5'],
+    ['High-voltage withstand', 'IEC 60034-1', '2U + 1000 V, 1 min'],
+    ['No-load running test', 'IEC 60034-1', 'Current & vibration within limits'],
+    ['Direction of rotation', 'IEC 60034-1', 'As specified'],
+  ]},
+  'Current Transformer (CT)': { iec: 'IEC 61869-2', is: 'IS 2705', tests: [
+    ['Ratio & polarity', 'IEC 61869-2', 'Within accuracy class'],
+    ['Insulation resistance', 'IEC 61869-2', '≥ specified'],
+    ['Power-frequency withstand (pri/sec)', 'IEC 61869-2', 'Per rated level'],
+    ['Magnetization / knee-point voltage', 'IEC 61869-2', '≥ specified Vk'],
+  ]},
+  'Voltage Transformer (PT/VT)': { iec: 'IEC 61869-3', is: 'IS 3156', tests: [
+    ['Ratio & polarity', 'IEC 61869-3', 'Within accuracy class'],
+    ['Insulation resistance', 'IEC 61869-3', '≥ specified'],
+    ['Power-frequency withstand', 'IEC 61869-3', 'Per rated level'],
+  ]},
+  'APFC / Capacitor Panel': { iec: 'IEC 61439-1 / IEC 60831', is: 'IS 8623 / IS 13340', tests: [
+    ['Capacitor capacitance / kVAr output', 'IEC 60831', 'Within −5% / +10% of rated kVAr'],
+    ['Insulation resistance', 'IEC 61439-1', '≥ specified'],
+    ['Protective bonding continuity', 'IEC 61439-1', '≤ 0.1 Ω'],
+    ['APFC relay functional / step switching', 'IEC 61439-1', 'Steps switch correctly'],
+  ]},
+  'Other / Custom': { iec: '', is: '', tests: [] },
+};
+
+// ═══ Technical Data Sheet (customer-specific cable TDS) ═══
+const TDS_FIELD_GROUPS = [
+  { title: 'General', fields: [['title','Sheet title (heading)',2],['cableType','Type of Cable'],['voltage','Voltage Grade (Volts)'],['cores','No of Cores & Nominal Area'],['code','Cable Code']] },
+  { title: 'Conductor', fields: [['condMat','Material'],['condSpec','Reference Specification'],['condShape','Shape of Conductor'],['area','Nominal Area (sq.mm)'],['minWires','Minimum No of Wires'],['dcRes','Max D.C. Resistance @20°C (Ohm/Km)']] },
+  { title: 'Insulation', fields: [['insMat','Material'],['insSpec','Reference Specification'],['insColour','Colour of Insulation'],['insNom','Thickness — Nominal (mm)'],['insMin','Thickness — Minimum at a point (mm)']] },
+  { title: 'Inner Sheath', toggle: 'hasInner', fields: [['innerMat','Material'],['innerMethod','Method of Application'],['innerSpec','Reference Specification'],['innerDia','Calculated Laid-up Diameter (mm)'],['innerMin','Minimum Thickness (mm)']] },
+  { title: 'Armouring', toggle: 'hasArmour', fields: [['armMat','Material'],['armSpec','Reference Specification'],['armDia','Calculated Dia over Inner Sheath (mm)'],['armType','Type of Armour'],['armDim','Dimension of Armour (mm)'],['armTol','Tolerance on Dimension']] },
+  { title: 'Outer Sheath', fields: [['outMat','Material'],['outSpec','Reference Specification'],['outColour','Colour of Outer Sheath'],['outDia','Calculated Dia over Armour (mm)'],['outNom','Thickness — Nominal (mm)'],['outMin','Thickness — Minimum at a point (mm)']] },
+  { title: 'Electrical Parameters', fields: [['acRes','Max AC Resistance @90°C (Ohm/Km)'],['react','Calculated Reactance (Ohm/Km)'],['cap','Capacitance (Mfd/Km)'],['tNorm','Max Conductor Temp — Normal (°C)'],['tSC','Max Conductor Temp — Short Circuit (°C)'],['scRating','Short Circuit Rating 1 sec (kA)']] },
+  { title: 'Current Carrying Capacity', fields: [['ground','In Ground at 30°C (Amp)'],['air','In Air at 40°C (Amp)'],['ampSpec','Reference Specification']] },
+  { title: 'FR-LSH Properties', toggle: 'hasFR', fields: [['coi','Critical Oxygen Index (%)'],['ti','Temperature Index (°C)'],['sd','Smoke Density Rating (%)'],['hag','Halogen Acid Gas Generation (%)'],['flame','Flammability Test',2]] },
+  { title: 'Finished Cable', fields: [['overall','Approx Overall Diameter (mm)'],['drum','Standard Drum Length (Meters)'],['drumTol','Tolerance on Drum Length (%)'],['bend','Bending Radius'],['pull1','Safe Pulling Force — with Stocking',2],['pull2','Safe Pulling Force — with pulling eyes',2]] },
+];
+const TDS_BASE = {
+  hasInner: true, hasArmour: true, hasFR: true, voltage: '1100',
+  condMat: 'STRANDED ANNEALED BARE COPPER', condSpec: 'IS: 8130-2013',
+  insMat: 'CROSS LINKED POLY ETHYLENE (XLPE)', insSpec: 'IS: 7098 (PART-1)-1988',
+  innerMat: 'POLYVINYL CHLORIDE (PVC)', innerMethod: 'EXTRUDED', innerSpec: 'IS: 5831-1984', innerMin: '0.30',
+  armSpec: 'IS: 3975-1999', armTol: '± 10 %',
+  outMat: 'PVC TYPE ST-2 FR-LSH', outSpec: 'IS: 5831-1984', outColour: 'BLACK', outNom: 'N.A.',
+  tNorm: '90', tSC: '250', ampSpec: 'IS: 3961 (PART-6)-2016',
+  coi: '29', ti: '250', sd: '60', hag: '20', flame: 'PERIOD OF BURNING MAX. 60 SECONDS; UNAFFECTED LENGTH MIN. 50 MM',
+  drum: '1000', drumTol: '±5', bend: '12 x Diameter of Cable',
+  pull1: '9 x D², D = Diameter of Cable in mm', pull2: '5 x Sum of Area of Conductors',
+};
+const TDS_PRESETS = {
+  '3C x 630 sq.mm (2XFY) FR-LSH': { title: '3 CORE LT XLPE CABLE — 3C x 630 sq.mm (2XFY) FR-LSH', cableType: 'LT XLPE ARMOURED CABLE', cores: '3 CORE X 630', code: '2XFY', condShape: 'STRANDED SECTOR SHAPED', area: '630', minWires: '53', dcRes: '0.0283', insSpec: 'IS: 7098 (PART-1)-2025', insColour: 'RED, YELLOW AND BLUE', insNom: '2.40', insMin: '2.06', innerMat: 'THERMOPLASTIC', innerMethod: 'TAPE WRAPPED', innerSpec: 'IS: 7098 (PART-1)-2025', innerDia: '71.50', innerMin: '0.70', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '72.90', armType: 'FORMED WIRE (FLAT STRIP)', armDim: '4 X 0.80', outDia: '74.50', outMin: '2.84', acRes: '0.0391', react: '0.069', cap: '0.36', scRating: '90.09', ground: '661', air: '870', overall: '72.00 ± 3.00', drum: '500/1000' },
+  '1C x 630 sq.mm (2XFaY) Armoured': { title: 'SINGLE CORE ARMOURED CABLE — 1C x 630 sq.mm (2XFaY)', cableType: 'COPPER XLPE ARMOURED CABLE', cores: '1 CORE X 630', code: '2XFY', condShape: 'STRANDED COMPACTED CIRCULAR', area: '630', minWires: '53', dcRes: '0.0283', insColour: 'NATURAL', insNom: '2.80', insMin: '2.42', hasInner: false, armMat: 'ALUMINIUM', armDia: 'N.A', armType: 'FLAT STRIP', armDim: '4 X 0.8', outColour: 'BLACK OR AS PER CUSTOMER REQUIREMENT', outDia: '35.50', outMin: '1.72', acRes: '0.0360', react: '0.086', cap: '1.67', scRating: '90.09', ground: '661', air: '961', overall: '39.00 ± 3.00', drum: '500/1000' },
+  '3C x 6 sq.mm (2XWY) FR-LSH': { title: '3 CORE XLPE CABLE — 3C x 6 sq.mm (2XWY) FR-LSH', cableType: 'XLPE ARMOURED CABLE', cores: '3 CORE X 6.0', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '6.0', minWires: '7', dcRes: '3.08', insColour: 'RED, YELLOW AND BLUE', insNom: '0.70', insMin: '0.63', innerDia: '9.07', armMat: 'GALVANISED STEEL ROUND WIRE', armDia: '9.67', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040', outDia: '12.47', outMin: '1.24', acRes: '3.94', react: '0.090', cap: '0.84', scRating: '0.858', ground: '56', air: '52', overall: '15 ± 3' },
+  '19C x 2.5 sq.mm (2XFY) Control': { title: '19 CORE XLPE CONTROL CABLE — 19C x 2.5 sq.mm (2XFY) FR-LSH', cableType: 'XLPE ARMOURED CONTROL CABLE', cores: '19 CORE X 2.5', code: '2XFY', condShape: 'STRANDED NON COMPACTED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'ALL CORES GREY WITH NUMBERING', insNom: '0.70', insMin: '0.63', innerDia: '16.00', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '16.60', armType: 'FORMED WIRE (FLAT STRIP)', armDim: '4 X 0.8', outDia: '18.20', outMin: '1.40', acRes: '9.48', react: '0.100', cap: '0.10', scRating: '0.358', ground: '34', air: '30', overall: '22 ± 3' },
+  '7C x 2.5 sq.mm (2XWY) FR-LSH': { title: '7 CORE XLPE CABLE — 7C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE ARMOURED CABLE', cores: '7 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'GREY WITH NUMBERING', insNom: '0.70', insMin: '0.63', innerDia: '9.60', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '10.20', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040 %', outDia: '13.00', outMin: '1.24', acRes: '9.44', react: '0.100', cap: '0.10', scRating: '0.358', ground: '34', air: '30', overall: '15.50 ± 3.00', drum: '500/1000' },
+  '2C x 2.5 sq.mm (2XWY) FR-LSH': { title: '2 CORE XLPE ARMOURED CABLE — 2C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE LT ARMOURED CABLE', cores: '2 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'RED AND BLACK', insNom: '0.90', insMin: '0.71', innerDia: '6.40', armMat: 'GALVANISED STEEL ROUND WIRE', armDia: '7.00', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040', outDia: '9.80', outMin: '1.24', acRes: '9.49', react: '0.100', cap: '0.10', scRating: '0.3575', ground: '41', air: '36', overall: '12.50 ± 3' },
+};
+function tdsRows(v) {
+  const g = (k) => (v[k] === undefined || v[k] === null || v[k] === '') ? '—' : String(v[k]);
+  const secs = [];
+  const add = (title, rows) => secs.push({ title, rows });
+  add('GENERAL', [['Type of Cable', '', g('cableType')], ['Voltage Grade', 'Volts', g('voltage')], ['No of Cores and Nominal Area', 'No & sq.mm', g('cores')], ['Cable Code', '', g('code')]]);
+  add('CONDUCTOR', [['Material', '', g('condMat')], ['Reference Specification', '', g('condSpec')], ['Shape of Conductor', '', g('condShape')], ['Nominal Area of Conductor', 'Sq.mm', g('area')], ['Minimum Number of Wires in Conductor', 'Nos', g('minWires'), 'Minimum'], ['Diameter of Wires in Conductor', 'mm', 'Wires are so chosen so that the required Conductor Resistance requirements are achieved'], ['Maximum D.C. Resistance at 20 Deg C', 'Ohm/Km', g('dcRes')]]);
+  add('INSULATION', [['Material', '', g('insMat')], ['Reference Specification', '', g('insSpec')], ['Colour of Insulation', '', g('insColour')], ['Thickness of Insulation', '', ''], ['Nominal', 'mm', g('insNom'), '', 1], ['Minimum at a Point', 'mm', g('insMin'), '', 1]]);
+  if (v.hasInner) add('INNER SHEATH', [['Material', '', g('innerMat')], ['Method of Application', '', g('innerMethod')], ['Reference Specification', '', g('innerSpec')], ['Calculated Laid-up Diameter', 'mm', g('innerDia')], ['Minimum Thickness of Sheath', 'mm', g('innerMin')]]);
+  if (v.hasArmour) add('ARMOURING', [['Material', '', g('armMat')], ['Reference Specification', '', g('armSpec')], ['Calculated Diameter over Inner Sheath', 'mm', g('armDia')], ['Type of Armour', '', g('armType')], ['Dimension of Armour', 'mm', g('armDim')], ['Tolerance on Dimension of Armour', 'mm / %', g('armTol')]]);
+  add('OUTER SHEATH', [['Material', '', g('outMat')], ['Reference Specification', '', g('outSpec')], ['Colour of Outer Sheath', '', g('outColour')], ['Calculated Diameter over Armour', 'mm', g('outDia')], ['Thickness of Outer Sheath', '', ''], ['Nominal', 'mm', g('outNom'), '', 1], ['Minimum at a Point', 'mm', g('outMin'), '', 1]]);
+  add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for 1 second duration', 'kA', g('scRating')]]);
+  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
+  if (v.hasFR) add('FR-LSH PROPERTIES', [['Critical Oxygen Index', '%', g('coi')], ['Temperature Index', 'Deg C', g('ti')], ['Smoke Density Rating', '%', g('sd')], ['Halogen Acid Gas Generation', '%', g('hag')], ['Flammability Test', '', g('flame')]]);
+  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'Newtons', g('pull1'), '', 1], ['When pulled with pulling eyes', 'Newton', g('pull2'), '', 1]]);
+  return secs.map((s, i) => {
+    const n = i + 1; let m = 0, sub = 0;
+    return { n, title: s.title, rows: s.rows.map(r => {
+      if (r[4]) { sub++; return { no: n + '.' + m + '.' + sub, label: r[0], unit: r[1], val: r[2], spec: r[3], indent: true }; }
+      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec: r[3] || '' };
+    }) };
+  });
+}
+function TDSPrintBody({ rec }) {
+  const secs = tdsRows(rec.v || {});
+  const th = { border: '1px solid #444', padding: '5px 6px', fontSize: 11.5, background: '#E9EEF7', color: '#1E2A4A', textAlign: 'left' };
+  const td = { border: '1px solid #666', padding: '4px 6px', fontSize: 11.5, verticalAlign: 'top' };
+  return (
+    <div>
+      <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#1E2A4A', letterSpacing: 0.5 }}>TECHNICAL DATA SHEET</div>
+      <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, margin: '4px 0 8px' }}>{(rec.v || {}).title}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11.5, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span><b>Document No.:</b> {rec.docNo}</span><span><b>TDS No.:</b> {rec.number}</span><span><b>Customer:</b> {rec.customer || 'MARKET'}</span>
+        {rec.refDoc ? <span><b>Ref:</b> {rec.refDoc}</span> : null}<span><b>Date:</b> {rec.date}</span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><th style={{ ...th, width: 44 }}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, width: 62 }}>Specified</th><th style={{ ...th, width: 70 }}>Unit</th><th style={{ ...th, width: '32%' }}>Committed Values</th></tr></thead>
+        <tbody>
+          {secs.map(s => (
+            <React.Fragment key={s.n}>
+              <tr><td style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.title}</td></tr>
+              {s.rows.map(r => (
+                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 18 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, textAlign: 'center' }}>{r.val}</td></tr>
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+      {rec.notes ? <div style={{ marginTop: 8, fontSize: 11.5 }}><b>Notes:</b> {rec.notes}</div> : null}
+      <div style={{ textAlign: 'center', fontSize: 11, color: '#555', marginTop: 12 }}>* This is a computer generated document. No signature is required *</div>
+    </div>
+  );
+}
+function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, tdsSheets = [], setTdsSheets, customers = [], documents = [] }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'staff';
+  const today = new Date().toISOString().slice(0, 10);
+  const [editing, setEditing] = React.useState(null);
+  const [printRec, setPrintRec] = React.useState(null);
+  const [q, setQ] = React.useState('');
+  const all = Array.isArray(tdsSheets) ? tdsSheets : [];
+  const list = all.filter(r => !r.deleted).filter(r => !isMultiBiz || (r.bizType || 'manufacturing') === currentBizType)
+    .filter(r => !q || ((r.number || '') + ' ' + (r.customer || '') + ' ' + ((r.v || {}).title || '')).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const quotes = (documents || []).filter(d => d.type === 'quotation' && d.status !== 'deleted');
+  function fy() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return String(y).slice(2) + '-' + String(y + 1).slice(2); }
+  function nextNo() { const n = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1; return dn('TDS', n); }
+  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: 'TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
+  const setV = (k, val) => setEditing(e => ({ ...e, v: { ...e.v, [k]: val } }));
+  function pickPreset(name) { if (!name) return; setEditing(e => ({ ...e, v: { ...TDS_BASE, ...TDS_PRESETS[name] } })); }
+  function pickQuote(id) {
+    const d = quotes.find(x => x.id === id); if (!d) { setEditing(e => ({ ...e, refDoc: '' })); return; }
+    const c = (customers || []).find(x => x.id === d.customerId);
+    setEditing(e => ({ ...e, refDoc: d.number || '', customerId: d.customerId || '', customer: (c && c.name) || d.customerName || e.customer }));
+  }
+  function save() {
+    if (!editing.v.title) { alert('Enter the sheet title.'); return; }
+    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditing(null);
+  }
+  function dup(r) { setEditing({ ...r, id: Date.now().toString(), number: nextNo(), date: today, createdAt: undefined, v: { ...r.v } }); }
+  function del(id) { if (userRole !== 'admin') { alert('Only an admin can delete.'); return; } if (!window.confirm('Delete this TDS?')) return; setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === id ? { ...x, deleted: true, deletedAt: Date.now() } : x)); }
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+
+  if (editing) {
+    const e = editing, v = e.v || {};
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+          <button onClick={() => setEditing(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
+          <h2 className="serif" style={{ ...styles.h1, flex: 1 }}>Technical Data Sheet — {e.number}</h2>
+          <button onClick={() => setPrintRec(e)} style={styles.ghostBtn}><Printer size={14} /> Preview / Print</button>
+          <button onClick={save} style={styles.primaryBtn}>Save</button>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+            <div><label style={lbl}>TDS No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
+            <div><label style={lbl}>Document No.</label><input style={inp} value={e.docNo} onChange={ev => setEditing(p => ({ ...p, docNo: ev.target.value }))} /></div>
+            <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
+            <div><label style={lbl}>Customer</label>
+              <input style={inp} list="tds-cust" value={e.customer} onChange={ev => { const c = (customers || []).find(x => x.name === ev.target.value); setEditing(p => ({ ...p, customer: ev.target.value, customerId: c ? c.id : '' })); }} placeholder="Customer name (or MARKET)" />
+              <datalist id="tds-cust">{(customers || []).map(c => <option key={c.id} value={c.name} />)}</datalist></div>
+            <div><label style={lbl}>From Quotation (optional)</label>
+              <select style={inp} value={(quotes.find(d => d.number === e.refDoc) || {}).id || ''} onChange={ev => pickQuote(ev.target.value)}>
+                <option value="">— none —</option>
+                {quotes.map(d => <option key={d.id} value={d.id}>{d.number}</option>)}
+              </select></div>
+            <div><label style={lbl}>Load a standard cable</label>
+              <select style={inp} value="" onChange={ev => pickPreset(ev.target.value)}>
+                <option value="">— choose preset (overwrites values) —</option>
+                {Object.keys(TDS_PRESETS).map(k => <option key={k} value={k}>{k}</option>)}
+              </select></div>
+          </div>
+        </div>
+        {TDS_FIELD_GROUPS.map(gr => (
+          <div key={gr.title} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>{gr.title}</div>
+              {gr.toggle && <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 5 }}><input type="checkbox" checked={!!v[gr.toggle]} onChange={ev => setV(gr.toggle, ev.target.checked)} /> Include in sheet</label>}
+            </div>
+            {(!gr.toggle || v[gr.toggle]) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+                {gr.fields.map(([k, label, wide]) => (
+                  <div key={k} style={wide ? { gridColumn: '1 / -1' } : null}><label style={lbl}>{label}</label><input style={inp} value={v[k] || ''} onChange={ev => setV(k, ev.target.value)} /></div>
+                ))}
+              </div>)}
+          </div>
+        ))}
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16 }}>
+          <label style={lbl}>Notes (printed below the table)</label>
+          <textarea style={{ ...inp, minHeight: 60 }} value={e.notes || ''} onChange={ev => setEditing(p => ({ ...p, notes: ev.target.value }))} />
+        </div>
+        {printRec && (
+          <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+            <TDSPrintBody rec={printRec} />
+          </DocPrintOverlay>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <h2 className="serif" style={{ ...styles.h1, flex: 1, margin: 0 }}>Technical Data Sheets</h2>
+        <input style={{ ...inp, width: 220 }} placeholder="Search TDS / customer…" value={q} onChange={ev => setQ(ev.target.value)} />
+        {canEdit && <button onClick={() => setEditing(blank())} style={styles.primaryBtn}><Plus size={14} /> New TDS</button>}
+      </div>
+      {list.length === 0 && <div style={{ color: '#888780', padding: 30, textAlign: 'center', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12 }}>No technical data sheets yet. Click “New TDS”, pick a standard cable preset and edit the values.</div>}
+      <div style={{ display: 'grid', gap: 8 }}>
+        {list.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontWeight: 600, fontSize: 13.5, color: '#1E2A4A' }}>{(r.v || {}).title}</div>
+              <div style={{ fontSize: 12, color: '#777' }}><span style={{ fontFamily: 'monospace', color: '#C9A24B' }}>{r.number}</span> · {r.customer || 'MARKET'}{r.refDoc ? ' · Ref ' + r.refDoc : ''} · {r.date}</div>
+            </div>
+            <button style={styles.iconBtn} title="Print" onClick={() => setPrintRec(r)}><Printer size={15} /></button>
+            {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditing({ ...r, v: { ...r.v } })}><Pencil size={15} /></button>}
+            {canEdit && <button style={styles.iconBtn} title="Duplicate for another customer" onClick={() => dup(r)}><Copy size={15} /></button>}
+            {userRole === 'admin' && <button style={styles.iconBtn} title="Delete (admin)" onClick={() => del(r.id)}><Trash2 size={15} color="#B5453A" /></button>}
+          </div>
+        ))}
+      </div>
+      {printRec && (
+        <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <TDSPrintBody rec={printRec} />
+        </DocPrintOverlay>
+      )}
+    </div>
+  );
+}
+
+function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, fatReports = [], setFatReports, customers = [] }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const today = new Date().toISOString().slice(0, 10);
+  const [editing, setEditing] = React.useState(null);
+  const [printRep, setPrintRep] = React.useState(null);
+
+  const list = (Array.isArray(fatReports) ? fatReports : [])
+    .filter(r => !isMultiBiz || (r.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  function nextNo(type) {
+    const yr = new Date().getFullYear();
+    const n = (Array.isArray(fatReports) ? fatReports : []).filter(r => (r.number || '').includes('/' + fyNow() + '/')).length + 1;
+    return dn(type || 'FAT', n);
+  }
+  function blank() {
+    return { id: Date.now().toString(), testType: 'FAT', number: nextNo('FAT'), date: today, product: '', iec: '', isCode: '',
+      clientId: '', client: '', project: '', make: '', rating: '', serialNo: '', qty: '',
+      rows: [], testedBy: '', witnessedBy: '', approvedBy: '', overall: 'Pass', remarks: '' };
+  }
+  function pickProduct(p) {
+    const std = PRODUCT_TEST_STANDARDS[p] || { iec: '', is: '', tests: [] };
+    setEditing(e => ({ ...e, product: p, iec: std.iec, isCode: std.is,
+      rows: std.tests.map(([name, ref, acc]) => ({ name, ref, acceptance: acc, observed: '', status: '', remarks: '' })) }));
+  }
+  const setR = (i, k, v) => setEditing(e => { const r = [...(e.rows || [])]; r[i] = { ...r[i], [k]: v }; return { ...e, rows: r }; });
+  const addRow = () => setEditing(e => ({ ...e, rows: [...(e.rows || []), { name: '', ref: '', acceptance: '', observed: '', status: '', remarks: '' }] }));
+  const delRow = (i) => setEditing(e => ({ ...e, rows: (e.rows || []).filter((_, idx) => idx !== i) }));
+  function save() {
+    if (!editing.product) { alert('Select a product/equipment first.'); return; }
+    const anyFail = (editing.rows || []).some(r => (r.status || '').toLowerCase() === 'fail');
+    const rec = { ...editing, overall: anyFail ? 'Fail' : (editing.overall || 'Pass'), bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setFatReports(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditing(null);
+  }
+  function del(id) { if (!window.confirm('Delete this test report?')) return; setFatReports(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '7px 8px', borderBottom: '2px solid #EAE6DB' };
+  const td = { padding: '5px 6px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', verticalAlign: 'top' };
+  const cellInput = { width: '100%', border: '1px solid #E5E1D6', borderRadius: 5, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' };
+
+  // ── Editor ──
+  if (editing) {
+    const e = editing;
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+          <button onClick={() => setEditing(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
+          <h2 className="serif" style={styles.h1}>{e.testType} Report — {e.number}</h2>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+            <div><label style={lbl}>Test Type</label>
+              <select style={inp} value={e.testType} onChange={ev => setEditing(p => ({ ...p, testType: ev.target.value, number: nextNo(ev.target.value) }))}>
+                <option value="FAT">FAT — Factory Acceptance Test</option>
+                <option value="SAT">SAT — Site Acceptance Test</option>
+                <option value="STP">STP — Standard Test Procedure</option>
+              </select>
+            </div>
+            <div><label style={lbl}>Report No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
+            <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Product / Equipment</label>
+              <select style={inp} value={e.product} onChange={ev => pickProduct(ev.target.value)}>
+                <option value="">— Select product —</option>
+                {Object.keys(PRODUCT_TEST_STANDARDS).map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+          {e.product && (
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', background: '#EEF2FF', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 13 }}>
+              <div><span style={{ color: '#888', fontWeight: 600 }}>IEC Standard: </span><b style={{ color: '#1E2A4A' }}>{e.iec || '—'}</b></div>
+              <div><span style={{ color: '#888', fontWeight: 600 }}>Equivalent IS: </span><b style={{ color: '#1E2A4A' }}>{e.isCode || '—'}</b></div>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 8 }}>
+            <div><label style={lbl}>Client</label>
+              <input style={inp} value={e.client} list="fat-clients" onChange={ev => setEditing(p => ({ ...p, client: ev.target.value }))} placeholder="Client / customer" />
+              <datalist id="fat-clients">{customers.map(c => <option key={c.id} value={c.name} />)}</datalist>
+            </div>
+            <div><label style={lbl}>Project / PO</label><input style={inp} value={e.project} onChange={ev => setEditing(p => ({ ...p, project: ev.target.value }))} /></div>
+            <div><label style={lbl}>Make</label><input style={inp} value={e.make} onChange={ev => setEditing(p => ({ ...p, make: ev.target.value }))} /></div>
+            <div><label style={lbl}>Rating / Specification</label><input style={inp} value={e.rating} onChange={ev => setEditing(p => ({ ...p, rating: ev.target.value }))} placeholder="e.g. 1000 kVA, 11/0.433 kV" /></div>
+            <div><label style={lbl}>Serial No.</label><input style={inp} value={e.serialNo} onChange={ev => setEditing(p => ({ ...p, serialNo: ev.target.value }))} /></div>
+            <div><label style={lbl}>Quantity</label><input style={inp} value={e.qty} onChange={ev => setEditing(p => ({ ...p, qty: ev.target.value }))} /></div>
+          </div>
+
+          <div style={{ fontWeight: 700, color: '#1E2A4A', margin: '16px 0 8px' }}>Test Schedule &amp; Results</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead><tr>{['#', 'Test Description', 'Standard Ref.', 'Acceptance / Spec', 'Observed / Result', 'Status', 'Remarks', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(e.rows || []).map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ ...td, textAlign: 'center' }}>{i + 1}</td>
+                    <td style={td}><input style={cellInput} value={r.name} onChange={ev => setR(i, 'name', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.ref} onChange={ev => setR(i, 'ref', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.acceptance} onChange={ev => setR(i, 'acceptance', ev.target.value)} /></td>
+                    <td style={td}><input style={cellInput} value={r.observed} onChange={ev => setR(i, 'observed', ev.target.value)} /></td>
+                    <td style={td}>
+                      <select style={{ ...cellInput, width: 80 }} value={r.status} onChange={ev => setR(i, 'status', ev.target.value)}>
+                        <option value="">—</option><option value="Pass">Pass</option><option value="Fail">Fail</option><option value="NA">N/A</option>
+                      </select>
+                    </td>
+                    <td style={td}><input style={cellInput} value={r.remarks} onChange={ev => setR(i, 'remarks', ev.target.value)} /></td>
+                    <td style={{ ...td, textAlign: 'center' }}><button onClick={() => delRow(i)} style={styles.iconBtn}><Trash2 size={13} color="#B5453A" /></button></td>
+                  </tr>
+                ))}
+                {(e.rows || []).length === 0 && <tr><td colSpan={8} style={{ ...td, color: '#999', textAlign: 'center', padding: 16 }}>Select a product to load its standard tests, or add rows manually.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={addRow} style={{ ...styles.ghostBtn, marginTop: 8 }}><Plus size={14} /> Add test row</button>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginTop: 16 }}>
+            <div><label style={lbl}>Tested By</label><input style={inp} value={e.testedBy} onChange={ev => setEditing(p => ({ ...p, testedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Witnessed By (Client)</label><input style={inp} value={e.witnessedBy} onChange={ev => setEditing(p => ({ ...p, witnessedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Approved By</label><input style={inp} value={e.approvedBy} onChange={ev => setEditing(p => ({ ...p, approvedBy: ev.target.value }))} /></div>
+            <div><label style={lbl}>Overall Result</label>
+              <select style={inp} value={e.overall} onChange={ev => setEditing(p => ({ ...p, overall: ev.target.value }))}>
+                <option value="Pass">Pass / Accepted</option><option value="Fail">Fail / Rejected</option><option value="Conditional">Conditional</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}><label style={lbl}>Remarks</label><textarea style={{ ...inp, minHeight: 56 }} value={e.remarks} onChange={ev => setEditing(p => ({ ...p, remarks: ev.target.value }))} /></div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button style={styles.ghostBtn} onClick={() => setEditing(null)}>Cancel</button>
+            <button style={styles.primaryBtn} onClick={save}>Save Report</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List ──
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>FAT / SAT / STP Test Reports</h2>
+          <div style={styles.muted}>Factory &amp; Site Acceptance Tests with standard IEC / IS test procedures per product</div>
+        </div>
+        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing(blank())}><Plus size={15} /> New Test Report</button>}
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No test reports yet. Click "New Test Report", pick a product, and the standard tests + IEC/IS codes load automatically.</div> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {list.map(r => (
+            <div key={r.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.number} <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#EEF2FF', color: '#3D52A0' }}>{r.testType}</span></div>
+                <div style={{ fontSize: 12.5, color: '#555', marginTop: 3 }}>{r.product} · {r.iec}{r.isCode ? ' / ' + r.isCode : ''}</div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{r.client || '—'}{r.rating ? ' · ' + r.rating : ''} · {r.date} · <b style={{ color: r.overall === 'Fail' ? '#B91C1C' : (r.overall === 'Conditional' ? '#C9752A' : '#1A7A3E') }}>{r.overall}</b></div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
+                {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditing({ ...blank(), ...r })}><Pencil size={14} /></button>}
+                {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {printRep && (
+        <DocPrintOverlay onClose={() => setPrintRep(null)} filename={printRep.testType + '-' + (printRep.product || 'Report').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 2 }}>{printRep.testType === 'FAT' ? 'FACTORY ACCEPTANCE TEST (FAT) REPORT' : printRep.testType === 'SAT' ? 'SITE ACCEPTANCE TEST (SAT) REPORT' : 'STANDARD TEST PROCEDURE (STP) REPORT'}</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 14 }}>Report No: {printRep.number} · Date: {printRep.date}</div>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginBottom: 12 }}><tbody>
+            <tr><td style={{ padding: '3px 8px', color: '#666', width: 150 }}>Product / Equipment</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.product}</td><td style={{ padding: '3px 8px', color: '#666', width: 120 }}>IEC Standard</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.iec || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Client</td><td style={{ padding: '3px 8px' }}>{printRep.client || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Equivalent IS</td><td style={{ padding: '3px 8px', fontWeight: 600 }}>{printRep.isCode || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Rating / Spec</td><td style={{ padding: '3px 8px' }}>{printRep.rating || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Serial No.</td><td style={{ padding: '3px 8px' }}>{printRep.serialNo || '—'}</td></tr>
+            <tr><td style={{ padding: '3px 8px', color: '#666' }}>Project / PO</td><td style={{ padding: '3px 8px' }}>{printRep.project || '—'}</td><td style={{ padding: '3px 8px', color: '#666' }}>Quantity</td><td style={{ padding: '3px 8px' }}>{printRep.qty || '—'}</td></tr>
+          </tbody></table>
+          <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', border: '1px solid #333' }}>
+            <thead><tr style={{ background: '#1E2A4A', color: '#fff' }}>{['#', 'Test', 'Standard', 'Acceptance / Spec', 'Observed', 'Status', 'Remarks'].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: 'left', border: '1px solid #33415E' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {(printRep.rows || []).map((r, i) => (
+                <tr key={i}>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC', textAlign: 'center' }}>{i + 1}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.name}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.ref}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.acceptance}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.observed}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC', fontWeight: 700, color: (r.status || '').toLowerCase() === 'fail' ? '#B91C1C' : ((r.status || '').toLowerCase() === 'pass' ? '#1A7A3E' : '#555') }}>{r.status}</td>
+                  <td style={{ padding: '5px 7px', border: '1px solid #CCC' }}>{r.remarks}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 12, fontSize: 13 }}>Overall Result: <b style={{ color: printRep.overall === 'Fail' ? '#B91C1C' : '#1A7A3E' }}>{printRep.overall}</b></div>
+          {printRep.remarks && <div style={{ marginTop: 6, fontSize: 12, color: '#555' }}>Remarks: {printRep.remarks}</div>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 50, fontSize: 12 }}>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Tested By<br /><b>{printRep.testedBy || ''}</b></div></div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Witnessed By<br /><b>{printRep.witnessedBy || ''}</b></div></div>
+            <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #333', paddingTop: 4, width: 150 }}>Approved By<br /><b>{printRep.approvedBy || ''}</b></div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
+    </div>
+  );
+}
+
+// ─── BO Shortages (Manufacturing) — material availability vs BOM requirement ──
+function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
+  const canEdit = userRole === 'admin' || userRole === 'manager';
+  const today = new Date().toISOString().slice(0, 10);
+  const n3 = (x) => Math.round((parseFloat(x) || 0) * 1000) / 1000;
+  const bomList = (Array.isArray(boms) ? boms : []).filter(b => b && (!isMultiBiz || !b.bizType || b.bizType === currentBizType));
+  const rmById = {}; (rawMaterials || []).forEach(r => { if (r && r.id) rmById[r.id] = r; });
+  const [selBomId, setSelBomId] = React.useState('');
+  const [qty, setQty] = React.useState(1);
+  const [result, setResult] = React.useState(null);
+  const [printRep, setPrintRep] = React.useState(null);
+
+  function buildRows(bom, q) {
+    // Support both BOM shapes: BOMForm saves `materials` ({materialId,...}); older/other
+    // BOMs may use `components` ({itemId,...}). Match stock from Raw Materials by id or name.
+    const lines = (bom.materials && bom.materials.length) ? bom.materials : (bom.components || []);
+    return lines.map(m => {
+      const mid = m.materialId || m.itemId || '';
+      const nm = m.name || '';
+      let rm = rmById[mid];
+      if (!rm && nm) rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === nm.trim().toLowerCase());
+      const perBom = parseFloat(m.qty) || 0;
+      const overall = perBom * q;
+      const available = rm ? (parseFloat(rm.stock) || 0) : 0;
+      return { materialId: rm ? rm.id : mid, name: nm || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
+    });
+  }
+  function compute() {
+    const bom = bomList.find(b => b.id === selBomId);
+    if (!bom) { alert('Please select a BOM first.'); return; }
+    const q = parseFloat(qty) || 0;
+    if (q <= 0) { alert('Enter a valid BO quantity (how many sets/batches to produce).'); return; }
+    setResult({ bomId: bom.id, bomName: bom.name || '(unnamed BOM)', outputQty: bom.outputQty || 1, outputUnit: bom.unit || '', qty: q, date: today, rows: buildRows(bom, q) });
+  }
+  function saveReport() {
+    if (!result) return;
+    const rec = { ...result, id: Date.now().toString(), bizType: currentBizType, createdAt: new Date().toISOString() };
+    setBoShortages(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    alert('✅ Shortage report saved.');
+  }
+  function del(id) { if (!window.confirm('Delete this saved shortage report?')) return; setBoShortages(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  function nextPRNumber() {
+    const yr = new Date().getFullYear();
+    const count = (Array.isArray(purchaseReqs) ? purchaseReqs : []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    return dn('PR', count);
+  }
+  function createPR(rep) {
+    if (!setPurchaseReqs) return;
+    const shortRows = (rep.rows || []).filter(r => r.shortage > 0);
+    if (!shortRows.length) { alert('No shortages — nothing to raise a PR for.'); return; }
+    const items = shortRows.map(r => {
+      const rm = rmById[r.materialId];
+      return { itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: rm ? (parseFloat(rm.rate) || '') : '', hsn: '', purpose: 'BOM shortage — ' + rep.bomName };
+    });
+    const rec = {
+      id: Date.now().toString(), number: nextPRNumber(), bizType: currentBizType,
+      type: 'manufacturing', linkId: rep.bomId || '', linkName: rep.bomName || '',
+      date: today, requiredBy: '', requestedBy: '', priority: 'Normal',
+      bomRef: rep.bomId || '', bomMult: rep.qty || 1,
+      items, remarks: 'Auto-raised from BO Shortage (BO Qty ' + rep.qty + ')',
+      approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
+    };
+    setPurchaseReqs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    if (window.confirm('✅ Purchase Requisition ' + rec.number + ' created with ' + items.length + ' short item(s).\n\nOpen Purchase Requisition now? (From there, approve it and convert to a PO for your vendor.)')) {
+      if (setView) setView('purchasereq');
+    }
+  }
+
+  const savedList = (Array.isArray(boShortages) ? boShortages : []).filter(r => !isMultiBiz || (r.bizType || 'trading') === currentBizType).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const shortCount = result ? result.rows.filter(r => r.shortage > 0).length : 0;
+
+  const th = { textAlign: 'left', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const tdc = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F2EFE6' };
+  const ResultTable = ({ rows }) => (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+        <thead><tr>{['Material', 'Available', 'Required / BOM', 'Required Overall', 'Shortage', 'Unit'].map(h => <th key={h} style={{ ...th, textAlign: h === 'Material' || h === 'Unit' ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ background: r.shortage > 0 ? '#FEF2F2' : undefined }}>
+              <td style={{ ...tdc, fontWeight: 600 }}>{r.name}</td>
+              <td style={{ ...tdc, textAlign: 'right' }}>{n3(r.available)}</td>
+              <td style={{ ...tdc, textAlign: 'right' }}>{n3(r.perBom)}</td>
+              <td style={{ ...tdc, textAlign: 'right', fontWeight: 600 }}>{n3(r.overall)}</td>
+              <td style={{ ...tdc, textAlign: 'right', fontWeight: 700, color: r.shortage > 0 ? '#B91C1C' : '#1A7A3E' }}>{r.shortage > 0 ? n3(r.shortage) : '—'}</td>
+              <td style={tdc}>{r.unit}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div style={styles.page}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 className="serif" style={styles.h1}>BO Shortages</h2>
+        <div style={styles.muted}>Pick a BOM and the order quantity to see material availability, requirement and shortage</div>
+      </div>
+
+      {/* Calculator */}
+      <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 18 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: 2, minWidth: 220 }}>
+            <label style={styles.label}>BOM / Product</label>
+            <select value={selBomId} onChange={e => { setSelBomId(e.target.value); setResult(null); }} style={styles.input}>
+              <option value="">— Select BOM —</option>
+              {bomList.map(b => <option key={b.id} value={b.id}>{b.name || '(unnamed BOM)'}{b.outputQty ? ' — makes ' + b.outputQty + ' ' + (b.unit || '') : ''}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={styles.label}>BO Quantity (sets/batches)</label>
+            <input type="number" min="1" value={qty} onChange={e => setQty(e.target.value)} style={styles.input} />
+          </div>
+          <button style={styles.primaryBtn} onClick={compute}>Calculate Shortage</button>
+        </div>
+        {bomList.length === 0 && <div style={{ fontSize: 12.5, color: '#B5453A', marginTop: 10 }}>No BOMs yet. Create a Bill of Materials first (Production → Bill of Materials).</div>}
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{result.bomName}</div>
+              <div style={{ fontSize: 12, color: '#888' }}>BO Qty: {result.qty} × BOM{result.outputQty ? ' (each makes ' + result.outputQty + ' ' + result.outputUnit + ')' : ''} · {result.rows.length} materials · <b style={{ color: shortCount ? '#B91C1C' : '#1A7A3E' }}>{shortCount ? shortCount + ' short' : 'All available'}</b></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button style={styles.ghostBtn} onClick={() => setPrintRep(result)}><Printer size={14} /> Print</button>
+              <button
+                style={{ ...styles.primaryBtn, background: shortCount > 0 ? '#B91C1C' : '#C9C4B8', cursor: shortCount > 0 ? 'pointer' : 'not-allowed' }}
+                disabled={shortCount === 0}
+                title={shortCount > 0 ? 'Create a Purchase Requisition for the short materials' : 'No shortages to raise a PR for'}
+                onClick={() => createPR(result)}>
+                🛒 Raise PR{shortCount > 0 ? ' for ' + shortCount + ' shortage' + (shortCount !== 1 ? 's' : '') : ' (no shortage)'}
+              </button>
+              {canEdit && <button style={styles.primaryBtn} onClick={saveReport}>Save Report</button>}
+            </div>
+          </div>
+          <ResultTable rows={result.rows} />
+        </div>
+      )}
+
+      {/* Saved reports */}
+      {savedList.length > 0 && (<>
+        <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', margin: '8px 0 10px' }}>Saved Shortage Reports</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {savedList.map(r => {
+            const sc = (r.rows || []).filter(x => x.shortage > 0).length;
+            return (
+              <div key={r.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, background: '#fff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.bomName} <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>· BO Qty {r.qty} · {r.date}</span></div>
+                    <div style={{ fontSize: 12, color: sc ? '#B91C1C' : '#1A7A3E' }}>{sc ? sc + ' material(s) short' : 'All materials available'}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {sc > 0 && <button style={{ ...styles.ghostBtn, fontSize: 11, padding: '3px 8px', color: '#B91C1C' }} title="Raise a Purchase Requisition for the shortages" onClick={() => createPR(r)}>🛒 Raise PR</button>}
+                    <button style={styles.iconBtn} title="Print" onClick={() => setPrintRep(r)}><Printer size={14} /></button>
+                    {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => del(r.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>)}
+
+      {/* Print overlay */}
+      {printRep && (
+        <DocPrintOverlay onClose={() => setPrintRep(null)} filename={'BO-Shortage-' + (printRep.bomName || 'BOM').replace(/\s+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>BO SHORTAGE REPORT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{printRep.bomName} · BO Qty {printRep.qty} · {printRep.date}</div>
+          <ResultTable rows={printRep.rows || []} />
+          <div style={{ marginTop: 14, fontSize: 12.5, color: '#555' }}>Materials short: <b style={{ color: (printRep.rows || []).filter(x => x.shortage > 0).length ? '#B91C1C' : '#1A7A3E' }}>{(printRep.rows || []).filter(x => x.shortage > 0).length}</b> of {(printRep.rows || []).length}</div>
+        </DocPrintOverlay>
+      )}
+    </div>
+  );
+}
+
+// ─── Investors & Profit-Share (Manufacturing / Admin) ─────────────────────────
+function InvestorShareView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, investors, setInvestors, profitShares, setProfitShares, documents = [], vouchers = [], pettyCash = {}, payrollRuns = [] }) {
+  const canEdit = userRole === 'admin';
+  const country = businessInfo?.country || 'india';
+  const fmt = makeFmt(businessInfo);
+  const today = new Date().toISOString().slice(0, 10);
+  const [tab, setTab] = React.useState('investors');
+  const [editInv, setEditInv] = React.useState(null);
+  const [editDist, setEditDist] = React.useState(null);
+  const [printAgr, setPrintAgr] = React.useState(null);   // investor for agreement print
+  const [printRcpt, setPrintRcpt] = React.useState(null); // { dist, alloc } payout receipt
+  const [printStmt, setPrintStmt] = React.useState(null); // distribution statement
+  const [stmtWho, setStmtWho] = React.useState('all');     // 'all' | investorId for statement print
+
+  const invList = (Array.isArray(investors) ? investors : [])
+    .filter(i => !isMultiBiz || (i.bizType || 'trading') === currentBizType);
+  const distList = (Array.isArray(profitShares) ? profitShares : [])
+    .filter(d => !isMultiBiz || (d.bizType || 'trading') === currentBizType)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  // ── Investor CRUD ──
+  const blankInv = () => ({ id: Date.now().toString(), name: '', contact: '', phone: '', email: '', address: '', investedAmount: '', shareMode: 'fixed', sharePct: '', joinDate: today, agreementDate: today, status: 'active', notes: '', terms: '' });
+  function saveInv() {
+    if (!editInv.name.trim()) { alert('Please enter the investor name.'); return; }
+    const rec = { ...editInv, bizType: currentBizType, updatedAt: new Date().toISOString(), createdAt: editInv.createdAt || new Date().toISOString() };
+    setInvestors(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditInv(null);
+  }
+  function delInv(id) { if (!window.confirm('Delete this investor? Past profit-share records are kept.')) return; setInvestors(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+
+  const totalCapital = invList.filter(i => i.status !== 'exited').reduce((s, i) => s + (parseFloat(i.investedAmount) || 0), 0);
+  const proRataCap = invList.filter(i => i.status !== 'exited' && i.shareMode === 'prorata').reduce((s, i) => s + (parseFloat(i.investedAmount) || 0), 0);
+  const sumFixedPct = invList.filter(i => i.status !== 'exited' && i.shareMode === 'fixed').reduce((s, i) => s + (parseFloat(i.sharePct) || 0), 0);
+
+  function effPctOf(inv, poolPct) {
+    if (inv.status === 'exited') return 0;
+    if (inv.shareMode === 'fixed') return parseFloat(inv.sharePct) || 0;
+    return proRataCap > 0 ? ((parseFloat(inv.investedAmount) || 0) / proRataCap) * (poolPct != null ? poolPct : Math.max(0, 100 - sumFixedPct)) : 0;
+  }
+
+  // ── Period helpers + auto profit ──
+  const PERIOD_OPTS = { quarterly: ['Q1', 'Q2', 'Q3', 'Q4'], halfyearly: ['H1', 'H2'], yearly: ['FY'], custom: [] };
+  function periodMonths(periodType, period) {
+    if (periodType === 'quarterly') return ({ Q1: [0, 2], Q2: [3, 5], Q3: [6, 8], Q4: [9, 11] })[period] || [0, 2];
+    if (periodType === 'halfyearly') return ({ H1: [0, 5], H2: [6, 11] })[period] || [0, 5];
+    return [0, 11]; // yearly
+  }
+  function periodDates(year, periodType, period) {
+    const m = periodMonths(periodType, period);
+    const iso = d => d.toISOString().slice(0, 10);
+    return { from: iso(new Date(year, m[0], 1)), to: iso(new Date(year, m[1] + 1, 0)) };
+  }
+  function distLabel(d) {
+    if (d.periodType === 'custom') return (d.periodFrom || '') + ' → ' + (d.periodTo || '');
+    if (d.periodType === 'yearly') return d.year + ' · Full Year';
+    if (d.periodType === 'halfyearly') return d.year + ' · ' + (d.period === 'H2' ? 'H2 (Jul–Dec)' : 'H1 (Jan–Jun)');
+    return d.year + ' · ' + (d.period || d.quarter || 'Q1');
+  }
+  function computeProfit(from, to) {
+    const inR = d => d && d >= from && d <= to;
+    const docs = Array.isArray(documents) ? documents : [];
+    const rev = docs.filter(d => d.type === 'invoice' && d.status === 'approved' && inR(d.date)).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const pur = docs.filter(d => d.type === 'purchasebill' && d.status === 'approved' && inR(d.date)).reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
+    const pcE = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+    const exp = pcE.filter(e => inR(e.date)).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    const pay = (Array.isArray(payrollRuns) ? payrollRuns : [])
+      .filter(r => (!isMultiBiz || (r.bizType || 'trading') === currentBizType))
+      .filter(r => { const dt = r.payDate || r.date || (r.month ? r.month + '-01' : ''); return inR(dt); })
+      .reduce((s, r) => s + (parseFloat(r.netPay != null ? r.netPay : (r.totalNet != null ? r.totalNet : r.total)) || 0), 0);
+    return { rev, pur, exp, pay, net: rev - pur - exp - pay };
+  }
+
+  // ── Distribution create/edit ──
+  function newDist() {
+    const yr = new Date().getFullYear();
+    const q = 'Q' + (Math.floor(new Date().getMonth() / 3) + 1);
+    const { from, to } = periodDates(yr, 'quarterly', q);
+    const b = computeProfit(from, to);
+    setEditDist({ id: Date.now().toString(), year: yr, periodType: 'quarterly', period: q, periodFrom: from, periodTo: to, netProfit: Math.round(b.net), proRataPoolPct: Math.max(0, 100 - sumFixedPct), breakdown: b, note: '' });
+  }
+  function recalcDist(patch) {
+    setEditDist(d => {
+      const next = { ...d, ...patch };
+      // When switching period type, snap the sub-period to a valid value
+      if (patch.periodType != null) { const opts = PERIOD_OPTS[patch.periodType] || []; next.period = opts.length ? opts[0] : ''; }
+      const structural = patch.year != null || patch.periodType != null || patch.period != null;
+      if (structural && next.periodType !== 'custom') { const qd = periodDates(next.year, next.periodType, next.period); next.periodFrom = qd.from; next.periodTo = qd.to; }
+      if (structural || patch.periodFrom != null || patch.periodTo != null) { const b = computeProfit(next.periodFrom, next.periodTo); next.breakdown = b; next.netProfit = Math.round(b.net); }
+      return next;
+    });
+  }
+  function saveDist() {
+    const net = parseFloat(editDist.netProfit) || 0;
+    const pool = parseFloat(editDist.proRataPoolPct) || 0;
+    const active = invList.filter(i => i.status !== 'exited');
+    if (!active.length) { alert('Add at least one active investor first.'); return; }
+    const allocations = active.map(i => { const ep = effPctOf(i, pool); return { investorId: i.id, name: i.name, mode: i.shareMode, effPct: Math.round(ep * 1000) / 1000, amount: Math.round(net * ep / 100), status: 'pending', paidDate: '' }; });
+    const rec = { ...editDist, netProfit: net, proRataPoolPct: pool, bizType: currentBizType, allocations, createdAt: editDist.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setProfitShares(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEditDist(null);
+  }
+  function delDist(id) { if (!window.confirm('Delete this quarterly distribution?')) return; setProfitShares(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
+  function togglePaid(distId, invId) {
+    setProfitShares(prev => (Array.isArray(prev) ? prev : []).map(d => d.id !== distId ? d : { ...d, allocations: (d.allocations || []).map(a => a.investorId !== invId ? a : (a.status === 'paid' ? { ...a, status: 'pending', paidDate: '' } : { ...a, status: 'paid', paidDate: today })) }));
+  }
+
+  function agreementTerms(inv) {
+    if (inv.terms && inv.terms.trim()) return inv.terms.split('\n').filter(x => x.trim());
+    const co = businessInfo?.name || 'the Company';
+    const share = inv.shareMode === 'fixed' ? ((inv.sharePct || 0) + '% of quarterly net profit') : 'a pro-rata share of quarterly net profit in proportion to invested capital';
+    return [
+      'Investment: ' + inv.name + ' ("the Investor") has invested ' + fmt(inv.investedAmount || 0) + ' in the Manufacturing division of ' + co + ' ("the Company").',
+      'Profit Share: The Investor is entitled to ' + share + ', payable every quarter.',
+      'Profit Calculation: Net profit = total approved sales revenue less purchases, payroll and operating expenses for the quarter, as recorded in the Company books.',
+      'Payout: The profit share shall be paid within 30 days of the close of each quarter, subject to available funds.',
+      'Losses: If a quarter results in a loss, no profit share is payable for that quarter; losses are not passed to the Investor unless separately agreed in writing.',
+      'Term & Exit: This agreement stays in force until the Investor exits. On exit, all dues are settled up to the exit date.',
+      'Books & Audit: The Investor may review quarterly profit statements. The Company books of account are final for computation.',
+      'Governing Law: This agreement is governed by the laws of India and subject to the jurisdiction of the local courts.',
+    ];
+  }
+
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '8px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 12, color: '#555', marginBottom: 4, display: 'block', fontWeight: 600 };
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h2 className="serif" style={styles.h1}>Investors &amp; Profit-Share</h2>
+          <div style={styles.muted}>Manufacturing division · investor agreements &amp; quarterly profit sharing</div>
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Active investors</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#1E2A4A' }}>{invList.filter(i => i.status !== 'exited').length}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Total capital invested</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#1A7A3E' }}>{fmt(totalCapital)}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 150, background: '#F8F5EE', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px' }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Profit committed to investors</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#C9A24B' }}>{Math.min(100, Math.round((sumFixedPct + (proRataCap > 0 ? Math.max(0, 100 - sumFixedPct) : 0)) * 10) / 10)}%</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '2px solid #EAE6DB' }}>
+        {[['investors', 'Investors'], ['distributions', 'Quarterly Profit-Share']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: tab === k ? 700 : 500, color: tab === k ? '#1E2A4A' : '#888', borderBottom: tab === k ? '2px solid #C9A24B' : '2px solid transparent', marginBottom: -2 }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── INVESTORS TAB ── */}
+      {tab === 'investors' && (<>
+        {canEdit && !editInv && <button style={{ ...styles.primaryBtn, marginBottom: 14 }} onClick={() => setEditInv(blankInv())}><Plus size={15} /> Add Investor</button>}
+
+        {editInv && (
+          <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 20, marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 14 }}>{investors.some(x => x.id === editInv.id) ? 'Edit' : 'New'} Investor</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+              <div><label style={lbl}>Investor name *</label><input style={inp} value={editInv.name} onChange={e => setEditInv({ ...editInv, name: e.target.value })} /></div>
+              <div><label style={lbl}>Contact person</label><input style={inp} value={editInv.contact} onChange={e => setEditInv({ ...editInv, contact: e.target.value })} /></div>
+              <div><label style={lbl}>Phone</label><input style={inp} value={editInv.phone} onChange={e => setEditInv({ ...editInv, phone: e.target.value })} /></div>
+              <div><label style={lbl}>Email</label><input style={inp} value={editInv.email} onChange={e => setEditInv({ ...editInv, email: e.target.value })} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Address</label><input style={inp} value={editInv.address} onChange={e => setEditInv({ ...editInv, address: e.target.value })} /></div>
+              <div><label style={lbl}>Invested amount</label><input style={inp} type="number" value={editInv.investedAmount} onChange={e => setEditInv({ ...editInv, investedAmount: e.target.value })} /></div>
+              <div><label style={lbl}>Share mode</label>
+                <select style={inp} value={editInv.shareMode} onChange={e => setEditInv({ ...editInv, shareMode: e.target.value })}>
+                  <option value="fixed">Fixed % of profit</option>
+                  <option value="prorata">Pro-rata by capital</option>
+                </select>
+              </div>
+              {editInv.shareMode === 'fixed'
+                ? <div><label style={lbl}>Fixed share %</label><input style={inp} type="number" value={editInv.sharePct} onChange={e => setEditInv({ ...editInv, sharePct: e.target.value })} /></div>
+                : <div><label style={lbl}>Share basis</label><input style={{ ...inp, background: '#F1EFE9' }} value="Auto from invested capital" disabled /></div>}
+              <div><label style={lbl}>Join date</label><input style={inp} type="date" value={editInv.joinDate} onChange={e => setEditInv({ ...editInv, joinDate: e.target.value })} /></div>
+              <div><label style={lbl}>Agreement date</label><input style={inp} type="date" value={editInv.agreementDate} onChange={e => setEditInv({ ...editInv, agreementDate: e.target.value })} /></div>
+              <div><label style={lbl}>Status</label>
+                <select style={inp} value={editInv.status} onChange={e => setEditInv({ ...editInv, status: e.target.value })}>
+                  <option value="active">Active</option>
+                  <option value="exited">Exited</option>
+                </select>
+              </div>
+              {editInv.status === 'exited' && <div><label style={lbl}>Exit date</label><input style={inp} type="date" value={editInv.exitDate || ''} onChange={e => setEditInv({ ...editInv, exitDate: e.target.value })} /></div>}
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Notes</label><input style={inp} value={editInv.notes} onChange={e => setEditInv({ ...editInv, notes: e.target.value })} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Agreement terms (leave blank for standard terms — one clause per line)</label><textarea style={{ ...inp, minHeight: 90, fontFamily: 'inherit' }} value={editInv.terms} onChange={e => setEditInv({ ...editInv, terms: e.target.value })} placeholder="Leave blank to auto-generate standard investment terms." /></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button style={styles.primaryBtn} onClick={saveInv}>Save Investor</button>
+              <button style={styles.ghostBtn} onClick={() => setEditInv(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {invList.length === 0 ? <div style={styles.emptyBox}>No investors yet. Add your first investor to generate an agreement and start quarterly profit-sharing.</div> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead><tr>{['Investor', 'Capital', 'Share mode', 'Effective %', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {invList.map(i => (
+                  <tr key={i.id} style={{ background: i.status === 'exited' ? '#FAFAF8' : undefined }}>
+                    <td style={{ ...styles.td, fontWeight: 600 }}>{i.name}{i.contact ? <div style={{ fontSize: 11, color: '#999', fontWeight: 400 }}>{i.contact}</div> : null}</td>
+                    <td style={styles.td}>{fmt(i.investedAmount || 0)}</td>
+                    <td style={styles.td}>{i.shareMode === 'fixed' ? 'Fixed ' + (i.sharePct || 0) + '%' : 'Pro-rata'}</td>
+                    <td style={{ ...styles.td, fontWeight: 600, color: '#1A7A3E' }}>{(Math.round(effPctOf(i) * 100) / 100)}%</td>
+                    <td style={styles.td}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: i.status === 'exited' ? '#F3F4F6' : '#E7F6EC', color: i.status === 'exited' ? '#888' : '#1A7A3E' }}>{i.status === 'exited' ? 'Exited' : 'Active'}</span></td>
+                    <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                      <button style={styles.iconBtn} title="Investment agreement" onClick={() => setPrintAgr(i)}><FileSignature size={14} /></button>
+                      {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditInv({ ...blankInv(), ...i })}><Pencil size={14} /></button>}
+                      {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => delInv(i.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>)}
+
+      {/* ── DISTRIBUTIONS TAB ── */}
+      {tab === 'distributions' && (<>
+        {canEdit && !editDist && <button style={{ ...styles.primaryBtn, marginBottom: 14 }} onClick={newDist}><Plus size={15} /> New Profit-Share</button>}
+
+        {editDist && (() => {
+          const pool = parseFloat(editDist.proRataPoolPct) || 0;
+          const net = parseFloat(editDist.netProfit) || 0;
+          const active = invList.filter(i => i.status !== 'exited');
+          const totalPct = active.reduce((s, i) => s + effPctOf(i, pool), 0);
+          return (
+            <div style={{ background: '#FAF8F4', border: '1px solid #EAE6DB', borderRadius: 12, padding: 20, marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A', marginBottom: 14 }}>New Profit-Share (Quarterly / Half-yearly / Yearly / Custom)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+                <div><label style={lbl}>Period type</label>
+                  <select style={inp} value={editDist.periodType || 'quarterly'} onChange={e => recalcDist({ periodType: e.target.value })}>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="halfyearly">Half-yearly</option>
+                    <option value="yearly">Yearly</option>
+                    <option value="custom">Custom period</option>
+                  </select>
+                </div>
+                {editDist.periodType !== 'custom' && <div><label style={lbl}>Year</label><input style={inp} type="number" value={editDist.year} onChange={e => recalcDist({ year: parseInt(e.target.value) || new Date().getFullYear() })} /></div>}
+                {(editDist.periodType === 'quarterly' || editDist.periodType === 'halfyearly') && (
+                  <div><label style={lbl}>{editDist.periodType === 'quarterly' ? 'Quarter' : 'Half'}</label>
+                    <select style={inp} value={editDist.period} onChange={e => recalcDist({ period: e.target.value })}>
+                      {(PERIOD_OPTS[editDist.periodType] || []).map(q => <option key={q} value={q}>{editDist.periodType === 'halfyearly' ? (q === 'H2' ? 'H2 (Jul–Dec)' : 'H1 (Jan–Jun)') : q}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div><label style={lbl}>Period from</label><input style={inp} type="date" value={editDist.periodFrom} onChange={e => recalcDist({ periodType: 'custom', periodFrom: e.target.value })} /></div>
+                <div><label style={lbl}>Period to</label><input style={inp} type="date" value={editDist.periodTo} onChange={e => recalcDist({ periodType: 'custom', periodTo: e.target.value })} /></div>
+              </div>
+              {editDist.breakdown && (
+                <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 14px', margin: '12px 0', fontSize: 12.5, color: '#555' }}>
+                  <b>Auto-computed from Manufacturing data:</b> Revenue {fmt(editDist.breakdown.rev)} − Purchases {fmt(editDist.breakdown.pur)} − Payroll {fmt(editDist.breakdown.pay)} − Expenses {fmt(editDist.breakdown.exp)} = <b style={{ color: editDist.breakdown.net >= 0 ? '#1A7A3E' : '#B5453A' }}>Net {fmt(editDist.breakdown.net)}</b>
+                  <button style={{ ...styles.ghostBtn, marginLeft: 10, padding: '2px 10px', fontSize: 12 }} onClick={() => recalcDist({ periodFrom: editDist.periodFrom, periodTo: editDist.periodTo })}>↻ Recompute</button>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                <div><label style={lbl}>Net profit for quarter (editable)</label><input style={inp} type="number" value={editDist.netProfit} onChange={e => setEditDist({ ...editDist, netProfit: e.target.value })} /></div>
+                <div><label style={lbl}>Pro-rata pool % (of net profit)</label><input style={inp} type="number" value={editDist.proRataPoolPct} onChange={e => setEditDist({ ...editDist, proRataPoolPct: e.target.value })} /><div style={{ fontSize: 11, color: '#999', marginTop: 3 }}>Split among pro-rata investors by capital. Fixed-% investors take their own %.</div></div>
+              </div>
+              {/* Preview allocations */}
+              <div style={{ overflowX: 'auto', marginTop: 12 }}>
+                <table style={styles.table}>
+                  <thead><tr>{['Investor', 'Mode', 'Effective %', 'Amount'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {active.map(i => { const ep = effPctOf(i, pool); return (
+                      <tr key={i.id}>
+                        <td style={{ ...styles.td, fontWeight: 600 }}>{i.name}</td>
+                        <td style={styles.td}>{i.shareMode === 'fixed' ? 'Fixed' : 'Pro-rata'}</td>
+                        <td style={styles.td}>{Math.round(ep * 100) / 100}%</td>
+                        <td style={{ ...styles.td, fontWeight: 600 }}>{fmt(net * ep / 100)}</td>
+                      </tr>
+                    ); })}
+                    <tr style={{ background: '#F8F5EE', fontWeight: 700 }}>
+                      <td style={styles.td} colSpan={2}>Total to investors</td>
+                      <td style={styles.td}>{Math.round(totalPct * 100) / 100}%</td>
+                      <td style={styles.td}>{fmt(net * totalPct / 100)}</td>
+                    </tr>
+                    <tr style={{ fontWeight: 600, color: '#888' }}>
+                      <td style={styles.td} colSpan={3}>Company retains</td>
+                      <td style={styles.td}>{fmt(net * Math.max(0, 100 - totalPct) / 100)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {totalPct > 100 && <div style={{ color: '#B5453A', fontSize: 12.5, marginTop: 8 }}>⚠ Investor shares total more than 100% of profit — check the fixed %s and pool %.</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                <button style={styles.primaryBtn} onClick={saveDist}>Save Distribution</button>
+                <button style={styles.ghostBtn} onClick={() => setEditDist(null)}>Cancel</button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {distList.length === 0 ? <div style={styles.emptyBox}>No quarterly distributions yet. Create one — the net profit is auto-suggested from your Manufacturing data and you can adjust it before splitting.</div> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {distList.map(d => {
+              const paid = (d.allocations || []).filter(a => a.status === 'paid').reduce((s, a) => s + (a.amount || 0), 0);
+              const total = (d.allocations || []).reduce((s, a) => s + (a.amount || 0), 0);
+              return (
+                <div key={d.id} style={{ border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, background: '#fff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: '#1E2A4A' }}>{distLabel(d)}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>{d.periodFrom} → {d.periodTo} · Net profit {fmt(d.netProfit)}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button style={styles.iconBtn} title="Print statement (all / selected person)" onClick={() => { setStmtWho('all'); setPrintStmt(d); }}><Printer size={14} /></button>
+                      {canEdit && <button style={styles.iconBtn} title="Edit" onClick={() => setEditDist({ ...d })}><Pencil size={14} /></button>}
+                      {canEdit && <button style={styles.iconBtn} title="Delete" onClick={() => delDist(d.id)}><Trash2 size={14} color="#B5453A" /></button>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#555', margin: '8px 0' }}>Paid {fmt(paid)} of {fmt(total)}</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={styles.table}>
+                      <thead><tr>{['Investor', 'Share %', 'Amount', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {(d.allocations || []).map(a => (
+                          <tr key={a.investorId}>
+                            <td style={{ ...styles.td, fontWeight: 600 }}>{a.name}</td>
+                            <td style={styles.td}>{a.effPct}%</td>
+                            <td style={{ ...styles.td, fontWeight: 600 }}>{fmt(a.amount)}</td>
+                            <td style={styles.td}><span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: a.status === 'paid' ? '#E7F6EC' : '#FEF3C7', color: a.status === 'paid' ? '#1A7A3E' : '#92400E' }}>{a.status === 'paid' ? 'Paid' + (a.paidDate ? ' · ' + a.paidDate : '') : 'Pending'}</span></td>
+                            <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                              <button style={styles.iconBtn} title="Payout receipt" onClick={() => setPrintRcpt({ dist: d, alloc: a })}><FileText size={14} /></button>
+                              {canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 10px', fontSize: 12 }} onClick={() => togglePaid(d.id, a.investorId)}>{a.status === 'paid' ? 'Mark pending' : 'Mark paid'}</button>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>)}
+
+      {/* ── Investment Agreement print ── */}
+      {printAgr && (
+        <DocPrintOverlay onClose={() => setPrintAgr(null)} filename={'Investment-Agreement-' + (printAgr.name || 'Investor').replace(/\s+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>INVESTMENT &amp; PROFIT-SHARING AGREEMENT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 20 }}>Manufacturing Division · Dated {printAgr.agreementDate || today}</div>
+          <table style={{ width: '100%', fontSize: 13, marginBottom: 18, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '4px 8px', color: '#666', width: 180 }}>Investor</td><td style={{ padding: '4px 8px', fontWeight: 600 }}>{printAgr.name}</td></tr>
+              {printAgr.contact ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Contact</td><td style={{ padding: '4px 8px' }}>{printAgr.contact}</td></tr> : null}
+              {printAgr.phone || printAgr.email ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Phone / Email</td><td style={{ padding: '4px 8px' }}>{[printAgr.phone, printAgr.email].filter(Boolean).join(' · ')}</td></tr> : null}
+              {printAgr.address ? <tr><td style={{ padding: '4px 8px', color: '#666' }}>Address</td><td style={{ padding: '4px 8px' }}>{printAgr.address}</td></tr> : null}
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Invested amount</td><td style={{ padding: '4px 8px', fontWeight: 600 }}>{fmt(printAgr.investedAmount || 0)}</td></tr>
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Profit share</td><td style={{ padding: '4px 8px' }}>{printAgr.shareMode === 'fixed' ? 'Fixed ' + (printAgr.sharePct || 0) + '% of quarterly net profit' : 'Pro-rata by invested capital'}</td></tr>
+              <tr><td style={{ padding: '4px 8px', color: '#666' }}>Join date</td><td style={{ padding: '4px 8px' }}>{printAgr.joinDate || '—'}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A', marginBottom: 8 }}>Terms &amp; Conditions</div>
+          <ol style={{ fontSize: 12.5, color: '#333', lineHeight: 1.7, paddingLeft: 20, margin: 0 }}>
+            {agreementTerms(printAgr).map((t, idx) => <li key={idx} style={{ marginBottom: 6 }}>{t}</li>)}
+          </ol>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 30 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>{printAgr.name} (Investor)</div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
+
+      {/* ── Payout receipt print ── */}
+      {printRcpt && (
+        <DocPrintOverlay onClose={() => setPrintRcpt(null)} filename={'Payout-' + (printRcpt.alloc.name || 'Investor').replace(/\s+/g, '-') + '-' + distLabel(printRcpt.dist).replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>PROFIT-SHARE PAYOUT RECEIPT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 20 }}>{distLabel(printRcpt.dist)} ({printRcpt.dist.periodFrom} → {printRcpt.dist.periodTo})</div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '6px 8px', color: '#666', width: 200 }}>Investor</td><td style={{ padding: '6px 8px', fontWeight: 600 }}>{printRcpt.alloc.name}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Quarter net profit</td><td style={{ padding: '6px 8px' }}>{fmt(printRcpt.dist.netProfit)}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Share of profit</td><td style={{ padding: '6px 8px' }}>{printRcpt.alloc.effPct}%</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Amount payable</td><td style={{ padding: '6px 8px', fontWeight: 700, fontSize: 16, color: '#1A7A3E' }}>{fmt(printRcpt.alloc.amount)}</td></tr>
+              <tr><td style={{ padding: '6px 8px', color: '#666' }}>Status</td><td style={{ padding: '6px 8px' }}>{printRcpt.alloc.status === 'paid' ? 'PAID' + (printRcpt.alloc.paidDate ? ' on ' + printRcpt.alloc.paidDate : '') : 'PENDING'}</td></tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 40 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Received by (Investor)</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
+          </div>
+        </DocPrintOverlay>
+      )}
+
+      {/* ── Distribution statement print (all investors or a selected person) ── */}
+      {printStmt && (() => {
+        const allAllocs = printStmt.allocations || [];
+        const rows = stmtWho === 'all' ? allAllocs : allAllocs.filter(a => a.investorId === stmtWho);
+        const whoName = stmtWho === 'all' ? '' : ((allAllocs.find(a => a.investorId === stmtWho) || {}).name || '');
+        return (
+        <DocPrintOverlay onClose={() => setPrintStmt(null)} filename={'Profit-Share-' + distLabel(printStmt).replace(/[^0-9A-Za-z]+/g, '-') + (whoName ? '-' + whoName.replace(/\s+/g, '-') : '') + '.pdf'} businessInfo={businessInfo}>
+          {/* person picker — hidden in print/PDF */}
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '8px 12px', background: '#EEF2FF', borderRadius: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#3D52A0' }}>Print for:</span>
+            <select value={stmtWho} onChange={e => setStmtWho(e.target.value)} style={{ border: '1px solid #CBD5E1', borderRadius: 6, padding: '5px 8px', fontSize: 13 }}>
+              <option value="all">All investors</option>
+              {allAllocs.map(a => <option key={a.investorId} value={a.investorId}>{a.name}</option>)}
+            </select>
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>PROFIT-SHARE STATEMENT</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 4 }}>{distLabel(printStmt)} ({printStmt.periodFrom} → {printStmt.periodTo})</div>
+          {whoName && <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#1E2A4A', marginBottom: 14 }}>Investor: {whoName}</div>}
+          {!whoName && <div style={{ marginBottom: 14 }} />}
+          {printStmt.breakdown && (
+            <div style={{ fontSize: 12.5, color: '#555', marginBottom: 12 }}>Revenue {fmt(printStmt.breakdown.rev)} − Purchases {fmt(printStmt.breakdown.pur)} − Payroll {fmt(printStmt.breakdown.pay)} − Expenses {fmt(printStmt.breakdown.exp)} = <b>Net profit {fmt(printStmt.netProfit)}</b></div>
+          )}
+          <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F1EFE9' }}>{['Investor', 'Share %', 'Amount', 'Status'].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #DDD' }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(a => (
+                <tr key={a.investorId}><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.name}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.effPct}%</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{fmt(a.amount)}</td><td style={{ padding: '6px 8px', borderBottom: '1px solid #EEE' }}>{a.status === 'paid' ? 'Paid' + (a.paidDate ? ' · ' + a.paidDate : '') : 'Pending'}</td></tr>
+              ))}
+              <tr style={{ fontWeight: 700 }}><td style={{ padding: '6px 8px' }}>{whoName ? 'Total' : 'Total to investors'}</td><td></td><td style={{ padding: '6px 8px' }}>{fmt(rows.reduce((s, a) => s + (a.amount || 0), 0))}</td><td></td></tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 30 }}>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {businessInfo?.name || 'the Company'}</div><div style={{ color: '#555' }}>Authorised Signatory</div></div>
+            <div style={{ textAlign: 'center', fontSize: 12, width: 200 }}><div style={{ height: 64 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>{whoName ? whoName + ' (Investor)' : 'Investor'}</div></div>
+          </div>
+        </DocPrintOverlay>
+        );
+      })()}
     </div>
   );
 }
@@ -11255,6 +14151,15 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   });
   const [editing, setEditing] = React.useState(null);
   const [viewDoc, setViewDoc] = React.useState(null);
+  const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter));
+  // Letterhead print: reserve exact page margins (mm) from each image's real aspect ratio,
+  // so fixed header/footer sit in the margins and repeat identically on every page.
+  const [lhMM, setLhMM] = React.useState({ t: 90, b: 68 });
+  const onLHImg = (which) => (e) => {
+    const img = e.target; if (!img || !img.naturalWidth) return;
+    const mm = Math.ceil(210 * (img.naturalHeight / img.naturalWidth)); // full-bleed A4 width = 210mm
+    setLhMM(p => (p[which] === mm ? p : { ...p, [which]: mm }));
+  };
 
   const list = (Array.isArray(moms) ? moms : [])
     .filter(m => !isMultiBiz || (m.bizType || 'trading') === currentBizType)
@@ -11262,8 +14167,8 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
 
   function nextNumber() {
     const yr = new Date().getFullYear();
-    const count = (Array.isArray(moms) ? moms : []).filter(m => (m.number || '').includes('MOM/' + yr)).length + 1;
-    return 'MOM/' + yr + '/' + String(count).padStart(3, '0');
+    const count = (Array.isArray(moms) ? moms : []).filter(m => (m.number || '').includes('MOM/' + fyNow() + '/')).length + 1;
+    return dn('MOM', count);
   }
 
   function startNew() { setEditing({ ...blank(), id: Date.now().toString(), number: nextNumber() }); }
@@ -11317,14 +14222,110 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
   if (viewDoc) {
     const m = viewDoc;
     const rows = (m.rows || []).filter(r => (r.point || r.decision || r.actionBy || r.followup));
+    const lhHdr = useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml);
+    const lhFtr = useLH && businessInfo?.letterheadFooter;
+    const lhOn = lhHdr || lhFtr;
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Print in an isolated document so header/footer repeat on every page and no content is clipped.
+    const momPrint = () => {
+      // Manual pagination: we build real A4 "sheets" in JS and flow the content block by
+      // block, starting a new sheet when one fills up. Every sheet gets its own header +
+      // footer, so they appear on EVERY page and nothing is ever clipped — this does not
+      // rely on thead repetition or position:fixed (both buggy for multi-page in Chromium).
+      // Band height = each letterhead's own natural full-width height (measured from the
+      // preview image), capped so a very tall letterhead doesn't eat the page. When the band
+      // equals the natural height the image fills it with NO distortion (short letterheads);
+      // a capped tall letterhead is lightly compressed. Same header/footer on every page.
+      const HCAP = 60, FCAP = 46;
+      const HDRMM = lhHdr ? Math.min(lhMM.t || 56, HCAP) : 30;
+      const FTRMM = lhFtr ? Math.min(lhMM.b || 40, FCAP) : 14;
+      const headerInner = lhHdr
+        ? `<img src="${businessInfo.letterhead}" style="width:100%;height:100%;object-fit:fill;display:block;"/>`
+        : `<div style="padding:8mm 14mm 0;"><div style="border-bottom:2px solid #1E2A4A;padding-bottom:8px;"><div style="font-size:18px;font-weight:700;color:#1E2A4A;">${esc(businessInfo.name || businessInfo.companyName || '')}</div><div style="font-size:11px;color:#666;">${esc(businessInfo.address || '')}</div>${businessInfo.gstin ? `<div style="font-size:11px;color:#666;">GSTIN: ${esc(businessInfo.gstin)}</div>` : ''}</div></div>`;
+      const footerInner = lhFtr ? `<img src="${businessInfo.letterheadFooter}" style="width:100%;height:100%;object-fit:fill;display:block;"/>` : '';
+      const DHEAD = `<div class="dhead"><div class="c0">#</div><div class="c1">Discussion / Point</div><div class="c2">Decision</div><div class="c3">Action By</div><div class="c4">Follow-up</div></div>`;
+      // Content as an ordered list of single-root blocks (discussion rows flow individually)
+      const B = [];
+      B.push(`<div class="blk" style="text-align:center;margin:2px 0 12px;"><div style="font-size:19px;font-weight:700;color:#1E2A4A;letter-spacing:.06em;text-transform:uppercase;">Minutes of Meeting</div><div style="width:70px;height:3px;background:#C9A24B;border-radius:2px;margin:7px auto 0;"></div><div style="font-size:11px;color:#888;margin-top:6px;">${esc(m.number)} · ${m.type === 'external' ? 'External' : 'Internal'}</div></div>`);
+      if (m.title) B.push(`<div class="blk" style="font-size:18px;font-weight:700;color:#1E2A4A;margin-bottom:12px;">${esc(m.title)}</div>`);
+      B.push(`<div class="blk"><table style="width:100%;font-size:12.5px;border-collapse:collapse;"><tbody><tr><td style="color:#888;width:120px;padding:3px 0;">Date</td><td style="color:#1E2A4A;font-weight:600;">${esc(fmtDate(m.date))}${m.time ? ' · ' + esc(m.time) : ''}</td><td style="color:#888;width:120px;padding:3px 0;">Venue</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.venue || '—')}</td></tr><tr><td style="color:#888;padding:3px 0;">Chairperson</td><td style="color:#1E2A4A;font-weight:600;">${esc(m.chairperson || '—')}</td><td style="color:#888;padding:3px 0;">Next Meeting</td><td style="color:#1E2A4A;font-weight:600;">${m.nextDate ? esc(fmtDate(m.nextDate)) + (m.nextTime ? ' · ' + esc(m.nextTime) : '') : '—'}</td></tr></tbody></table></div>`);
+      B.push(`<div class="blk"><div class="sec">${m.type === 'external' ? 'OUR ATTENDEES (' + esc(businessInfo.name || 'Company') + ')' : 'ATTENDEES'}</div><table class="dt"><thead><tr><th>Name</th><th>Designation</th><th>Department</th></tr></thead><tbody>${(m.internalAttendees || []).length ? (m.internalAttendees || []).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.designation || '—')}</td><td>${esc(a.department || '—')}</td></tr>`).join('') : '<tr><td colspan="3">—</td></tr>'}</tbody></table></div>`);
+      if (m.type === 'external') B.push(`<div class="blk"><div class="sec">${esc((m.extCompany || 'EXTERNAL PARTY').toUpperCase())}</div><table class="dt"><thead><tr><th>Name</th><th>Designation</th></tr></thead><tbody>${(m.extPersons || []).length ? (m.extPersons || []).map(p => `<tr><td>${esc(p.name || '—')}</td><td>${esc(p.designation || '—')}</td></tr>`).join('') : '<tr><td colspan="2">—</td></tr>'}</tbody></table></div>`);
+      if ((m.agenda || []).filter(a => a && a.trim()).length) B.push(`<div class="blk"><div class="sec">AGENDA</div><ol style="margin:0;padding-left:20px;font-size:12.5px;color:#333;">${(m.agenda || []).filter(a => a && a.trim()).map(a => `<li style="margin-bottom:3px;">${esc(a)}</li>`).join('')}</ol></div>`);
+      if (rows.length) {
+        B.push(`<div class="blk"><div class="sec">DISCUSSION, DECISIONS &amp; ACTIONS</div>${DHEAD}</div>`);
+        rows.forEach((r, i) => B.push(`<div class="drow"><div class="c0">${i + 1}</div><div class="c1">${esc(r.point || '—')}</div><div class="c2">${esc(r.decision || '—')}</div><div class="c3">${esc(r.actionBy || '—')}</div><div class="c4">${r.followup ? esc(fmtDate(r.followup)) : '—'}</div></div>`));
+      }
+      B.push(`<div class="blk" style="margin-top:36px;display:flex;justify-content:space-between;font-size:12px;"><div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Prepared by</div><div style="text-align:center;"><div style="border-top:1px solid #999;width:180px;margin-bottom:4px;"></div>Chairperson</div></div>`);
+
+      const script = '(function(){'
+        + 'var out=document.getElementById("out");'
+        + 'var hd=document.getElementById("hdtpl").innerHTML;'
+        + 'var ft=document.getElementById("fttpl").innerHTML;'
+        + 'var cur,bd;'
+        + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);cur=s;bd=b;}'
+        + 'np();'
+        + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i];var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(node.className&&node.className.indexOf("drow")>-1){var dh=document.createElement("div");dh.innerHTML=DHEADHTML;if(dh.firstElementChild)bd.appendChild(dh.firstElementChild);}bd.appendChild(node);}}'
+        + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
+        + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
+        + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
+        + '})();';
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(m.title || 'Minutes of Meeting')}</title>
+        <style>
+          @page { size:A4; margin: 0; }
+          html,body{margin:0;padding:0;}
+          body{font-family:Arial,Helvetica,sans-serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+          .sheet{position:relative;width:210mm;height:296mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}
+          .hd{position:absolute;top:0;left:0;right:0;height:${HDRMM}mm;overflow:hidden;background:#fff;}
+          .ft{position:absolute;bottom:0;left:0;right:0;height:${FTRMM}mm;overflow:hidden;background:#fff;}
+          .bd{position:absolute;top:${HDRMM}mm;bottom:${FTRMM}mm;left:0;right:0;overflow:hidden;padding:5mm 14mm 0;box-sizing:border-box;}
+          .sec{font-size:12px;font-weight:700;color:#C9A24B;margin:12px 0 4px;}
+          .dt{width:100%;border-collapse:collapse;margin-bottom:4px;}
+          .dt th{background:#F8F5EE;color:#1E2A4A;font-weight:600;font-size:11px;text-align:left;padding:6px 8px;border-bottom:1px solid #EAE6DB;}
+          .dt td{font-size:12px;color:#333;padding:6px 8px;border-bottom:1px solid #F0EDE5;vertical-align:top;}
+          .dhead{display:flex;background:#F8F5EE;font-weight:600;font-size:11px;color:#1E2A4A;border-bottom:1px solid #EAE6DB;}
+          .drow{display:flex;font-size:12px;color:#333;border-bottom:1px solid #F0EDE5;}
+          .dhead>div,.drow>div{padding:6px 8px;box-sizing:border-box;overflow-wrap:break-word;word-break:break-word;}
+          .c0{width:6%;}.c1{width:32%;}.c2{width:40%;}.c3{width:12%;}.c4{width:10%;}
+        </style></head><body>
+        <div id="out"></div>
+        <div id="hdtpl" style="display:none">${headerInner}</div>
+        <div id="fttpl" style="display:none">${footerInner}</div>
+        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};${script}</script>
+      </body></html>`;
+      // Hidden iframe = isolated print context that works inside the desktop app
+      // (window.open popups are blocked there). The in-document script paginates & prints.
+      const ifr = document.createElement('iframe');
+      ifr.setAttribute('aria-hidden', 'true');
+      ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+      document.body.appendChild(ifr);
+      const d = ifr.contentWindow.document;
+      d.open(); d.write(html); d.close();
+      // Safety cleanup in case afterprint never fires
+      setTimeout(() => { try { if (ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) {} }, 60000);
+    };
     return (
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
           <button style={styles.ghostBtn} onClick={() => setViewDoc(null)}><X size={15} /> Close</button>
-          <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+          {(businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <button onClick={() => setUseLH(v => !v)} style={{ ...styles.ghostBtn, ...(useLH ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLH ? 'Letterhead ON' : 'Use Letterhead'}</button>}
+          <button style={styles.ghostBtn} onClick={() => downloadDocPDF('.print-area', 'minutes-of-meeting.pdf')}><Download size={15} /> PDF</button>
+          <button style={styles.primaryBtn} onClick={momPrint}><Printer size={15} /> Print</button>
         </div>
-        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
-          <StdDocHeader businessInfo={businessInfo} title="Minutes of Meeting" subtitle={m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')} />
+        <div className="print-area" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: lhOn ? 0 : '40px 56px' }}>
+          {lhHdr && (
+            <div className="mom-fx-hdr" style={{ background: '#fff' }}>
+              <img src={businessInfo.letterhead} alt="letterhead" style={{ width: '100%', display: 'block' }} onLoad={onLHImg('t')} />
+            </div>
+          )}
+          <div className="mom-fx-body" style={lhOn ? { padding: '16px 48px 0' } : undefined}>
+          {!lhHdr && <StdDocHeader businessInfo={businessInfo} title="" subtitle="" />}
+          <div style={{ textAlign: 'center', margin: '8px 0 12px' }}>
+            <div style={{ fontSize: 19, fontWeight: 700, color: '#1E2A4A', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Minutes of Meeting</div>
+            <div style={{ width: 70, height: 3, background: '#C9A24B', borderRadius: 2, margin: '7px auto 0' }} />
+            <div style={{ fontSize: 11.5, color: '#888', marginTop: 6 }}>{m.number + ' · ' + (m.type === 'external' ? 'External' : 'Internal')}</div>
+          </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 12 }}>{m.title}</div>
           <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16, borderCollapse: 'collapse' }}>
             <tbody>
@@ -11383,6 +14384,12 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Prepared by</div>
             <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 180, marginBottom: 4 }} />Chairperson</div>
           </div>
+          </div>{/* mom-fx-body */}
+          {lhFtr && (
+            <div className="mom-fx-ftr" style={{ background: '#fff' }}>
+              <img src={businessInfo.letterheadFooter} alt="letterhead footer" style={{ width: '100%', display: 'block' }} onLoad={onLHImg('b')} />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -11837,7 +14844,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
       </tr>
     </table>
     ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
-    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Operix</div>
+    <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Oryqen</div>
     </body></html>`);
     w.document.close();
     setTimeout(() => { w.print(); }, 400);
@@ -12511,7 +15518,7 @@ function VATReport({ documents, customers, businessInfo }) {
       )}
 
       <div style={{ marginTop: 28, fontSize: 11, color:'#888', borderTop:'1px solid #ddd', paddingTop: 8 }}>
-        Generated by Operix · {new Date().toLocaleDateString()}
+        Generated by Oryqen · {new Date().toLocaleDateString()}
       </div>
     </div>
   );
@@ -12847,6 +15854,42 @@ function PartsMasterList({ parts, setParts, vendors = [], ownerUid, userRole }) 
     setParts(prev => prev.filter(p => p.id !== id));
   }
 
+  async function downloadPartsTemplate() {
+    const aoa = [['Part Number', 'Name', 'Description', 'Material', 'Weight', 'Finish', 'Tolerance', 'QC Criteria'],
+      ['SPN-0001', 'BRACKET L-TYPE', 'Mounting bracket', 'MS', '0.4 kg', 'Powder coated', '±0.2mm', 'Visual + dimensional'],
+      ['SPN-0002', 'SHAFT 20MM', 'Drive shaft', 'EN8', '1.2 kg', 'Hard chrome', '±0.05mm', 'Hardness 55 HRC']];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 14 }, { wch: 11 }, { wch: 22 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Parts'); XLSX.writeFile(wb, 'PartsMaster-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'PartsMaster-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importPartsXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /part|name|desc|material|weight|finish|toler|qc/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { pn: find('part number', 'part no', 'partno', 'part'), name: find('name'), desc: find('desc'), mat: find('material'), wt: find('weight'), fin: find('finish'), tol: find('toler'), qc: find('qc', 'quality') }; }
+      else { start = 0; idx = { pn: 0, name: 1, desc: 2, mat: 3, wt: 4, fin: 5, tol: 6, qc: 7 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      let count = parts.length;
+      const added = r2.slice(start).map(c => {
+        const name = g(c, idx.name) || g(c, idx.pn); if (!name || /^(name|part)/i.test(g(c, idx.name))) return null;
+        count++;
+        return { id: crypto.randomUUID(), createdAt: Date.now(), partNumber: g(c, idx.pn) || ('SPN-' + String(count).padStart(4, '0')), name: g(c, idx.name) || name, description: g(c, idx.desc), material: g(c, idx.mat), weight: g(c, idx.wt), finish: g(c, idx.fin), tolerance: g(c, idx.tol), qcCriteria: g(c, idx.qc), avl: [], drawingUrl: '', drawingPath: '', specs: '' };
+      }).filter(Boolean);
+      if (!added.length) { alert('No rows with a Part found. Check the Part Number / Name columns.'); e.target.value = ''; return; }
+      setParts(prev => [...added, ...(Array.isArray(prev) ? prev : [])]);
+      alert('✅ Imported ' + added.length + ' part(s).');
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   const filtered = parts.filter(p => {
     const q = search.toLowerCase();
     return !q || (p.partNumber + ' ' + p.name + ' ' + p.description).toLowerCase().includes(q);
@@ -12859,7 +15902,11 @@ function PartsMasterList({ parts, setParts, vendors = [], ownerUid, userRole }) 
           <h1 className="serif" style={styles.h1}>Parts Master</h1>
           <p style={styles.muted}>{parts.length} parts registered</p>
         </div>
-        {canEdit && <button onClick={() => { setEditing(null); setCreating(true); }} style={styles.primaryBtn}><Plus size={15} /> New Part</button>}
+        {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button onClick={() => { setEditing(null); setCreating(true); }} style={styles.primaryBtn}><Plus size={15} /> New Part</button>
+          <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Part Number, Name, Description, Material, Weight, Finish, Tolerance, QC Criteria">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importPartsXlsx} /></label>
+          <button type="button" onClick={downloadPartsTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
+        </div>}
       </div>
 
       <div style={{ ...styles.searchWrap, marginBottom: 16, maxWidth: 380 }}>
@@ -13291,13 +16338,54 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, b
     setEditing(null);
   }
 
+  async function downloadRMTemplate() {
+    const aoa = [['Name', 'Unit', 'Current Stock', 'Min Stock', 'Rate'], ['STEEL ROD 10MM', 'kg', 500, 50, 65], ['COPPER WIRE 2.5SQMM', 'm', 1200, 100, 18], ['PVC GRANULES', 'kg', 300, 40, 95]];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'RawMaterials'); XLSX.writeFile(wb, 'RawMaterials-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'RawMaterials-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importRMXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /name|material|unit|stock|rate|min/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { name: find('name', 'material', 'item'), unit: find('unit', 'uom'), stock: find('current stock', 'stock', 'qty', 'opening'), min: find('min'), rate: find('rate', 'price', 'cost') }; }
+      else { start = 0; idx = { name: 0, unit: 1, stock: 2, min: 3, rate: 4 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      const num = (v) => parseFloat(String(v).replace(/[^0-9.]/g, '')) || 0;
+      const existing = Array.isArray(rawMaterials) ? rawMaterials : [];
+      const added = []; let updated = 0;
+      r2.slice(start).forEach(c => {
+        const name = g(c, idx.name); if (!name || /^(name|material|item)$/i.test(name)) return;
+        const rec = { name, unit: g(c, idx.unit), stock: num(g(c, idx.stock)), minStock: num(g(c, idx.min)), rate: num(g(c, idx.rate)) };
+        const match = existing.find(x => (x.name || '').trim().toLowerCase() === name.toLowerCase());
+        if (match) { updated++; match._upd = rec; } else { added.push({ ...rec, id: crypto.randomUUID() }); }
+      });
+      if (!added.length && !updated) { alert('No rows with a Name found. Check the Name column.'); e.target.value = ''; return; }
+      setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(x => x._upd ? { ...x, ...x._upd, _upd: undefined } : x).concat(added));
+      alert('✅ Imported ' + added.length + ' new material(s)' + (updated ? ' and updated ' + updated + ' existing (stock/rate refreshed).' : '.'));
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Raw Materials</h1>
         <p style={styles.muted}>Track your raw material inventory and stock levels.</p>
       </div>
-      {canEdit && <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>}
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
+        <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>
+        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Name, Unit, Current Stock, Min Stock, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importRMXlsx} /></label>
+        <button type="button" onClick={downloadRMTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
+      </div>}
       <div style={{ ...styles.list, marginTop: 16 }}>
         {rawMaterials.length === 0 && <div style={styles.emptyBox}>No raw materials yet. Add materials to use in Bill of Materials.</div>}
         {rawMaterials.map((m) => (
@@ -13451,6 +16539,41 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
     setForm((f) => ({ ...f, materials: f.materials.filter((_, idx) => idx !== i) }));
   }
 
+  async function downloadBomTemplate() {
+    const aoa = [['Material', 'Unit', 'Qty'], ['STEEL ROD 10MM', 'kg', 12], ['COPPER WIRE 2.5SQMM', 'm', 40], ['PVC GRANULES', 'kg', 5]];
+    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, 'BOM-Import-Template.xlsx'); }
+    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'BOM-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importBomXlsx(e) {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const nm = (file.name || '').toLowerCase();
+    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
+    try {
+      let rows = [];
+      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
+      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
+      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
+      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
+      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
+      const hasHeader = head.some(h => /material|item|name|unit|qty|quantity/.test(h));
+      let idx, start;
+      if (hasHeader) { start = 1; idx = { name: find('material', 'item', 'name', 'description'), unit: find('unit', 'uom'), qty: find('qty', 'quantity', 'nos') }; }
+      else { start = 0; idx = { name: 0, unit: 1, qty: 2 }; }
+      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
+      const added = r2.slice(start).map(c => {
+        const name = g(c, idx.name); if (!name || /^(material|item|name)$/i.test(name)) return null;
+        // Match an existing raw material by name (case-insensitive) to link its id/unit
+        const rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === name.toLowerCase());
+        return { materialId: rm ? rm.id : '', name: rm ? rm.name : name, unit: g(c, idx.unit) || (rm && rm.unit) || '', qty: parseFloat(g(c, idx.qty).replace(/[^0-9.]/g, '')) || 0 };
+      }).filter(Boolean);
+      if (!added.length) { alert('No rows with a Material name found. Check the Material column.'); e.target.value = ''; return; }
+      const unmatched = added.filter(a => !a.materialId).length;
+      setForm((f) => ({ ...f, materials: [...(f.materials || []), ...added] }));
+      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Raw Materials — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
+    } catch (err) { alert('Import failed: ' + (err.message || err)); }
+    e.target.value = '';
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {parts.length > 0 && (
@@ -13488,7 +16611,12 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
           <button onClick={() => removeMaterial(i)} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>
         </div>
       ))}
-      <button onClick={addMaterial} style={{ ...styles.ghostBtn, marginBottom: 16, fontSize: 13 }}><Plus size={14} /> Add material</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+        <button onClick={addMaterial} style={{ ...styles.ghostBtn, fontSize: 13 }}><Plus size={14} /> Add material</button>
+        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }} title="Bulk-import materials from Excel/CSV — columns: Material, Unit, Qty">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importBomXlsx} /></label>
+        <button type="button" onClick={downloadBomTemplate} style={{ ...styles.ghostBtn, fontSize: 13 }} title="Download the import template">⬇ Template</button>
+        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Raw Materials by name)</span>
+      </div>
       <div style={styles.sectionDivider}>Engineering Specifications</div>
       <SpecsFields
         specs={form.specs}
@@ -13534,7 +16662,7 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -13961,9 +17089,8 @@ function EnquiryList({ enquiries, setEnquiries, customers, userRole, currentBizT
 
   // Auto-generate ENQ number (per-division counter in multi-biz)
   function nextEnqNumber() {
-    if (!bizEnquiries.length) return 'ENQ-001';
-    const nums = bizEnquiries.map(e => parseInt((e.number || '').replace(/\D/g, '')) || 0);
-    return 'ENQ-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = bizEnquiries.map(e => lastNum(e.number));
+    return dn('ENQ', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function openNew() {
@@ -14418,9 +17545,8 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
   const [filterStatus, setFilterStatus] = useState('All');
 
   function nextConNum() {
-    if (!contracts.length) return 'CON-001';
-    const nums = contracts.map(c => parseInt((c.number || '').replace(/\D/g, '')) || 0);
-    return 'CON-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = contracts.map(c => lastNum(c.number));
+    return dn('CON', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function handleSave(form) {
@@ -14587,7 +17713,10 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
           const c = allParties.find(x => x.id === e.target.value);
           set('customerId', e.target.value);
           set('customerSnapshot', c || null);
-          if (c?.taxId && !form.vendorGst) set('vendorGst', c.taxId);
+          // Auto-fill from the selected vendor/customer master record.
+          // The master stores GST as `gstin` (older records may use `taxId`).
+          set('vendorGst', c ? (c.gstin || c.taxId || '') : '');
+          if (c && !form.vendorContactPerson) { const cp = [c.contactPerson || c.contact, c.phone, c.email].filter(Boolean).join(' · '); if (cp) set('vendorContactPerson', cp); }
         }} style={inputStyle}>
           <option value="">— Select customer / vendor —</option>
           {(customers||[]).length > 0 && <optgroup label="Customers">{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>}
@@ -14608,6 +17737,14 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
           ))}
         </select>
         {form.poRefNumber && <div style={{ fontSize:11, color:'#1A7A3E', marginTop:4 }}>✓ Linked: <b>{form.poRefNumber}</b></div>}
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <label style={labelStyle}>Delivery To (Delivery Address / Site)</label>
+        <textarea value={form.deliveryAddress || ''} onChange={e => set('deliveryAddress', e.target.value)} style={{ ...inputStyle, minHeight: 56, resize: 'vertical' }} placeholder="Where goods / work are to be delivered — site name & full address" />
+        {form.customerSnapshot?.address && !form.deliveryAddress && (
+          <button type="button" onClick={() => set('deliveryAddress', form.customerSnapshot.address)} style={{ marginTop: 6, fontSize: 11, background: 'none', border: 'none', color: '#3D52A0', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Use supplier/client address</button>
+        )}
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
@@ -14665,7 +17802,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
             <div style={styles.formGroup}>
               <label style={labelStyle}>Vendor GST No.</label>
               <input value={form.vendorGst} onChange={e=>set('vendorGst',e.target.value)}
-                placeholder={form.customerSnapshot?.taxId || 'e.g. 33ABCDE1234F1Z5'} style={inputStyle} />
+                placeholder={form.customerSnapshot?.gstin || form.customerSnapshot?.taxId || 'e.g. 33ABCDE1234F1Z5'} style={inputStyle} />
             </div>
           )}
           <div style={styles.formGroup}>
@@ -14823,6 +17960,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
   const fmt = makeFmt(bi);
   const [useLH, setUseLH] = React.useState(!!(bi?.letterhead || bi?.letterheadFooter));
   const [orient, setOrient] = React.useState('portrait');
+  const [useSeal, setUseSeal] = React.useState(true);
   const effLHH = useLH ? bi?.letterhead : null;
   const effLHF = useLH ? bi?.letterheadFooter : null;
   const isIndia = (bi?.country||'').toLowerCase() === 'india';
@@ -14882,7 +18020,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <td style="padding:10px 12px;border:1px solid #ddd;vertical-align:top;">
             <b>${c.customerSnapshot?.name||'—'}</b><br/>
             <span style="color:#555;font-size:11px;">${c.customerSnapshot?.address||''}</span><br/>
-            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.vendorGst||c.customerSnapshot?.taxId||'—'}</b></span><br/>` : ''}
+            ${isIndia ? `<span style="font-size:11px;">GSTIN: <b>${c.vendorGst||c.customerSnapshot?.gstin||c.customerSnapshot?.taxId||'—'}</b></span><br/>` : ''}
             <span style="font-size:11px;">Contact: ${c.vendorContactPerson||'—'}</span>
           </td>
         </tr>
@@ -14966,11 +18104,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
 
+    const sealImgs = ((bi?.seal || bi?.signature) && bi?.printSeal !== false && useSeal) ? `<div style="height:66px;display:flex;align-items:center;gap:10px;margin-bottom:2px">${bi?.seal ? `<img src="${bi.seal}" style="height:64px;max-width:90px;object-fit:contain" />` : ''}${bi?.signature ? `<img src="${bi.signature}" style="height:44px;max-width:110px;object-fit:contain" />` : ''}</div>` : '';
     const sigBlock = `
       <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.buyerRole||'Buyer'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:36px;">${bi?.name||bi?.companyName||''}</div>
+          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${bi?.name||bi?.companyName||''}</div>${sealImgs}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryOurName||'Authorised Signatory'}</b>
             ${c.signatoryOurDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryOurDesignation}</div>` : ''}
@@ -14979,7 +18118,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.supplierRole||'Supplier'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:36px;">${c.customerSnapshot?.name||''}</div>
+          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${c.customerSnapshot?.name||''}</div>${sealImgs ? '<div style="height:66px;margin-bottom:2px"></div>' : ''}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryClientName||'Authorised Signatory'}</b>
             ${c.signatoryClientDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryClientDesignation}</div>` : ''}
@@ -14988,22 +18127,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         </div>
       </div>`;
 
-    const html = `<!DOCTYPE html><html><head>
-      <meta charset="utf-8"/>
-      <title>Contract — ${c.number}</title>
-      <style>
-        @page { size: A4 ${orient}; margin: ${lhImg ? '220px' : '15mm'} 15mm ${lhFooterImg ? '140px' : '20mm'} 15mm; ${!lhFooterImg ? `@bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: Arial, sans-serif; font-size: 9px; color: #888; }` : ''} }
-        body { font-family: Georgia, serif; font-size: 13px; color: #222; line-height: 1.7; }
-        h3 { font-size: 14px; font-weight: 700; color: #1E2A4A; border-bottom: 1px solid #ccc;
-             padding-bottom: 6px; margin: 20px 0 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-      </style>
-      ${draftWm}
-    </head><body>
-      ${lhImg}
-      ${companyHeader}
+    // Same framed print engine as every other document: header/footer (letterhead or logo) on every
+    // page, content flows page by page, nothing hidden behind the header/footer.
+    const inner = `<div class="page">
       <div style="text-align:center;margin-bottom:20px;">
         <div style="font-size:17px;font-weight:700;letter-spacing:2px;color:#1E2A4A;text-transform:uppercase;">CONTRACT AGREEMENT</div>
-        <div style="font-size:12px;color:#888;margin-top:4px;">Contract No: ${c.number} &nbsp;|&nbsp; Date: ${c.date}${c.poRefNumber ? ` &nbsp;|&nbsp; PO Ref: <b>${c.poRefNumber}</b>` : ''}${isDraft?' &nbsp;|&nbsp; <span style="color:red;font-weight:700">DRAFT</span>':''}</div>
+        <div style="font-size:12px;color:#888;margin-top:4px;">Contract No: ${c.number} &nbsp;|&nbsp; Date: ${c.date}${c.poRefNumber ? ` &nbsp;|&nbsp; PO Ref: <b>${c.poRefNumber}</b>` : ''}</div>
       </div>
       <div style="background:#f7f6f3;border:1px solid #ddd;border-radius:4px;padding:10px 16px;margin-bottom:20px;font-size:14px;font-weight:700;color:#1E2A4A;">
         Subject: ${c.title}
@@ -15015,13 +18144,10 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       ${milestoneTable}
       ${termsHTML}
       ${sigBlock}
-      ${lhFooterImg}
-    </body></html>`;
-
-    const w = window.open('', '_blank', 'width=900,height=750');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => { w.focus(); w.print(); }, 600);
+    </div>`;
+    printLetterFromHtml('<!DOCTYPE html><html><body>' + inner + '</body></html>',
+      { ...bi, ...(useLH ? {} : { printHeader: 'logo' }), ...(useSeal ? {} : { printSeal: false }) },
+      { landscape: orient === 'landscape', watermark: isDraft ? 'DRAFT' : '' });
   }
 
   return (
@@ -15032,6 +18158,12 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <input type="checkbox" checked={useLH} onChange={e=>setUseLH(e.target.checked)} />
           Use letterpad
         </label>
+        {(bi?.seal || bi?.signature) && (
+          <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, cursor:'pointer' }}>
+            <input type="checkbox" checked={useSeal} onChange={e=>setUseSeal(e.target.checked)} />
+            Seal &amp; signature
+          </label>
+        )}
         {useLH && effLHH && <span style={{ fontSize:11, color:'#1A7A3E', background:'#EEF9F0', border:'1px solid #B7E5C6', borderRadius:6, padding:'4px 10px' }}>✓ Header from Settings</span>}
         {useLH && effLHF && <span style={{ fontSize:11, color:'#1A7A3E', background:'#EEF9F0', border:'1px solid #B7E5C6', borderRadius:6, padding:'4px 10px' }}>✓ Footer from Settings</span>}
         {useLH && !effLHH && !effLHF && <span style={{ fontSize:11, color:'#B45309', background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:6, padding:'4px 10px' }}>No header/footer saved — add in Settings</span>}
@@ -15181,9 +18313,8 @@ function ChannelPartnerList({ channelPartners, setChannelPartners, documents, te
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
   function nextCPNum() {
-    if (!channelPartners.length) return 'CP-001';
-    const nums = channelPartners.map(p => parseInt((p.number || '').replace(/\D/g, '')) || 0);
-    return 'CP-' + String(Math.max(...nums) + 1).padStart(3, '0');
+    const nums = channelPartners.map(p => lastNum(p.number));
+    return dn('CP', (nums.length ? Math.max(...nums) : 0) + 1);
   }
 
   function handleSave(form) {
@@ -15358,7 +18489,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
         <button onClick={onBack} style={{ border: 'none', background: 'none', color: '#888', fontSize: 13, cursor: 'pointer' }}>← Back</button>
         {(bi?.letterhead||bi?.letterheadHtml) && <button onClick={() => setUseLHPartner(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHPartner?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHPartner?'Letterhead ON':'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','partner-agreement.pdf')} style={styles.ghostBtn}><Download size={13} style={{ marginRight: 4 }}/> PDF</button>
-        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
+        <SealToggle businessInfo={bi} /><button onClick={() => printView('.print-area', bi)} style={{ padding: '8px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}><Printer size={13} style={{ marginRight: 6 }} />Print Agreement</button>
         {linkedDocs.length > 0 && <span style={{ fontSize: 13, color: '#888' }}>{linkedDocs.length} linked document{linkedDocs.length !== 1 ? 's' : ''}</span>}
       </div>
       <div className="print-area" style={{ maxWidth: 780, margin: '28px auto', background: '#fff', padding: '48px 56px', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.8, color: '#222', boxShadow: '0 2px 20px rgba(0,0,0,0.08)' }}>
@@ -16103,7 +19234,7 @@ function QATestingView({ productionOrders, setProductionOrders, pdvs, setPdvs, s
 
   function raiseCapaFromNCR(order) {
     const bom = boms.find(b => b.id === order.bomId);
-    const num = `CAR-${String((capaRecords||[]).length + 1).padStart(3,'0')}`;
+    const num = dn('CAR', (capaRecords||[]).length + 1);
     const capa = {
       id: crypto.randomUUID(), number: num,
       date: new Date().toISOString().slice(0,10),
@@ -16616,13 +19747,14 @@ function MEPProjectForm({ project, employees, onSave, onClose }) {
 
 // ── Activity Planner (WBS + BOM) ────────────────────────────────────────────────
 // ─── MEP Gantt Chart + Activity Planner ──────────────────────────────────────
-function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo }) {
+function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, progressUpdates, setProgressUpdates, userRole, employees = [], businessInfo, tenders = [], raBillings = [], setRaBillings, customers = [], setView }) {
   const [selProject, setSelProject] = useState(siteProjects[0]?.id || '');
   const [editing, setEditing] = useState(null);
   const [expandedBOM, setExpandedBOM] = useState({});
   const [viewMode, setViewMode] = useState('gantt'); // 'gantt' | 'table'
   const [updateModal, setUpdateModal] = useState(null); // activityId
   const [printActs, setPrintActs] = useState(false);
+  const [tenderPick, setTenderPick] = useState(false);
   const [ganttStart, setGanttStart] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10);
   });
@@ -16642,6 +19774,72 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     setEditing(null);
   }
   function del(id) { if (confirm('Delete activity?')) setSiteActivities(prev=>prev.filter(a=>a.id!==id)); }
+  const buildupPct = l => (parseFloat(l.siteOH)||0)+(parseFloat(l.hoOH)||0)+(parseFloat(l.contingency)||0)+(parseFloat(l.profit)||0);
+  function importFromTender(t) {
+    const src = (t.priceDetail && t.priceDetail.length)
+      ? t.priceDetail.map(l => ({ name:(l.activity||'').trim(), contractValue:(parseFloat(l.rate)||0)*(parseFloat(l.units)||0), unit:l.unit||'%', disc:'' }))
+      : (t.boq||[]).map(l => ({ name:(l.description||'').trim(), contractValue:(parseFloat(l.tenderQty)||0)*(parseFloat(l.rate)||0)*(1+buildupPct(l)/100), unit:l.unit||'%', disc:l.subcategory||'' }));
+    const valid = src.filter(l=>l.name);
+    if(!valid.length){ alert('This tender has no Price Detail / BOQ activities.'); return; }
+    const wt = +(100/valid.length).toFixed(2);
+    const discs = project?.disciplines||MEP_DISCIPLINES;
+    const newActs = valid.map((l,i)=>({ id:crypto.randomUUID(), projectId:selProject, villaId:'', discipline:(discs.includes(l.disc)?l.disc:discs[0]), phase:MEP_PHASES[0], name:l.name, weight:wt, contractValue:l.contractValue, unit:l.unit, plannedStart:'', plannedEnd:'', bom:[], bomLocked:false, seq:i }));
+    setSiteActivities(prev=>[...prev, ...newActs]);
+    setTenderPick(false);
+    alert(valid.length+' activities imported from tender '+(t.number||'')+'. Assign villa & dates as needed.');
+  }
+  async function downloadActTemplate() {
+    const aoa=[['Villa/Unit','Discipline','Phase','Activity','Planned Start','Planned End','Weight %','Contract Value'],
+      ['','Electrical','First Fix','Box Fixing','2026-08-01','2026-08-05',10,1550],
+      ['','Electrical','First Fix','Wiring','2026-08-06','2026-08-12',15,6200]];
+    try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:14},{wch:14},{wch:30},{wch:14},{wch:14},{wch:9},{wch:14}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Activities'); XLSX.writeFile(wb,'Activities-Import-Template.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Activities-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  async function importActsCsv(e) {
+    const file=e.target.files&&e.target.files[0]; if(!file) return;
+    const nm=(file.name||'').toLowerCase();
+    if(!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)){ alert('Please import an Excel (.xlsx) or CSV file. Use the Template.'); e.target.value=''; return; }
+    try{
+      let rows=[];
+      if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+      else { const text=await file.text(); if(text.slice(0,5)==='%PDF-'||text.slice(0,2)==='PK'){ alert('Not a CSV/Excel — use the Template.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+      const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+      const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+      const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+      const hasHeader=head.some(h=>/activ|discipl|phase|villa|unit|start|end|weight|contract/.test(h));
+      let idx,start;
+      if(hasHeader){ start=1; idx={ villa:find('villa','unit'), disc:find('discipl'), phase:find('phase'), name:find('activ','desc','work'), ps:find('start'), pe:find('end'), wt:find('weight','wt'), cv:find('contract','value') }; }
+      else { start=0; idx={villa:0,disc:1,phase:2,name:3,ps:4,pe:5,wt:6,cv:7}; }
+      const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
+      const villas=project?.villas||[]; const discs=project?.disciplines||MEP_DISCIPLINES;
+      const findVilla=nm2=>{ const v=villas.find(x=>(x.name||'').toLowerCase()===nm2.toLowerCase()); return v?v.id:''; };
+      const added=r2.slice(start).map((c,i)=>{ const name=g(c,idx.name); if(!name||/^activity$/i.test(name)) return null; const d=g(c,idx.disc); return { id:crypto.randomUUID(), projectId:selProject, villaId:findVilla(g(c,idx.villa)), discipline:(discs.includes(d)?d:discs[0]), phase:g(c,idx.phase)||MEP_PHASES[0], name, plannedStart:g(c,idx.ps), plannedEnd:g(c,idx.pe), weight:parseFloat(g(c,idx.wt))||5, contractValue:parseFloat(g(c,idx.cv).replace(/[^0-9.]/g,''))||0, unit:'%', bom:[], bomLocked:false, seq:i }; }).filter(Boolean);
+      if(!added.length){ alert('No activities found (need an Activity column).'); e.target.value=''; return; }
+      setSiteActivities(prev=>[...prev, ...added]);
+      alert(added.length+' activities imported.');
+    }catch(err){ alert('Import failed: '+err.message); }
+    e.target.value='';
+  }
+  function createInvoiceFromActivities() {
+    if (!setRaBillings) { alert('Billing module not available.'); return; }
+    const billable = acts.filter(a => (parseFloat(a.contractValue)||0) > 0);
+    if (!billable.length) { alert('No activities with a Contract Value to bill. Set Contract Value on activities first (Edit activity).'); return; }
+    const priorItems = (raBillings||[]).filter(b => String(b.projectId)===String(selProject)).flatMap(b => (b.items||[]));
+    const prevPctOf = actId => { const vals = priorItems.filter(it => it.activityId===actId).map(it => parseFloat(it.thisQty)||0); return vals.length ? Math.max(...vals) : 0; };
+    const items = billable.map(a => {
+      const prev = prevPctOf(a.id);
+      const cur = getProgress(a.id);
+      return { id: crypto.randomUUID(), description: a.name, contractValue: parseFloat(a.contractValue)||0, previousQty: prev, thisQty: Math.max(prev, cur), unit:'%', activityId: a.id };
+    }).filter(it => (it.thisQty - it.previousQty) > 0.001);
+    if (!items.length) { alert('Nothing new to bill — all activities already billed up to their current progress.'); return; }
+    const amt = items.reduce((s,i)=> s + (i.contractValue*(i.thisQty-i.previousQty)/100), 0);
+    if (!window.confirm('Create a progress invoice (RA Bill) for '+items.length+' activit'+(items.length===1?'y':'ies')+' — value '+Math.round(amt).toLocaleString()+'? Review & print it in Billing → RA Billing.')) return;
+    const num = dn('RAB', (raBillings.length||0)+1);
+    const ym = new Date().toISOString().slice(0,7);
+    const bill = { id: crypto.randomUUID(), billNumber:num, projectId:selProject, customerId:(project?.customerId||''), tenderId:'', periodFrom:ym+'-01', periodTo:new Date().toISOString().slice(0,10), date:new Date().toISOString().slice(0,10), items, taxRate:0, placeOfSupply:'', status:'draft', approvalStatus:'draft', notes:'Auto-generated from Activity Planner progress.', source:'activity', updatedAt:Date.now() };
+    setRaBillings(prev => [...prev, bill]);
+    if (window.confirm('Progress invoice '+num+' created. Go to RA Billing now to review & print?')) { if (setView) setView('rabilling'); }
+  }
   function lockBOM(id) { setSiteActivities(prev=>prev.map(a=>a.id===id?{...a,bomLocked:true}:a)); }
   function toggleBOM(id) { setExpandedBOM(p=>({...p,[id]:!p[id]})); }
 
@@ -16655,7 +19853,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
     const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
     const dur = (a,b) => (a&&b) ? Math.max(0, Math.round((new Date(b)-new Date(a))/86400000)) : '';
     const aoa = [['#','Discipline','Unit','Activity','Start','End','Duration (days)','Weight %','Progress %','Status'],
-      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.startDate||'', a.endDate||'', dur(a.startDate,a.endDate), a.weight||'', getProgress(a.id), a.status||''])];
+      ...acts.map((a,i)=>[i+1, a.discipline||'', vName(a.villaId), a.name||'', a.plannedStart||'', a.plannedEnd||'', dur(a.plannedStart,a.plannedEnd), a.weight||'', getProgress(a.id), a.status||''])];
     try {
       const XLSX = await loadXLSX();
       const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -16718,6 +19916,10 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           </select>
           {acts.length>0 && <button onClick={exportActsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
           {acts.length>0 && <button onClick={()=>setPrintActs(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setTenderPick(true)} style={styles.ghostBtn} title="Import activities from a tender's Price Detail / BOQ">↳ From Tender</button>}
+          {canEdit && <button onClick={downloadActTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>}
+          {canEdit && <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import activities from Excel/CSV">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importActsCsv} /></label>}
+          {canEdit && acts.some(a=>(parseFloat(a.contractValue)||0)>0) && <button onClick={createInvoiceFromActivities} style={{ ...styles.ghostBtn, color:'#1a6b30', borderColor:'#bfe3c9', background:'#F1FAF3' }} title="Create a progress invoice (RA Bill) from completed work %"><FileText size={14}/> Create Invoice</button>}
           <div style={{ display:'flex', border:'1px solid #DDD8CE', borderRadius:8, overflow:'hidden' }}>
             {[['gantt','📊 Gantt'],['table','📋 Table']].map(([k,l])=>(
               <button key={k} onClick={()=>setViewMode(k)} style={{ padding:'6px 14px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: viewMode===k ? '#1E2A4A' : '#fff', color: viewMode===k ? '#fff' : '#555' }}>{l}</button>
@@ -16770,7 +19972,12 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
                       </div>
                       <div style={{ padding:'6px 8px', fontSize:11 }}>
                         <div style={{ fontWeight:600, color:'#1E2A4A', lineHeight:1.3 }}>{act.name}</div>
-                        <div style={{ fontSize:10, color:'#aaa' }}>{act.phase}</div>
+                        <div style={{ fontSize:10, color:'#aaa', display:'flex', alignItems:'center', gap:4, marginTop:2 }}>
+                          <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{act.phase}</span>
+                          <button onClick={()=>setUpdateModal(act.id)} style={{ ...styles.iconBtn, padding:'1px 4px' }} title="Log update">📝</button>
+                          {canEdit && <button onClick={()=>setEditing(act)} style={{ ...styles.iconBtn, padding:'1px 4px' }} title="Edit activity"><Pencil size={12}/></button>}
+                          {canEdit && <button onClick={()=>del(act.id)} style={{ ...styles.iconBtn, padding:'1px 4px', color:'#B5453A' }} title="Delete activity"><Trash2 size={12}/></button>}
+                        </div>
                       </div>
                     </div>
                   );
@@ -16905,9 +20112,31 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
           project={project}
           progressUpdates={progressUpdates}
           setProgressUpdates={setProgressUpdates}
+          setSiteActivities={setSiteActivities}
+          canEdit={canEdit}
           employees={employees}
           onClose={()=>setUpdateModal(null)}
         />
+      )}
+      {tenderPick && (
+        <>
+          <div className="no-print" onClick={()=>setTenderPick(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1200 }} />
+          <div className="no-print" style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#fff', borderRadius:12, padding:'20px 22px', zIndex:1201, width:460, maxHeight:'80vh', overflowY:'auto', boxShadow:'0 10px 40px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontSize:16, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>Import Activities from Tender</div>
+            <div style={{ fontSize:12, color:'#888', marginBottom:14 }}>Pulls the tender's Price Detail activities (or BOQ) into <b>{project?.name||'this project'}</b>. You can then set villa &amp; dates.</div>
+            {tenders.length===0 ? <div style={{ color:'#aaa', padding:20, textAlign:'center' }}>No tenders found.</div> : (
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {tenders.map(t=>{ const cnt=((t.priceDetail&&t.priceDetail.length)||(t.boq&&t.boq.length)||0); return (
+                  <button key={t.id} onClick={()=>importFromTender(t)} disabled={!cnt} style={{ textAlign:'left', background:cnt?'#F8F7F4':'#f3f3f3', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 12px', cursor:cnt?'pointer':'not-allowed', opacity:cnt?1:0.6 }}>
+                    <div style={{ fontWeight:600, color:'#1E2A4A' }}>{t.number||'Tender'} — {t.title||'(no title)'}</div>
+                    <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{cnt} activit{cnt===1?'y':'ies'} · {t.status||'draft'}</div>
+                  </button>
+                ); })}
+              </div>
+            )}
+            <button onClick={()=>setTenderPick(false)} style={{ background:'none', border:'none', color:'#888', fontSize:12, marginTop:14, width:'100%', cursor:'pointer' }}>Cancel</button>
+          </div>
+        </>
       )}
       {printActs && (()=>{
         const vName = id => (project?.villas||[]).find(v=>v.id===id)?.name || '';
@@ -16920,6 +20149,32 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
               <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PROJECT ACTIVITY SCHEDULE</div>
               <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{project?.name} &nbsp;|&nbsp; Overall Progress: {overall}% &nbsp;|&nbsp; {acts.length} activities</div>
             </div>
+            {(()=>{ const PDW=16; const totalW=ganttDays*PDW; return (
+              <div style={{ marginBottom:22 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:8 }}>Gantt Chart</div>
+                <div style={{ display:'flex', borderBottom:'2px solid #1E2A4A' }}>
+                  <div style={{ width:168, flexShrink:0, fontWeight:700, fontSize:9, padding:'2px 4px' }}>Activity</div>
+                  <div style={{ position:'relative', display:'flex', width:totalW }}>
+                    {Array.from({length:ganttDays}).map((_,i)=>{ const d=new Date(gStart); d.setDate(d.getDate()+i); const we=d.getDay()===0||d.getDay()===6; return <div key={i} style={{ width:PDW, textAlign:'center', fontSize:7.5, color:we?'#B5453A':'#999', borderLeft:'1px solid #F0EDE6', paddingTop:2 }}>{d.getDate()}</div>; })}
+                  </div>
+                </div>
+                {acts.map(a=>{ const so=dayOffset(a.plannedStart); const eo=dayOffset(a.plannedEnd); const pr=getProgress(a.id); const has=so!=null&&eo!=null; const bl=has?so*PDW:0; const bw=has?Math.max(PDW,(eo-so+1)*PDW):0; return (
+                  <div key={a.id} style={{ display:'flex', alignItems:'center', height:17, borderBottom:'1px solid #F5F3EE' }}>
+                    <div style={{ width:168, flexShrink:0, fontSize:8.5, padding:'0 4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{a.name}</div>
+                    <div style={{ position:'relative', height:'100%', width:totalW }}>
+                      {Array.from({length:ganttDays}).map((_,i)=>{ const d=new Date(gStart); d.setDate(d.getDate()+i); return (d.getDay()===0||d.getDay()===6)?<div key={i} style={{ position:'absolute', left:i*PDW, width:PDW, top:0, bottom:0, background:'rgba(201,162,75,0.10)' }} />:null; })}
+                      {has && <div style={{ position:'absolute', left:bl, width:bw, top:3, height:11, borderRadius:3, background:'#DDD8CE', overflow:'hidden' }}>
+                        <div style={{ width:pr+'%', height:'100%', background:pr>=100?'#1A7A3E':'#1E7A9A' }} />
+                        <span style={{ position:'absolute', left:3, top:-1, fontSize:7.5, fontWeight:700, color:'#fff', whiteSpace:'nowrap' }}>{pr>0?pr+'%':''}</span>
+                      </div>}
+                      {!has && <span style={{ position:'absolute', left:4, top:2, fontSize:7.5, color:'#ccc', fontStyle:'italic' }}>no dates</span>}
+                    </div>
+                  </div>
+                ); })}
+                <div style={{ fontSize:8, color:'#999', marginTop:6 }}>Weekend shaded. Bar = planned duration; filled = progress (blue in-progress, green complete).</div>
+              </div>
+            ); })()}
+            <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', margin:'6px 0 8px' }}>Activity Table</div>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
               <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Discipline','Unit','Activity','Start','End','Days','Wt%','Progress','Status'].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['#','Days','Wt%','Progress'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -16929,9 +20184,9 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
                     <td style={{ padding:'5px 8px' }}>{a.discipline}</td>
                     <td style={{ padding:'5px 8px' }}>{vName(a.villaId)||'—'}</td>
                     <td style={{ padding:'5px 8px' }}>{a.name}</td>
-                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.startDate||'—'}</td>
-                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.endDate||'—'}</td>
-                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.startDate,a.endDate)}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.plannedStart||'—'}</td>
+                    <td style={{ padding:'5px 8px', whiteSpace:'nowrap' }}>{a.plannedEnd||'—'}</td>
+                    <td style={{ padding:'5px 8px', textAlign:'right' }}>{dur(a.plannedStart,a.plannedEnd)}</td>
                     <td style={{ padding:'5px 8px', textAlign:'right' }}>{a.weight||'—'}</td>
                     <td style={{ padding:'5px 8px', textAlign:'right', fontWeight:600, color:pr>=100?'#1a6b30':'#1E2A4A' }}>{pr}%</td>
                     <td style={{ padding:'5px 8px' }}>{a.status||''}</td>
@@ -16947,7 +20202,7 @@ function ActivityPlannerView({ siteActivities, setSiteActivities, siteProjects, 
 }
 
 // ─── Daily Update Modal (from Gantt click) ───────────────────────────────────
-function DailyUpdateModal({ activityId, activity, project, progressUpdates, setProgressUpdates, employees, onClose }) {
+function DailyUpdateModal({ activityId, activity, project, progressUpdates, setProgressUpdates, setSiteActivities, canEdit=true, employees, onClose }) {
   const today = new Date().toISOString().slice(0,10);
   const lastLog = progressUpdates.filter(u=>u.activityId===activityId).sort((a,b)=>b.date.localeCompare(a.date))[0];
   const lastPct = lastLog ? parseFloat(lastLog.cumProgress)||0 : 0;
@@ -16961,6 +20216,8 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
     materialConsumed: [],
     notes: '',
   });
+  const [pStart, setPStart] = useState(activity?.plannedStart||'');
+  const [pEnd, setPEnd] = useState(activity?.plannedEnd||'');
   const [saved, setSaved] = useState(false);
   const set = (k,v) => setForm(p=>({...p,[k]:v}));
 
@@ -16986,6 +20243,9 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
       totalManhours: Number(form.totalManhours) || 0,
     };
     setProgressUpdates(prev => [...prev, rec]);
+    if (setSiteActivities && (pStart!==(activity?.plannedStart||'') || pEnd!==(activity?.plannedEnd||''))) {
+      setSiteActivities(prev => prev.map(a => a.id===activityId ? { ...a, plannedStart:pStart, plannedEnd:pEnd } : a));
+    }
     setSaved(true);
     setTimeout(() => { if (typeof onClose === 'function') onClose(); }, 900);
   }
@@ -17011,6 +20271,15 @@ function DailyUpdateModal({ activityId, activity, project, progressUpdates, setP
           <input type="number" min={lastPct} max={100} value={form.cumProgress} onChange={e=>set('cumProgress',Math.min(100,Math.max(lastPct,+e.target.value)))} style={styles.input} />
         </div>
       </div>
+      {canEdit && (
+        <div style={{ background:'#F4F7FB', border:'1px solid #D8E2F0', borderRadius:8, padding:'10px 12px', marginBottom:12 }}>
+          <div style={{ fontSize:11.5, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>Planned Schedule {(!activity?.plannedStart||!activity?.plannedEnd)?'— set dates to show the Gantt bar':''}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Planned Start</label><input type="date" value={pStart} onChange={e=>setPStart(e.target.value)} style={styles.input} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Planned End</label><input type="date" value={pEnd} onChange={e=>setPEnd(e.target.value)} style={styles.input} /></div>
+          </div>
+        </div>
+      )}
 
       {/* Manpower moved to dedicated Manpower module */}
       <div style={{ background:'#F4FAF5', border:'1px solid #DCE8D6', borderRadius:8, padding:'9px 12px', marginBottom:12, fontSize:12, color:'#1A7A3E' }}>
@@ -17931,6 +21200,515 @@ function ProgressBoardView({ siteProjects, siteActivities, progressUpdates }) {
 }
 
 // ── Client Materials Received ───────────────────────────────────────────────────
+function PaymentTrackingView({ siteProjects = [], siteActivities = [], raBillings = [], subcontractors = [], setSiteProjects, businessInfo, userRole }) {
+  const [tab, setTab] = useState('billing');
+  const [printPT, setPrintPT] = useState(false);
+  const fmt = makeFmt(businessInfo);
+  const canEdit = ['admin','manager','accounts'].includes(userRole);
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 0, marginBottom: 12, overflowX: 'auto' };
+  const th = { textAlign: 'right', fontSize: 11, color: '#888780', textTransform: 'uppercase', padding: '8px 10px', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const thL = { ...th, textAlign: 'left' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid #F2EFE6', textAlign: 'right', whiteSpace: 'nowrap' };
+  const tdL = { ...td, textAlign: 'left', fontWeight: 600, color: '#1E2A4A' };
+  const tfootTd = { ...td, borderTop: '2px solid #1E2A4A', fontWeight: 700 };
+
+  // ── Per-bill client-side certification maths ──
+  const billClaim = rb => (rb.items || []).reduce((s, i) => s + ((parseFloat(i.contractValue) || 0) * ((parseFloat(i.thisQty) || 0) - (parseFloat(i.previousQty) || 0)) / 100), 0);
+  const billCert = rb => (rb.certifiedAmount === '' || rb.certifiedAmount == null) ? billClaim(rb) : (parseFloat(rb.certifiedAmount) || 0);
+  const billRet = rb => billCert(rb) * (parseFloat(rb.retentionPct) || 0) / 100;
+  const billNet = rb => billCert(rb) - billRet(rb) - (parseFloat(rb.advanceRecovery) || 0) - (parseFloat(rb.otherDeductions) || 0);
+  const billRcv = rb => parseFloat(rb.receivedAmount) || 0;
+
+  const rows = (siteProjects || []).map(p => {
+    const acts = (siteActivities || []).filter(a => String(a.projectId) === String(p.id));
+    const contractVal = (parseFloat(p.contractValue) || 0) || acts.reduce((s, a) => s + (parseFloat(a.contractValue) || 0), 0);
+    const bills = (raBillings || []).filter(rb => String(rb.projectId) === String(p.id));
+    const claimed = bills.reduce((s, rb) => s + billClaim(rb), 0);
+    const certified = bills.reduce((s, rb) => s + billCert(rb), 0);
+    const clientRetention = bills.reduce((s, rb) => s + billRet(rb), 0);
+    const advRecovered = bills.reduce((s, rb) => s + (parseFloat(rb.advanceRecovery) || 0), 0);
+    const netCert = bills.reduce((s, rb) => s + billNet(rb), 0);
+    const received = bills.reduce((s, rb) => s + billRcv(rb), 0);
+    const outstanding = netCert - received;
+    const clientAdvance = parseFloat(p.clientAdvance) || 0;
+    const advBalance = clientAdvance - advRecovered;
+    // Subcontractor payable side
+    let subVal = 0, subPaid = 0, subRetention = 0, subAdvance = 0;
+    (subcontractors || []).forEach(sc => (sc.workOrders || []).filter(w => String(w.projectId) === String(p.id)).forEach(w => {
+      subVal += parseFloat(w.value) || 0;
+      subPaid += (parseFloat(w.advancePaid) || 0) + (parseFloat(w.progressPaid) || 0) + (parseFloat(w.finalPaid) || 0);
+      subRetention += parseFloat(w.retentionHeld) || 0;
+      subAdvance += parseFloat(w.advancePaid) || 0;
+    }));
+    const subBal = subVal - subPaid - subRetention;
+    return { p, contractVal, claimed, certified, clientRetention, advRecovered, netCert, received, outstanding, clientAdvance, advBalance, subVal, subPaid, subRetention, subAdvance, subBal };
+  }).filter(r => r.contractVal || r.claimed || r.subVal || r.clientAdvance);
+
+  const sum = keys => rows.reduce((a, r) => { keys.forEach(k => a[k] = (a[k] || 0) + r[k]); return a; }, {});
+  const setAdvance = (projId, val) => { if (setSiteProjects) setSiteProjects(prev => prev.map(p => p.id === projId ? { ...p, clientAdvance: val } : p)); };
+  async function exportPTXlsx() {
+    const billing = [['Project','Contract','Claimed','Certified','Net Certified','Received','Outstanding','Subcon Value','Subcon Paid','Subcon Balance'],
+      ...rows.map(r=>[r.p.name||'', r.contractVal, r.claimed, r.certified, r.netCert, r.received, r.outstanding, r.subVal, r.subPaid, r.subBal])];
+    const retention = [['Project','Held by Client (receivable)','Held from Subcon (payable)','Net Exposure'],
+      ...rows.map(r=>[r.p.name||'', r.clientRetention, r.subRetention, r.clientRetention-r.subRetention])];
+    const advances = [['Project','Advance from Client','Recovered','Balance','Advance to Subcon'],
+      ...rows.map(r=>[r.p.name||'', r.clientAdvance, r.advRecovered, r.advBalance, r.subAdvance])];
+    try {
+      const XLSX = await loadXLSX();
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(billing), 'Billing');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(retention), 'Retention');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(advances), 'Advances');
+      XLSX.writeFile(wb, 'Payment-Tracking.xlsx');
+    } catch(err) {
+      const csv = billing.map(r=>r.map(c=>{const v=String(c==null?'':c); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+      const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}));
+      const el=document.createElement('a'); el.href=url; el.download='Payment-Tracking.csv'; el.click(); URL.revokeObjectURL(url);
+    }
+  }
+
+  const TABS = [['billing', 'Billing & Payment'], ['retention', 'Retention'], ['advances', 'Advances']];
+
+  return (
+    <div style={styles.page}>
+      <div style={{ ...styles.pageHeader, display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div>
+          <h2 className="serif" style={styles.pageTitle}>Payment Tracking</h2>
+          <p style={styles.muted}>Client receivable + subcontractor payable + retention & advances — the full money loop, per project</p>
+        </div>
+        {rows.length>0 && <div style={{ display:'flex', gap:8 }}>
+          <button onClick={exportPTXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>
+          <button onClick={()=>setPrintPT(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>
+        </div>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {TABS.map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ ...styles.ghostBtn, background: tab === k ? '#1E2A4A' : 'transparent', color: tab === k ? '#fff' : '#555', fontSize: 12 }}>{l}</button>)}
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={styles.emptyBox}>No project billing yet. Raise RA Bills / subcontractor work orders to track payments.</div>
+      ) : tab === 'billing' ? (() => {
+        const t = sum(['contractVal', 'claimed', 'certified', 'netCert', 'received', 'outstanding', 'subVal', 'subPaid', 'subBal']);
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1040 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Contract</th>
+                <th style={th}>Claimed</th>
+                <th style={th}>Certified</th>
+                <th style={th}>Net Certified</th>
+                <th style={th}>Received</th>
+                <th style={th}>Outstanding</th>
+                <th style={th}>Subcon Value</th>
+                <th style={th}>Subcon Paid</th>
+                <th style={th}>Subcon Balance</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={td}>{fmt(r.contractVal)}</td>
+                    <td style={td}>{fmt(r.claimed)}</td>
+                    <td style={td}>{fmt(r.certified)}</td>
+                    <td style={td}>{fmt(r.netCert)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.received)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.outstanding)}</td>
+                    <td style={td}>{fmt(r.subVal)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.subPaid)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(r.subBal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={tfootTd}>{fmt(t.contractVal)}</td>
+                <td style={tfootTd}>{fmt(t.claimed)}</td>
+                <td style={tfootTd}>{fmt(t.certified)}</td>
+                <td style={tfootTd}>{fmt(t.netCert)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.received)}</td>
+                <td style={{ ...tfootTd, color: t.outstanding > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(t.outstanding)}</td>
+                <td style={tfootTd}>{fmt(t.subVal)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.subPaid)}</td>
+                <td style={{ ...tfootTd, color: t.subBal > 0 ? '#C9752A' : '#1a6b30' }}>{fmt(t.subBal)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Claimed = our RA claim. Certified = client-certified amount. Net Certified = certified − retention − advance recovery − deductions. Outstanding = Net Certified − Received.</div>
+          </div>
+        );
+      })() : tab === 'retention' ? (() => {
+        const t = sum(['clientRetention', 'subRetention']);
+        const netExposure = t.clientRetention - t.subRetention;
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Held by Client (receivable)</th>
+                <th style={th}>Held from Subcon (payable)</th>
+                <th style={th}>Net Retention Exposure</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={{ ...td, color: '#B5453A' }}>{fmt(r.clientRetention)}</td>
+                    <td style={{ ...td, color: '#C9752A' }}>{fmt(r.subRetention)}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>{fmt(r.clientRetention - r.subRetention)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={{ ...tfootTd, color: '#B5453A' }}>{fmt(t.clientRetention)}</td>
+                <td style={{ ...tfootTd, color: '#C9752A' }}>{fmt(t.subRetention)}</td>
+                <td style={{ ...tfootTd }}>{fmt(netExposure)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Client retention = money client holds back from our bills (we get it back at DLP). Subcon retention = money we hold from subcontractors (we release at their DLP). Net = our net retention position.</div>
+          </div>
+        );
+      })() : (() => {
+        const t = sum(['clientAdvance', 'advRecovered', 'advBalance', 'subAdvance']);
+        return (
+          <div style={card}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead><tr>
+                <th style={thL}>Project</th>
+                <th style={th}>Advance from Client</th>
+                <th style={th}>Recovered</th>
+                <th style={th}>Advance Balance</th>
+                <th style={th}>Advance to Subcon</th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.p.id}>
+                    <td style={tdL}>{r.p.name || 'Untitled'}</td>
+                    <td style={td}>{canEdit ? <input type='number' value={r.clientAdvance || 0} onChange={e => setAdvance(r.p.id, parseFloat(e.target.value) || 0)} style={{ ...styles.input, width: 120, padding: '4px 6px', textAlign: 'right' }} /> : fmt(r.clientAdvance)}</td>
+                    <td style={{ ...td, color: '#1a6b30' }}>{fmt(r.advRecovered)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: r.advBalance > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(r.advBalance)}</td>
+                    <td style={{ ...td, color: '#C9752A' }}>{fmt(r.subAdvance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr>
+                <td style={{ ...tdL, ...tfootTd }}>TOTAL</td>
+                <td style={tfootTd}>{fmt(t.clientAdvance)}</td>
+                <td style={{ ...tfootTd, color: '#1a6b30' }}>{fmt(t.advRecovered)}</td>
+                <td style={{ ...tfootTd, color: t.advBalance > 0 ? '#B5453A' : '#1a6b30' }}>{fmt(t.advBalance)}</td>
+                <td style={{ ...tfootTd, color: '#C9752A' }}>{fmt(t.subAdvance)}</td>
+              </tr></tfoot>
+            </table>
+            <div style={{ fontSize: 11, color: '#B0AC9F', padding: '8px 12px' }}>Enter the mobilization advance received from the client per project. Recovered = sum of advance recovery entered on RA Bills. Balance = still to be recovered from future bills.</div>
+          </div>
+        );
+      })()}
+      {printPT && (
+        <DocPrintOverlay onClose={()=>setPrintPT(false)} filename="Payment-Tracking.pdf" businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:16 }}>
+            <div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>PAYMENT TRACKING</div>
+            <div style={{ fontSize:12, color:'#888', marginTop:3 }}>Client receivable · Subcontractor payable · Retention · Advances</div>
+          </div>
+          {[['Billing & Payment', ['Project','Contract','Claimed','Certified','Net Cert','Received','Outstanding'], rows.map(r=>[r.p.name||'', r.contractVal, r.claimed, r.certified, r.netCert, r.received, r.outstanding])],
+            ['Retention', ['Project','Client (recv)','Subcon (pay)','Net'], rows.map(r=>[r.p.name||'', r.clientRetention, r.subRetention, r.clientRetention-r.subRetention])],
+            ['Advances', ['Project','From Client','Recovered','Balance','To Subcon'], rows.map(r=>[r.p.name||'', r.clientAdvance, r.advRecovered, r.advBalance, r.subAdvance])]
+          ].map(([title,heads,data],bi)=>(
+            <div key={bi} style={{ marginBottom:18 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:6 }}>{title}</div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+                <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{heads.map((h,i)=><th key={h} style={{ padding:'5px 7px', textAlign:i===0?'left':'right', fontWeight:700 }}>{h}</th>)}</tr></thead>
+                <tbody>{data.map((row,ri)=><tr key={ri} style={{ borderBottom:'1px solid #eee', background:ri%2?'#F8F7F4':'#fff' }}>{row.map((cell,ci)=><td key={ci} style={{ padding:'5px 7px', textAlign:ci===0?'left':'right' }}>{ci===0?cell:fmt(cell)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          ))}
+        </DocPrintOverlay>
+      )}
+    </div>
+  );
+}
+
+function ServiceHistoryView({ serviceHistory = [], setServiceHistory, siteProjects = [], assets = [], userRole, businessInfo }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProj, setFilterProj] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [printDoc, setPrintDoc] = useState(false);
+  const canEdit = ['admin','manager'].includes(userRole);
+  const today = new Date().toISOString().slice(0,10);
+  const TYPES = ['Preventive','Corrective','Breakdown','Inspection','Installation'];
+  const STATUSES = ['Completed','Pending','Follow-up'];
+
+  function blank() {
+    const n = serviceHistory.length+1;
+    return { id:'', serviceNo:dn('SVC', n), date:today, projectId:'', assetId:'', serviceType:'Preventive', technician:'', description:'', findings:'', partsUsed:'', nextDueDate:'', status:'Completed' };
+  }
+  function save(rec){ const t={...rec,id:rec.id||crypto.randomUUID()}; setServiceHistory(prev=>prev.find(x=>x.id===t.id)?prev.map(x=>x.id===t.id?t:x):[...prev,t]); setEditing(null); }
+  function del(id){ if(window.confirm('Delete this service record?')) setServiceHistory(prev=>prev.filter(x=>x.id!==id)); }
+
+  const rows = serviceHistory.filter(r=>(!filterProj||String(r.projectId)===String(filterProj)) && (!filterType||r.serviceType===filterType));
+  const projName = id => siteProjects.find(p=>p.id===id)?.name||'—';
+  const assetName = id => { const a=assets.find(x=>x.id===id); return a?(a.name||a.tag||a.assetTag||'Asset'):'—'; };
+  const dueSoon = r => r.nextDueDate && r.nextDueDate>=today && (new Date(r.nextDueDate)-new Date(today))/86400000<=14;
+  const overdue = r => r.nextDueDate && r.nextDueDate<today;
+
+  async function exportXlsx() {
+    const aoa=[['Service No','Date','Project','Asset','Type','Technician','Description','Findings','Parts Used','Next Due','Status'],
+      ...rows.map(r=>[r.serviceNo||'',r.date||'',projName(r.projectId),assetName(r.assetId),r.serviceType||'',r.technician||'',r.description||'',r.findings||'',r.partsUsed||'',r.nextDueDate||'',r.status||''])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Service History'); XLSX.writeFile(wb,'Service-History.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Service-History.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+
+  if (editing) {
+    const d=editing; const set=(k,v)=>setEditing(p=>({...p,[k]:v}));
+    return (
+      <div style={{ maxWidth:640, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{d.id?'Edit':'New'} Service Record — {d.serviceNo}</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Service No</label><input value={d.serviceNo||''} onChange={e=>set('serviceNo',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={d.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={d.serviceType} onChange={e=>set('serviceType',e.target.value)} style={styles.input}>{TYPES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Asset</label><select value={d.assetId||''} onChange={e=>set('assetId',e.target.value)} style={styles.input}><option value=''>— (optional)</option>{assets.map(a=><option key={a.id} value={a.id}>{a.name||a.tag||a.assetTag||'Asset'}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Technician</label><input value={d.technician||''} onChange={e=>set('technician',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Status</label><select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{STATUSES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Work Description</label><textarea value={d.description||''} onChange={e=>set('description',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+          <div style={styles.formGroup}><label style={styles.label}>Findings / Observations</label><textarea value={d.findings||''} onChange={e=>set('findings',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Parts / Materials Used</label><input value={d.partsUsed||''} onChange={e=>set('partsUsed',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Next Service Due</label><input type='date' value={d.nextDueDate||''} onChange={e=>set('nextDueDate',e.target.value)} style={styles.input}/></div>
+          </div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>save(d)} style={styles.primaryBtn}>Save Record</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const TY_BG={Preventive:'#d4edda',Corrective:'#fff3cd',Breakdown:'#f8d7da',Inspection:'#e7f1ff',Installation:'#ede7f6'}, TY_C={Preventive:'#1a6b30',Corrective:'#856404',Breakdown:'#842029',Inspection:'#0a58ca',Installation:'#6b4fa0'};
+  const ST_BG={Completed:'#d4edda',Pending:'#fff3cd','Follow-up':'#e7f1ff'}, ST_C={Completed:'#1a6b30',Pending:'#856404','Follow-up':'#0a58ca'};
+  return (
+    <>
+    <div style={{ padding:'24px 32px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h2 className="serif" style={styles.pageTitle}>Service History</h2>
+        <div style={{ display:'flex', gap:8 }}>
+          {serviceHistory.length>0 && <button onClick={exportXlsx} style={styles.ghostBtn} title="Export to Excel">⭳ Excel</button>}
+          {serviceHistory.length>0 && <button onClick={()=>setPrintDoc(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setEditing(blank())} style={styles.primaryBtn}><Plus size={15}/> New Service Record</button>}
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap' }}>
+        {[['Total',serviceHistory.length,''],['Preventive',serviceHistory.filter(r=>r.serviceType==='Preventive').length,'#1a6b30'],['Breakdown',serviceHistory.filter(r=>r.serviceType==='Breakdown').length,'#842029'],['Due / Overdue',serviceHistory.filter(r=>overdue(r)||dueSoon(r)).length,'#B5453A']].map(([l,v,c])=>(
+          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px' }}>
+            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <select value={filterProj} onChange={e=>setFilterProj(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:220 }}><option value=''>All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:180 }}><option value=''>All Types</option>{TYPES.map(x=><option key={x}>{x}</option>)}</select>
+      </div>
+      {rows.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No service records logged.</div> : (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:900 }}>
+            <thead><tr style={{ background:'#F8F7F4' }}>
+              {['Service No','Date','Project','Asset','Type','Technician','Next Due','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {[...rows].sort((a,b)=>b.date>a.date?1:-1).map(r=>{
+                const ov=overdue(r), ds=dueSoon(r);
+                return (
+                  <tr key={r.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                    <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{r.serviceNo}</td>
+                    <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{r.date||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{projName(r.projectId)}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{assetName(r.assetId)}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:TY_BG[r.serviceType], color:TY_C[r.serviceType], borderRadius:5, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{r.serviceType}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{r.technician||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:ov?'#B5453A':ds?'#856404':'#555', fontWeight:(ov||ds)?700:400, whiteSpace:'nowrap' }}>{r.nextDueDate||'—'}{ov?' ⚠':ds?' •':''}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:ST_BG[r.status], color:ST_C[r.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{r.status}</span></td>
+                    <td style={{ padding:'8px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setEditing(r)} style={styles.iconBtn}><Pencil size={14}/></button>
+                      <button onClick={()=>del(r.id)} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                    </div>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    {printDoc && (
+      <DocPrintOverlay onClose={()=>setPrintDoc(false)} filename="Service-History.pdf" businessInfo={businessInfo}>
+        <div style={{ textAlign:'center', marginBottom:16 }}><div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>SERVICE HISTORY</div><div style={{ fontSize:12, color:'#888', marginTop:3 }}>{filterProj?projName(filterProj):'All Projects'}</div></div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+          <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Service','Date','Project','Asset','Type','Technician','Next Due','Status'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left', fontWeight:700 }}>{h}</th>)}</tr></thead>
+          <tbody>{[...rows].sort((a,b)=>b.date>a.date?1:-1).map((r,i)=><tr key={r.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+            <td style={{ padding:'4px 6px' }}>{i+1}</td><td style={{ padding:'4px 6px' }}>{r.serviceNo}</td><td style={{ padding:'4px 6px' }}>{r.date||'—'}</td><td style={{ padding:'4px 6px' }}>{projName(r.projectId)}</td><td style={{ padding:'4px 6px' }}>{assetName(r.assetId)}</td><td style={{ padding:'4px 6px' }}>{r.serviceType}</td><td style={{ padding:'4px 6px' }}>{r.technician||'—'}</td><td style={{ padding:'4px 6px' }}>{r.nextDueDate||'—'}</td><td style={{ padding:'4px 6px' }}>{r.status}</td>
+          </tr>)}</tbody>
+        </table>
+      </DocPrintOverlay>
+    )}
+    </>
+  );
+}
+
+function DLPView({ dlpDefects = [], setDlpDefects, siteProjects = [], subcontractors = [], setSiteProjects, userRole, businessInfo }) {
+  const [editing, setEditing] = useState(null);
+  const [filterProj, setFilterProj] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [printDoc, setPrintDoc] = useState(false);
+  const canEdit = ['admin','manager'].includes(userRole);
+  const today = new Date().toISOString().slice(0,10);
+  const SEV = ['Low','Medium','High'];
+  const STATUSES = ['Open','In Progress','Closed'];
+  const RESP = ['In-house','Subcontractor'];
+
+  function blankDefect() {
+    const n = dlpDefects.length+1;
+    return { id:'', defectNo:`DEF-${String(n).padStart(3,'0')}`, projectId:'', location:'', discipline:'', description:'', severity:'Medium', raisedDate:today, targetDate:'', closedDate:'', responsible:'In-house', responsibleName:'', status:'Open', remarks:'' };
+  }
+  function save(rec) {
+    const t = { ...rec, id:rec.id||crypto.randomUUID() };
+    setDlpDefects(prev=>prev.find(x=>x.id===t.id)?prev.map(x=>x.id===t.id?t:x):[...prev,t]);
+    setEditing(null);
+  }
+  function del(id){ if(window.confirm('Delete this defect?')) setDlpDefects(prev=>prev.filter(x=>x.id!==id)); }
+  const setDlp = (projId,val)=>{ if(setSiteProjects) setSiteProjects(prev=>prev.map(p=>p.id===projId?{...p,dlpEndDate:val}:p)); };
+
+  const rows = dlpDefects.filter(d=>(!filterProj||String(d.projectId)===String(filterProj)) && (!filterStatus||d.status===filterStatus));
+  const projName = id => siteProjects.find(p=>p.id===id)?.name||'—';
+  const isOverdue = d => d.status!=='Closed' && d.targetDate && d.targetDate<today;
+  const stat = { total:dlpDefects.length, open:dlpDefects.filter(d=>d.status==='Open').length, prog:dlpDefects.filter(d=>d.status==='In Progress').length, closed:dlpDefects.filter(d=>d.status==='Closed').length, overdue:dlpDefects.filter(isOverdue).length };
+
+  async function exportXlsx() {
+    const aoa=[['Defect No','Project','Location','Discipline','Description','Severity','Raised','Target','Closed','Status','Responsible','Party','Remarks'],
+      ...rows.map(d=>[d.defectNo||'',projName(d.projectId),d.location||'',d.discipline||'',d.description||'',d.severity||'',d.raisedDate||'',d.targetDate||'',d.closedDate||'',d.status||'',d.responsible||'',d.responsibleName||'',d.remarks||''])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Defects'); XLSX.writeFile(wb,'DLP-Defects.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='DLP-Defects.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+
+  if (editing) {
+    const d = editing; const set=(k,v)=>setEditing(p=>({...p,[k]:v}));
+    const subNames = subcontractors.map(sc=>sc.name);
+    return (
+      <div style={{ maxWidth:640, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{d.id?'Edit':'New'} Defect — {d.defectNo}</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Defect No</label><input value={d.defectNo||''} onChange={e=>set('defectNo',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Severity</label><select value={d.severity} onChange={e=>set('severity',e.target.value)} style={styles.input}>{SEV.map(x=><option key={x}>{x}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Status</label><select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{STATUSES.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Location / Area</label><input value={d.location||''} onChange={e=>set('location',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Discipline</label><input value={d.discipline||''} onChange={e=>set('discipline',e.target.value)} style={styles.input} placeholder='Electrical / HVAC...'/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Responsible</label><select value={d.responsible} onChange={e=>set('responsible',e.target.value)} style={styles.input}>{RESP.map(x=><option key={x}>{x}</option>)}</select></div>
+          </div>
+          {d.responsible==='Subcontractor' && <div style={styles.formGroup}><label style={styles.label}>Subcontractor</label><select value={d.responsibleName||''} onChange={e=>set('responsibleName',e.target.value)} style={styles.input}><option value=''>Select</option>{subNames.map(nm=><option key={nm} value={nm}>{nm}</option>)}</select></div>}
+          <div style={styles.formGroup}><label style={styles.label}>Description</label><textarea value={d.description||''} onChange={e=>set('description',e.target.value)} style={{ ...styles.input, height:70 }}/></div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Raised Date</label><input type='date' value={d.raisedDate||''} onChange={e=>set('raisedDate',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Target Close</label><input type='date' value={d.targetDate||''} onChange={e=>set('targetDate',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Closed Date</label><input type='date' value={d.closedDate||''} onChange={e=>set('closedDate',e.target.value)} style={styles.input}/></div>
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Remarks</label><textarea value={d.remarks||''} onChange={e=>set('remarks',e.target.value)} style={{ ...styles.input, height:50 }}/></div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>save(d)} style={styles.primaryBtn}>Save Defect</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const SEV_BG={Low:'#e7f1ff',Medium:'#fff3cd',High:'#f8d7da'}, SEV_C={Low:'#0a58ca',Medium:'#856404',High:'#842029'};
+  const ST_BG={Open:'#f8d7da','In Progress':'#fff3cd',Closed:'#d4edda'}, ST_C={Open:'#842029','In Progress':'#856404',Closed:'#1a6b30'};
+  return (
+    <>
+    <div style={{ padding:'24px 32px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <h2 className="serif" style={styles.pageTitle}>DLP / Defects Liability</h2>
+        <div style={{ display:'flex', gap:8 }}>
+          {dlpDefects.length>0 && <button onClick={exportXlsx} style={styles.ghostBtn} title="Export to Excel">⭳ Excel</button>}
+          {dlpDefects.length>0 && <button onClick={()=>setPrintDoc(true)} style={styles.ghostBtn} title="Print / PDF"><Printer size={14}/> Print</button>}
+          {canEdit && <button onClick={()=>setEditing(blankDefect())} style={styles.primaryBtn}><Plus size={15}/> New Defect</button>}
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:16, flexWrap:'wrap' }}>
+        {[['Total',stat.total,''],['Open',stat.open,'#842029'],['In Progress',stat.prog,'#856404'],['Closed',stat.closed,'#1a6b30'],['Overdue',stat.overdue,'#B5453A']].map(([l,v,c])=>(
+          <div key={l} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:8, padding:'10px 16px' }}>
+            <div style={{ fontSize:11, color:'#888', fontWeight:600, textTransform:'uppercase' }}>{l}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:c||'#1E2A4A' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+        <select value={filterProj} onChange={e=>setFilterProj(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:220 }}><option value=''>All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{ ...styles.input, margin:0, maxWidth:180 }}><option value=''>All Status</option>{STATUSES.map(x=><option key={x}>{x}</option>)}</select>
+        {filterProj && <span style={{ fontSize:12, color:'#888' }}>DLP End Date: <input type='date' value={siteProjects.find(p=>p.id===filterProj)?.dlpEndDate||''} onChange={e=>setDlp(filterProj,e.target.value)} style={{ ...styles.input, margin:0, display:'inline-block', width:150 }} disabled={!canEdit}/></span>}
+      </div>
+      {rows.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No defects logged.</div> : (
+        <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:900 }}>
+            <thead><tr style={{ background:'#F8F7F4' }}>
+              {['Defect No','Project','Location','Description','Severity','Raised','Target','Status','Responsible',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map(d=>{
+                const ov=isOverdue(d);
+                return (
+                  <tr key={d.id} style={{ borderBottom:'1px solid #F0ECE5', background:ov?'#fff8f7':'#fff' }}>
+                    <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{d.defectNo}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{projName(d.projectId)}</td>
+                    <td style={{ padding:'8px 12px', color:'#555' }}>{d.location||'—'}{d.discipline?' · '+d.discipline:''}</td>
+                    <td style={{ padding:'8px 12px', color:'#333', maxWidth:220 }}>{d.description||'—'}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:SEV_BG[d.severity], color:SEV_C[d.severity], borderRadius:5, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{d.severity}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{d.raisedDate||'—'}</td>
+                    <td style={{ padding:'8px 12px', color:ov?'#B5453A':'#555', fontWeight:ov?700:400, whiteSpace:'nowrap' }}>{d.targetDate||'—'}{ov?' ⚠':''}</td>
+                    <td style={{ padding:'8px 12px' }}><span style={{ background:ST_BG[d.status], color:ST_C[d.status], borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{d.status}</span></td>
+                    <td style={{ padding:'8px 12px', color:'#555', fontSize:12 }}>{d.responsible==='Subcontractor'?(d.responsibleName||'Subcon'):'In-house'}</td>
+                    <td style={{ padding:'8px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setEditing(d)} style={styles.iconBtn}><Pencil size={14}/></button>
+                      <button onClick={()=>del(d.id)} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                    </div>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    {printDoc && (
+      <DocPrintOverlay onClose={()=>setPrintDoc(false)} filename="DLP-Defects.pdf" businessInfo={businessInfo}>
+        <div style={{ textAlign:'center', marginBottom:16 }}><div style={{ fontSize:20, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>DEFECTS LIABILITY REGISTER</div><div style={{ fontSize:12, color:'#888', marginTop:3 }}>{filterProj?projName(filterProj):'All Projects'}</div></div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+          <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>{['#','Defect','Project','Location','Description','Sev','Target','Status'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left', fontWeight:700 }}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map((d,i)=><tr key={d.id} style={{ borderBottom:'1px solid #eee', background:i%2?'#F8F7F4':'#fff' }}>
+            <td style={{ padding:'4px 6px' }}>{i+1}</td><td style={{ padding:'4px 6px' }}>{d.defectNo}</td><td style={{ padding:'4px 6px' }}>{projName(d.projectId)}</td><td style={{ padding:'4px 6px' }}>{d.location||'—'}</td><td style={{ padding:'4px 6px' }}>{d.description||'—'}</td><td style={{ padding:'4px 6px' }}>{d.severity}</td><td style={{ padding:'4px 6px' }}>{d.targetDate||'—'}</td><td style={{ padding:'4px 6px' }}>{d.status}</td>
+          </tr>)}</tbody>
+        </table>
+      </DocPrintOverlay>
+    )}
+    </>
+  );
+}
+
 function VariationsView({ variations = [], setVariations, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [editing, setEditing] = React.useState(null);
@@ -17947,7 +21725,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
   const approvedOmit = list.filter(v => v.status === 'Approved' && v.type === 'Omission').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
   const net = approvedAdd - approvedOmit;
   const projName = id => (siteProjects.find(p => String(p.id) === String(id)) || {}).name || '—';
-  function nextNo() { const nums = scoped.map(v => parseInt(String(v.voNo || '').replace(/\D/g, '')) || 0); return 'VO-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0'); }
+  function nextNo() { const nums = scoped.map(v => lastNum(v.voNo)); return dn('VO', (nums.length ? Math.max(...nums) : 0) + 1); }
   function save(rec) { const t = { ...rec, bizType: rec.bizType || currentBizType }; setVariations(prev => prev.find(x => x.id === t.id) ? prev.map(x => x.id === t.id ? t : x) : [...prev, t]); setEditing(null); }
   function del(id) { if (!window.confirm('Delete this VO?')) return; setVariations(prev => prev.filter(x => x.id !== id)); }
   function setStatus(id, status) { setVariations(prev => prev.map(x => x.id === id ? { ...x, status } : x)); }
@@ -18151,7 +21929,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
   );
 }
 
-function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {} }) {
+function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, siteProjects = [], userRole, businessInfo, currentBizType = 'trading', isMultiBiz = false, currentUserName = '', tcChecklists = [], handoverDocs = [], subcontractors = [], setView = () => {}, ownerUid = '' }) {
   const [projFilter, setProjFilter] = React.useState('all');
   const [catFilter, setCatFilter]   = React.useState('all');
   const [editing, setEditing]       = React.useState(null);
@@ -18238,7 +22016,7 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
               {list.map(d => (
                 <tr key={d.id}>
                   <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.docNo || '—'}</td>
-                  <td style={td}>{d.title}{d.link && <a href={d.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
+                  <td style={td}>{d.title}{d.link && <a href={normalizeUrl(d.link)} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 6, fontSize: 11, color: '#2C6FB5', textDecoration: 'underline' }}>link ↗</a>}{d.remarks && <div style={{ fontSize: 11, color: '#999' }}>{d.remarks}</div>}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{projName(d.projectId)}</td>
                   <td style={td}>{d.category}{d.subType && <div style={{ fontSize: 11, color: '#999' }}>{d.subType}</div>}</td>
                   <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{d.revision}</td>
@@ -18266,14 +22044,28 @@ function ProjectDocumentsView({ projectDocuments = [], setProjectDocuments, site
         </div>
       )}
 
-      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <ProjectDocForm rec={editing} siteProjects={siteProjects} cats={CATS} subtypes={SUBTYPES} statuses={STATUSES} onSave={save} onClose={() => setEditing(null)} ownerUid={ownerUid} />}
     </div>
   );
 }
 
-function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose }) {
+function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSave, onClose, ownerUid = '' }) {
   const [form, setForm] = React.useState(rec);
+  const [uploading, setUploading] = React.useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  async function handleFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!ownerUid) { alert('Cannot upload right now — please try again in a moment.'); return; }
+    if (file.size > 25 * 1024 * 1024) { alert('File too large (max 25 MB). For bigger files, use a Drive/SharePoint share link instead.'); e.target.value = ''; return; }
+    setUploading(true);
+    try {
+      const res = await uploadDrawing(ownerUid, 'projectdocs', file);
+      setForm(f => ({ ...f, link: res.url, fileName: res.name, filePath: res.path }));
+    } catch (err) { alert('Upload failed: ' + (err.message || err)); }
+    setUploading(false);
+    e.target.value = '';
+  }
   const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
   const row = { marginBottom: 12 };
   const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
@@ -18296,7 +22088,18 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
           <div style={row}><label style={lbl}>Status</label><select style={styles.input} value={form.status} onChange={e => set('status', e.target.value)}>{statuses.map(sx => <option key={sx}>{sx}</option>)}</select></div>
           <div style={row}><label style={lbl}>Submitted To</label><input style={styles.input} value={form.submittedTo} onChange={e => set('submittedTo', e.target.value)} placeholder="Consultant / Client" /></div>
         </div>
-        <div style={row}><label style={lbl}>Link (Drive / SharePoint URL — optional)</label><input style={styles.input} value={form.link} onChange={e => set('link', e.target.value)} placeholder="https://..." /></div>
+        <div style={row}>
+          <label style={lbl}>Attach document (upload the file, or paste a cloud link)</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ ...styles.ghostBtn, cursor: uploading ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+              {uploading ? '⏳ Uploading…' : '⬆ Upload file'}
+              <input type="file" style={{ display: 'none' }} disabled={uploading} onChange={handleFile} />
+            </label>
+            {form.fileName && <span style={{ fontSize: 12, color: '#1A7A3E' }}>✓ {form.fileName}</span>}
+          </div>
+          <input style={styles.input} value={form.link || ''} onChange={e => set('link', e.target.value)} placeholder="https://drive.google.com/…  (or upload above)" />
+          <div style={{ fontSize: 11, color: '#B0AC9F', marginTop: 4 }}>Tip: a path from your computer (like D:\… ) will not open on other devices. Upload the file, or use a shared Drive/SharePoint link.</div>
+        </div>
         <div style={row}><label style={lbl}>Remarks</label><textarea style={{ ...styles.input, minHeight: 50, resize: 'vertical' }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
           <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
@@ -18445,161 +22248,559 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, siteProjects, employees, userRole }) {
+function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
+  const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [markGroupId, setMarkGroupId] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
-  const canEdit = userRole === 'admin' || userRole === 'manager';
-  const sorted = [...siteAttendance]
-    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  function save(form) {
-    const rec = { ...form, id: form.id || crypto.randomUUID() };
+  const [printSheet, setPrintSheet] = useState(false);
+  const [printAbsent, setPrintAbsent] = useState(false);
+  const [holForm, setHolForm] = useState({date:'',name:'',type:'govt',projectId:''});
+  const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
+  const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const fmt = makeFmt(businessInfo);
+
+  const isForeman = userRole === 'foreman';
+  const canManageGroups = ['admin','manager','hr'].includes(userRole);
+  const myEmp = employees.find(e => e.email && user?.email && String(e.email).toLowerCase() === String(user.email).toLowerCase());
+  const visibleGroups = isForeman ? labourGroups.filter(g => g.leaderId && g.leaderId === myEmp?.id) : labourGroups;
+  const canEditGroupAtt = g => ['admin','manager','hr'].includes(userRole) || (isForeman && g && g.leaderId === myEmp?.id);
+  const empName = id => employees.find(e=>e.id===id)?.name || '—';
+  const projName = id => siteProjects.find(p=>p.id===id)?.name || '—';
+
+  function saveAtt(form) {
+    const rec = { ...form, id: form.id || crypto.randomUUID(), updatedBy: user?.email||'' };
     setSiteAttendance(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
     setEditing(null);
   }
-  function del(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
+  function delAtt(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
+  function saveGroup(g) {
+    const rec = { ...g, id: g.id || crypto.randomUUID() };
+    const eff = rec.effectiveFrom || new Date().toISOString().slice(0,10);
+    delete rec.effectiveFrom;
+    setLabourGroups(prev => {
+      const old = prev.find(x=>x.id===rec.id);
+      const hist = rec.siteHistory || (old && old.siteHistory) || [];
+      if (old) {
+        if (old.projectId !== rec.projectId) { rec.siteHistory = [...hist, { projectId: rec.projectId, fromDate: eff }]; }
+        else { rec.siteHistory = hist; }
+      } else if (rec.projectId) {
+        rec.siteHistory = [{ projectId: rec.projectId, fromDate: eff }];
+      }
+      return old ? prev.map(x=>x.id===rec.id?rec:x) : [...prev, rec];
+    });
+    setEditingGroup(null);
+  }
+  function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
+
   const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵' };
-  const empSummary = employees.reduce((acc, emp) => {
+  const sorted = [...siteAttendance]
+    .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
+    .filter(r => !isForeman || visibleGroups.some(g=>g.id===r.groupId))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const scopeEmpIds = isForeman ? new Set(visibleGroups.flatMap(g=>g.memberIds||[])) : null;
+  const scopeEmps = scopeEmpIds ? employees.filter(e=>scopeEmpIds.has(e.id)) : employees;
+  const empSummary = scopeEmps.reduce((acc, emp) => {
     const records = sorted.flatMap(r => (r.records || []).filter(x => x.employeeId === emp.id));
     acc[emp.id] = {
       present: records.filter(x => x.status === 'present').length,
       halfDay: records.filter(x => x.status === 'half_day').length,
       absent: records.filter(x => x.status === 'absent').length,
       leave: records.filter(x => x.status === 'leave').length,
+      ot: records.reduce((s,x)=>s+(parseFloat(x.otHours)||0),0),
       total: records.length,
     };
     return acc;
   }, {});
+
+  const absentAlerts = (['admin','manager','hr'].includes(userRole) ? scopeEmps : []).map(emp => {
+    const dset = new Set();
+    siteAttendance.filter(r => (!isForeman || visibleGroups.some(g=>g.id===r.groupId))).forEach(r => { if(r.date && (r.records||[]).some(x=>x.employeeId===emp.id && x.status==='absent')) dset.add(r.date); });
+    const uniq = [...dset].sort();
+    let maxRun=0, run=0, prev=null, endD='';
+    uniq.forEach(ds => { const d=new Date(ds); if(prev && Math.round((d-prev)/86400000)===1){ run++; } else { run=1; } if(run>=maxRun){ maxRun=run; endD=ds; } prev=d; });
+    return { emp, maxRun, endD };
+  }).filter(a => a.maxRun >= 3);
+  function startMark() {
+    const g = labourGroups.find(x=>x.id===markGroupId);
+    if (!g) { alert('Select a group first.'); return; }
+    const mem = employees.filter(e => (g.memberIds||[]).includes(e.id));
+    setEditing({ _isNew:true, date:new Date().toISOString().slice(0,10), groupId:g.id, projectId:g.projectId||'', records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) });
+  }
+  const OT_MULT = 1.25, WORK_DAYS = 30;
+  function salaryData() {
+    const ym = filterMonth || new Date().toISOString().slice(0,7);
+    const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
+    const dim = new Date(yy, mm, 0).getDate() || 30;
+    const days = Array.from({length:dim},(_,i)=>i+1);
+    const selProj = siteProjects.find(p=>p.id===filterProject);
+    const effWeek = (selProj && selProj.weekOff!=null) ? selProj.weekOff : weekOff;
+    const holDays = new Set();
+    days.forEach(d => { if (new Date(yy, mm-1, d).getDay() === effWeek) holDays.add(d); });
+    (holidayCalendar||[]).forEach(h => { if ((h.date||'').startsWith(ym) && (!h.projectId || !filterProject || h.projectId===filterProject)) { const dd=parseInt((h.date||'').slice(8,10),10); if(dd>=1&&dd<=dim) holDays.add(dd); } });
+    const holidays = holDays.size;
+    const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
+    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
+    const rows = scopeEmps.map(emp => {
+      const byDay = {}; let ot=0;
+      recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; ot+=parseFloat(rec.otHours)||0; });
+      // Classify each calendar day ONCE: holiday days are never double-counted as present.
+      let present=0, half=0, absent=0, leave=0;
+      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
+      const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/dim;
+      const payable = Math.min(dim, present + 0.5*half + holidays);
+      const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
+      return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
+    });
+    return { ym, yy, mm, dim, holidays, holDays, effWeek, rows };
+  }
+  async function exportSalaryXlsx() {
+    const { ym, dim, holidays, rows } = salaryData();
+    const days = Array.from({length:dim},(_,i)=>i+1);
+    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
+    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
+    try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
+    catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+  function processToPayroll() {
+    if (!setPayrollRuns) { alert('Payroll module not available.'); return; }
+    const { ym, dim, rows } = salaryData();
+    const mm = ym.slice(5,7), yy = ym.slice(0,4);
+    if (!rows.length) { alert('No employees / attendance for '+ym+'.'); return; }
+    if (payrollRuns.find(r => (r.period===ym || (r.month===mm && r.year===yy)) && (!isMultiBiz || (r.bizType||'trading')===currentBizType))) { alert('A payroll run for '+ym+' already exists. Delete it in HR → Payroll to re-generate.'); return; }
+    if (!window.confirm('Generate a payroll run for '+ym+' from this attendance sheet? ('+rows.length+' employees). You can review & adjust it in HR → Payroll before approving.')) return;
+    const lines = rows.map(r => {
+      const e = r.emp;
+      const basic=parseFloat(e.basicSalary)||0, hra=parseFloat(e.hra)||0, da=parseFloat(e.da)||0, other0=parseFloat(e.otherAllowances)||0;
+      const otAmt = r.ot * ((basic/dim)/8) * 1.25;
+      const other = other0 + otAmt;
+      const gross = basic+hra+da+other;
+      const pf = basic*(parseFloat(e.pf)||0)/100, esi=(basic+hra+da+other0)*(parseFloat(e.esi)||0)/100, tds=parseFloat(e.tds)||0;
+      const lopDays = Math.max(0, +(dim - r.payable).toFixed(2));
+      const fixedDaily = (basic+hra+da+other0)/dim;
+      const lopAmt = +(fixedDaily*lopDays).toFixed(2);
+      const totalDeductions = +(pf+esi+tds+lopAmt).toFixed(2);
+      const net = Math.max(0, +(gross-totalDeductions).toFixed(2));
+      return { empId:e.empId, name:e.name, designation:e.designation, department:e.department||'', bankAccount:e.bankAccount||'', bankName:e.bankName||'', ifsc:e.ifsc||'',
+        basic, hra, da, other:+other.toFixed(2), gross:+gross.toFixed(2),
+        workingDays:dim, paidDays:+r.payable.toFixed(2),
+        pf:+pf.toFixed(2), esi:+esi.toFixed(2), tds,
+        lopDays, lopAmt, advance:0, otHours:r.ot||0, otAmount:+otAmt.toFixed(2),
+        otherDeductAmt:0, otherDeductNote: r.ot?('incl. OT '+r.ot+'h'):'',
+        totalDeductions, net };
+    });
+    setPayrollRuns(prev => [...prev, { id:crypto.randomUUID(), month:mm, year:yy, period:ym, lines, status:'draft', source:'attendance', bizType:currentBizType, createdAt:Date.now() }]);
+    alert('Payroll run for '+ym+' generated from attendance — '+lines.length+' employees. Go to HR → Payroll to review, adjust & approve.');
+  }
+
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{siteAttendance.length} daily records</p></div>
-        {canEdit && <button style={styles.primaryBtn} onClick={() => setEditing({ _isNew: true, date: new Date().toISOString().slice(0, 10), records: [] })}>+ Mark Attendance</button>}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
+        <div style={{ display:'flex', gap:8 }}>
+          {['mark', ...(canManageGroups?['groups','sheet','holidays']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':k==='sheet'?'Monthly Sheet':'Holidays'}</button>)}
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={{ ...styles.input, width: 220 }}>
-          <option value="">All Projects</option>
-          {siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ ...styles.input, width: 160 }} />
-        <button style={styles.ghostBtn} onClick={() => setFilterMonth('')}>All months</button>
-      </div>
-      {employees.length > 0 && (
-        <>
-          <div style={styles.dashSection}>Monthly Summary — {filterMonth || 'All time'}</div>
-          <div style={{ overflowX: 'auto', marginBottom: 20 }}>
-            <table style={styles.table}>
-              <thead><tr style={{ background: '#F5F3EE' }}>{['Employee','Days Logged','Present','Half Day','Absent','Leave','Attendance %'].map(h=><th key={h} style={{ ...styles.th, textAlign: h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
-              <tbody>
-                {employees.map(emp => {
-                  const s = empSummary[emp.id] || {};
-                  const pct = s.total ? Math.round(((s.present + (s.halfDay||0) * 0.5) / s.total) * 100) : 0;
-                  return (
-                    <tr key={emp.id} style={{ borderTop: '1px solid #EAE6DB' }}>
-                      <td style={styles.td}>{emp.name}</td>
-                      <td style={{ ...styles.td, textAlign:'center' }}>{s.total||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{s.present||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{s.halfDay||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{s.absent||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{s.leave||0}</td>
-                      <td style={{ ...styles.td, textAlign:'center' }}><span style={{ fontWeight:700, color: pct>=80?'#1A7A3E':pct>=60?'#C9A24B':'#B5453A' }}>{s.total?`${pct}%`:'—'}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+      {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
+
+      {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d'+(a.endD?', to '+a.endD:'')+')').join(', ')}. Please review.</div>}
+
+      {tab === 'groups' && canManageGroups && (
+        <div>
+          <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:12 }}>
+            <button style={styles.primaryBtn} onClick={()=>setEditingGroup({ _isNew:true, name:'', leaderId:'', projectId:'', type:'site', memberIds:[] })}><Plus size={15}/> New Group</button>
           </div>
-        </>
-      )}
-      <div style={styles.dashSection}>Daily Records</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {sorted.map(r => {
-          const proj = siteProjects.find(p => p.id === r.projectId);
-          const presentCount = (r.records || []).filter(x => x.status === 'present').length;
-          return (
-            <div key={r.id} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: '12px 16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: '#1E2A4A' }}>{r.date}</span>
-                  <span style={{ fontSize: 12, color: '#888', marginLeft: 10 }}>{proj?.name || '—'}</span>
-                  <span style={{ fontSize: 12, color: '#1A7A3E', marginLeft: 10 }}>{presentCount}/{(r.records||[]).length} present</span>
+          {labourGroups.length===0 ? <div style={styles.emptyBox}>No labour groups yet. Create a group, set its foreman/leader, and add members.</div> : (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px,1fr))', gap:14 }}>
+              {labourGroups.map(g=>(
+                <div key={g.id} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'14px 16px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight:700, color:'#1E2A4A', fontSize:15 }}>{g.name||'Untitled'}</div>
+                      <div style={{ fontSize:11.5, color:'#888', marginTop:2 }}>{g.type==='office'?'Office / General':projName(g.projectId)}{(g.siteHistory&&g.siteHistory.length)?' · since '+g.siteHistory[g.siteHistory.length-1].fromDate:''}</div>
+                    </div>
+                    <span style={{ fontSize:10.5, fontWeight:700, background:g.type==='office'?'#EEF2FF':'#E6F5EC', color:g.type==='office'?'#3D52A0':'#1A7A3E', borderRadius:5, padding:'2px 8px' }}>{g.type==='office'?'OFFICE':'SITE'}</span>
+                  </div>
+                  <div style={{ fontSize:12.5, color:'#555', marginTop:8 }}>Leader: <b>{empName(g.leaderId)}</b></div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:4 }}>{(g.memberIds||[]).length} member{(g.memberIds||[]).length!==1?'s':''}</div>
+                  <div style={{ display:'flex', gap:6, marginTop:10 }}>
+                    <button style={{ ...styles.ghostBtn, fontSize:12 }} onClick={()=>setEditingGroup(g)}><Pencil size={13}/> Edit</button>
+                    <button style={{ ...styles.ghostBtn, fontSize:12, color:'#B5453A' }} onClick={()=>delGroup(g.id)}><Trash2 size={13}/></button>
+                  </div>
                 </div>
-                {canEdit && <div style={{ display:'flex', gap:6 }}>
-                  <button style={{ ...styles.ghostBtn, fontSize: 12 }} onClick={() => setEditing(r)}>Edit</button>
-                  <button style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }} onClick={() => del(r.id)}>×</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'mark' && (<>
+        <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
+          <select value={markGroupId} onChange={e=>setMarkGroupId(e.target.value)} style={{ ...styles.input, width:240, margin:0 }}>
+            <option value="">— Select group to mark —</option>
+            {visibleGroups.map(g=><option key={g.id} value={g.id}>{g.name} ({g.type==='office'?'Office':projName(g.projectId)})</option>)}
+          </select>
+          {(()=>{ const mg=labourGroups.find(g=>g.id===markGroupId); const proj=mg&&siteProjects.find(p=>p.id===mg.projectId); const cur=proj?(proj.weekOff!=null?proj.weekOff:5):weekOff; return (
+            <label style={{ fontSize:12, color:'#888', display:'flex', alignItems:'center', gap:5 }}>Week off
+              <select value={cur} onChange={e=>{ const v=Number(e.target.value); if(proj&&setSiteProjects){ setSiteProjects(prev=>prev.map(p=>p.id===proj.id?{...p,weekOff:v}:p)); } else setWeekOff(v); }} style={{ ...styles.input, width:110, margin:0 }} title={proj?('Weekly off for '+(proj.name||'site')):'Pick a group with a site to save per-site'}>{DOW_NAMES.map((n,i)=><option key={i} value={i}>{n}</option>)}</select>
+            </label>
+          ); })()}
+          <button style={styles.primaryBtn} disabled={!markGroupId} onClick={startMark}>+ Mark Attendance</button>
+          <span style={{ flex:1 }}/>
+          <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
+          {['admin','manager','hr'].includes(userRole) && <button style={styles.ghostBtn} onClick={()=>setPrintAbsent(true)} title="Absent report — grouped by site & foreman"><Printer size={13}/> Absent Report</button>}
+        </div>
+
+        {scopeEmps.length>0 && (
+          <>
+            <div style={styles.dashSection}>Monthly Summary — {filterMonth||'All time'}</div>
+            <div style={{ overflowX:'auto', marginBottom:20 }}>
+              <table style={styles.table}>
+                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.halfDay||0)*0.5)/su.total)*100):0; return (
+                    <tr key={emp.id} style={{ borderTop:'1px solid #EAE6DB' }}>
+                      <td style={styles.td}>{emp.name}</td>
+                      <td style={{ ...styles.td, textAlign:'center' }}>{su.total||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{su.present||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{su.halfDay||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{su.absent||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{su.leave||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', fontWeight:600 }}>{su.ot?su.ot:'—'}</td>
+                      <td style={{ ...styles.td, textAlign:'center' }}><span style={{ fontWeight:700, color:pct>=80?'#1A7A3E':pct>=60?'#C9A24B':'#B5453A' }}>{su.total?pct+'%':'—'}</span></td>
+                    </tr>
+                  ); })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div style={styles.dashSection}>Daily Records</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {sorted.map(r=>{ const g=labourGroups.find(x=>x.id===r.groupId); const presentCount=(r.records||[]).filter(x=>x.status==='present').length; const editable=canEditGroupAtt(g) || (!g && ['admin','manager','hr'].includes(userRole)); return (
+            <div key={r.id} style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:12, padding:'12px 16px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                <div>
+                  <span style={{ fontWeight:600, fontSize:14, color:'#1E2A4A' }}>{r.date}</span>
+                  <span style={{ fontSize:12, color:'#888', marginLeft:10 }}>{g?.name||projName(r.projectId)}</span>
+                  <span style={{ fontSize:12, color:'#1A7A3E', marginLeft:10 }}>{presentCount}/{(r.records||[]).length} present</span>
+                </div>
+                {editable && <div style={{ display:'flex', gap:6 }}>
+                  <button style={{ ...styles.ghostBtn, fontSize:12 }} onClick={()=>setEditing(r)}>Edit</button>
+                  <button style={{ ...styles.ghostBtn, fontSize:12, color:'#B5453A' }} onClick={()=>delAtt(r.id)}>×</button>
                 </div>}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {(r.records || []).map((rec, i) => {
-                  const emp = employees.find(e => e.id === rec.employeeId);
-                  return <span key={i} style={{ fontSize: 12, background: '#F5F3EE', borderRadius: 8, padding: '3px 10px' }}>{STATUS_ICON[rec.status]||'?'} {emp?.name||'?'}</span>;
-                })}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                {(r.records||[]).map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return <span key={i} style={{ fontSize:12, background:'#F5F3EE', borderRadius:8, padding:'3px 10px' }}>{STATUS_ICON[rec.status]||'?'} {emp?.name||'?'}{rec.otHours>0?' +'+rec.otHours+'h':''}</span>; })}
               </div>
             </div>
-          );
-        })}
-        {sorted.length === 0 && <div style={{ color: '#aaa', padding: 24 }}>No attendance records for this period.</div>}
-      </div>
-      {editing && <AttendanceSheet sheet={editing} siteProjects={siteProjects} employees={employees} onSave={save} onClose={() => setEditing(null)} />}
+          ); })}
+          {sorted.length===0 && <div style={{ color:'#aaa', padding:24 }}>No attendance records for this period.</div>}
+        </div>
+      </>)}
+
+      {tab === 'sheet' && canManageGroups && (() => {
+        const { ym, yy, mm, dim, holidays, holDays, effWeek, rows } = salaryData();
+        const days = Array.from({length:dim},(_,i)=>i+1);
+        const isOff = d => holDays.has(d);
+        const selProjObj = siteProjects.find(p=>p.id===filterProject);
+        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
+        const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, payable:a.payable+r.payable, inHand:a.inHand+r.inHand }), {present:0,half:0,absent:0,leave:0,ot:0,payable:0,inHand:0});
+        return (
+          <div>
+            <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+              <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
+              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              <span style={{ fontSize:11.5, color:'#B0AC9F' }}>Week off: <b style={{ color:'#666' }}>{DOW_NAMES[effWeek]}</b>{selProjObj?' ('+(selProjObj.name||'site')+')':''} — set it in the Attendance tab</span>
+              <span style={{ flex:1 }}/>
+              {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
+              {rows.length>0 && <button style={styles.ghostBtn} onClick={()=>setPrintSheet(true)} title="Print (landscape)"><Printer size={14}/> Print</button>}
+              {rows.length>0 && ['admin','manager','accounts','hr'].includes(userRole) && <button style={styles.primaryBtn} onClick={processToPayroll} title="Generate payroll run from this attendance sheet"><FileText size={14}/> Process to Payroll</button>}
+            </div>
+            {rows.length===0 ? <div style={styles.emptyBox}>No employees in scope for {ym}.</div> : (
+              <div style={{ overflowX:'auto', border:'1px solid #EAE6DB', borderRadius:8 }}>
+                <table style={{ borderCollapse:'collapse', fontSize:11, minWidth:960 }}>
+                  <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
+                    <th style={{ padding:'5px 8px', textAlign:'left', position:'sticky', left:0, background:'#1E2A4A', whiteSpace:'nowrap' }}>Employee</th>
+                    {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center', background:isOff(d)?'#B5453A':'#1E2A4A' }}>{d}</th>)}
+                    {['P','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r,ri)=>(
+                      <tr key={r.emp.id} style={{ background:ri%2?'#F6F5F2':'#fff', borderBottom:'1px solid #eee' }}>
+                        <td style={{ padding:'4px 8px', fontWeight:600, position:'sticky', left:0, background:ri%2?'#F6F5F2':'#fff', whiteSpace:'nowrap' }}>{r.emp.name}</td>
+                        {days.map(d=>{ const v=r.byDay[d]||''; const off=isOff(d); return <td key={d} style={{ padding:'3px 2px', textAlign:'center', background:off?'#FBE4E4':'transparent', color:STC[v]||'#ccc', fontWeight:700 }}>{v||(off?'':'·')}</td>; })}
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#1A7A3E' }}>{r.present}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#C9A24B' }}>{r.half}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#B5453A' }}>{r.absent}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#6B5BAE' }}>{r.leave}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.ot||''}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#888' }}>{holidays}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:700, background:'#EAF7EE', color:'#1A7A3E' }}>{r.payable}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right' }}>{r.basic?fmt(r.basic):'—'}</td>
+                        <td style={{ padding:'4px 8px', textAlign:'right', fontWeight:700, color:'#1E2A4A' }}>{r.inHand?fmt(Math.round(r.inHand)):'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop:'2px solid #1E2A4A', fontWeight:700 }}>
+                    <td style={{ padding:'5px 8px', position:'sticky', left:0, background:'#fff' }}>TOTAL</td>
+                    <td colSpan={dim}></td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#1A7A3E' }}>{tot.present}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#C9A24B' }}>{tot.half}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#B5453A' }}>{tot.absent}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#6B5BAE' }}>{tot.leave}</td>
+                    <td style={{ padding:'5px 6px', textAlign:'right' }}>{tot.ot||''}</td>
+                    <td></td>
+                    <td style={{ padding:'5px 6px', textAlign:'right', color:'#1A7A3E' }}>{tot.payable}</td>
+                    <td></td>
+                    <td style={{ padding:'5px 8px', textAlign:'right', color:'#1E2A4A' }}>{fmt(Math.round(tot.inHand))}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            )}
+            <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>Week off = {DOW_NAMES[weekOff]} ({holidays}/month, paid). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT × 1.25.</div>
+          </div>
+        );
+      })()}
+
+      {tab === 'holidays' && canManageGroups && (
+        <div>
+          <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'#1E2A4A', marginBottom:10 }}>Add Holiday (Government / Company)</div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'flex-end' }}>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Date</div><input type='date' value={holForm.date} onChange={e=>setHolForm(fm=>({...fm,date:e.target.value}))} style={{ ...styles.input, margin:0 }}/></div>
+              <div style={{ flex:1, minWidth:180 }}><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Name</div><input value={holForm.name} onChange={e=>setHolForm(fm=>({...fm,name:e.target.value}))} style={{ ...styles.input, margin:0 }} placeholder='e.g. UAE National Day'/></div>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Type</div><select value={holForm.type} onChange={e=>setHolForm(fm=>({...fm,type:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value='govt'>Government</option><option value='company'>Company</option></select></div>
+              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              <button style={styles.primaryBtn} onClick={()=>{ if(!holForm.date){alert('Pick a date');return;} setHolidayCalendar(prev=>[...prev,{ id:crypto.randomUUID(), ...holForm }]); setHolForm({date:'',name:'',type:'govt',projectId:''}); }}><Plus size={14}/> Add</button>
+            </div>
+          </div>
+          {(holidayCalendar||[]).length===0 ? <div style={styles.emptyBox}>No holidays added. Add government / company holidays — they count as paid holidays in the salary sheet & payable days.</div> : (
+            <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                <thead><tr style={{ background:'#F8F7F4' }}>{['Date','Name','Type','Site',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {[...holidayCalendar].sort((a,b)=>(a.date||'')<(b.date||'')?1:-1).map(h=>(
+                    <tr key={h.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600 }}>{h.date}</td>
+                      <td style={{ padding:'8px 12px' }}>{h.name||'—'}</td>
+                      <td style={{ padding:'8px 12px' }}><span style={{ background:h.type==='company'?'#EEF2FF':'#E6F5EC', color:h.type==='company'?'#3D52A0':'#1A7A3E', borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{h.type==='company'?'Company':'Govt'}</span></td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{h.projectId?(siteProjects.find(p=>p.id===h.projectId)?.name||'—'):'All sites'}</td>
+                      <td style={{ padding:'8px 12px' }}><button style={{ ...styles.iconBtn, color:'#B5453A' }} onClick={()=>setHolidayCalendar(prev=>prev.filter(x=>x.id!==h.id))}><Trash2 size={14}/></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ fontSize:11, color:'#B0AC9F', marginTop:8 }}>Holidays are counted as paid days (added to Payable Days) and tinted in the Monthly Sheet. Weekly-off day is set per site in the Attendance tab.</div>
+        </div>
+      )}
+
+      {printSheet && (() => {
+        const { ym, dim, holidays, holDays, effWeek, rows } = salaryData();
+        const parts = ym.split('-').map(Number); const yy=parts[0], mm=parts[1]||1;
+        const days = Array.from({length:dim},(_,i)=>i+1);
+        const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dowOf = d => new Date(yy, mm-1, d).getDay();
+        const monthName = new Date(yy, mm-1, 1).toLocaleString('default',{month:'long', year:'numeric'});
+        const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+        const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+        const calc = r => { const payable = r.present + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
+        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present, absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
+        const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
+        const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
+        return (
+          <DocPrintOverlay onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
+            <style>{`@media print { @page { size: A4 landscape; margin: 6mm; } }`}</style>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:'#1E2A4A' }}>Attendance &amp; Salary Sheet</div>
+              <div style={{ fontSize:12, fontWeight:700, background:'#FFF3B0', padding:'2px 10px', borderRadius:4 }}>{monthName}</div>
+            </div>
+            <div style={{ display:'flex', gap:24, fontSize:10, marginBottom:8 }}><span>From: <b>{fromD}</b></span><span>To: <b style={{ background:'#FFF3B0', padding:'0 4px' }}>{toD}</b></span></div>
+            <table style={{ borderCollapse:'collapse', width:'100%', fontFamily:'Arial, sans-serif' }}>
+              <thead>
+                <tr>
+                  {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
+                </tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.map((r,ri)=>{ const c=calc(r); return (
+                  <tr key={r.emp.id}>
+                    <td style={td}>{ri+1}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
+                    <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
+                    <td style={td}>{holidays}</td>
+                    <td style={td}>{dim}</td>
+                    <td style={{ ...td, background:'#D6F0DD', fontWeight:700 }}>{c.payable}</td>
+                    <td style={{ ...td, textAlign:'right' }}>{r.basic?Math.round(r.basic).toLocaleString():''}</td>
+                    <td style={{ ...td, textAlign:'right', fontWeight:700 }}>{Math.round(c.inHand).toLocaleString()}</td>
+                  </tr>
+                ); })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background:'#EDEBE4', fontWeight:700 }}>
+                  <td colSpan={4} style={{ ...td, textAlign:'right', fontWeight:700 }}>TOTAL</td>
+                  <td colSpan={dim} style={td}></td>
+                  <td style={{ ...td, background:'#FFF3B0' }}>{gtot.present}</td>
+                  <td style={{ ...td, color:'#B5453A' }}>{gtot.absent}</td>
+                  <td style={td}></td>
+                  <td style={td}></td>
+                  <td style={{ ...td, background:'#D6F0DD' }}>{gtot.payable}</td>
+                  <td style={{ ...td, textAlign:'right' }}>{Math.round(gtot.basic).toLocaleString()}</td>
+                  <td style={{ ...td, textAlign:'right' }}>{Math.round(gtot.inHand).toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
+          </DocPrintOverlay>
+        );
+      })()}
+
+      {printAbsent && (() => {
+        const ym = filterMonth || new Date().toISOString().slice(0,7);
+        const grpList = (visibleGroups.length?visibleGroups:labourGroups).filter(g=>!filterProject || g.projectId===filterProject).map(g => {
+          const proj = siteProjects.find(p=>p.id===g.projectId);
+          const foreman = employees.find(e=>e.id===g.leaderId);
+          const members = employees.filter(e=>(g.memberIds||[]).includes(e.id)).map(emp => {
+            const dates=[];
+            siteAttendance.filter(r=>r.groupId===g.id && (r.date||'').startsWith(ym)).forEach(r=>{ const rec=(r.records||[]).find(x=>x.employeeId===emp.id && x.status==='absent'); if(rec) dates.push((r.date||'').slice(8,10)); });
+            return { emp, dates:dates.sort() };
+          }).filter(m=>m.dates.length>0);
+          return { g, proj, foreman, members };
+        }).filter(x=>x.members.length>0);
+        const totalAbs = grpList.reduce((s,x)=>s+x.members.reduce((a,m)=>a+m.dates.length,0),0);
+        return (
+          <DocPrintOverlay onClose={()=>setPrintAbsent(false)} filename={'Absent-Report-'+ym+'.pdf'} businessInfo={businessInfo}>
+            <div style={{ textAlign:'center', marginBottom:14 }}>
+              <div style={{ fontSize:18, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>ABSENT REPORT</div>
+              <div style={{ fontSize:11, color:'#888' }}>{ym}{filterProject?' · '+(siteProjects.find(p=>p.id===filterProject)?.name||''):''} · {totalAbs} absence(s)</div>
+            </div>
+            {grpList.length===0 ? <div style={{ textAlign:'center', color:'#888', padding:30 }}>No absences recorded for {ym}.</div> : grpList.map(x=>(
+              <div key={x.g.id} style={{ marginBottom:18, border:'1px solid #EAE6DB', borderRadius:6, overflow:'hidden' }}>
+                <div style={{ background:'#1E2A4A', color:'#fff', padding:'6px 12px', fontSize:12.5, display:'flex', justifyContent:'space-between' }}>
+                  <span><b>{x.g.name||'Group'}</b> &nbsp;·&nbsp; Site: {x.g.type==='office'?'Office / General':(x.proj?.name||'—')}</span>
+                  <span>Foreman: {x.foreman?.name||'—'}</span>
+                </div>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+                  <thead><tr style={{ background:'#F5F3EE' }}>{['#','Employee','Designation','Absent Days','Dates'].map(h=><th key={h} style={{ padding:'4px 8px', textAlign:h==='Absent Days'?'center':'left', fontSize:10.5, fontWeight:700, color:'#888' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {x.members.map((m,i)=>(
+                      <tr key={m.emp.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                        <td style={{ padding:'4px 8px' }}>{i+1}</td>
+                        <td style={{ padding:'4px 8px', fontWeight:600 }}>{m.emp.name}</td>
+                        <td style={{ padding:'4px 8px', color:'#555' }}>{m.emp.designation||'—'}</td>
+                        <td style={{ padding:'4px 8px', textAlign:'center', fontWeight:700, color:'#B5453A' }}>{m.dates.length}</td>
+                        <td style={{ padding:'4px 8px', color:'#555' }}>{m.dates.join(', ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </DocPrintOverlay>
+        );
+      })()}
+
+      {editing && (() => {
+        const g = labourGroups.find(x=>x.id===editing.groupId);
+        const proj = g && siteProjects.find(p=>p.id===g.projectId);
+        const woDay = proj ? (proj.weekOff!=null?proj.weekOff:weekOff) : weekOff;
+        const holDates = (holidayCalendar||[]).filter(h=>!h.projectId || (g && h.projectId===g.projectId)).map(h=>h.date);
+        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
+      })()}
+      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
     </div>
   );
 }
 
-function AttendanceSheet({ sheet, siteProjects, employees, onSave, onClose }) {
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10), projectId: '',
-    records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })),
-    ...sheet,
-  });
-  useEffect(() => {
-    if (form.records.length === 0 && employees.length > 0) {
-      setForm(f => ({ ...f, records: employees.map(e => ({ employeeId: e.id, status: 'present', note: '' })) }));
-    }
-  }, []);
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
-  function setRecord(i, k, v) { const recs = [...form.records]; recs[i] = { ...recs[i], [k]: v }; set('records', recs); }
-  const STATUSES = [{ value:'present',label:'P',color:'#1A7A3E' },{ value:'absent',label:'A',color:'#B5453A' },{ value:'half_day',label:'½',color:'#C9A24B' },{ value:'leave',label:'L',color:'#6B5BAE' }];
-  const proj = siteProjects.find(p => p.id === form.projectId);
-  const relevantEmps = proj?.teamIds?.length ? employees.filter(e => proj.teamIds.includes(e.id)) : employees;
-  const displayRecords = form.records.filter(r => relevantEmps.some(e => e.id === r.employeeId));
+function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
+  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type:'site', memberIds:[], ...group });
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const toggle=id=>setForm(f=>({ ...f, memberIds: (f.memberIds||[]).includes(id) ? f.memberIds.filter(x=>x!==id) : [...(f.memberIds||[]), id] }));
   return (
-    <Modal title="Mark Attendance" onClose={onClose} width={560}>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-        <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Project</label>
-          <select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}>
-            <option value="">— All / General —</option>
-            {siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
+    <Modal title={form.id?'Edit Group':'New Labour Group'} onClose={onClose} width={560}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
+        <div style={styles.formGroup}><label style={styles.label}>Group Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder="e.g. Electrical Gang A"/></div>
+        <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>
+        <div style={styles.formGroup}><label style={styles.label}>Leader / Foreman</label><select value={form.leaderId} onChange={e=>set('leaderId',e.target.value)} style={styles.input}><option value="">— Select —</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
+        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+        {form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
       </div>
-      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Employees ({relevantEmps.length})</div>
-      <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:340, overflowY:'auto' }}>
-        {displayRecords.map((rec) => {
-          const emp = employees.find(e => e.id === rec.employeeId);
-          const allIdx = form.records.findIndex(r => r.employeeId === rec.employeeId);
-          return (
-            <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 3fr', gap:10, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
-              <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
-              <div style={{ display:'flex', gap:4 }}>
-                {STATUSES.map(s=>(
-                  <button key={s.value} onClick={()=>setRecord(allIdx,'status',s.value)}
-                    style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===s.value?s.color:'#EAE6DB', color:rec.status===s.value?'#fff':'#666', fontWeight:700 }}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-              <input value={rec.note||''} onChange={e=>setRecord(allIdx,'note',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 8px' }} placeholder="Note (optional)" />
-            </div>
-          );
-        })}
-        {displayRecords.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No employees. Add team in project settings.</div>}
+      {form.type!=='office' && (form.siteHistory||[]).length>0 && (
+        <div style={{ background:'#F8F7F4', border:'1px solid #EAE6DB', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:11.5, color:'#666' }}>
+          <b style={{ color:'#1E2A4A' }}>Site history:</b> {(form.siteHistory||[]).map((h,i)=>(siteProjects.find(p=>p.id===h.projectId)?.name||'—')+' (from '+h.fromDate+')').join('  →  ')}
+        </div>
+      )}
+      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({(form.memberIds||[]).length})</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:280, overflowY:'auto', border:'1px solid #EAE6DB', borderRadius:8, padding:8 }}>
+        {employees.length===0 && <div style={{ color:'#aaa', fontSize:13, padding:8 }}>No employees. Add employees first.</div>}
+        {employees.map(e=>(
+          <label key={e.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 8px', borderRadius:6, cursor:'pointer', background:(form.memberIds||[]).includes(e.id)?'#F4FAF5':'transparent' }}>
+            <input type="checkbox" checked={(form.memberIds||[]).includes(e.id)} onChange={()=>toggle(e.id)} />
+            <span style={{ fontSize:13 }}>{e.name}</span><span style={{ fontSize:11, color:'#999' }}>{e.designation||''}</span>
+          </label>
+        ))}
       </div>
       <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:16 }}>
         <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
-        <button style={styles.primaryBtn} onClick={()=>{ if(!form.date) return alert('Date required'); onSave(form); }}>Save Attendance</button>
+        <button style={styles.primaryBtn} onClick={()=>{ if(!form.name.trim()) return alert('Group name required'); onSave(form); }}>Save Group</button>
+      </div>
+    </Modal>
+  );
+}
+
+function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
+  const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), projectId:'', records:[], ...sheet });
+  const [bypass, setBypass] = useState(false);
+  const _DOWN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const _holSet = new Set(holidayDates||[]);
+  const offInfo = (() => { if(!form.date) return null; if(_holSet.has(form.date)) return 'Holiday'; if(new Date(form.date).getDay()===weekOffDay) return 'Weekly off ('+_DOWN[weekOffDay]+')'; return null; })();
+  const canBypass = ['admin','manager'].includes(userRole);
+  useEffect(()=>{ if((form.records||[]).length===0){ const mem = group ? employees.filter(e=>(group.memberIds||[]).includes(e.id)) : employees; setForm(f=>({ ...f, records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) })); } }, []);
+  function set(k,v){ setForm(f=>({...f,[k]:v})); }
+  function setRecord(i,k,v){ const recs=[...form.records]; recs[i]={...recs[i],[k]:v}; set('records',recs); }
+  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'}];
+  return (
+    <Modal title={'Mark Attendance'+(group?' — '+group.name:'')} onClose={onClose} width={620}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+        <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+      </div>
+      {offInfo && (
+        <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12.5, color:'#92400E' }}>
+          <b>⚠ {offInfo}</b> on {form.date}. Normally no attendance is marked. {canBypass ? '' : 'Only a manager/admin can record work on an off-day/holiday.'}
+          {canBypass && <label style={{ display:'flex', alignItems:'center', gap:7, marginTop:8, cursor:'pointer', fontWeight:600 }}><input type='checkbox' checked={bypass} onChange={e=>setBypass(e.target.checked)} /> Confirm they worked on this off-day — proceed</label>}
+        </div>
+      )}
+      <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
+        {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
+          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'1.5fr auto 66px 130px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
+            <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
+            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
+            <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 6px', margin:0 }} placeholder="OT" title="Overtime hours" />
+            <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          </div>
+        ); })}
+        {form.records.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No members in this group. Add members in Labour Groups.</div>}
+      </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:10, marginTop:16 }}>
+        <button style={styles.ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.primaryBtn} onClick={()=>{ if(!form.date) return alert('Date required'); if(offInfo && !bypass){ if(canBypass){ alert('This date is a '+offInfo+'. Tick "Confirm they worked on this off-day" to proceed.'); } else { alert('This date is a '+offInfo+'. Only a manager/admin can mark attendance on an off-day / holiday.'); } return; } onSave(form); }}>Save Attendance</button>
       </div>
     </Modal>
   );
@@ -19360,7 +23561,7 @@ function PMScheduleView({ pmSchedules, setPmSchedules, assets, fmWorkOrders, set
   }
   function raisePMWorkOrder(pm) {
     const asset = assets.find(a=>a.id===pm.assetId);
-    const wo = { id:crypto.randomUUID(), woNumber:`WO-${String(fmWorkOrders.length+1).padStart(4,'0')}`, type:'preventive', assetId:pm.assetId, assetName:asset?.name||'', title:pm.title, priority:'medium', raisedDate:today, dueDate:pm.nextDueDate||'', assignedTo:pm.assignedTo||'', instructions:pm.instructions||'', status:'open', pmRef:pm.id, cost:0 };
+    const wo = { id:crypto.randomUUID(), woNumber:dn('WO', fmWorkOrders.length+1, 4), type:'preventive', assetId:pm.assetId, assetName:asset?.name||'', title:pm.title, priority:'medium', raisedDate:today, dueDate:pm.nextDueDate||'', assignedTo:pm.assignedTo||'', instructions:pm.instructions||'', status:'open', pmRef:pm.id, cost:0 };
     setFmWorkOrders(prev=>[...prev, wo]);
     setPmSchedules(prev=>prev.map(s=>s.id===pm.id?{ ...s, lastDoneDate:today, nextDueDate:calcNext(today,s.frequency) }:s));
     alert(`Work Order ${wo.woNumber} created.`);
@@ -19476,7 +23677,7 @@ function FMWorkOrderView({ fmWorkOrders, setFmWorkOrders, assets, fmSpareParts, 
   const ST_BG     = { open:'#cfe2ff', in_progress:'#fff3cd', on_hold:'#f0ece5', completed:'#d4edda', cancelled:'#f0ece5' };
 
   function blank() {
-    return { id:'', woNumber:`WO-${String(fmWorkOrders.length+1).padStart(4,'0')}`, type:'corrective', assetId:'', title:'', description:'', priority:'medium', raisedDate:today, dueDate:'', assignedTo:'', status:'open', completedDate:'', cost:0, sparesUsed:[], notes:'' };
+    return { id:'', woNumber:dn('WO', fmWorkOrders.length+1, 4), type:'corrective', assetId:'', title:'', description:'', priority:'medium', raisedDate:today, dueDate:'', assignedTo:'', status:'open', completedDate:'', cost:0, sparesUsed:[], notes:'' };
   }
   function save(wo) {
     const rec = { ...wo, id:wo.id||crypto.randomUUID(), approvalStatus:wo.approvalStatus||'draft', approvalNote:wo.approvalNote||'', updatedAt:Date.now() };
@@ -19617,7 +23818,7 @@ function AMCContractView({ amcContracts, setAmcContracts, customers, assets, use
   const sellerState = businessInfo?.state || '';
 
   function blank() {
-    const n = `AMC-${String(amcContracts.length+1).padStart(3,'0')}`;
+    const n = dn('AMC', amcContracts.length+1);
     return { id:'', contractNo:n, customerId:'', title:'', startDate:'', endDate:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', slaResponse:'4', slaPriority:'P2', coveredAssets:[], scope:'', billingCycle:'Annual', status:'active', notes:'' };
   }
   function save(c) {
@@ -20337,6 +24538,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const [analysing, setAnalysing] = useState(null);
   const [showCat, setShowCat] = useState(false);
   const [quoteDoc, setQuoteDoc] = useState(null);
+  const [boqTab, setBoqTab] = useState('boq'); // 'boq' | 'price' | 'manpower'
   const canEdit = ['admin','manager'].includes(userRole);
   const STATUS = ['draft','submitted','won','lost','cancelled'];
   const STATUS_COLOR = { draft:'#555', submitted:'#0a58ca', won:'#1a6b30', lost:'#842029', cancelled:'#888' };
@@ -20347,7 +24549,7 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
   const fmt = makeFmt(businessInfo);
 
   function blank() {
-    return { id:'', number:`TND-${String(tenders.length+1).padStart(3,'0')}`, customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
+    return { id:'', number:dn('TND', tenders.length+1), customerId:'', projectRef:'', title:'', submissionDate:'', validUntil:'', status:'draft', boq:[], taxRate: cc.defaultTaxRate||0, placeOfSupply:'', notes:'' };
   }
   const BUILDUP_CATS = ['Materials', 'Manhours', 'Equipment', 'Subcontract'];
   const BUILDUP_SUBCATS = ['Civil', 'Electrical', 'Mechanical', 'Plumbing', 'HVAC', 'Fire Fighting', 'ELV', 'General'];
@@ -20400,8 +24602,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     setEditing(null);
   }
   function nextQuoteNo() {
-    const nums = (tenders||[]).map(x => parseInt(String(x.quoteNo||'').replace(/\D/g,''))||0);
-    return 'QTN-' + String((nums.length?Math.max(...nums):0)+1).padStart(3,'0');
+    const nums = (tenders||[]).map(x => lastNum(x.quoteNo));
+    return dn('QTN', (nums.length?Math.max(...nums):0)+1);
   }
   function updateApproval(id, patch) {
     setTenders(prev => prev.map(x => x.id===id ? { ...x, approvalStatus: patch.status, approvalNote: patch.rejectionNote||'' } : x));
@@ -20450,13 +24652,152 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
     function boqRowsToLines(rows) {
       const r2 = (rows||[]).filter(r => (r||[]).some(c => String(c||'').trim()));
       if (!r2.length) return [];
-      const f = (r2[0]||[]).join(' ').toLowerCase();
-      const start = (f.includes('categ') || f.includes('desc') || f.includes('item') || f.includes('particular')) ? 1 : 0;
-      return r2.slice(start).map(cols => { const q = parseFloat(cols[4])||0; return { id: crypto.randomUUID(), category: String(cols[0]||'Materials').trim() || 'Materials', subcategory: String(cols[1]||'').trim(), description: String(cols[2]||'').trim(), unit: String(cols[3]||'').trim(), tenderQty: q, finalisedQty: 0, variationQty: 0, actualQty: 0, rate: parseFloat(cols[5])||0, siteOH: 0, hoOH: 0, contingency: 0, profit: 0 }; }).filter(x => x.description);
+      // Header-aware: match columns by NAME so order / extra columns don't matter.
+      const head = (r2[0]||[]).map(c => String(c||'').trim().toLowerCase());
+      const hasHeader = head.some(h => /categ|subcat|discipl|desc|item|particular|unit|uom|qty|quantit|rate|price/.test(h));
+      const find = (...keys) => head.findIndex(h => keys.some(k => h.includes(k)));
+      let idx, start;
+      if (hasHeader) {
+        start = 1;
+        idx = {
+          category:    find('categ'),
+          subcategory: find('subcat','sub cat','discipl'),
+          description: find('desc','item','particular','work'),
+          unit:        find('unit','uom'),
+          qty:         (find('tender qty')>=0 ? find('tender qty') : find('qty','quantit','nos')),
+          rate:        (find('base rate')>=0 ? find('base rate') : find('rate','price')),
+        };
+      } else {
+        start = 0;
+        idx = { category:0, subcategory:1, description:2, unit:3, qty:4, rate:5 };
+      }
+      const g = (cols, i) => (i>=0 && i<cols.length) ? cols[i] : '';
+      return r2.slice(start).map(cols => {
+        const cat = String(g(cols, idx.category)||'').trim();
+        return { id: crypto.randomUUID(), category: cat || 'Materials', subcategory: String(g(cols, idx.subcategory)||'').trim(), description: String(g(cols, idx.description)||'').trim(), unit: String(g(cols, idx.unit)||'').trim(), tenderQty: parseFloat(g(cols, idx.qty))||0, finalisedQty: 0, variationQty: 0, actualQty: 0, rate: parseFloat(g(cols, idx.rate))||0, siteOH: 0, hoOH: 0, contingency: 0, profit: 0 };
+      }).filter(x => x.description);
+    }
+    async function downloadBoqTemplate() {
+      const headers = ['Category','Subcategory','Description','Unit','Tender Qty','Base Rate'];
+      const sample = [
+        ['Materials','Electrical','Supply & install 1.5 sqmm FRLS copper cable','m',500,45],
+        ['Manhours','Electrical','Electrician — cable pulling & termination','hr',120,150],
+        ['Equipment','Mechanical','Mobile scaffolding hire','day',30,800],
+        ['Subcontract','HVAC','Ducting fabrication & installation (subcontract)','lot',1,250000],
+      ];
+      const aoa = [headers, ...sample];
+      try {
+        const XLSX = await loadXLSX();
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{wch:14},{wch:14},{wch:50},{wch:8},{wch:12},{wch:12}];
+        const guide = [['BOQ IMPORT TEMPLATE — how to use'],[''],
+          ['1. Fill the BOQ sheet. Keep the header row as-is.'],
+          ['2. Column order can change and extra columns are ignored — headers are matched by name.'],
+          ['3. Base Rate = direct cost only (no markup). Markup is added later via Cost Build-up.'],[''],
+          ['Valid Category values'], ...BUILDUP_CATS.map(c=>[c]), [''],
+          ['Valid Subcategory values'], ...BUILDUP_SUBCATS.map(c=>[c])];
+        const wsg = XLSX.utils.aoa_to_sheet(guide);
+        wsg['!cols'] = [{wch:60}];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'BOQ');
+        XLSX.utils.book_append_sheet(wb, wsg, 'Guide');
+        XLSX.writeFile(wb, 'BOQ-Import-Template.xlsx');
+      } catch (err) {
+        const csv = aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n');
+        const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='BOQ-Import-Template.csv'; el.click(); URL.revokeObjectURL(url);
+      }
+    }
+    const villaCount = parseFloat(t.noUnits) || 1;
+    const techRate = parseFloat(t.techRate) || 0;
+    const helperRate = parseFloat(t.helperRate) || 0;
+    const MP_STAGES = ['First Fix','Final Fix','Second Fix','Testing & Commissioning','General'];
+    const MP_AREAS = ['Ground Floor','First Floor','Lower Roof','Upper Roof','DB Dressing','External','General'];
+    function blankPriceLine() { return { id: crypto.randomUUID(), activity:'', unit:'villa', rate:0, units: villaCount }; }
+    const priceAmt = l => (parseFloat(l.rate)||0) * (parseFloat(l.units)||0);
+    const priceTotal = () => (t.priceDetail||[]).reduce((sm,l)=>sm+priceAmt(l),0);
+    function blankMpLine() { return { id: crypto.randomUUID(), stage:'First Fix', area:'Ground Floor', activity:'', tech:0, helper:0, days:1, perVilla:true }; }
+    const mpMult = l => (l.perVilla!==false) ? villaCount : 1;
+    const mpTechDays = l => (parseFloat(l.tech)||0) * (parseFloat(l.days)||0) * mpMult(l);
+    const mpHelperDays = l => (parseFloat(l.helper)||0) * (parseFloat(l.days)||0) * mpMult(l);
+    const mpManDays = l => mpTechDays(l) + mpHelperDays(l);
+    const mpCost = l => mpTechDays(l)*techRate + mpHelperDays(l)*helperRate;
+    const mpTotal = () => (t.manpower||[]).reduce((a,l)=>({ tech:a.tech+mpTechDays(l), helper:a.helper+mpHelperDays(l), md:a.md+mpManDays(l), cost:a.cost+mpCost(l) }), {tech:0,helper:0,md:0,cost:0});
+    async function importPriceCsv(e) {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      const nm = (file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
+      try {
+        let rows = [];
+        if (nm.endsWith('.xlsx')||nm.endsWith('.xls')) { const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+        else { const text=await file.text(); if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+        const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+        const hasHeader=head.some(h=>/activ|desc|price|rate|unit|villa|qty/.test(h));
+        const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+        let idx,start;
+        if(hasHeader){ start=1; idx={ activity:find('activ','desc','item','particular','work'), unit:find('unit','uom'), rate:(find('rate')>=0?find('rate'):find('price','amount')), units:find('units','villa','qty','nos') }; }
+        else { start=0; idx={activity:0,unit:-1,rate:1,units:-1}; }
+        const g=(c,i)=>(i>=0&&i<c.length)?c[i]:'';
+        const parsed=r2.slice(start).map(c=>({ id:crypto.randomUUID(), activity:String(g(c,idx.activity)||'').trim(), unit:String(g(c,idx.unit)||'').trim()||'villa', rate:parseFloat(String(g(c,idx.rate)).replace(/[^0-9.\-]/g,''))||0, units:parseFloat(g(c,idx.units))||villaCount })).filter(x=>x.activity && !/^total$/i.test(x.activity));
+        if(!parsed.length){alert('No rows. Columns: Activity, Rate/Price, (Unit), (Units).');return;}
+        set('priceDetail',[...(t.priceDetail||[]),...parsed]);
+        alert(parsed.length+' activity line(s) imported.');
+      } catch(err){ alert('Import failed: '+err.message); }
+      e.target.value='';
+    }
+    async function downloadPriceTemplate() {
+      const aoa=[['Activity','Unit','Rate','Units'],['Slab Works Full Villa','villa',2480,7],['Box Fixing','villa',1550,7],['Wiring','villa',6200,7],['Testing & Commissioning','villa',1550,7]];
+      try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:30},{wch:8},{wch:10},{wch:8}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Price Detail'); XLSX.writeFile(wb,'Price-Detail-Template.xlsx'); }
+      catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Price-Detail-Template.csv'; el.click(); URL.revokeObjectURL(url); }
+    }
+    async function importMpCsv(e) {
+      const file=e.target.files&&e.target.files[0]; if(!file) return;
+      const nm=(file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
+      const areaKey=str=>{ const u=String(str||'').toUpperCase(); if(u.includes('GROUND')) return 'Ground Floor'; if(u.includes('FIRST FLOOR')) return 'First Floor'; if(u.includes('LOWER ROOF')) return 'Lower Roof'; if(u.includes('UPPER ROOF')) return 'Upper Roof'; if(u.includes('DB DRESS')) return 'DB Dressing'; if(u.includes('EXTERN')) return 'External'; return null; };
+      const stageGuess = nm.includes('final')?'Final Fix':nm.includes('second')?'Second Fix':'First Fix';
+      try {
+        let rows=[];
+        if(nm.endsWith('.xlsx')||nm.endsWith('.xls')){ const XLSX=await loadXLSX(); const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false}); }
+        else { const text=await file.text(); if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; } rows=text.split(/\r?\n/).filter(l=>l.trim()).map(l=>l.split(/,|;|\t/).map(c=>c.replace(/^"|"$/g,''))); }
+        const r2=rows.filter(r=>(r||[]).some(c=>String(c||'').trim())); if(!r2.length){alert('Empty file.');return;}
+        const head=(r2[0]||[]).map(c=>String(c||'').trim().toLowerCase());
+        const hasHeader=head.some(h=>/activ|tech|helper|day|stage|area|floor/.test(h));
+        const find=(...ks)=>head.findIndex(h=>ks.some(k=>h.includes(k)));
+        let idx,start;
+        if(hasHeader){ start=1; idx={ stage:find('stage'), area:find('area','floor','location'), activity:find('activ','desc','item','work'), tech:find('tech'), helper:find('helper'), days:find('day') }; }
+        else { start=0; idx={stage:-1,area:-1,activity:1,tech:2,helper:3,days:4}; }
+        const g=(c,i)=>(i>=0&&i<c.length)?c[i]:'';
+        let curArea='Ground Floor'; const out=[];
+        for(const c of r2.slice(start)){
+          const act=String(g(c,idx.activity)||'').trim();
+          const tech=String(g(c,idx.tech)||'').trim(), helper=String(g(c,idx.helper)||'').trim(), days=String(g(c,idx.days)||'').trim();
+          const joined=(c||[]).map(x=>String(x||'').trim()).filter(Boolean).join(' ');
+          const ak=areaKey(act||joined);
+          if(ak && !tech && !helper && !days){ curArea=ak; continue; }
+          if(/total/i.test(joined) && !parseFloat(tech) && !parseFloat(helper)) { if(/^total/i.test(act)||!act) continue; }
+          if(!act) continue;
+          const areaCol = idx.area>=0 ? (areaKey(g(c,idx.area))||String(g(c,idx.area)||'').trim()||curArea) : curArea;
+          const stageCol = idx.stage>=0 ? (String(g(c,idx.stage)||'').trim()||stageGuess) : stageGuess;
+          out.push({ id:crypto.randomUUID(), stage:stageCol, area:areaCol, activity:act, tech:parseFloat(tech)||0, helper:parseFloat(helper)||0, days:parseFloat(days)||1, perVilla:true });
+        }
+        if(!out.length){alert('No manpower rows. Columns: (Stage), Area/Floor, Activity, Tech, Helper, Days. Floor section-headers are auto-detected.');return;}
+        set('manpower',[...(t.manpower||[]),...out]);
+        alert(out.length+' manpower line(s) imported. Stage = "'+stageGuess+'" (from file name) — adjust per line if needed.');
+      } catch(err){ alert('Import failed: '+err.message); }
+      e.target.value='';
+    }
+    async function downloadMpTemplate() {
+      const aoa=[['Stage','Area','Activity','Tech','Helper','Days'],['First Fix','Ground Floor','GI Box Fixing',2,1,1],['First Fix','Ground Floor','L/L Wiring',3,3,1],['First Fix','First Floor','H/L Wiring Light & Power',3,3,1],['Final Fix','Ground Floor','Light Fixing',4,2,1.5]];
+      try{ const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:14},{wch:34},{wch:7},{wch:7},{wch:7}];
+        const gd=[['MANPOWER IMPORT — how to use'],[''],['1. Fill Stage, Area, Activity, Tech, Helper, Days.'],['2. Headers matched by name; column order can vary.'],['3. You can also import your existing First/Final Fix sheet where the FLOOR is a section-header row (e.g. GROUND FLOOR) — it is auto-detected and applied to the rows below it.'],['4. File name containing "final"/"first" sets the default Stage.'],[''],['Valid Stage'],['First Fix'],['Final Fix'],['Second Fix'],['Testing & Commissioning'],['General'],[''],['Valid Area'],['Ground Floor'],['First Floor'],['Lower Roof'],['Upper Roof'],['DB Dressing'],['External']];
+        const wsg=XLSX.utils.aoa_to_sheet(gd); wsg['!cols']=[{wch:72}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Manpower'); XLSX.utils.book_append_sheet(wb,wsg,'Guide'); XLSX.writeFile(wb,'Manpower-Import-Template.xlsx'); }
+      catch(err){ const csv=aoa.map(r=>r.join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Manpower-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
     }
     async function importBoqCsv(e) {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       const nm = (file.name||'').toLowerCase();
+      if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx / .xls) or CSV file.\n\nA PDF, Word or image cannot be read — download the ⬇ Template, fill it in Excel, and import that.'); e.target.value=''; return; }
       try {
         let rows = [];
         if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) {
@@ -20467,10 +24808,11 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
         } else {
           const text = await file.text();
+          if (text.slice(0,5)==='%PDF-' || text.slice(0,2)==='PK' || /[\x00-\x08]/.test(text.slice(0,2000))) { alert('This file looks like a PDF or binary — not a CSV. Use the Template and import a .xlsx or .csv.'); e.target.value=''; return; }
           rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, '')));
         }
         const parsed = boqRowsToLines(rows);
-        if (!parsed.length) { alert('No rows found. Use columns in order: Category, Subcategory, Description, Unit, Qty, Rate'); return; }
+        if (!parsed.length) { alert('No rows found. Download the Template (⬇) for the correct columns: Category, Subcategory, Description, Unit, Tender Qty, Base Rate.'); return; }
         set('boq', withItemCodes([...(t.boq||[]), ...parsed]));
         alert(parsed.length + ' line(s) imported.');
       } catch (err) {
@@ -20506,7 +24848,11 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
           <div style={styles.formGroup}><label style={styles.label}>Tender Title / Scope</label><input value={t.title||''} onChange={e=>set('title',e.target.value)} style={styles.input} placeholder='e.g. MEP Works for Villa Block A'/></div>
           {/* BOQ */}
           <div>
-            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>Bill of Quantities (BOQ)</div>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:8, textTransform:'uppercase' }}>BOQ / Estimation</div>
+            <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+              {[['boq','BOQ (Material)'],['price','Price Detail'],['manpower','Manpower']].map(([k,l])=><button key={k} type="button" onClick={()=>setBoqTab(k)} style={{ ...styles.ghostBtn, fontSize:12, background: boqTab===k?'#1E2A4A':'transparent', color: boqTab===k?'#fff':'#555' }}>{l}</button>)}
+            </div>
+            {boqTab === 'boq' && (<>
             <BuildupPanel cats={BUILDUP_CATS} subcats={BUILDUP_SUBCATS} boq={t.boq||[]} onApply={(cat,sub,mk)=>set('boq',(t.boq||[]).map(l=>(l.category===cat && (!sub || l.subcategory===sub)) ? { ...l, siteOH:mk.siteOH, hoOH:mk.hoOH, contingency:mk.contingency, profit:mk.profit } : l))} />
             <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:1040 }}>
@@ -20544,7 +24890,8 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
               <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                 <button onClick={()=>set('boq',[...(t.boq||[]), {...blankLine(), itemCode: nextCodeFor('Materials','', t.boq, null)}])} style={styles.ghostBtn}><Plus size={13}/> Add Line</button>
                 <button onClick={()=>set('boq', withItemCodes((t.boq||[]).map(l=>({...l, itemCode:''}))))} style={styles.ghostBtn} title="Regenerate all item codes by Category/Subcategory">⟳ Auto Item Codes</button>
-                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV — columns: Description, Unit, Qty, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
+                <button onClick={downloadBoqTemplate} style={styles.ghostBtn} title="Download a ready-to-fill Excel template with the correct columns + a guide sheet">⬇ Template</button>
+                <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import BOQ from Excel (.xlsx) or CSV. Headers matched by name: Category, Subcategory, Description, Unit, Tender Qty, Base Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importBoqCsv} /></label>
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderXlsx(t)} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Export .xlsx</button>}
                 {(t.boq||[]).length>0 && <button onClick={()=>exportTenderExcel(t)} style={styles.ghostBtn} title="Export to CSV">⭳ Export CSV</button>}
               </div>
@@ -20557,6 +24904,97 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
                 onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
               />
             )}
+            </>)}
+
+            {boqTab === 'price' && (
+              <div>
+                <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:10, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:12, color:'#888' }}>No. of Villas / Units <input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{ ...styles.input, margin:0, width:70, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:11, color:'#B0AC9F' }}>Amount = Rate/Unit × Units. Matches your client Price Detail sheet.</span>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:640 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>{['S.No','Activity','Unit','Rate / Unit','Units','Amount',''].map(h=><th key={h} style={{ padding:'6px 8px', textAlign:['Rate / Unit','Units','Amount'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(t.priceDetail||[]).map((l,i)=>{ const upd=(k,v)=>set('priceDetail',t.priceDetail.map((x,j)=>j===i?{...x,[k]:v}:x)); return (
+                      <tr key={l.id}>
+                        <td style={{ padding:'3px 8px', color:'#888', width:40 }}>{i+1}</td>
+                        <td style={{ padding:'3px 3px', minWidth:220 }}><input value={l.activity} onChange={e=>upd('activity',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }} placeholder='e.g. WIRING'/></td>
+                        <td style={{ padding:'3px 3px', width:70 }}><input value={l.unit} onChange={e=>upd('unit',e.target.value)} style={{ ...styles.input, margin:0 }} placeholder='villa'/></td>
+                        <td style={{ padding:'3px 3px', width:100 }}><input type='number' value={l.rate} onChange={e=>upd('rate',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:70 }}><input type='number' value={l.units} onChange={e=>upd('units',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 8px', fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{priceAmt(l).toLocaleString(undefined,{maximumFractionDigits:2})}</td>
+                        <td style={{ padding:'3px 3px', width:26 }}><button onClick={()=>set('priceDetail',t.priceDetail.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                      </tr>
+                    );})}
+                  </tbody>
+                </table>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <button onClick={()=>set('priceDetail',[...(t.priceDetail||[]), blankPriceLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Activity</button>
+                    <button onClick={downloadPriceTemplate} style={styles.ghostBtn} title="Download Price Detail template">⬇ Template</button>
+                    <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import — columns: Activity, Rate/Price, (Unit), (Units)">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importPriceCsv} /></label>
+                  </div>
+                  <div style={{ fontWeight:700, fontSize:15, color:'#1E2A4A' }}>Price Total: {fmt(priceTotal())}</div>
+                </div>
+              </div>
+            )}
+
+            {boqTab === 'manpower' && (() => {
+              const tot = mpTotal();
+              return (
+              <div>
+                <div style={{ display:'flex', gap:14, alignItems:'center', marginBottom:10, flexWrap:'wrap' }}>
+                  <span style={{ fontSize:12, color:'#888' }}>Villas <input type='number' value={t.noUnits||''} onChange={e=>set('noUnits',e.target.value)} style={{ ...styles.input, margin:0, width:60, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:12, color:'#888' }}>Tech rate/day <input type='number' value={t.techRate||''} onChange={e=>set('techRate',e.target.value)} style={{ ...styles.input, margin:0, width:80, display:'inline-block' }}/></span>
+                  <span style={{ fontSize:12, color:'#888' }}>Helper rate/day <input type='number' value={t.helperRate||''} onChange={e=>set('helperRate',e.target.value)} style={{ ...styles.input, margin:0, width:80, display:'inline-block' }}/></span>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5, minWidth:940 }}>
+                  <thead><tr style={{ background:'#F8F7F4' }}>{['Stage','Area / Floor','Activity','Tech','Helper','Days','/Villa','Man-days','Cost',''].map(h=><th key={h} style={{ padding:'6px 6px', textAlign:['Tech','Helper','Days','Man-days','Cost'].includes(h)?'right':'left', fontSize:10.5, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(t.manpower||[]).map((l,i)=>{ const upd=(k,v)=>set('manpower',t.manpower.map((x,j)=>j===i?{...x,[k]:v}:x)); return (
+                      <tr key={l.id}>
+                        <td style={{ padding:'3px 3px', width:110 }}><select value={l.stage} onChange={e=>upd('stage',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{MP_STAGES.map(c=><option key={c}>{c}</option>)}</select></td>
+                        <td style={{ padding:'3px 3px', width:120 }}><select value={l.area} onChange={e=>upd('area',e.target.value)} style={{ ...styles.input, margin:0, fontSize:11.5, padding:'4px 4px' }}>{MP_AREAS.map(c=><option key={c}>{c}</option>)}</select></td>
+                        <td style={{ padding:'3px 3px', minWidth:160 }}><input value={l.activity} onChange={e=>upd('activity',e.target.value)} style={{ ...styles.input, margin:0, width:'100%' }} placeholder='e.g. GI BOX FIXING'/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.tech} onChange={e=>upd('tech',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.helper} onChange={e=>upd('helper',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:54 }}><input type='number' value={l.days} onChange={e=>upd('days',e.target.value)} style={{ ...styles.input, margin:0, textAlign:'right' }}/></td>
+                        <td style={{ padding:'3px 3px', width:44, textAlign:'center' }}><input type='checkbox' checked={l.perVilla!==false} onChange={e=>upd('perVilla',e.target.checked)} title='Multiply by villa count'/></td>
+                        <td style={{ padding:'3px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{mpManDays(l).toLocaleString(undefined,{maximumFractionDigits:1})}</td>
+                        <td style={{ padding:'3px 6px', fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{mpCost(l)?fmt(mpCost(l)):'—'}</td>
+                        <td style={{ padding:'3px 3px', width:26 }}><button onClick={()=>set('manpower',t.manpower.filter((_,j)=>j!==i))} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={13}/></button></td>
+                      </tr>
+                    );})}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop:'2px solid #1E2A4A' }}>
+                    <td colSpan={7} style={{ padding:'6px 6px', fontWeight:700, textAlign:'right' }}>TOTAL</td>
+                    <td style={{ padding:'6px 6px', fontWeight:700, textAlign:'right' }}>{tot.md.toLocaleString(undefined,{maximumFractionDigits:1})}</td>
+                    <td style={{ padding:'6px 6px', fontWeight:700, textAlign:'right', color:'#1A7A3E' }}>{fmt(tot.cost)}</td>
+                    <td></td>
+                  </tr></tfoot>
+                </table>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, flexWrap:'wrap', gap:8 }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <button onClick={()=>set('manpower',[...(t.manpower||[]), blankMpLine()])} style={styles.ghostBtn}><Plus size={13}/> Add Manpower Line</button>
+                    <button onClick={downloadMpTemplate} style={styles.ghostBtn} title="Download Manpower template + guide">⬇ Template</button>
+                    <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:4 }} title="Import your First/Final Fix sheet — floor section-headers auto-detected">⬆ Import<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display:'none' }} onChange={importMpCsv} /></label>
+                  </div>
+                  <div style={{ fontSize:12.5, color:'#555' }}>Tech-days: <b>{tot.tech.toFixed(0)}</b> · Helper-days: <b>{tot.helper.toFixed(0)}</b> · Labour Cost: <b style={{ color:'#1A7A3E' }}>{fmt(tot.cost)}</b></div>
+                </div>
+                <div style={{ marginTop:12, background:'#F4FAF5', border:'1px solid #CDE9D5', borderRadius:8, padding:'12px 16px', display:'flex', gap:24, flexWrap:'wrap', fontSize:13 }}>
+                  <span>Revenue (Price Detail): <b>{fmt(priceTotal())}</b></span>
+                  <span>Labour Cost: <b style={{ color:'#B5453A' }}>{fmt(tot.cost)}</b></span>
+                  <span>Gross Profit: <b style={{ color:'#1A7A3E' }}>{fmt(priceTotal()-tot.cost)}</b></span>
+                  <span>Margin: <b>{priceTotal()>0?((priceTotal()-tot.cost)/priceTotal()*100).toFixed(1):'0'}%</b></span>
+                  <span style={{ color:'#888' }}>Material: client-supplied</span>
+                </div>
+              </div>
+              );
+            })()}
           </div>
           {(() => {
             const est = computeEstimation(t);
@@ -20857,11 +25295,14 @@ function TenderView({ tenders, setTenders, customers, siteProjects, userRole, bu
 }
 
 // ─── Subcontractor Management ─────────────────────────────────────────────────
-function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole, businessInfo }) {
-  const [tab, setTab] = useState('register');
+function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, userRole, businessInfo, initialTab='register' }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(()=>{ setTab(initialTab); }, [initialTab]);
   const [editing, setEditing] = useState(null);
   const [editingWO, setEditingWO] = useState(null);
+  const [editingCert, setEditingCert] = useState(null);
   const [printWO, setPrintWO] = useState(null);
+  const [printCert, setPrintCert] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
   const country = businessInfo?.country || 'other';
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
@@ -20871,7 +25312,7 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
   const allWOs = subcontractors.flatMap(s=>(s.workOrders||[]).map(w=>({...w,subId:s.id,subName:s.name})));
 
   function blankSub() { return { id:'', name:'', trade:'', contact:'', email:'', phone:'', taxId:'', workOrders:[] }; }
-  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active' }; }
+  function blankWO(subId) { return { id:crypto.randomUUID(), subId, projectId:'', scope:'', value:0, taxRate:cc.defaultTaxRate||0, placeOfSupply:'', startDate:'', endDate:'', advancePaid:0, progressPaid:0, retentionHeld:0, finalPaid:0, status:'active', progressPct:0, stage:'', progressRemarks:'' }; }
 
   function saveSub(sub) {
     const rec = { ...sub, id:sub.id||crypto.randomUUID() };
@@ -20897,7 +25338,50 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     return (parseFloat(wo.value)||0) - (parseFloat(wo.advancePaid)||0) - (parseFloat(wo.progressPaid)||0) - (parseFloat(wo.retentionHeld)||0) - (parseFloat(wo.finalPaid)||0);
   }
 
-  const TABS = [['register','Register'],['workorders','Work Orders']];
+  function patchWO(woId, subId, patch) {
+    setSubcontractors(prev=>prev.map(s=>s.id!==subId?s:{...s, workOrders:(s.workOrders||[]).map(w=>w.id===woId?{...w,...patch}:w)}));
+  }
+  const allCerts = subcontractors.flatMap(s=>(s.certificates||[]).map(c=>({...c,subId:s.id,subName:s.name})));
+  const CERT_TYPES = ['Work Completion','Payment Certificate','Retention Release'];
+  const STAGES = ['Not Started','Mobilization','30%','60%','90%','Completed','Handover'];
+  function blankCert(subId, woId) {
+    const n = allCerts.length+1;
+    return { id:'', subId:subId||(subcontractors[0]?.id||''), woId:woId||'', type:'Work Completion', number:`CERT-${String(n).padStart(3,'0')}`, date:new Date().toISOString().slice(0,10), amount:0, retentionReleased:0, note:'', status:'draft' };
+  }
+  function saveCert(cert) {
+    const rec = { ...cert, id:cert.id||crypto.randomUUID(), approvalStatus:cert.approvalStatus||'draft', approvalNote:cert.approvalNote||'' };
+    setSubcontractors(prev=>prev.map(s=>{
+      if(s.id!==rec.subId) return s;
+      const cs = s.certificates||[];
+      return { ...s, certificates: cs.find(c=>c.id===rec.id)?cs.map(c=>c.id===rec.id?rec:c):[...cs,rec] };
+    }));
+    setEditingCert(null);
+  }
+  function updateCertApproval(certId, subId, patch) {
+    setSubcontractors(prev=>prev.map(s=>s.id!==subId?s:{...s, certificates:(s.certificates||[]).map(c=>c.id===certId?{...c,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:c)}));
+  }
+  async function exportSubXlsx() {
+    const projName = id => siteProjects.find(p=>p.id===id)?.name||'';
+    let aoa, name;
+    if (tab==='register') {
+      aoa=[['Name','Trade','Contact','Phone','Email','Work Orders'], ...subcontractors.map(x=>[x.name||'',x.trade||'',x.contact||'',x.phone||'',x.email||'',(x.workOrders||[]).length])];
+      name='Subcontractors';
+    } else if (tab==='workorders') {
+      aoa=[['Subcontractor','Project','Scope','Value','Advance','Progress','Retention','Final','Balance','Status'], ...allWOs.map(w=>[w.subName||'',projName(w.projectId),w.scope||'',parseFloat(w.value)||0,parseFloat(w.advancePaid)||0,parseFloat(w.progressPaid)||0,parseFloat(w.retentionHeld)||0,parseFloat(w.finalPaid)||0,balance(w),w.status||''])];
+      name='Work-Orders';
+    } else if (tab==='progress') {
+      aoa=[['Subcontractor','Project','Scope','Value','% Complete','Stage','Earned','Paid','Variance','Remarks'], ...allWOs.map(w=>{const val=parseFloat(w.value||0);const pct=Math.max(0,Math.min(100,parseFloat(w.progressPct||0)));const earned=val*pct/100;const paid=parseFloat(w.advancePaid||0)+parseFloat(w.progressPaid||0)+parseFloat(w.finalPaid||0);return [w.subName||'',projName(w.projectId),w.scope||'',val,pct,w.stage||'',earned,paid,paid-earned,w.progressRemarks||''];})];
+      name='Subcontractor-Progress';
+    } else {
+      aoa=[['Cert No','Type','Subcontractor','Amount','Retention Released','Status','Date','Notes'], ...allCerts.map(c=>[c.number||'',c.type||'',c.subName||'',parseFloat(c.amount)||0,parseFloat(c.retentionReleased)||0,c.approvalStatus||'draft',c.date||'',c.note||''])];
+      name='Certificates';
+    }
+    try {
+      const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31)); XLSX.writeFile(wb,name+'.xlsx');
+    } catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download=name+'.csv'; el.click(); URL.revokeObjectURL(url); }
+  }
+
+  const TABS = [['register','Register'],['workorders','Work Orders'],['progress','Progress'],['certification','Certification']];
 
   if (editingWO) {
     const wo = editingWO;
@@ -20954,6 +25438,42 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     );
   }
 
+  if (editingCert) {
+    const c = editingCert;
+    const set = (k,v)=>setEditingCert(p=>({...p,[k]:v}));
+    const subWOs = allWOs.filter(w=>w.subId===c.subId);
+    return (
+      <div style={{ maxWidth:620, margin:'0 auto', padding:'24px 0' }}>
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
+          <button onClick={()=>setEditingCert(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
+          <h2 className="serif" style={styles.pageTitle}>{c.id?'Edit':'New'} Certificate</h2>
+        </div>
+        <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={styles.formGroup}><label style={styles.label}>Certificate No</label><input value={c.number||''} onChange={e=>set('number',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={c.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Type</label>
+              <select value={c.type} onChange={e=>set('type',e.target.value)} style={styles.input}>{CERT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Subcontractor</label>
+              <select value={c.subId} onChange={e=>{ set('subId',e.target.value); set('woId',''); }} style={styles.input}>{subcontractors.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Work Order</label>
+              <select value={c.woId||''} onChange={e=>set('woId',e.target.value)} style={styles.input}><option value=''>—</option>{subWOs.map(w=>{const p=siteProjects.find(x=>x.id===w.projectId);return <option key={w.id} value={w.id}>{(p?.name||'WO')+' — '+(w.scope||'').slice(0,30)}</option>;})}</select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Certified Amount</label><input type='number' value={c.amount||0} onChange={e=>set('amount',e.target.value)} style={styles.input}/></div>
+            {c.type==='Retention Release' && <div style={styles.formGroup}><label style={styles.label}>Retention Released</label><input type='number' value={c.retentionReleased||0} onChange={e=>set('retentionReleased',e.target.value)} style={styles.input}/></div>}
+          </div>
+          <div style={styles.formGroup}><label style={styles.label}>Notes / Remarks</label><textarea value={c.note||''} onChange={e=>set('note',e.target.value)} style={{ ...styles.input, height:70 }}/></div>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+            <button onClick={()=>setEditingCert(null)} style={styles.ghostBtn}>Cancel</button>
+            <button onClick={()=>saveCert(c)} style={styles.primaryBtn}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (editing) {
     const s = editing;
     const set = (k,v)=>setEditing(p=>({...p,[k]:v}));
@@ -20981,8 +25501,12 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
     <div style={{ padding:'24px 32px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <h2 className="serif" style={styles.pageTitle}>Subcontractor Management</h2>
-        {canEdit && tab==='register' && <button onClick={()=>setEditing(blankSub())} style={styles.primaryBtn}><Plus size={15}/> Add Subcontractor</button>}
-        {canEdit && tab==='workorders' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingWO(blankWO(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Work Order</button>}
+        <div style={{ display:'flex', gap:8 }}>
+          {subcontractors.length>0 && <button onClick={exportSubXlsx} style={styles.ghostBtn} title="Export current tab to Excel (.xlsx)">⭳ Excel</button>}
+          {canEdit && tab==='register' && <button onClick={()=>setEditing(blankSub())} style={styles.primaryBtn}><Plus size={15}/> Add Subcontractor</button>}
+          {canEdit && tab==='workorders' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingWO(blankWO(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Work Order</button>}
+          {canEdit && tab==='certification' && <button onClick={()=>{ if(!subcontractors.length){alert('Add a subcontractor first.');return;} setEditingCert(blankCert(subcontractors[0].id)); }} style={styles.primaryBtn}><Plus size={15}/> New Certificate</button>}
+        </div>
       </div>
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{l}</button>)}
@@ -21044,6 +25568,87 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
                           <ApprovalActions item={{ status:wo.approvalStatus||'draft', rejectionNote:wo.approvalNote||'' }} onUpdate={(patch)=>updateWOApproval(wo.id,wo.subId,patch)} userRole={userRole} compact />
                           <button onClick={()=>setPrintWO(wo)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
                           {canEdit && wo.approvalStatus!=='submitted' && <button onClick={()=>setEditingWO(wo)} style={styles.iconBtn}><Pencil size={14}/></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+      {tab==='progress' && (
+        allWOs.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No work orders to track.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:940 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Subcontractor','Project','Scope','Value','% Complete','Stage','Earned','Paid','Variance','Remarks'].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {allWOs.map(wo=>{
+                  const proj = siteProjects.find(p=>p.id===wo.projectId);
+                  const val = parseFloat(wo.value||0);
+                  const pct = Math.max(0,Math.min(100,parseFloat(wo.progressPct||0)));
+                  const earned = val*pct/100;
+                  const paid = parseFloat(wo.advancePaid||0)+parseFloat(wo.progressPaid||0)+parseFloat(wo.finalPaid||0);
+                  const variance = paid-earned;
+                  return (
+                    <tr key={wo.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600 }}>{wo.subName}</td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:'#333', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{wo.scope||'—'}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap' }}>{(cc.currency||'')+val.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', minWidth:120 }}>
+                        {canEdit ? <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                          <input type='number' min='0' max='100' value={wo.progressPct||0} onChange={e=>patchWO(wo.id,wo.subId,{progressPct:e.target.value})} style={{ ...styles.input, width:60, padding:'4px 6px' }}/><span style={{ fontSize:12 }}>%</span>
+                        </div> : <span>{pct}%</span>}
+                        <div style={{ height:5, background:'#EEE', borderRadius:3, marginTop:4, overflow:'hidden' }}><div style={{ width:pct+'%', height:'100%', background:pct>=100?'#1a6b30':'#C9A24B' }}/></div>
+                      </td>
+                      <td style={{ padding:'8px 12px' }}>
+                        {canEdit ? <select value={wo.stage||''} onChange={e=>patchWO(wo.id,wo.subId,{stage:e.target.value})} style={{ ...styles.input, padding:'4px 6px', minWidth:110 }}>
+                          <option value=''>—</option>
+                          {STAGES.map(st=><option key={st} value={st}>{st}</option>)}
+                        </select> : (wo.stage||'—')}
+                      </td>
+                      <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>{(cc.currency||'')+earned.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>{(cc.currency||'')+paid.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap', color:variance>0?'#B5453A':'#1a6b30' }}>{(variance>0?'+':'')+(cc.currency||'')+variance.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px' }}>{canEdit ? <input value={wo.progressRemarks||''} onChange={e=>patchWO(wo.id,wo.subId,{progressRemarks:e.target.value})} placeholder='Site note...' style={{ ...styles.input, padding:'4px 6px', minWidth:140 }}/> : (wo.progressRemarks||'—')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ fontSize:11, color:'#B0AC9F', padding:'8px 12px' }}>Earned = Value × % Complete. Variance = Paid − Earned (positive = over-paid vs progress).</div>
+          </div>
+        )
+      )}
+      {tab==='certification' && (
+        allCerts.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No certificates issued yet. Click “New Certificate” to add one.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:880 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Cert No','Type','Subcontractor','Project','Date','Amount','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {allCerts.map(c=>{
+                  const wo = allWOs.find(w=>w.id===c.woId);
+                  const proj = siteProjects.find(p=>p.id===(wo?.projectId));
+                  return (
+                    <tr key={c.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'8px 12px', fontWeight:600, fontFamily:'monospace' }}>{c.number}</td>
+                      <td style={{ padding:'8px 12px' }}>{c.type}</td>
+                      <td style={{ padding:'8px 12px' }}>{c.subName}</td>
+                      <td style={{ padding:'8px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'8px 12px', color:'#555', whiteSpace:'nowrap' }}>{c.date||'—'}</td>
+                      <td style={{ padding:'8px 12px', fontWeight:600, whiteSpace:'nowrap' }}>{(cc.currency||'')+parseFloat(c.amount||0).toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                      <td style={{ padding:'8px 12px' }}><StatusBadge status={c.approvalStatus||'draft'} /></td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', justifyContent:'flex-end' }}>
+                          <ApprovalActions item={{ status:c.approvalStatus||'draft', rejectionNote:c.approvalNote||'' }} onUpdate={(patch)=>updateCertApproval(c.id,c.subId,patch)} userRole={userRole} compact />
+                          <button onClick={()=>setPrintCert(c)} style={styles.iconBtn} title="Print"><Printer size={14}/></button>
+                          {canEdit && c.approvalStatus!=='submitted' && <button onClick={()=>setEditingCert(c)} style={styles.iconBtn}><Pencil size={14}/></button>}
                         </div>
                       </td>
                     </tr>
@@ -21121,13 +25726,51 @@ function SubcontractorView({ subcontractors, setSubcontractors, siteProjects, us
         </DocPrintOverlay>
       );
     })()}
+    {printCert && (()=>{
+      const c = printCert;
+      const sub = subcontractors.find(x=>x.id===c.subId);
+      const wo = (sub?.workOrders||[]).find(w=>w.id===c.woId);
+      const proj = siteProjects.find(p=>p.id===(wo?.projectId));
+      const amt = parseFloat(c.amount||0);
+      const TITLES = { 'Work Completion':'WORK COMPLETION CERTIFICATE', 'Payment Certificate':'PAYMENT CERTIFICATE', 'Retention Release':'RETENTION RELEASE CERTIFICATE' };
+      return (
+        <DocPrintOverlay onClose={()=>setPrintCert(null)} filename={`${c.type.replace(/\s/g,'')}-${c.number}.pdf`} businessInfo={businessInfo}>
+          <div style={{ textAlign:'center', marginBottom:20 }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#1E2A4A', letterSpacing:1 }}>{TITLES[c.type]||'CERTIFICATE'}</div>
+            <div style={{ fontSize:13, color:'#888', marginTop:4 }}>{c.number}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 32px', fontSize:13, marginBottom:16 }}>
+            {[['Subcontractor', sub?.name||'—'],['Trade', sub?.trade||'—'],['Project', proj?.name||'—'],['Work Order Scope', wo?.scope||'—'],['Date', c.date||'—'],['Type', c.type]].map(([l,v])=>(
+              <div key={l} style={{ display:'flex', gap:8, borderBottom:'1px solid #f0ece5', padding:'5px 0' }}>
+                <span style={{ color:'#888', minWidth:130 }}>{l}</span><span style={{ fontWeight:600, color:'#1E2A4A' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ background:'#F8F7F4', borderRadius:8, padding:'14px 18px', marginBottom:16, fontSize:14 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'#1E2A4A' }}><span>Certified Amount</span><span>{(cc.currency||'')+amt.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
+            {c.type==='Retention Release' && <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, color:'#555', marginTop:6 }}><span>Retention Released</span><span>{(cc.currency||'')+parseFloat(c.retentionReleased||0).toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>}
+          </div>
+          {c.note && <div style={{ marginBottom:16, fontSize:13 }}><b>Notes:</b><div style={{ color:'#555', marginTop:4, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{c.note}</div></div>}
+          <div style={{ fontSize:12.5, color:'#555', lineHeight:1.7, marginBottom:24 }}>This is to certify that the works described above have been {c.type==='Work Completion'?'satisfactorily completed':'assessed'} in accordance with the terms of the subcontract agreement, and the certified amount stated above is {c.type==='Retention Release'?'due for retention release':'due and payable'}.</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:32, marginTop:40 }}>
+            {['Prepared By','Approved By'].map(x=>(
+              <div key={x}>
+                <div style={{ borderTop:'1px solid #555', paddingTop:8, fontSize:12, color:'#555', textAlign:'center' }}>{x}</div>
+                <div style={{ marginTop:24, fontSize:11, color:'#aaa', textAlign:'center' }}>Date: _______________</div>
+              </div>
+            ))}
+          </div>
+        </DocPrintOverlay>
+      );
+    })()}
     </>
   );
 }
 
 // ─── HSE ──────────────────────────────────────────────────────────────────────
-function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessInfo }) {
-  const [tab, setTab] = useState('incidents');
+function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessInfo, initialTab='incidents' }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(()=>{ setTab(initialTab); }, [initialTab]);
   const [editing, setEditing] = useState(null);
   const [printPermit, setPrintPermit] = useState(null);
   const canEdit = ['admin','manager'].includes(userRole);
@@ -21135,6 +25778,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   const incidents    = hseRecords.incidents    || [];
   const toolboxTalks = hseRecords.toolboxTalks || [];
   const permits      = hseRecords.permits      || [];
+  const inspections  = hseRecords.inspections  || [];
 
   function updateSection(key, fn) {
     setHseRecords(prev=>({ ...prev, [key]: fn(prev[key]||[]) }));
@@ -21143,7 +25787,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   const INCIDENT_TYPES = ['Near Miss','First Aid','Minor Injury','Major Injury','LTI','Property Damage','Environmental'];
   const PERMIT_TYPES   = ['Hot Work','Confined Space','Electrical Isolation','Working at Height','Excavation','General'];
 
-  const TABS = [['incidents',`Incidents (${incidents.length})`],['toolbox',`Toolbox Talks (${toolboxTalks.length})`],['permits',`Permits to Work (${permits.length})`]];
+  const TABS = [['incidents',`Incidents (${incidents.length})`],['toolbox',`Toolbox Talks (${toolboxTalks.length})`],['permits',`Permits to Work (${permits.length})`],['inspections',`Inspections (${inspections.length})`],['reports','Safety Reports']];
 
   // Stats
   const lti    = incidents.filter(i=>i.type==='LTI').length;
@@ -21153,6 +25797,8 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
   function blankIncident() { return { id:'', date:new Date().toISOString().slice(0,10), time:'', projectId:'', location:'', type:'Near Miss', description:'', injuredPerson:'', rootCause:'', correctiveAction:'', status:'open', reportedBy:'' }; }
   function blankTalk()     { return { id:'', date:new Date().toISOString().slice(0,10), projectId:'', topic:'', conductedBy:'', attendeesCount:0, notes:'' }; }
   function blankPermit()   { return { id:'', number:`PTW-${String(permits.length+1).padStart(3,'0')}`, date:new Date().toISOString().slice(0,10), projectId:'', type:'Hot Work', location:'', description:'', validFrom:'', validUntil:'', issuedBy:'', receiver:'', status:'active' }; }
+  const INSPECTION_AREAS = ['Site General','Electrical','Mechanical','Plumbing','HVAC','Fire Fighting','Scaffolding','Housekeeping','PPE Compliance','Work at Height'];
+  function blankInspection() { return { id:'', date:new Date().toISOString().slice(0,10), projectId:'', area:'Site General', inspector:'', score:'', findings:'', correctiveAction:'', targetDate:'', status:'open' }; }
 
   function saveRecord(section, key, rec) {
     const data = { ...rec, id:rec.id||crypto.randomUUID(), approvalStatus: rec.approvalStatus||'draft', approvalNote: rec.approvalNote||'', updatedAt:Date.now() };
@@ -21174,7 +25820,7 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
       <div style={{ maxWidth:620, margin:'0 auto', padding:'24px 0' }}>
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:20 }}>
           <button onClick={()=>setEditing(null)} style={styles.ghostBtn}><X size={14}/> Back</button>
-          <h2 className="serif" style={styles.pageTitle}>{section==='incidents'?'Incident Report':section==='toolbox'?'Toolbox Talk':'Permit to Work'}</h2>
+          <h2 className="serif" style={styles.pageTitle}>{section==='incidents'?'Incident Report':section==='toolbox'?'Toolbox Talk':section==='inspections'?'Site Inspection':'Permit to Work'}</h2>
         </div>
         <div style={{ background:'#fff', borderRadius:10, padding:24, border:'1px solid #EAE6DB', display:'flex', flexDirection:'column', gap:12 }}>
           {section==='incidents' && (<>
@@ -21254,6 +25900,29 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
               </select>
             </div>
           </>)}
+          {section==='inspections' && (<>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Date</label><input type='date' value={d.date||''} onChange={e=>set('date',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Area / Type</label>
+                <select value={d.area} onChange={e=>set('area',e.target.value)} style={styles.input}>{INSPECTION_AREAS.map(t=><option key={t} value={t}>{t}</option>)}</select>
+              </div>
+              <div style={styles.formGroup}><label style={styles.label}>Score %</label><input type='number' min={0} max={100} value={d.score||''} onChange={e=>set('score',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Project</label>
+                <select value={d.projectId||''} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value=''>Select project</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              </div>
+              <div style={styles.formGroup}><label style={styles.label}>Inspector</label><input value={d.inspector||''} onChange={e=>set('inspector',e.target.value)} style={styles.input}/></div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Findings / Observations</label><textarea value={d.findings||''} onChange={e=>set('findings',e.target.value)} style={{ ...styles.input, height:72 }}/></div>
+            <div style={styles.formGroup}><label style={styles.label}>Corrective Action</label><textarea value={d.correctiveAction||''} onChange={e=>set('correctiveAction',e.target.value)} style={{ ...styles.input, height:60 }}/></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Target Close Date</label><input type='date' value={d.targetDate||''} onChange={e=>set('targetDate',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Status</label>
+                <select value={d.status} onChange={e=>set('status',e.target.value)} style={styles.input}>{['open','closed'].map(x=><option key={x} value={x}>{x.charAt(0).toUpperCase()+x.slice(1)}</option>)}</select>
+              </div>
+            </div>
+          </>)}
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
             <button onClick={()=>setEditing(null)} style={styles.ghostBtn}>Cancel</button>
             <button onClick={()=>saveRecord(section,section,d)} style={styles.primaryBtn}>Save</button>
@@ -21268,11 +25937,12 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
     <div style={{ padding:'24px 32px' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <h2 className="serif" style={styles.pageTitle}>HSE — Health, Safety & Environment</h2>
-        {canEdit && <button onClick={()=>{
+        {canEdit && tab!=='reports' && <button onClick={()=>{
           if(tab==='incidents') setEditing({ section:'incidents', data:blankIncident() });
           else if(tab==='toolbox') setEditing({ section:'toolbox', data:blankTalk() });
+          else if(tab==='inspections') setEditing({ section:'inspections', data:blankInspection() });
           else setEditing({ section:'permits', data:blankPermit() });
-        }} style={styles.primaryBtn}><Plus size={15}/> New {tab==='incidents'?'Incident':tab==='toolbox'?'Talk':'Permit'}</button>}
+        }} style={styles.primaryBtn}><Plus size={15}/> New {tab==='incidents'?'Incident':tab==='toolbox'?'Talk':tab==='inspections'?'Inspection':'Permit'}</button>}
       </div>
       {/* KPIs */}
       <div style={{ display:'flex', gap:12, marginBottom:20 }}>
@@ -21378,6 +26048,66 @@ function HSEView({ hseRecords, setHseRecords, siteProjects, userRole, businessIn
           </div>
         )
       )}
+      {tab==='inspections' && (
+        inspections.length===0 ? <div style={{ textAlign:'center', padding:60, color:'#888' }}>No inspections recorded.</div> : (
+          <div style={{ background:'#fff', borderRadius:10, border:'1px solid #EAE6DB', overflow:'hidden' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead><tr style={{ background:'#F8F7F4' }}>
+                {['Date','Area','Project','Inspector','Score','Status',''].map(h=><th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:700, color:'#888', textTransform:'uppercase' }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {[...inspections].sort((a,b)=>b.date>a.date?1:-1).map(ins=>{
+                  const proj = siteProjects.find(p=>p.id===ins.projectId);
+                  const sc = parseFloat(ins.score);
+                  return (
+                    <tr key={ins.id} style={{ borderBottom:'1px solid #F0ECE5' }}>
+                      <td style={{ padding:'10px 12px' }}>{ins.date}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:600 }}>{ins.area||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#555' }}>{proj?.name||'—'}</td>
+                      <td style={{ padding:'10px 12px', color:'#555' }}>{ins.inspector||'—'}</td>
+                      <td style={{ padding:'10px 12px', fontWeight:700, color:isNaN(sc)?'#888':sc>=85?'#1a6b30':sc>=60?'#856404':'#B5453A' }}>{isNaN(sc)?'—':sc+'%'}</td>
+                      <td style={{ padding:'10px 12px' }}><span style={{ background:ins.status==='closed'?'#d4edda':'#fff3cd', color:ins.status==='closed'?'#1a6b30':'#856404', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>{(ins.status||'open').toUpperCase()}</span></td>
+                      <td style={{ padding:'10px 12px' }}>{canEdit && <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={()=>setEditing({ section:'inspections', data:ins })} style={styles.iconBtn}><Pencil size={14}/></button>
+                        <button onClick={()=>{if(window.confirm('Delete?'))updateSection('inspections',prev=>prev.filter(x=>x.id!==ins.id))}} style={{ ...styles.iconBtn, color:'#B5453A' }}><Trash2 size={14}/></button>
+                      </div>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+      {tab==='reports' && (()=>{
+        const byType = INCIDENT_TYPES.map(t=>[t, incidents.filter(i=>i.type===t).length]).filter(([,n])=>n>0);
+        const closedInc = incidents.filter(i=>i.status==='closed').length;
+        const avgScore = inspections.length ? Math.round(inspections.reduce((s2,i)=>s2+(parseFloat(i.score)||0),0)/inspections.length) : 0;
+        const openInsp = inspections.filter(i=>i.status!=='closed').length;
+        const totalAtt = toolboxTalks.reduce((s2,t)=>s2+(parseInt(t.attendeesCount)||0),0);
+        const Row = ({l,v,c}) => <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid #F2EFE6', fontSize:13 }}><span style={{ color:'#555' }}>{l}</span><span style={{ fontWeight:700, color:c||'#1E2A4A' }}>{v}</span></div>;
+        return (
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+            <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'16px 20px' }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', marginBottom:8 }}>Incident Summary</div>
+              <Row l="Total Incidents" v={incidents.length}/>
+              <Row l="Lost Time Injuries (LTI)" v={lti} c={lti?'#B5453A':'#1a6b30'}/>
+              <Row l="Open / Investigating" v={open} c={open?'#856404':'#1a6b30'}/>
+              <Row l="Closed" v={closedInc} c="#1a6b30"/>
+              {byType.map(([t,n])=><Row key={t} l={'• '+t} v={n}/>)}
+            </div>
+            <div style={{ background:'#fff', border:'1px solid #EAE6DB', borderRadius:10, padding:'16px 20px' }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', textTransform:'uppercase', marginBottom:8 }}>Inspections & Toolbox</div>
+              <Row l="Inspections Done" v={inspections.length}/>
+              <Row l="Avg Inspection Score" v={avgScore+'%'} c={avgScore>=85?'#1a6b30':avgScore>=60?'#856404':'#B5453A'}/>
+              <Row l="Open Inspection Items" v={openInsp} c={openInsp?'#856404':'#1a6b30'}/>
+              <Row l="Toolbox Talks" v={toolboxTalks.length}/>
+              <Row l="Total Attendance" v={totalAtt}/>
+              <Row l="Active Permits" v={activeP} c="#0a58ca"/>
+            </div>
+          </div>
+        );
+      })()}
     </div>
     {/* ── HSE Permit to Work Print Overlay ── */}
     {printPermit && (()=>{
@@ -21451,7 +26181,7 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
   const sellerState = businessInfo?.state || '';
 
   function blank() {
-    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], taxRate:cc.defaultTaxRate||0, placeOfSupply:'', status:'draft', notes:'' };
+    return { id:'', billNumber:`RAB-${String(raBillings.length+1).padStart(3,'0')}`, projectId:'', customerId:'', tenderId:'', periodFrom:'', periodTo:'', date:new Date().toISOString().slice(0,10), items:[], taxRate:cc.defaultTaxRate||0, placeOfSupply:'', status:'draft', notes:'', certifiedAmount:'', retentionPct:0, advanceRecovery:0, otherDeductions:0, receivedAmount:0, receivedDate:'', certDate:'' };
   }
   function blankItem() { return { id:crypto.randomUUID(), description:'', contractValue:0, previousQty:0, thisQty:0, unit:'%' }; }
   function itemAmount(item, tender) {
@@ -21538,6 +26268,25 @@ function RABillingView({ raBillings, setRaBillings, siteProjects, customers, ten
                 onChangeTax={v=>set('taxRate',v)} onChangePOS={v=>set('placeOfSupply',v)}
               />
             )}
+          </div>
+          {/* ── Client Certification & Payment (IPC) ── */}
+          <div style={{ background:'#F4F1EA', borderRadius:8, padding:14, border:'1px solid #E7E1D4' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#1E2A4A', marginBottom:10, textTransform:'uppercase' }}>Client Certification & Payment (IPC)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+              <div style={styles.formGroup}><label style={styles.label}>Certified Amount</label><input type='number' value={b.certifiedAmount??''} placeholder={subtotal.toFixed(0)} onChange={e=>set('certifiedAmount',e.target.value)} style={styles.input}/><span style={{ fontSize:10, color:'#999' }}>Blank = claimed ({(cc.currency||'')+subtotal.toLocaleString(undefined,{maximumFractionDigits:0})})</span></div>
+              <div style={styles.formGroup}><label style={styles.label}>Retention %</label><input type='number' value={b.retentionPct||0} onChange={e=>set('retentionPct',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Advance Recovery</label><input type='number' value={b.advanceRecovery||0} onChange={e=>set('advanceRecovery',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Other Deductions</label><input type='number' value={b.otherDeductions||0} onChange={e=>set('otherDeductions',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Received Amount</label><input type='number' value={b.receivedAmount||0} onChange={e=>set('receivedAmount',e.target.value)} style={styles.input}/></div>
+              <div style={styles.formGroup}><label style={styles.label}>Received Date</label><input type='date' value={b.receivedDate||''} onChange={e=>set('receivedDate',e.target.value)} style={styles.input}/></div>
+            </div>
+            {(()=>{ const cert=(b.certifiedAmount===''||b.certifiedAmount==null)?subtotal:(parseFloat(b.certifiedAmount)||0); const ret=cert*(parseFloat(b.retentionPct)||0)/100; const net=cert-ret-(parseFloat(b.advanceRecovery)||0)-(parseFloat(b.otherDeductions)||0); const rcv=parseFloat(b.receivedAmount)||0; return (
+              <div style={{ marginTop:10, fontSize:12.5, borderTop:'1px solid #E0DACB', paddingTop:8, display:'grid', gap:3 }}>
+                <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#666' }}>Retention held by client</span><span>{(cc.currency||'')+ret.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:'#1E2A4A' }}><span>Net Certified (payable to us)</span><span>{(cc.currency||'')+net.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontWeight:700, color:(net-rcv)>0?'#B5453A':'#1a6b30' }}><span>Outstanding from client</span><span>{(cc.currency||'')+(net-rcv).toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+              </div>
+            ); })()}
           </div>
           <div style={styles.formGroup}><label style={styles.label}>Notes</label><textarea value={b.notes||''} onChange={e=>set('notes',e.target.value)} style={{ ...styles.input, height:56 }}/></div>
           <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
@@ -21687,7 +26436,7 @@ function TCPrint({ checklist, project, businessInfo, onClose }) {
     <div className="print-area" style={{ position:'fixed',inset:0,background:'#fff',zIndex:9999,overflowY:'auto' }}>
       <div className="no-print" style={{ display:'flex',gap:8,padding:'12px 20px',borderBottom:'1px solid #EEE',background:'#F8F6F2' }}>
         <button onClick={onClose} style={styles.ghostBtn}>← Back</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
+        <SealToggle businessInfo={businessInfo} /><button onClick={() => printView('.print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}><Printer size={14}/> Print / PDF</button>
       </div>
       <div style={{ maxWidth:800,margin:'0 auto',padding:'32px 40px',fontFamily:'Arial,sans-serif',fontSize:12 }}>
         {useLH && <LetterheadHeader bi={businessInfo} style={{marginBottom:8}} />}
@@ -22473,7 +27222,7 @@ function CAPAView({ capaRecords, setCapaRecords, vendors, customers, userRole })
   const STATUS_BG    = { open:'#f8d7da', in_progress:'#fff3cd', pending_verification:'#cfe2ff', closed:'#d4edda' };
 
   function blankCAPA() {
-    const num = `CAR-${String(capaRecords.length+1).padStart(3,'0')}`;
+    const num = dn('CAR', capaRecords.length+1);
     return { id:'', number:num, date: new Date().toISOString().slice(0,10), source:'NCR', sourceRef:'', description:'', rootCause:'', actionPlan:'', responsibility:'', targetDate:'', effectivenessCheck:'', closedDate:'', status:'open' };
   }
   function save(rec) {
@@ -22597,7 +27346,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   const CLAUSES = ['4.1 Context','4.2 Interested Parties','5.1 Leadership','6.1 Risk & Opportunity','7.1 Resources','7.2 Competence','7.5 Documentation','8.1 Planning','8.4 External Providers','8.5 Production Control','8.6 Release','8.7 NC Output','9.1 Monitoring','9.2 Internal Audit','9.3 MRM','10.2 CAPA'];
 
   function blankAudit() {
-    const num = `IA-${new Date().getFullYear()}-${String(internalAudits.length+1).padStart(2,'0')}`;
+    const num = dn('IA', internalAudits.length+1, 2);
     return { id:'', number:num, scheduledDate:'', conductedDate:'', auditor:'', auditee:'', scope:'', clauses:[], findings:[], status:'scheduled', summary:'' };
   }
   function blankFinding() {
@@ -22612,7 +27361,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
     setInternalAudits(prev=>prev.map(x=>x.id===id?{...x,approvalStatus:patch.status,approvalNote:patch.rejectionNote||''}:x));
   }
   function raiseCAPAFromFinding(audit, finding) {
-    const num = `CAR-${String(capaRecords.length+1).padStart(3,'0')}`;
+    const num = dn('CAR', capaRecords.length+1);
     const capa = { id: crypto.randomUUID(), number: num, date: new Date().toISOString().slice(0,10), source:'Internal Audit', sourceRef: audit.number, description: finding.description, rootCause:'', actionPlan:'', responsibility:'', targetDate:'', effectivenessCheck:'', closedDate:'', status:'open' };
     setCapaRecords(prev=>[...prev, capa]);
     setInternalAudits(prev=>prev.map(a=>a.id===audit.id ? { ...a, findings: a.findings.map(f=>f.id===finding.id ? { ...f, capaRaised:true, capaRef:num } : f) } : a));
@@ -22753,7 +27502,7 @@ function InternalAuditView({ internalAudits, setInternalAudits, capaRecords, set
   );
 }
 
-const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml'];
+const BRANDING_KEYS = ['logo', 'letterhead', 'letterheadFooter', 'letterheadHtml', 'seal', 'signature'];
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -22774,6 +27523,7 @@ export default function App() {
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [businessInfo,     _setBi]     = useState({});
+  try { window.__operixBI = businessInfo; } catch (e) {}
   const [documents,        _setDocs]   = useState([]);
   const [customers,        _setCusts]  = useState([]);
   const [vendors,          _setVends]  = useState([]);
@@ -22807,7 +27557,11 @@ export default function App() {
   const [resources,        _setRes]    = useState([]);
   const [manpowerLogs,     _setMPL]    = useState([]);
   const [variations,       _setVAR]    = useState([]);
+  const [dlpDefects,       _setDLP]    = useState([]);
+  const [serviceHistory,   _setSH]     = useState([]);
   const [siteAttendance,   _setSA]     = useState([]);
+  const [labourGroups,     _setLG]     = useState([]);
+  const [holidayCalendar,  _setHC]     = useState([]);
   const [evaluations,      _setEvls]   = useState([]);
   const [capaRecords,      _setCapa]   = useState([]);
   const [internalAudits,   _setAudits] = useState([]);
@@ -22829,7 +27583,13 @@ export default function App() {
   const [moms,             _setMoms]       = useState([]);
   const [purchaseReqs,     _setPReqs]      = useState([]);
   const [rackStore,        _setRS]         = useState({ racks: [], inward: [], outward: [], returns: [] });
+  const [investors,        _setInv]        = useState([]);
+  const [profitShares,     _setPS]         = useState([]);
+  const [boShortages,      _setBOS]        = useState([]);
+  const [fatReports,       _setFAT]        = useState([]);
+  const [tdsSheets,        _setTDS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
+  const [bypassEmails,     setBypassEmails]   = useState([]); // global super-admin-managed free list
   const [showDeleteModal,  setShowDeleteModal] = useState(false);
   // Tracks which BizSection the user last interacted with (for shared views like enquiries)
   const [activeBizContext, setActiveBizContext] = useState(null);
@@ -22837,6 +27597,27 @@ export default function App() {
   const migratedRef = React.useRef(false);
   const latestDataRef = React.useRef({});
   const cloudBackupCheckedRef = React.useRef(false);
+
+  // ── Global paywall-bypass list (super-admin managed, live) ───────────────────
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeBypassEmails(setBypassEmails);
+    return () => { try { unsub && unsub(); } catch (_e) {} };
+  }, [user]);
+
+  // ── Load branding (logo / letterhead) from its own doc and merge into state ──
+  // On account switch, first CLEAR any previous account's branding so one company's
+  // letterhead never leaks onto another, then load the correct account's branding.
+  useEffect(() => {
+    if (!ownerUid) return;
+    _setBi((prev) => { const c = { ...prev }; BRANDING_KEYS.forEach((k) => { delete c[k]; }); return c; });
+    loadBranding(ownerUid).then((b) => {
+      _setBi((prev) => {
+        const c = { ...prev }; BRANDING_KEYS.forEach((k) => { delete c[k]; });
+        return { ...c, ...(b || {}) };
+      });
+    }).catch(() => {});
+  }, [ownerUid]);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -22848,8 +27629,8 @@ export default function App() {
           // Check membership FIRST — staff accounts don't go through email verification
           // 3-second timeout: admin accounts have no membership doc, avoid 30s+ network wait
           // TEST_EMAILS always bypass membership so ownerUid is consistent across all devices
-          const isTestEmail = TEST_EMAILS.includes(firebaseUser.email);
-          const membership = isTestEmail ? null : await Promise.race([
+          const isTestAcct = TEST_EMAILS.includes(String(firebaseUser.email || '').toLowerCase().trim());
+          const membership = isTestAcct ? null : await Promise.race([
             getMembership(firebaseUser.uid),
             new Promise(resolve => setTimeout(() => resolve(null), 3000)),
           ]);
@@ -22951,7 +27732,9 @@ export default function App() {
       const _biRaw = data.businessInfo || {};
       const _biClean = {};
       Object.keys(_biRaw).forEach((k) => { if (!BRANDING_KEYS.includes(k)) _biClean[k] = _biRaw[k]; });
-      _setBi(_biClean);
+      // Keep branding (logo/letterhead) that's already in memory — it lives in a
+      // separate Firestore doc and must survive each main-doc snapshot.
+      _setBi((prev) => { const b = {}; BRANDING_KEYS.forEach((k) => { if (prev && prev[k]) b[k] = prev[k]; }); return { ..._biClean, ...b }; });
       // One-time cleanup: strip any legacy letterhead/logo from the main document
       // so it drops below Firestore's 1 MB limit and saves reach the server again.
       try {
@@ -22995,8 +27778,12 @@ export default function App() {
       _setRes(data.resources || []);
       _setMPL(data.manpowerLogs || []);
       _setVAR(data.variations || []);
+      _setDLP(data.dlpDefects || []);
+      _setSH(data.serviceHistory || []);
       _setMepBoms(data.mepBoms || []);
       _setSA(data.siteAttendance || []);
+      _setLG(data.labourGroups || []);
+      _setHC(data.holidayCalendar || []);
       _setEvls(data.evaluations || []);
       _setCapa(data.capaRecords || []);
       _setAudits(data.internalAudits || []);
@@ -23016,6 +27803,11 @@ export default function App() {
       _setMoms(data.moms || []);
       _setPReqs(data.purchaseReqs || []);
       _setRS(data.rackStore || { racks: [], inward: [], outward: [], returns: [] });
+      _setInv(data.investors || []);
+      _setPS(data.profitShares || []);
+      _setBOS(data.boShortages || []);
+      _setFAT(data.fatReports || []);
+      _setTDS(data.tdsSheets || []);
     }, (err) => {
       console.warn('Firestore load error:', err);
       setDataError(true);
@@ -23051,12 +27843,16 @@ export default function App() {
   function setBusinessInfo(v) {
     _setBi((prev) => {
       const raw = typeof v === 'function' ? v(prev) : v;
-      // Letterhead/logo are intentionally NOT stored — keeps the company document
-      // well under Firestore's 1 MB limit so every save reaches the server.
+      // Core (text) fields go in the main company doc (kept small, <1 MB).
       const core = {};
       Object.keys(raw || {}).forEach((k) => { if (!BRANDING_KEYS.includes(k)) core[k] = raw[k]; });
       persist({ businessInfo: core });
-      return core;
+      // Branding (logo / letterhead images) lives in its own doc so the main doc
+      // stays small; save it separately and KEEP it in memory so it persists.
+      const brand = {};
+      BRANDING_KEYS.forEach((k) => { if (raw && raw[k] !== undefined) brand[k] = raw[k]; });
+      if (ownerUid && Object.keys(brand).length) { try { saveBranding(ownerUid, brand); } catch (_e) {} }
+      return { ...core, ...brand };
     });
   }
   const setDocuments        = mkSet(_setDocs,  'documents');
@@ -23092,7 +27888,11 @@ export default function App() {
   const setResources        = mkSet(_setRes,   'resources');
   const setManpowerLogs     = mkSet(_setMPL,   'manpowerLogs');
   const setVariations       = mkSet(_setVAR,   'variations');
+  const setDlpDefects       = mkSet(_setDLP,   'dlpDefects');
+  const setServiceHistory   = mkSet(_setSH,    'serviceHistory');
   const setSiteAttendance   = mkSet(_setSA,    'siteAttendance');
+  const setLabourGroups     = mkSet(_setLG,    'labourGroups');
+  const setHolidayCalendar  = mkSet(_setHC,    'holidayCalendar');
   const setEvaluations      = mkSet(_setEvls,  'evaluations');
   const setCapaRecords      = mkSet(_setCapa,  'capaRecords');
   const setInternalAudits   = mkSet(_setAudits,'internalAudits');
@@ -23107,6 +27907,11 @@ export default function App() {
   const setMoms             = mkSet(_setMoms,'moms');
   const setPurchaseReqs     = mkSet(_setPReqs,'purchaseReqs');
   const setRackStore        = mkSet(_setRS,        'rackStore');
+  const setInvestors        = mkSet(_setInv,   'investors');
+  const setProfitShares     = mkSet(_setPS,    'profitShares');
+  const setBoShortages      = mkSet(_setBOS,   'boShortages');
+  const setFatReports       = mkSet(_setFAT,   'fatReports');
+  const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
   const setPmSchedules      = mkSet(_setPMS,   'pmSchedules');
   const setFmWorkOrders     = mkSet(_setFMWO,  'fmWorkOrders');
@@ -23134,7 +27939,7 @@ export default function App() {
       getFY(d.date) === fy &&
       (!isMultiBiz || (d.bizType || 'trading') === bizType)
     );
-    return `${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`;
+    return withCo(`${prefix}/${fy}/${String(same.length + 1).padStart(3, '0')}`);
   }
 
   // ── Doc helpers ──────────────────────────────────────────────────────────────
@@ -23142,7 +27947,7 @@ export default function App() {
   // bizType MUST be a string — passing an object is a bug; we type-guard defensively
   function startNewDoc(type, bizType, prefill = {}) {
     const today = new Date().toISOString().slice(0, 10);
-    const bType = (typeof bizType === 'string' ? bizType : null) || activeTypes[0] || 'trading';
+    const bType = (typeof bizType === 'string' ? bizType : null) || sessionContext || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(type, businessInfo),
       ...prefill,
@@ -23160,7 +27965,7 @@ export default function App() {
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
-    const bType = srcDoc.bizType || activeTypes[0] || 'trading';
+    const bType = srcDoc.bizType || sessionContext || activeTypes[0] || 'trading';
     setActiveDoc({
       ...blankDoc(newType, businessInfo),
       bizType: bType,
@@ -23178,6 +27983,7 @@ export default function App() {
   }
 
   function handleSaveDoc(status, rejectionNote) {
+    if (activeDoc && activeDoc.status === 'deleted') { setActiveDoc(null); setView('documents'); return; }
     const saved = {
       ...activeDoc,
       status: status || activeDoc.status || 'draft',
@@ -23249,9 +28055,17 @@ export default function App() {
     setView('documents');
   }
 
+  // Soft delete (admin only): the document number stays in the list, marked DELETED and read-only.
+  // Totals/reports treat it as nil and any stock it moved is reversed.
   function deleteDoc(id) {
-    if (!window.confirm('Delete this document?')) return;
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
+    if (userRole !== 'admin') { alert('Only an admin can delete documents.'); return; }
+    const d = documents.find((x) => x.id === id);
+    if (!d || d.status === 'deleted') return;
+    const lbl = (DOC_TYPES[d.type]?.label || d.type) + ' ' + (d.number || '');
+    if (!window.confirm('Delete ' + lbl + '?\n\nThe number stays in the list marked DELETED. It cannot be edited or used again.')) return;
+    setDocuments((prev) => prev.map((x) => x.id === id ? { ...x, status: 'deleted', statusBeforeDelete: x.status || 'draft', deletedAt: Date.now(), deletedBy: user?.email || '' } : x));
+    const rel = (stockLedger || []).filter((e) => e.docId === id && !e.reversal);
+    if (rel.length) setStockLedger((prev) => [...prev, ...rel.map((e) => ({ ...e, id: crypto.randomUUID(), qty: -(e.qty || 0), note: 'Deleted — ' + (e.note || ''), reversal: true }))]);
   }
 
   async function handleLogout() { await logOut(); }
@@ -23270,10 +28084,10 @@ export default function App() {
       serviceOrders, productionOrders, rawMaterials, boms, parts, engDocs,
       enquiries, contracts, channelPartners, termsLibrary, scopeOfWork,
       qualityDocs, pdvs, moms, purchaseReqs, siteProjects, siteActivities, progressUpdates,
-      clientMaterials, projectDocuments, resources, manpowerLogs, variations, siteAttendance, evaluations, capaRecords, internalAudits,
+      clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -23321,7 +28135,11 @@ export default function App() {
     if (backup.resources) setResources(backup.resources);
     if (backup.manpowerLogs) setManpowerLogs(backup.manpowerLogs);
     if (backup.variations) setVariations(backup.variations);
+    if (backup.dlpDefects) setDlpDefects(backup.dlpDefects);
+    if (backup.serviceHistory) setServiceHistory(backup.serviceHistory);
     if (backup.siteAttendance)  setSiteAttendance(backup.siteAttendance);
+    if (backup.labourGroups) setLabourGroups(backup.labourGroups);
+    if (backup.holidayCalendar) setHolidayCalendar(backup.holidayCalendar);
     if (backup.evaluations)     setEvaluations(backup.evaluations);
     if (backup.capaRecords)     setCapaRecords(backup.capaRecords);
     if (backup.internalAudits)  setInternalAudits(backup.internalAudits);
@@ -23341,6 +28159,11 @@ export default function App() {
     if (backup.moms)            setMoms(backup.moms);
     if (backup.purchaseReqs)    setPurchaseReqs(backup.purchaseReqs);
     if (backup.rackStore)       setRackStore(backup.rackStore);
+    if (backup.investors)       setInvestors(backup.investors);
+    if (backup.profitShares)    setProfitShares(backup.profitShares);
+    if (backup.boShortages)     setBoShortages(backup.boShortages);
+    if (backup.fatReports)      setFatReports(backup.fatReports);
+    if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
   }
 
@@ -23352,6 +28175,55 @@ export default function App() {
     return [ct];
   })();
   const isMultiBiz = activeTypes.length > 1;
+
+  // One-time cleanup for legacy/mis-tagged records. Single-activity accounts are
+  // auto-repaired (every record forced to the one activity). Multi-activity accounts
+  // get a read-only diagnostic — automatic moves are disabled there so isolation
+  // between businesses can never be corrupted by a guess.
+  function repairBizTags() {
+    const valid = activeTypes;
+    const validSet = new Set(valid);
+    const only = valid.length === 1 ? valid[0] : null;
+    const cols = [
+      ['Documents', documents, setDocuments],
+      ['Vouchers', vouchers, setVouchers],
+      ['Employees', employees, setEmployees],
+      ['Customers', customers, setCustomers],
+      ['Vendors', vendors, setVendors],
+      ['Items', items, setItems],
+      ['Payroll runs', payrollRuns, setPayrollRuns],
+      ['Investors', investors, setInvestors],
+      ['Profit shares', profitShares, setProfitShares],
+      ['BO shortages', boShortages, setBoShortages],
+      ['FAT/SAT reports', fatReports, setFatReports],
+      ['Technical data sheets', tdsSheets, setTdsSheets],
+    ];
+    if (only) {
+      let fixed = 0; const lines = [];
+      cols.forEach(([label, arr, setter]) => {
+        if (!Array.isArray(arr) || !arr.length) return;
+        const need = arr.filter(r => r.bizType !== only);
+        if (need.length) { setter(arr.map(r => r.bizType === only ? r : { ...r, bizType: only })); fixed += need.length; lines.push('\u2022 ' + label + ': ' + need.length); }
+      });
+      const pcE = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
+      const pcNeed = pcE.filter(e => e.bizType !== only);
+      if (pcNeed.length) { setPettyCash({ ...pettyCash, entries: pcE.map(e => e.bizType === only ? e : { ...e, bizType: only }) }); fixed += pcNeed.length; lines.push('\u2022 Petty cash: ' + pcNeed.length); }
+      alert(fixed ? ('\u2705 Re-tagged ' + fixed + ' record(s) to \u201C' + only + '\u201D:\n\n' + lines.join('\n') + '\n\nEverything now shows under your business.') : '\u2705 All records are already tagged correctly. Nothing to repair.');
+      return;
+    }
+    const report = []; let orphanTotal = 0;
+    const allCols = cols.concat([['Petty cash', (pettyCash?.entries || []), null]]);
+    allCols.forEach(([label, arr]) => {
+      if (!Array.isArray(arr) || !arr.length) return;
+      const dist = {};
+      arr.forEach(r => { const k = r.bizType || '(untagged)'; dist[k] = (dist[k] || 0) + 1; });
+      Object.keys(dist).forEach(k => { if (k !== '(untagged)' && !validSet.has(k)) orphanTotal += dist[k]; });
+      const parts = Object.entries(dist).map(([k, n]) => k + ((k !== '(untagged)' && !validSet.has(k)) ? '\u26A0' : '') + ': ' + n);
+      report.push(label + ' \u2014 ' + parts.join(', '));
+    });
+    alert('Your activities: ' + valid.join(', ') + '\n\nTag distribution:\n' + report.join('\n') + '\n\n' + (orphanTotal ? ('\u26A0 = tagged to a division not in your account (' + orphanTotal + ' record(s)) \u2014 these are hidden everywhere.') : 'No orphaned tags found.') + '\n\nTo move a record shown under the wrong (but valid) division: open it in the correct workspace and re-save. Automatic moves are disabled for multi-business accounts to protect isolation.');
+  }
+
   // Resolves which division the user is currently working in (falls back to first type)
   const effectiveBizContext = (activeBizContext && activeTypes.includes(activeBizContext))
     ? activeBizContext
@@ -23364,11 +28236,15 @@ export default function App() {
   const country = (businessInfo && businessInfo.country) || 'india';
 
   const stats = useMemo(() => {
-    // Scope every figure to the currently-selected business division (dashboard isolation)
+    // Scope every figure to the currently-selected business division (dashboard isolation).
+    // Only filter when the account actually runs multiple activities — a single-biz
+    // account shows all its data (matches the Vouchers / Petty Cash module behaviour,
+    // so the dashboard totals always agree with what the modules list).
     const _bizDef = activeTypes.length === 1 ? activeTypes[0] : 'trading';
-    const _docs   = sessionContext ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
+    const _scoped = !!sessionContext && activeTypes.length > 1;
+    const _docs   = _scoped ? documents.filter(d => (d.bizType || _bizDef) === sessionContext) : documents;
     const _vlist  = Array.isArray(vouchers) ? vouchers : [];
-    const _vouch  = sessionContext ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
+    const _vouch  = _scoped ? _vlist.filter(v => (v.bizType || _bizDef) === sessionContext) : _vlist;
     // Only approved invoices count toward receivables
     const totalRevenue   = _docs.filter(d => d.type === 'invoice' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
     const totalPurchases = _docs.filter(d => d.type === 'purchasebill' && d.status === 'approved').reduce((s, d) => s + (computeTotals(d, businessInfo.state, country).grandTotal || 0), 0);
@@ -23423,7 +28299,8 @@ export default function App() {
   const trialDaysLeft  = _trialDaysUsed !== null ? Math.max(0, TRIAL_DAYS - _trialDaysUsed) : null;
   const trialExpired   = _trialDaysUsed !== null && _trialDaysUsed >= TRIAL_DAYS;
   const isSubscribed   = !!businessInfo.subscriptionActive;
-  const isTestAccount  = TEST_EMAILS.includes(user?.email);
+  const _email = String(user?.email || '').toLowerCase().trim();
+  const isTestAccount  = isTestEmail(user?.email) || (!!_email && bypassEmails.includes(_email));
 
   // Once data is loaded and user hasn't chosen a session workspace yet,
   // always route to setup or home screen — never fall through to main app.
@@ -23451,23 +28328,26 @@ export default function App() {
   }
 
   if (biReady && trialExpired && !isSubscribed && !isTestAccount) {
-    return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} />;
+    return <PaywallScreen businessInfo={businessInfo} onLogout={handleLogout} isStaff={userRole !== 'admin'} activeTypes={activeTypes} />;
   }
 
   // Session-scoped: when a workspace is chosen, scope all views to that activity
   const sessionActiveTypes = sessionContext ? [sessionContext] : activeTypes;
   const sessionCompanyType = sessionContext || companyType;
   const sessionIsMultiBiz  = sessionActiveTypes.length > 1;
-  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all)
+  // Filter documents to the chosen workspace (backward-compat: untagged docs show in all).
+  // Only scope when the account actually runs multiple activities — a single-activity
+  // account shows all its data, so every module and the dashboard stay in agreement.
   const bizDefault  = activeTypes.length === 1 ? activeTypes[0] : 'trading';
-  const sessionDocs = sessionContext
+  const _sessScoped = !!sessionContext && isMultiBiz;
+  const sessionDocs = _sessScoped
     ? documents.filter(d => (d.bizType || bizDefault) === sessionContext)
     : documents;
   // Session-scoped accounts data (vouchers + petty cash) for reports & audit isolation
-  const sessionVouchers = sessionContext
+  const sessionVouchers = _sessScoped
     ? (Array.isArray(vouchers) ? vouchers : []).filter(v => (v.bizType || bizDefault) === sessionContext)
     : vouchers;
-  const sessionEmployees = sessionContext
+  const sessionEmployees = _sessScoped
     ? (Array.isArray(employees) ? employees : []).filter(e => (e.bizType || bizDefault) === sessionContext)
     : employees;
   const sessionPettyCash = (sessionContext && isMultiBiz)
@@ -23486,6 +28366,7 @@ export default function App() {
           businessInfo={businessInfo}
           userRole={userRole}
           onSave={handleSaveDoc}
+          onDeleteDoc={(id) => { deleteDoc(id); setActiveDoc(null); setView('documents'); }}
           onCancel={() => { setActiveDoc(null); setView('documents'); }}
           onAddCustomer={(c) => setEditingCustomer(c || { name: '' })}
           onAddVendor={(v) => setEditingVendor(v || { name: '' })}
@@ -23495,6 +28376,7 @@ export default function App() {
           onConvert={convertDoc}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
           documents={documents}
+          purchaseReqs={purchaseReqs}
         />
       );
     }
@@ -23517,6 +28399,17 @@ export default function App() {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    if (view === 'paymenttracking') return (
+      <PaymentTrackingView
+        siteProjects={siteProjects}
+        setSiteProjects={setSiteProjects}
+        siteActivities={siteActivities}
+        raBillings={raBillings}
+        subcontractors={subcontractors}
+        userRole={userRole}
+        businessInfo={businessInfo}
+      />
+    );
     if (view === 'variations') return (
       <VariationsView
         variations={variations}
@@ -23524,7 +28417,7 @@ export default function App() {
         siteProjects={siteProjects}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -23536,7 +28429,7 @@ export default function App() {
         siteActivities={siteActivities}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -23546,7 +28439,7 @@ export default function App() {
         setResources={setResources}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
       />
     );
@@ -23557,13 +28450,14 @@ export default function App() {
         siteProjects={siteProjects}
         userRole={userRole}
         businessInfo={businessInfo}
-        currentBizType={effectiveBizContext}
+        currentBizType={sessionContext || effectiveBizContext}
         isMultiBiz={isMultiBiz}
         currentUserName={user?.displayName || user?.email || ''}
         tcChecklists={tcChecklists}
         handoverDocs={handoverDocs}
         subcontractors={subcontractors}
         setView={setView}
+        ownerUid={ownerUid}
       />
     );
     if (COMING_SOON[view]) return <ComingSoon label={COMING_SOON[view]} />;
@@ -23591,6 +28485,11 @@ export default function App() {
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
+            employees={sessionEmployees}
+            labourGroups={labourGroups}
+            userRole={userRole}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
           />
         );
       case 'enquiries':
@@ -23600,7 +28499,7 @@ export default function App() {
             setEnquiries={setEnquiries}
             customers={customers}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             onConvertToQuotation={(enq) => {
               const cust = customers.find(c => c.id === enq.customerId);
@@ -23760,7 +28659,7 @@ export default function App() {
             termsLibrary={termsLibrary}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23782,6 +28681,7 @@ export default function App() {
             setSearch={setDocSearch}
             openDoc={openDoc}
             deleteDoc={deleteDoc}
+            userRole={userRole}
             startNewDoc={startNewDoc}
             activeTypes={sessionActiveTypes}
           />
@@ -23817,7 +28717,7 @@ export default function App() {
       case 'staff':
         return <StaffPage ownerUid={ownerUid} employees={employees} companyName={businessInfo?.name || ''} />;
       case 'settings':
-        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} />;
+        return <SettingsView businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} onExportData={exportAllData} onRestoreBackup={restoreFromBackup} onBackupNow={() => saveServerBackup(ownerUid, latestDataRef.current)} onListCloudBackups={() => listServerBackups(ownerUid)} onRestoreCloud={(path) => fetchServerBackup(path).then((bk) => restoreFromBackup(bk))} onTestConnection={async () => { try { const r = await testServerWrite(ownerUid); return '✅ Server OK — wrote & read back from Firestore: ' + JSON.stringify(r); } catch (e) { return '❌ FAILED: ' + (e.code || '') + ' — ' + (e.message || e); } }} onSaved={() => setView('dashboard')} userRole={userRole} isOwner={user?.uid === ownerUid} userEmail={user?.email || ''} onRequestDelete={() => setShowDeleteModal(true)} onRepairTags={repairBizTags} isMultiBiz={isMultiBiz} isSuperAdmin={isSuperAdmin(user?.email)} bypassEmails={bypassEmails} onSaveBypass={saveBypassEmails} />;
       case 'pettycash':
         return (
           <PettyCashList
@@ -23825,7 +28725,7 @@ export default function App() {
             setPettyCash={setPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             currentUserName={user?.displayName || user?.email || ''}
           />
@@ -23840,7 +28740,7 @@ export default function App() {
             documents={sessionDocs}
             userRole={userRole}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23855,7 +28755,7 @@ export default function App() {
             setStockLedger={setStockLedger}
             userRole={userRole}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23871,7 +28771,7 @@ export default function App() {
             businessInfo={businessInfo}
             setNotifications={setNotifications}
             user={user}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23883,7 +28783,7 @@ export default function App() {
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23903,7 +28803,7 @@ export default function App() {
             stockLedger={stockLedger}
             businessInfo={businessInfo}
             storeIssues={storeIssues}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
           />
         );
@@ -23915,13 +28815,13 @@ export default function App() {
             items={items}
             grns={grns}
             storeIssues={storeIssues}
-            employees={employees}
+            employees={sessionEmployees}
             siteProjects={siteProjects}
             productionOrders={productionOrders}
             setStockLedger={setStockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             currentUserName={user?.displayName || user?.email || ''}
           />
@@ -23935,7 +28835,7 @@ export default function App() {
             userRole={userRole}
             ownerUid={ownerUid}
             businessInfo={businessInfo}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
           />
         );
             case 'offerletter':
@@ -23978,6 +28878,8 @@ export default function App() {
             setPayrollRuns={setPayrollRuns}
             businessInfo={businessInfo}
             userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={sessionIsMultiBiz}
           />
         );
       case 'serviceorders':
@@ -23996,7 +28898,7 @@ export default function App() {
           <MEPProjectsView
             siteProjects={siteProjects}
             setSiteProjects={setSiteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             siteActivities={siteActivities}
             progressUpdates={progressUpdates}
             userRole={userRole}
@@ -24012,6 +28914,11 @@ export default function App() {
             setProgressUpdates={setProgressUpdates}
             userRole={userRole}
             businessInfo={businessInfo}
+            tenders={tenders}
+            raBillings={raBillings}
+            setRaBillings={setRaBillings}
+            customers={customers}
+            setView={setView}
           />
         );
       case 'dailyupdates':
@@ -24021,7 +28928,7 @@ export default function App() {
             setProgressUpdates={setProgressUpdates}
             siteActivities={siteActivities}
             siteProjects={siteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
           />
         );
@@ -24039,7 +28946,7 @@ export default function App() {
             clientMaterials={clientMaterials}
             setClientMaterials={setClientMaterials}
             siteProjects={siteProjects}
-            employees={employees}
+            employees={sessionEmployees}
             userRole={userRole}
           />
         );
@@ -24048,9 +28955,20 @@ export default function App() {
           <SiteAttendanceView
             siteAttendance={siteAttendance}
             setSiteAttendance={setSiteAttendance}
+            labourGroups={labourGroups}
+            setLabourGroups={setLabourGroups}
             siteProjects={siteProjects}
-            employees={employees}
+            setSiteProjects={setSiteProjects}
+            employees={sessionEmployees}
             userRole={userRole}
+            user={user}
+            businessInfo={businessInfo}
+            payrollRuns={payrollRuns}
+            setPayrollRuns={setPayrollRuns}
+            holidayCalendar={holidayCalendar}
+            setHolidayCalendar={setHolidayCalendar}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={sessionIsMultiBiz}
           />
         );
       case 'evaluation':
@@ -24058,7 +28976,7 @@ export default function App() {
           <QuarterlyEvalView
             evaluations={evaluations}
             setEvaluations={setEvaluations}
-            employees={employees}
+            employees={sessionEmployees}
             siteAttendance={siteAttendance}
             progressUpdates={progressUpdates}
             siteProjects={siteProjects}
@@ -24091,6 +29009,9 @@ export default function App() {
           />
         );
       case 'subcontractors':
+      case 'subcontractbilling':
+      case 'subprogress':
+      case 'subcertification':
         return (
           <SubcontractorView
             subcontractors={subcontractors}
@@ -24098,9 +29019,14 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            initialTab={view==='subprogress'?'progress':view==='subcertification'?'certification':'register'}
           />
         );
       case 'hse':
+      case 'hseinspections':
+      case 'toolbox':
+      case 'incidents':
+      case 'hsepermits':
         return (
           <HSEView
             hseRecords={hseRecords}
@@ -24108,6 +29034,7 @@ export default function App() {
             siteProjects={siteProjects}
             userRole={userRole}
             businessInfo={businessInfo}
+            initialTab={view==='hseinspections'?'inspections':view==='toolbox'?'toolbox':view==='incidents'?'incidents':view==='hsepermits'?'permits':'reports'}
           />
         );
       case 'tcommissioning':
@@ -24131,13 +29058,36 @@ export default function App() {
             businessInfo={businessInfo}
           />
         );
+      case 'dlpdefects':
+        return (
+          <DLPView
+            dlpDefects={dlpDefects}
+            setDlpDefects={setDlpDefects}
+            siteProjects={siteProjects}
+            setSiteProjects={setSiteProjects}
+            subcontractors={subcontractors}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
+      case 'servicehistory':
+        return (
+          <ServiceHistoryView
+            serviceHistory={serviceHistory}
+            setServiceHistory={setServiceHistory}
+            siteProjects={siteProjects}
+            assets={assets}
+            userRole={userRole}
+            businessInfo={businessInfo}
+          />
+        );
       case 'mepreports':
         return (
           <MEPReportsView
             siteProjects={siteProjects}
             siteActivities={siteActivities}
             progressUpdates={progressUpdates}
-            employees={employees}
+            employees={sessionEmployees}
             businessInfo={businessInfo}
             manpowerLogs={manpowerLogs}
           />
@@ -24193,7 +29143,7 @@ export default function App() {
             documents={documents}
             stockLedger={stockLedger}
             items={items}
-            employees={employees}
+            employees={sessionEmployees}
             businessInfo={businessInfo}
           />
         );
@@ -24219,6 +29169,7 @@ export default function App() {
           />
         );
       case 'pmschedules':
+      case 'pmaintenance':
         return (
           <PMScheduleView
             pmSchedules={pmSchedules}
@@ -24301,7 +29252,7 @@ export default function App() {
             pettyCash={sessionPettyCash}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             auditDocs={auditDocs}
             setAuditDocs={setAuditDocs}
@@ -24312,11 +29263,69 @@ export default function App() {
           <MoMView
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
             moms={moms}
             setMoms={setMoms}
-            employees={employees}
+            employees={sessionEmployees}
+          />
+        );
+      case 'investors':
+        return (
+          <InvestorShareView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            investors={investors}
+            setInvestors={setInvestors}
+            profitShares={profitShares}
+            setProfitShares={setProfitShares}
+            documents={sessionDocs}
+            vouchers={sessionVouchers}
+            pettyCash={sessionPettyCash}
+            payrollRuns={payrollRuns}
+          />
+        );
+      case 'boshortage':
+        return (
+          <BOShortageView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            boms={boms}
+            rawMaterials={rawMaterials}
+            boShortages={boShortages}
+            setBoShortages={setBoShortages}
+            purchaseReqs={purchaseReqs}
+            setPurchaseReqs={setPurchaseReqs}
+            setView={setView}
+          />
+        );
+      case 'tds':
+        return (
+          <TDSView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            tdsSheets={tdsSheets}
+            setTdsSheets={setTdsSheets}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            documents={documents}
+          />
+        );
+      case 'fatsat':
+        return (
+          <FATSATView
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz}
+            fatReports={fatReports}
+            setFatReports={setFatReports}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
           />
         );
       case 'purchasereq':
@@ -24334,13 +29343,15 @@ export default function App() {
             mepBoms={mepBoms}
             businessInfo={businessInfo}
             userRole={userRole}
-            currentBizType={effectiveBizContext}
+            currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz}
+            assets={assets}
+            setAssets={setAssets}
             onConvertToPO={(pr) => {
               const its = (pr.items || []).filter(it => it.name).map(it => {
                 const m = (items || []).find(x => String(x.id) === String(it.itemId));
                 const base = EMPTY_ITEM_ROW(businessInfo);
-                return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
+                return { ...base, itemId: it.itemId || '', name: it.name + (pr.type === 'capex' ? (it.make ? ' — ' + it.make : '') + (it.spec ? ' (' + it.spec + ')' : '') : ''), qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
               });
               startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
@@ -24379,6 +29390,11 @@ export default function App() {
             siteProjects={siteProjects}
             siteAttendance={siteAttendance}
             serviceOrders={serviceOrders}
+            employees={sessionEmployees}
+            labourGroups={labourGroups}
+            userRole={userRole}
+            raBillings={raBillings}
+            siteActivities={siteActivities}
           />
         );
     }
@@ -24388,6 +29404,14 @@ export default function App() {
 
   return (
     <div style={styles.app} className="no-print-bg">
+      <style>{`
+        /* Global toolbar alignment: action-button rows wrap instead of overflowing; labels never break mid-word */
+        button { white-space: nowrap; }
+        div:has(> button + button), div:has(> button + a), div:has(> button + label), div:has(> label + button) { flex-wrap: wrap; row-gap: 8px; }
+        div:has(> div > button + button):not([style*="overflow"]) { flex-wrap: wrap; row-gap: 10px; }
+        div:has(> div > button + button) > div:has(> button + button) { justify-content: flex-end; }
+        @media print { button { white-space: normal; } }
+      `}</style>
       <style>{`
         * { box-sizing: border-box; }
         .nav-toggle { display: none; }
@@ -24519,7 +29543,7 @@ export default function App() {
           pointerEvents: 'none',
         }}>
           <span style={{ opacity: 0.55 }}>Powered by</span>
-          <strong style={{ marginLeft: 3 }}>Operix</strong>
+          <strong style={{ marginLeft: 3 }}>Oryqen</strong>
         </div>
       )}
 
@@ -24558,6 +29582,8 @@ export default function App() {
           }}
           onClose={() => setEditingItem(null)}
           businessInfo={businessInfo}
+          items={items}
+          setBusinessInfo={setBusinessInfo}
         />
       )}
 
