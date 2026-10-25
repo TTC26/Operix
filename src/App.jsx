@@ -720,12 +720,41 @@ function printLetterFromHtml(html, biz, opts) {
       sbs.forEach((b2, bi2) => { if (bi2 > 0 && b2.firstElementChild) b2.firstElementChild.style.height = '66px'; });
       if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
     }
-    const kids = Array.from(page.children);
-    for (let ki = 0; ki < kids.length; ki++) {
-      const el = kids[ki];
-      if (/^H[23]$/.test(el.tagName) && kids[ki + 1]) { blocks.push({ t: '', h: '<div>' + el.outerHTML + kids[ki + 1].outerHTML + '</div>' }); ki++; }
-      else blocks.push({ t: '', h: el.outerHTML });
-    }
+    // Flow content at the finest sensible grain so long clauses / tables break across pages (tables row by row,
+    // header row repeated) instead of jumping whole to the next page or being cut off by the footer.
+    let _tid = 0;
+    const flat = (el, out) => {
+      if (el.tagName === 'TABLE') {
+        _tid++;
+        const thead = el.querySelector('thead');
+        const head = thead ? thead.outerHTML : '';
+        let trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
+        if (!trs.length) trs = Array.from(el.querySelectorAll(':scope > tr'));
+        if (!trs.length) { out.push({ t: '', h: el.outerHTML }); return; }
+        const open = '<table style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+        let i = 0;
+        while (i < trs.length) {
+          let span = 1;
+          trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+          out.push({ t: 'trow', id: _tid, o: open, th: head, h: trs.slice(i, i + span).map(r => r.outerHTML).join('') });
+          i += span;
+        }
+        return;
+      }
+      const ke = Array.from(el.children);
+      if (el.tagName === 'DIV' && ke.length >= 2 && el.style.display !== 'flex' && el.style.display !== 'grid' && !/(^|\s)(sig|sig-box|zco)(\s|$)/.test(el.className || '') && (el.querySelector('table') || (el.textContent || '').length > 500)) {
+        ke.forEach(k => flat(k, out)); return;
+      }
+      out.push({ t: '', h: el.outerHTML });
+    };
+    let _head = null;
+    Array.from(page.children).forEach(el => {
+      if (/^H[23]$/.test(el.tagName)) { if (_head) blocks.push({ t: '', h: _head }); _head = el.outerHTML; return; }
+      const out = []; flat(el, out);
+      if (_head) { if (out.length && out[0].t === '') out[0].h = '<div>' + _head + out[0].h + '</div>'; else blocks.push({ t: '', h: _head }); _head = null; }
+      out.forEach(b => blocks.push(b));
+    });
+    if (_head) blocks.push({ t: '', h: _head });
     return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
   } catch (e) { console.error(e); printHTML(html); }
 }
@@ -17376,13 +17405,16 @@ function blocksToText(blocks) {
   }).filter(s => s !== '').join('\n');
 }
 const _escH = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-function clauseHTML(text) {
+function clauseHTML(text, indent) {
+  const ind = indent || 0;
   return clauseBlocks(text).map(b => {
     if (b.type === 'text') {
-      return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map(l => `<div style="margin-bottom:4px;">${_escH(l.trim())}</div>`).join('');
+      return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map(l => `<div style="margin:0 0 4px ${ind}px;">${_escH(l.trim())}</div>`).join('');
     }
     const cell = (c, th) => `<${th ? 'th' : 'td'} style="border:1px solid #888;padding:4px 7px;text-align:left;vertical-align:top;${th ? 'background:#EEF1F7;font-weight:700;' : ''}">${_escH(c).replace(/\n/g, '<br>')}</${th ? 'th' : 'td'}>`;
-    return `<table style="width:100%;border-collapse:collapse;margin:6px 0 10px;font-size:11.5px;page-break-inside:avoid;">${b.rows.map((r, i) => `<tr>${r.map(c => cell(c, i === 0)).join('')}</tr>`).join('')}</table>`;
+    const head = `<thead><tr>${b.rows[0].map(c => cell(c, true)).join('')}</tr></thead>`;
+    const body = b.rows.slice(1).map(r => `<tr>${r.map(c => cell(c, false)).join('')}</tr>`).join('');
+    return `<table style="width:calc(100% - ${ind}px);margin:6px 0 10px ${ind}px;border-collapse:collapse;font-size:11.5px;">${head}<tbody>${body}</tbody></table>`;
   }).join('');
 }
 function ClauseBody({ text, prefix = '', style }) {
@@ -18539,11 +18571,9 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     const termsHTML = terms.items.length > 0 ? `
       <h3>Terms &amp; Conditions</h3>
       ${terms.items.map((item,i)=>`
-        <div style="margin-bottom:16px;font-size:12px;line-height:1.8;">
-          ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin-bottom:6px;">${item.title}</div>` : ''}
-          <div style="margin-left:${item.title?14:0}px;">
-            ${clauseHTML(item.text)}
-          </div>
+        <div style="font-size:12px;line-height:1.8;">
+          ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin:12px 0 6px;">${item.title}</div>` : ''}
+          ${clauseHTML(item.text, item.title ? 14 : 0)}
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
 
