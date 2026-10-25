@@ -1441,6 +1441,11 @@ async function printPaginated(sel, bi, pre, gen) {
     Array.from(clone.children).forEach(walk);
     }
 
+    // Common rule for EVERY printed document / module / business: page footer = company | document no. | Page x of y.
+    // (Explicit pre.pgf wins; otherwise the document number is detected from the content, e.g. TTC/INV/26-27/001.)
+    const _plain = blocks.map(b => String(b.h || '')).join(' ').replace(/<[^>]+>/g, ' ');
+    const _dm = _plain.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
+    const PGFTXT = (pre && pre.pgf) || (gen && gen.pgf) || [bi && bi.name, _dm ? _dm[0] : (typeof window !== 'undefined' && window.__printDocNo) || '', 'Page {p} of {n}'].filter(Boolean).join(' | ');
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
@@ -1477,7 +1482,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.pgf{position:absolute;left:0;right:0;bottom:' + (FTRMM + 1) + 'mm;text-align:center;font-size:9px;color:#666;font-family:Arial,sans-serif;}'
-      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + ((pre && pre.pgf) ? 6 : 0)) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + 6) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
       + '.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:120px;font-weight:900;letter-spacing:12px;color:rgba(185,28,28,0.10);white-space:nowrap;pointer-events:none;z-index:5;font-family:Arial,sans-serif;}'
       + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
       + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
@@ -1492,7 +1497,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify((pre && pre.pgf) || '') + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
