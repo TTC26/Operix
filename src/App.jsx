@@ -157,6 +157,7 @@ const CONVERT_TO = {
   quotation: ['invoice'],
   invoice:   ['delivery', 'packing_list', 'creditnote'],
   delivery:  ['packing_list'],
+  packing_list: ['delivery'],
   purchase:  ['purchasebill'],
 };
 
@@ -1267,6 +1268,33 @@ async function printPaginated(sel, bi, pre, gen) {
       clone.querySelectorAll('.di-print').forEach(n => { n.style.display = 'block'; });
       clone.querySelectorAll('.di-print-row').forEach(n => { n.style.display = 'table-row'; });
       clone.querySelectorAll('.draft-watermark').forEach(n => { const p = n.parentNode; if (p) p.remove(); });
+      // Letterhead already carries the company name / address / contacts → drop the duplicate company block from the
+      // top of the view and keep only the document title (e.g. "PURCHASE REQUISITION  PR/26-27/001").
+      if (lhHdrUrl && bi && bi.name) {
+        try {
+          const first = clone.firstElementChild;
+          if (first && (first.textContent || '').length < 500) {
+            const nz = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toLowerCase();
+            const nameN = [bi.name, bi.companyName].filter(Boolean).map(nz);
+            const addrN = nz(bi.address);
+            const ids = [bi.phone, bi.email, bi.gstin, bi.website].filter(Boolean).map(nz);
+            Array.from(first.querySelectorAll('div,span,p,h1,h2,h3,b,strong,small')).forEach(el => {
+              if (!el.isConnected) return;
+              if (Array.from(el.children).some(ch => ch.tagName !== 'BR')) return;
+              const t = nz(el.textContent); if (!t) return;
+              const isCo = nameN.includes(t) || (t.length > 6 && addrN && addrN.includes(t)) || (t.length < 110 && ids.some(x => x && t.includes(x)));
+              if (!isCo) return;
+              let n = el;
+              while (n.parentElement && n.parentElement !== first.parentElement && !(n.parentElement.textContent || '').replace(/\s+/g, '').replace(n.textContent.replace(/\s+/g, ''), '').length) n = n.parentElement;
+              n.remove();
+            });
+            const hasText = (e) => (e.textContent || '').trim() || e.querySelector('img,table');
+            Array.from(first.querySelectorAll('div,span')).reverse().forEach(e => { if (!hasText(e)) e.remove(); });
+            if (!hasText(first)) first.remove();
+            else if (first.style.display === 'flex' && first.children.length === 1) { first.style.justifyContent = 'center'; first.children[0].style.textAlign = 'center'; }
+          }
+        } catch (e) {}
+      }
       // Seal & signature: drop them above the "Authorised Signatory" line (and equalise the other party's gap),
       // or append a signature block when the view has none. Switched by Settings + the per-print toggle.
       let _needSealAppend = false, _sealImgs = '';
@@ -4877,7 +4905,7 @@ function DocRow({ doc, customers, vendors, onClick, businessInfo, showBizBadge =
         <div style={{ ...styles.docRowTitle, display: 'flex', alignItems: 'center', gap: 6 }}>
           {doc.number}
           {doc.linkedFrom && (
-            <span title={`Based on ${DOC_TYPES[doc.linkedFrom.docType]?.label} ${doc.linkedFrom.docNumber}`}
+            <span title={`Based on ${DOC_TYPES[doc.linkedFrom.docType]?.label || doc.linkedFrom.label || 'document'} ${doc.linkedFrom.docNumber}`}
               style={{ fontSize: 10, background: '#EDE8FA', color: '#6B5BAE', borderRadius: 4, padding: '1px 5px', fontWeight: 500 }}>
               🔗 {doc.linkedFrom.docNumber}
             </span>
@@ -6457,7 +6485,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
       {/* Linked-from banner */}
       {doc.linkedFrom && (
         <div style={{ background: '#F0EEF9', border: '1px solid #C8C0E8', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: '#4A3F8A', display: 'flex', alignItems: 'center', gap: 8 }} className="no-print">
-          🔗 <span>Based on <strong>{DOC_TYPES[doc.linkedFrom.docType]?.label}</strong> — {doc.linkedFrom.docNumber}</span>
+          🔗 <span>Based on <strong>{DOC_TYPES[doc.linkedFrom.docType]?.label || doc.linkedFrom.label || 'Document'}</strong> — {doc.linkedFrom.docNumber}</span>
         </div>
       )}
 
@@ -17315,15 +17343,260 @@ const DEFAULT_PO_CLAUSES = [
   { id:'dc15', category:'Termination',      title:'Clause 15: Termination',                           text:'15.1 The Buyer may terminate this PO in whole or in part by giving 30 days written notice to the Supplier.\n15.2 In the event of termination for convenience, the Buyer shall pay for work completed up to the date of termination and reasonable documented costs incurred.\n15.3 The Buyer may terminate this PO immediately for cause if the Supplier: (a) becomes insolvent or files for bankruptcy; (b) commits a material breach that remains unrectified for 14 days after notice; (c) fails to deliver within the LD cap period.\n15.4 Upon termination, the Supplier shall promptly return any advance paid (less work completed) and hand over all work in progress, drawings, and documents related to the PO.' },
 ];
 
+// ── Clause text: plain lines + pipe tables (| a | b |) ───────────────────────
+const DEFAULT_LIBRARY = 'General';
+const clauseLib = c => (c && c.library) || DEFAULT_LIBRARY;
+function libraryList(tl) {
+  const s = new Set([DEFAULT_LIBRARY]);
+  ((tl && tl.libraries) || []).forEach(x => x && s.add(x));
+  ((tl && tl.clauses) || []).forEach(c => s.add(clauseLib(c)));
+  return [...s];
+}
+function clauseBlocks(text) {
+  const out = []; let tbl = null, buf = [];
+  const flush = () => { if (buf.length) { out.push({ type: 'text', value: buf.join('\n') }); buf = []; } };
+  String(text || '').split('\n').forEach(line => {
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim().replace(/<br>/gi, '\n'));
+      if (cells.every(c => /^:?-{2,}:?$/.test(c))) return;
+      if (!tbl) { flush(); tbl = { type: 'table', rows: [] }; out.push(tbl); }
+      tbl.rows.push(cells);
+    } else { tbl = null; buf.push(line); }
+  });
+  flush();
+  out.forEach(b => { if (b.type === 'table') { const n = Math.max(...b.rows.map(r => r.length)); b.rows = b.rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; }); } });
+  return out;
+}
+function blocksToText(blocks) {
+  return blocks.map(b => {
+    if (b.type === 'text') return b.value;
+    const rows = b.rows.map(r => '| ' + r.map(c => String(c).replace(/\n/g, '<br>').replace(/\|/g, '/')).join(' | ') + ' |');
+    if (rows.length) rows.splice(1, 0, '| ' + b.rows[0].map(() => '---').join(' | ') + ' |');
+    return rows.join('\n');
+  }).filter(s => s !== '').join('\n');
+}
+const _escH = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function clauseHTML(text) {
+  return clauseBlocks(text).map(b => {
+    if (b.type === 'text') {
+      return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map(l => `<div style="margin-bottom:4px;">${_escH(l.trim())}</div>`).join('');
+    }
+    const cell = (c, th) => `<${th ? 'th' : 'td'} style="border:1px solid #888;padding:4px 7px;text-align:left;vertical-align:top;${th ? 'background:#EEF1F7;font-weight:700;' : ''}">${_escH(c).replace(/\n/g, '<br>')}</${th ? 'th' : 'td'}>`;
+    return `<table style="width:100%;border-collapse:collapse;margin:6px 0 10px;font-size:11.5px;page-break-inside:avoid;">${b.rows.map((r, i) => `<tr>${r.map(c => cell(c, i === 0)).join('')}</tr>`).join('')}</table>`;
+  }).join('');
+}
+function ClauseBody({ text, prefix = '', style }) {
+  let first = true;
+  return (
+    <div style={style}>
+      {clauseBlocks(text).map((b, i) => {
+        if (b.type === 'text') {
+          return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map((l, j) => {
+            const p = first ? prefix : ''; first = false;
+            return <div key={i + '-' + j} style={{ marginBottom: 2 }}>{p}{l.trim()}</div>;
+          });
+        }
+        first = false;
+        return (
+          <table key={i} style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 10px', fontSize: '0.92em' }}>
+            <tbody>
+              {b.rows.map((r, ri) => (
+                <tr key={ri}>{r.map((c, ci) => React.createElement(ri === 0 ? 'th' : 'td', { key: ci, style: { border: '1px solid #999', padding: '4px 8px', textAlign: 'left', verticalAlign: 'top', whiteSpace: 'pre-wrap', ...(ri === 0 ? { background: '#EEF1F7', fontWeight: 700 } : {}) } }, c))}</tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Import clauses from DOCX / Excel / CSV ───────────────────────────────────
+let _mammothPromise = null;
+function loadMammoth() {
+  if (typeof window !== 'undefined' && window.mammoth) return Promise.resolve(window.mammoth);
+  if (_mammothPromise) return _mammothPromise;
+  const urls = ['https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js'];
+  _mammothPromise = new Promise((resolve, reject) => {
+    let i = 0;
+    const tryNext = () => {
+      if (i >= urls.length) { _mammothPromise = null; return reject(new Error('Could not load the Word reader (offline or blocked)')); }
+      const s = document.createElement('script'); s.src = urls[i++];
+      s.onload = () => window.mammoth ? resolve(window.mammoth) : tryNext();
+      s.onerror = tryNext; document.head.appendChild(s);
+    };
+    tryNext();
+  });
+  return _mammothPromise;
+}
+function guessClauseCategory(t) {
+  t = String(t || '');
+  const map = [['Force Majeure', /force majeure/i], ['Confidentiality', /confiden|non-?disclosure|\bnda\b/i], ['Dispute Resolution', /dispute|arbitrat|jurisdiction|governing law/i], ['Termination', /terminat|cancell?ation/i], ['Warranty', /warrant|guarantee|defect|\bdlp\b/i], ['Liability', /liabil|liquidated|penalt|indemn|damages/i], ['Payment', /payment|invoice|advance|retention|billing/i], ['Delivery', /deliver|dispatch|shipment|freight|packing/i]];
+  for (const [c, re] of map) if (re.test(t)) return c;
+  return 'Other';
+}
+function matchClauseCategory(v) {
+  const x = String(v || '').toLowerCase();
+  return CLAUSE_CATEGORIES.find(c => c.toLowerCase() === x) || guessClauseCategory(v);
+}
+function rowsToClauses(rows, sheetName) {
+  rows = rows.map(r => r.map(c => String(c == null ? '' : c).trim())).filter(r => r.some(Boolean));
+  if (!rows.length) return [];
+  let hi = -1, ti = -1, xi = -1, ci = -1;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const h = rows[i].map(c => c.toLowerCase());
+    const t = h.findIndex(c => /^(title|clause|heading|subject|name|clause title)/.test(c));
+    const x = h.findIndex((c, k) => k !== t && /(text|description|details|condition|terms|content|wording)/.test(c));
+    if (t >= 0 && x >= 0) { hi = i; ti = t; xi = x; ci = h.findIndex(c => /categor|type|group/.test(c)); break; }
+  }
+  if (hi >= 0) {
+    return rows.slice(hi + 1).filter(r => r[ti] || r[xi]).map((r, k) => ({ title: r[ti] || 'Clause ' + (k + 1), text: r[xi] || '', category: ci >= 0 && r[ci] ? matchClauseCategory(r[ci]) : guessClauseCategory((r[ti] || '') + ' ' + (r[xi] || '')) }));
+  }
+  const n = Math.max(...rows.map(r => r.length));
+  const grid = rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; });
+  return [{ title: sheetName || 'Table', text: blocksToText([{ type: 'table', rows: grid }]), category: 'Other' }];
+}
+async function parseClauseFile(file) {
+  const name = file.name || 'clauses';
+  if (/\.(xlsx|xls)$/i.test(name)) {
+    const X = await loadXLSX();
+    const wb = X.read(await file.arrayBuffer(), { type: 'array' });
+    let out = [];
+    wb.SheetNames.forEach(sn => { out = out.concat(rowsToClauses(X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', blankrows: false }), sn)); });
+    return out;
+  }
+  if (/\.(csv|tsv|txt)$/i.test(name)) return rowsToClauses(parseCsvText(await file.text()), name.replace(/\.[^.]+$/, ''));
+  if (/\.docx$/i.test(name)) {
+    const M = await loadMammoth();
+    const res = await M.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+    const dom = new DOMParser().parseFromString('<div id="r">' + res.value + '</div>', 'text/html');
+    const items = []; let cur = null;
+    const start = t => { cur = { title: t.trim(), lines: [] }; items.push(cur); };
+    const ensure = () => { if (!cur) start(name.replace(/\.[^.]+$/, '')); };
+    const boldOnly = el => { const t = (el.textContent || '').trim(); const b = [...el.querySelectorAll('strong,b')].map(x => x.textContent).join('').trim(); return !!t && b.length >= t.length - 2; };
+    const isTitle = (el, t) => /^H[1-6]$/.test(el.tagName) || (t.length <= 120 && !/^\d+\.\d+/.test(t) && (boldOnly(el) || /^(clause|article|section)\s*\d+/i.test(t)));
+    [...dom.getElementById('r').children].forEach(el => {
+      const tag = el.tagName; const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (tag === 'TABLE') {
+        ensure();
+        const rows = [...el.querySelectorAll('tr')].map(tr => [...tr.children].map(td => (td.textContent || '').replace(/\s+/g, ' ').trim()));
+        const n = Math.max(...rows.map(r => r.length));
+        cur.lines.push(blocksToText([{ type: 'table', rows: rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; }) }]));
+        return;
+      }
+      if (!t) return;
+      if (tag === 'UL' || tag === 'OL') { ensure(); [...el.querySelectorAll('li')].forEach((li, i) => cur.lines.push((tag === 'OL' ? (i + 1) + '. ' : '• ') + (li.textContent || '').trim())); return; }
+      if (isTitle(el, t)) { start(t); return; }
+      ensure(); cur.lines.push(t);
+    });
+    return items.filter(c => c.lines.length).map(c => { const text = c.lines.join('\n'); return { title: c.title, text, category: guessClauseCategory(c.title + ' ' + text) }; });
+  }
+  throw new Error('Unsupported file type — use .docx, .xlsx, .xls or .csv');
+}
+
+function ImportClausesModal({ libraries, defaultLibrary, onImport, onClose }) {
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [fname, setFname] = useState('');
+  const [lib, setLib] = useState(defaultLibrary && defaultLibrary !== 'All' ? defaultLibrary : DEFAULT_LIBRARY);
+  const [newLib, setNewLib] = useState('');
+  async function pick(e) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy(true); setErr(''); setItems([]); setFname(f.name);
+    try {
+      const res = await parseClauseFile(f);
+      if (!res.length) setErr('No clauses could be found in this file.');
+      setItems(res.map(c => ({ ...c, include: true })));
+    } catch (ex) { setErr(ex.message || String(ex)); }
+    setBusy(false);
+  }
+  const upd = (i, p) => setItems(a => a.map((x, j) => j === i ? { ...x, ...p } : x));
+  const chosen = items.filter(c => c.include);
+  const target = lib === '__new' ? newLib.trim() : lib;
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, boxSizing: 'border-box' };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 26, width: 760, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 700 }}>Import clauses from a file</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#777' }}>Upload a Word (.docx) or Excel (.xlsx / .csv) file. Headings (or Excel Title + Text columns) become clauses; tables are kept as tables. Review, then choose the library to save them under.</p>
+        <input type="file" accept=".docx,.xlsx,.xls,.csv" onChange={pick} style={{ marginBottom: 12 }} />
+        {busy && <div style={{ fontSize: 13, color: '#888' }}>Reading {fname}…</div>}
+        {err && <div style={{ fontSize: 13, color: '#B5453A', marginBottom: 8 }}>{err}</div>}
+        {items.length > 0 && (
+          <>
+            <div style={{ fontSize: 12.5, fontWeight: 600, margin: '6px 0' }}>{chosen.length} of {items.length} clause(s) selected</div>
+            <div style={{ border: '1px solid #EAE6DB', borderRadius: 8, maxHeight: 320, overflowY: 'auto', marginBottom: 14 }}>
+              {items.map((c, i) => (
+                <div key={i} style={{ padding: '8px 10px', borderBottom: '1px solid #F0EDE6', background: c.include ? '#fff' : '#FAFAF8', opacity: c.include ? 1 : 0.55 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                    <input type="checkbox" checked={c.include} onChange={e => upd(i, { include: e.target.checked })} />
+                    <input value={c.title} onChange={e => upd(i, { title: e.target.value })} style={{ ...inp, flex: 1, fontWeight: 600 }} />
+                    <select value={c.category} onChange={e => upd(i, { category: e.target.value })} style={inp}>{CLAUSE_CATEGORIES.map(x => <option key={x}>{x}</option>)}</select>
+                  </div>
+                  <ClauseBody text={c.text} style={{ fontSize: 12, color: '#666', maxHeight: 90, overflow: 'hidden', marginLeft: 24 }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 600, color: '#555' }}>Save under library</label>
+              <select value={lib} onChange={e => setLib(e.target.value)} style={inp}>
+                {libraries.map(l => <option key={l} value={l}>{l}</option>)}
+                <option value="__new">＋ New library…</option>
+              </select>
+              {lib === '__new' && <input value={newLib} onChange={e => setNewLib(e.target.value)} placeholder="e.g. SOS, AMC Terms, PO Terms" style={{ ...inp, width: 200 }} />}
+            </div>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button disabled={!chosen.length} onClick={() => { if (!target) return alert('Enter a library name'); onImport(chosen.map(({ include, ...c }) => c), target); }}
+            style={{ padding: '9px 20px', background: chosen.length ? '#1E2A4A' : '#aaa', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: chosen.length ? 'pointer' : 'default' }}>Import {chosen.length || ''} clause(s)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   const [tab, setTab] = useState('clauses'); // 'clauses' | 'templates'
   const [clauseModal, setClauseModal] = useState(null); // null | clause obj
   const [tmplModal, setTmplModal] = useState(null);     // null | template obj
   const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
+  const [libFilter, setLibFilter] = useState('All');
+  const [importOpen, setImportOpen] = useState(false);
 
   const clauses   = termsLibrary.clauses   || [];
   const templates = termsLibrary.templates || [];
+  const libraries = libraryList(termsLibrary);
+  const libCount = l => clauses.filter(c => clauseLib(c) === l).length;
+
+  function addLibraryName(name) {
+    setTermsLibrary(prev => (prev.libraries || []).includes(name) ? prev : { ...prev, libraries: [...(prev.libraries || []), name] });
+  }
+  function newLibrary() {
+    const n = (window.prompt('New library name (e.g. SOS, AMC Terms, PO Terms):') || '').trim();
+    if (!n) return;
+    if (libraries.some(l => l.toLowerCase() === n.toLowerCase())) { alert('That library already exists.'); return; }
+    addLibraryName(n); setLibFilter(n);
+  }
+  function renameLibrary() {
+    if (libFilter === 'All' || libFilter === DEFAULT_LIBRARY) { alert('Select a library (other than General) to rename.'); return; }
+    const n = (window.prompt('Rename library "' + libFilter + '" to:', libFilter) || '').trim();
+    if (!n || n === libFilter) return;
+    setTermsLibrary(prev => ({ ...prev, libraries: (prev.libraries || []).map(l => l === libFilter ? n : l), clauses: (prev.clauses || []).map(c => clauseLib(c) === libFilter ? { ...c, library: n } : c) }));
+    setLibFilter(n);
+  }
+  function importClauses(items, libName) {
+    const stamp = Date.now().toString(36);
+    const add = items.map((c, i) => ({ id: stamp + i + Math.random().toString(36).slice(2, 6), title: c.title, category: c.category || 'Other', text: c.text, library: libName }));
+    saveClauses(prev => [...(prev || []), ...add]);
+    addLibraryName(libName);
+    setLibFilter(libName);
+    setImportOpen(false);
+    alert('✅ ' + add.length + ' clause(s) imported into "' + libName + '".');
+  }
 
   function saveClauses(updater) {
     setTermsLibrary(prev => {
@@ -17354,6 +17627,7 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   function handleSaveClause(form) {
     const saved = { ...form, id: form.id || crypto.randomUUID() };
     saveClauses(prev => form.id ? prev.map(c => c.id === form.id ? saved : c) : [...prev, saved]);
+    if (saved.library) addLibraryName(saved.library);
     setClauseModal(null);
   }
   function deleteClause(id) {
@@ -17374,8 +17648,9 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
   const filteredClauses = clauses.filter(c => {
     const matchCat = filterCat === 'All' || c.category === filterCat;
+    const matchLib = libFilter === 'All' || clauseLib(c) === libFilter;
     const matchSearch = `${c.title} ${c.text}`.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch;
+    return matchCat && matchSearch && matchLib;
   });
 
   const canEdit = userRole === 'admin';
@@ -17392,13 +17667,19 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
         {canEdit && (
           <div style={{ display:'flex', gap:8 }}>
             {tab === 'clauses' && (
+              <button onClick={() => setImportOpen(true)}
+                style={{ padding:'9px 16px', background:'#fff', color:'#1E2A4A', border:'1px solid #1E2A4A', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                ⬆ Import DOCX / Excel
+              </button>
+            )}
+            {tab === 'clauses' && (
               <button onClick={loadDefaultClauses}
                 style={{ padding:'9px 16px', background:'#fff', color:'#1E2A4A', border:'1px solid #1E2A4A', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
                 📋 Load Standard Clauses
               </button>
             )}
             <button
-              onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '' }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
+              onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '', library: libFilter !== 'All' ? libFilter : DEFAULT_LIBRARY }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
               style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>
               + {tab === 'clauses' ? 'New Clause' : 'New Template'}
             </button>
@@ -17417,6 +17698,16 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
       {tab === 'clauses' && (
         <>
+          {/* Library selector */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center', background: '#FBF9F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '8px 12px' }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A' }}>Library</label>
+            <select value={libFilter} onChange={e => setLibFilter(e.target.value)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, minWidth: 190 }}>
+              <option value="All">All libraries ({clauses.length})</option>
+              {libraries.map(l => <option key={l} value={l}>{l} ({libCount(l)})</option>)}
+            </select>
+            {canEdit && <button onClick={newLibrary} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>＋ New library</button>}
+            {canEdit && <button onClick={renameLibrary} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Rename</button>}
+          </div>
           {/* Filters */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clauses…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '7px 12px', fontSize: 13, width: 220 }} />
@@ -17434,8 +17725,9 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{c.title}</span>
                     <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#666' }}>{c.category}</span>
+                    <span style={{ background: '#E3EAF7', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#2B4A8B' }}>{clauseLib(c)}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                  <ClauseBody text={c.text} style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }} />
                 </div>
                 {canEdit && (
                   <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
@@ -17482,7 +17774,10 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
       {/* Clause Modal */}
       {clauseModal && (
-        <ClauseModal clause={clauseModal} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+        <ClauseModal clause={clauseModal} libraries={libraries} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+      )}
+      {importOpen && (
+        <ImportClausesModal libraries={libraries} defaultLibrary={libFilter} onImport={importClauses} onClose={() => setImportOpen(false)} />
       )}
       {/* Template Modal */}
       {tmplModal && (
@@ -17492,24 +17787,94 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   );
 }
 
-function ClauseModal({ clause, onSave, onClose }) {
-  const [form, setForm] = useState({ title: '', category: 'Payment', text: '', ...clause });
+function ClauseModal({ clause, libraries, onSave, onClose }) {
+  const [form, setForm] = useState({ title: '', category: 'Payment', library: DEFAULT_LIBRARY, ...clause });
+  const [blocks, setBlocks] = useState(() => { const b = clauseBlocks(clause.text || ''); return b.length ? b : [{ type: 'text', value: '' }]; });
+  const [newLib, setNewLib] = useState('');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setBlock = (i, patch) => setBlocks(bs => bs.map((b, j) => j === i ? { ...b, ...patch } : b));
+  const mapRows = (i, fn) => setBlocks(bs => bs.map((b, j) => j === i ? { ...b, rows: fn(b.rows) } : b));
+  const addTable = () => setBlocks(bs => [...bs, { type: 'table', rows: [['Column 1', 'Column 2', 'Column 3'], ['', '', ''], ['', '', '']] }]);
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' };
+  const mini = { border: '1px solid #DDD8CE', borderRadius: 5, padding: '3px 9px', fontSize: 11.5, background: '#fff', cursor: 'pointer', marginRight: 6 };
+  const libVal = form.library || DEFAULT_LIBRARY;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 540, maxHeight: '80vh', overflowY: 'auto' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 760, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{clause.id ? 'Edit Clause' : 'New Clause'}</h3>
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Title</label>
-        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
-        <select value={form.category} onChange={e => set('category', e.target.value)} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }}>
-          {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-        </select>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Text</label>
-        <textarea value={form.text} onChange={e => set('text', e.target.value)} placeholder="Write the full clause text here…" rows={6} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ ...inp, width: '100%' }} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
+            <select value={form.category} onChange={e => set('category', e.target.value)} style={{ ...inp, width: '100%' }}>
+              {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Library</label>
+            <select value={libVal} onChange={e => set('library', e.target.value)} style={{ ...inp, width: '100%' }}>
+              {libraries.map(l => <option key={l} value={l}>{l}</option>)}
+              <option value="__new">＋ New library…</option>
+            </select>
+            {libVal === '__new' && <input value={newLib} onChange={e => setNewLib(e.target.value)} placeholder="Library name" style={{ ...inp, width: '100%', marginTop: -8 }} />}
+          </div>
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Content <span style={{ fontWeight: 400, color: '#999' }}>— text and tables, in the order they will print</span></label>
+        <div style={{ marginTop: 6, marginBottom: 12 }}>
+          {blocks.map((b, i) => (
+            <div key={i} style={{ border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 8, background: b.type === 'table' ? '#FBFAF6' : '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase' }}>{b.type === 'table' ? 'Table' : 'Text'}</span>
+                <span>
+                  {i > 0 && <button style={mini} onClick={() => setBlocks(bs => { const a = bs.slice(); [a[i - 1], a[i]] = [a[i], a[i - 1]]; return a; })}>↑</button>}
+                  {i < blocks.length - 1 && <button style={mini} onClick={() => setBlocks(bs => { const a = bs.slice(); [a[i + 1], a[i]] = [a[i], a[i + 1]]; return a; })}>↓</button>}
+                  {blocks.length > 1 && <button style={{ ...mini, color: '#B5453A', borderColor: '#F3C5C5' }} onClick={() => setBlocks(bs => bs.filter((_, j) => j !== i))}>Remove</button>}
+                </span>
+              </div>
+              {b.type === 'text' ? (
+                <textarea value={b.value} onChange={e => setBlock(i, { value: e.target.value })} rows={5} placeholder="Write the clause text here…" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              ) : (
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <tbody>
+                        {b.rows.map((row, ri) => (
+                          <tr key={ri}>
+                            {row.map((cell, ci) => (
+                              <td key={ci} style={{ border: '1px solid #CFC9BB', padding: 0, background: ri === 0 ? '#EEF1F7' : '#fff' }}>
+                                <textarea value={cell} rows={1} onChange={e => mapRows(i, rs => rs.map((r, a) => a !== ri ? r : r.map((c, k) => k !== ci ? c : e.target.value)))}
+                                  style={{ width: '100%', minWidth: 90, border: 'none', padding: '6px 8px', fontSize: 12.5, boxSizing: 'border-box', resize: 'vertical', background: 'transparent', fontWeight: ri === 0 ? 700 : 400 }} />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <button style={mini} onClick={() => mapRows(i, rs => [...rs, rs[0].map(() => '')])}>+ Row</button>
+                    <button style={mini} onClick={() => mapRows(i, rs => rs.map(r => [...r, '']))}>+ Column</button>
+                    <button style={mini} disabled={b.rows.length < 2} onClick={() => mapRows(i, rs => rs.length > 1 ? rs.slice(0, -1) : rs)}>− Row</button>
+                    <button style={mini} disabled={b.rows[0].length < 2} onClick={() => mapRows(i, rs => rs[0].length > 1 ? rs.map(r => r.slice(0, -1)) : rs)}>− Column</button>
+                    <span style={{ fontSize: 11, color: '#999' }}>First row is the heading row.</span>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+          <button style={mini} onClick={() => setBlocks(bs => [...bs, { type: 'text', value: '' }])}>+ Add text</button>
+          <button style={mini} onClick={addTable}>▦ Add table</button>
+        </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
-          <button onClick={() => { if (!form.title || !form.text) return alert('Title and text are required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
+          <button onClick={() => {
+            const text = blocksToText(blocks);
+            if (!form.title || !text.trim()) return alert('Title and content are required');
+            const library = libVal === '__new' ? newLib.trim() : libVal;
+            if (!library) return alert('Enter a library name');
+            onSave({ ...form, text, library });
+          }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
         </div>
       </div>
     </div>
@@ -17518,6 +17883,8 @@ function ClauseModal({ clause, onSave, onClose }) {
 
 function TemplateModal({ template, clauses, onSave, onClose }) {
   const [form, setForm] = useState({ name: '', description: '', clauseIds: [], customText: '', ...template });
+  const [tlib, setTlib] = useState('All');
+  const tLibs = libraryList({ clauses });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   function toggleClause(id) {
     set('clauseIds', form.clauseIds.includes(id) ? form.clauseIds.filter(x => x !== id) : [...form.clauseIds, id]);
@@ -17531,10 +17898,18 @@ function TemplateModal({ template, clauses, onSave, onClose }) {
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Description (optional)</label>
         <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Short description" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666', display: 'block', marginBottom: 8 }}>Select Clauses to include</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <select value={tlib} onChange={e => setTlib(e.target.value)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 10px', fontSize: 12 }}>
+            <option value="All">All libraries</option>
+            {tLibs.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <button type="button" onClick={() => { const ids = clauses.filter(c => tlib === 'All' || clauseLib(c) === tlib).map(c => c.id); set('clauseIds', [...new Set([...form.clauseIds, ...ids])]); }} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '4px 10px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Select all shown</button>
+          <button type="button" onClick={() => { const ids = new Set(clauses.filter(c => tlib === 'All' || clauseLib(c) === tlib).map(c => c.id)); set('clauseIds', form.clauseIds.filter(x => !ids.has(x))); }} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '4px 10px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Clear shown</button>
+        </div>
         {clauses.length === 0 && <div style={{ color: '#999', fontSize: 12, marginBottom: 14 }}>No clauses yet — add clauses in the Clauses tab first.</div>}
         <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 14 }}>
           {CLAUSE_CATEGORIES.map(cat => {
-            const catClauses = clauses.filter(c => c.category === cat);
+            const catClauses = clauses.filter(c => c.category === cat && (tlib === 'All' || clauseLib(c) === tlib));
             if (!catClauses.length) return null;
             return (
               <div key={cat} style={{ marginBottom: 10 }}>
@@ -17716,6 +18091,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
   const setScope = (section, field, val) => setForm(p => ({ ...p, scope: { ...p.scope, [section]: { ...p.scope[section], [field]: val } } }));
 
   const [milestoneInput, setMilestoneInput] = useState({ milestone: '', percentage: '', dueDate: '' });
+  const [clauseLibSel, setClauseLibSel] = useState('All');
 
   const clauses   = termsLibrary.clauses   || [];
   const templates = termsLibrary.templates || [];
@@ -17959,8 +18335,16 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
       {!form.termsTemplateId && clauses.length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Select Clauses from Terms Library ({clauses.length} available)</label>
+          <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6, flexWrap:'wrap' }}>
+            <select value={clauseLibSel} onChange={e => setClauseLibSel(e.target.value)} style={{ ...inputStyle, width:'auto', minWidth:200, margin:0 }}>
+              <option value="All">All libraries</option>
+              {libraryList(termsLibrary).map(l => <option key={l} value={l}>{l} ({clauses.filter(c => clauseLib(c) === l).length})</option>)}
+            </select>
+            <button type="button" onClick={() => { const ids = clauses.filter(c => clauseLibSel === 'All' || clauseLib(c) === clauseLibSel).map(c => c.id); set('selectedClauseIds', [...new Set([...(form.selectedClauseIds||[]), ...ids])]); }} style={{ border:'1px solid #DDD8CE', borderRadius:6, padding:'6px 12px', background:'#fff', fontSize:12, cursor:'pointer' }}>Select all in library</button>
+            <button type="button" onClick={() => { const ids = new Set(clauses.filter(c => clauseLibSel === 'All' || clauseLib(c) === clauseLibSel).map(c => c.id)); set('selectedClauseIds', (form.selectedClauseIds||[]).filter(x => !ids.has(x))); }} style={{ border:'1px solid #DDD8CE', borderRadius:6, padding:'6px 12px', background:'#fff', fontSize:12, cursor:'pointer' }}>Clear</button>
+          </div>
           <div style={{ border:'1px solid #DDD8CE', borderRadius:8, maxHeight:220, overflowY:'auto', padding:'4px 0', background:'#fff' }}>
-            {clauses.map(cl => {
+            {clauses.filter(cl => clauseLibSel === 'All' || clauseLib(cl) === clauseLibSel).map(cl => {
               const sel = (form.selectedClauseIds||[]).includes(cl.id);
               return (
                 <label key={cl.id} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'7px 12px', cursor:'pointer', background:sel?'#EFF6FF':'transparent', borderBottom:'1px solid #f0ede6' }}>
@@ -17970,7 +18354,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
                   }} style={{ marginTop:2, accentColor:'#1E2A4A' }} />
                   <div>
                     <div style={{ fontWeight:600, fontSize:12, color:'#1E2A4A' }}>{cl.title}</div>
-                    <div style={{ fontSize:11, color:'#888' }}>{cl.category}</div>
+                    <div style={{ fontSize:11, color:'#888' }}>{cl.category} · {clauseLib(cl)}{(cl.text||'').includes('\n|') || (cl.text||'').startsWith('|') ? ' · contains table' : ''}</div>
                   </div>
                 </label>
               );
@@ -18158,8 +18542,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
         <div style="margin-bottom:16px;font-size:12px;line-height:1.8;">
           ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin-bottom:6px;">${item.title}</div>` : ''}
           <div style="margin-left:${item.title?14:0}px;">
-            ${fmtClause(item.text).split('\n').filter(l=>l.trim()).map(line=>`
-              <div style="margin-bottom:4px;">${line.trim()}</div>`).join('')}
+            ${clauseHTML(item.text)}
           </div>
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
@@ -18319,12 +18702,11 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <div style={{ marginBottom: 32 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
             {terms.items.map((item, i) => {
-              const clauseLines = (item.text||'').replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l=>l.trim());
               return (
                 <div key={i} style={{ marginBottom: 14 }}>
                   {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{i + 1}. {item.title}</div>}
                   <div style={{ marginLeft: item.title ? 16 : 0, lineHeight: 1.9 }}>
-                    {clauseLines.map((line, j) => <div key={j} style={{ marginBottom: 2 }}>{j===0&&!item.title?`${i+1}. `:''}{line.trim()}</div>)}
+                    <ClauseBody text={item.text} prefix={!item.title ? `${i+1}. ` : ''} />
                   </div>
                 </div>
               );
@@ -18587,7 +18969,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
             {terms.items.map((item, i) => (
               <div key={i} style={{ marginBottom: 12 }}>
                 {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
-                <div style={{ marginLeft: item.title ? 16 : 0 }}>{!item.title && `${i + 1}. `}{item.text}</div>
+                <div style={{ marginLeft: item.title ? 16 : 0 }}><ClauseBody text={item.text} prefix={!item.title ? `${i + 1}. ` : ''} /></div>
               </div>
             ))}
             {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
@@ -28061,6 +28443,13 @@ export default function App() {
       terms: srcDoc.terms || '',
       discount: srcDoc.discount || 0,
       placeOfSupply: srcDoc.placeOfSupply || '',
+      refNumber: srcDoc.refNumber || '',
+      // shipping / transport details travel with the goods (invoice → delivery note → packing list)
+      shipmentType: srcDoc.shipmentType || 'domestic', shipToSameAsBilling: !!srcDoc.shipToSameAsBilling,
+      shipToName: srcDoc.shipToName || '', shipToAddress: srcDoc.shipToAddress || '',
+      portOfLoading: srcDoc.portOfLoading || '', portOfDischarge: srcDoc.portOfDischarge || '', vesselFlight: srcDoc.vesselFlight || '',
+      blNumber: srcDoc.blNumber || '', countryOfOrigin: srcDoc.countryOfOrigin || '', shippingMarks: srcDoc.shippingMarks || '',
+      vehicleNo: srcDoc.vehicleNo || '', vehicleMode: srcDoc.vehicleMode || '', driverName: srcDoc.driverName || '', driverMobile: srcDoc.driverMobile || '',
       linkedFrom: { id: srcDoc.id, docType: srcDoc.type, docNumber: srcDoc.number },
     });
     setView('doceditor');
@@ -28591,6 +28980,9 @@ export default function App() {
                 customerId: enq.customerId,
                 customerSnapshot: cust || null,
                 notes: enq.notes || '',
+                refNumber: enq.number || '',
+                // the enquiry's "Product / Service interest" becomes the first line's description
+                ...(enq.interest ? { items: [{ ...EMPTY_ITEM_ROW(businessInfo), name: enq.interest, qty: 1 }] } : {}),
               });
             }}
           />
@@ -29437,7 +29829,7 @@ export default function App() {
                 const base = EMPTY_ITEM_ROW(businessInfo);
                 return { ...base, itemId: it.itemId || '', name: it.name + (pr.type === 'capex' ? (it.make ? ' — ' + it.make : '') + (it.spec ? ' (' + it.spec + ')' : '') : ''), qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
               });
-              startNewDoc('purchase', pr.bizType || 'trading', { items: its.length ? its : undefined, linkedFrom: { type: 'purchaserequisition', id: pr.id, number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
+              startNewDoc('purchase', pr.bizType || 'trading', { ...(its.length ? { items: its } : {}), linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number, label: pr.type === 'capex' ? 'Capex Requisition' : 'Purchase Requisition', number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
             }}
           />
