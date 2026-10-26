@@ -67,10 +67,10 @@ const PLAN_MODULES = {
     'stock','bincard','grn','storeissue','stockledger','verticalrack',
   ],
   trading: [
-    'hr','payroll','employees',
+    'hr','payroll','employees','siteattendance',
   ],
   manufacturing: [
-    'hr','payroll',
+    'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
     'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds',
@@ -720,12 +720,41 @@ function printLetterFromHtml(html, biz, opts) {
       sbs.forEach((b2, bi2) => { if (bi2 > 0 && b2.firstElementChild) b2.firstElementChild.style.height = '66px'; });
       if (sp) { sp.style.cssText = 'height:66px;display:flex;align-items:center;justify-content:center;gap:10px'; sp.innerHTML = (biz.seal ? '<img src="' + biz.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (biz.signature ? '<img src="' + biz.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : ''); }
     }
-    const kids = Array.from(page.children);
-    for (let ki = 0; ki < kids.length; ki++) {
-      const el = kids[ki];
-      if (/^H[23]$/.test(el.tagName) && kids[ki + 1]) { blocks.push({ t: '', h: '<div>' + el.outerHTML + kids[ki + 1].outerHTML + '</div>' }); ki++; }
-      else blocks.push({ t: '', h: el.outerHTML });
-    }
+    // Flow content at the finest sensible grain so long clauses / tables break across pages (tables row by row,
+    // header row repeated) instead of jumping whole to the next page or being cut off by the footer.
+    let _tid = 0;
+    const flat = (el, out) => {
+      if (el.tagName === 'TABLE') {
+        _tid++;
+        const thead = el.querySelector('thead');
+        const head = thead ? thead.outerHTML : '';
+        let trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
+        if (!trs.length) trs = Array.from(el.querySelectorAll(':scope > tr'));
+        if (!trs.length) { out.push({ t: '', h: el.outerHTML }); return; }
+        const open = '<table style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+        let i = 0;
+        while (i < trs.length) {
+          let span = 1;
+          trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
+          out.push({ t: 'trow', id: _tid, o: open, th: head, h: trs.slice(i, i + span).map(r => r.outerHTML).join('') });
+          i += span;
+        }
+        return;
+      }
+      const ke = Array.from(el.children);
+      if (el.tagName === 'DIV' && ke.length >= 2 && el.style.display !== 'flex' && el.style.display !== 'grid' && !/(^|\s)(sig|sig-box|zco)(\s|$)/.test(el.className || '') && (el.querySelector('table') || (el.textContent || '').length > 500)) {
+        ke.forEach(k => flat(k, out)); return;
+      }
+      out.push({ t: '', h: el.outerHTML });
+    };
+    let _head = null;
+    Array.from(page.children).forEach(el => {
+      if (/^H[23]$/.test(el.tagName)) { if (_head) blocks.push({ t: '', h: _head }); _head = el.outerHTML; return; }
+      const out = []; flat(el, out);
+      if (_head) { if (out.length && out[0].t === '') out[0].h = '<div>' + _head + out[0].h + '</div>'; else blocks.push({ t: '', h: _head }); _head = null; }
+      out.forEach(b => blocks.push(b));
+    });
+    if (_head) blocks.push({ t: '', h: _head });
     return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
   } catch (e) { console.error(e); printHTML(html); }
 }
@@ -1412,6 +1441,11 @@ async function printPaginated(sel, bi, pre, gen) {
     Array.from(clone.children).forEach(walk);
     }
 
+    // Common rule for EVERY printed document / module / business: page footer = company | document no. | Page x of y.
+    // (Explicit pre.pgf wins; otherwise the document number is detected from the content, e.g. TTC/INV/26-27/001.)
+    const _plain = blocks.map(b => String(b.h || '')).join(' ').replace(/<[^>]+>/g, ' ');
+    const _dm = _plain.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
+    const PGFTXT = (pre && pre.pgf) || (gen && gen.pgf) || [bi && bi.name, _dm ? _dm[0] : (typeof window !== 'undefined' && window.__printDocNo) || '', 'Page {p} of {n}'].filter(Boolean).join(' | ');
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
@@ -1448,7 +1482,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.pgf{position:absolute;left:0;right:0;bottom:' + (FTRMM + 1) + 'mm;text-align:center;font-size:9px;color:#666;font-family:Arial,sans-serif;}'
-      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + ((pre && pre.pgf) ? 6 : 0)) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
+      + '.bd{position:absolute;top:' + HDRMM + 'mm;bottom:' + (FTRMM + 6) + 'mm;left:0;right:0;overflow:hidden;padding:5mm 12mm 0;box-sizing:border-box;}'
       + '.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:120px;font-weight:900;letter-spacing:12px;color:rgba(185,28,28,0.10);white-space:nowrap;pointer-events:none;z-index:5;font-family:Arial,sans-serif;}'
       + '.doc-items-table{border-collapse:collapse;width:100%;border:1.2px solid #000;table-layout:fixed;}'
       + '.doc-items-table thead th{border:1px solid #000;background:#EFEDE6;padding:6px 7px;font-size:11px;color:#000;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
@@ -1463,7 +1497,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify((pre && pre.pgf) || '') + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -5090,7 +5124,7 @@ const SECTION_VIEWS = {
   engineering: ['partsmaster', 'engdocs', 'tds'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
-  hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
+  hr:          ['employees', 'payroll', 'siteattendance', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   mep_clients: ['customers', 'enquiries', 'items'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
@@ -5105,7 +5139,7 @@ const BIZ_SECTION_VIEWS = {
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
-  hr:            ['employees','payroll','offerletter','warnletter','termletter'],
+  hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
 
@@ -5792,6 +5826,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <BizSection bizType="hr" defaultOpen={false}>
           <NavBtn id="employees"  label="Employees"          icon={Users} />
           <NavBtn id="payroll"    label="Payroll"            icon={FileText} />
+          {!showService && <NavBtn id="siteattendance" label="Attendance & Salary" icon={Users} />}
           <NavBtn id="offerletter" label="Offer Letters"        icon={FileText} />
           <NavBtn id="warnletter"  label="Warning Letters"    icon={AlertTriangle} />
           <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
@@ -5800,6 +5835,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <Section sectionKey="hr" label="HR & Payroll">
           <NavBtn id="employees"   label="Employees"           icon={Users} />
           <NavBtn id="payroll"     label="Payroll"             icon={FileText} />
+          {!showService && <NavBtn id="siteattendance" label="Attendance & Salary" icon={Users} />}
           <NavBtn id="offerletter" label="Offer Letters"       icon={FileText} />
           <NavBtn id="warnletter"  label="Warning Letters"     icon={AlertTriangle} />
           <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
@@ -11587,6 +11623,7 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <EmpField {...fp} label="Employee ID" name="empId" required />
+            <EmpField {...fp} label="Biometric / Machine ID" name="biometricId" />
             <EmpField {...fp} label="Full Name"   name="name"  required />
             <EmpField {...fp} label="Date of Birth" name="dob" type="date" />
             <EmpField {...fp} label="Nationality" name="nationality" />
@@ -17343,15 +17380,263 @@ const DEFAULT_PO_CLAUSES = [
   { id:'dc15', category:'Termination',      title:'Clause 15: Termination',                           text:'15.1 The Buyer may terminate this PO in whole or in part by giving 30 days written notice to the Supplier.\n15.2 In the event of termination for convenience, the Buyer shall pay for work completed up to the date of termination and reasonable documented costs incurred.\n15.3 The Buyer may terminate this PO immediately for cause if the Supplier: (a) becomes insolvent or files for bankruptcy; (b) commits a material breach that remains unrectified for 14 days after notice; (c) fails to deliver within the LD cap period.\n15.4 Upon termination, the Supplier shall promptly return any advance paid (less work completed) and hand over all work in progress, drawings, and documents related to the PO.' },
 ];
 
+// ── Clause text: plain lines + pipe tables (| a | b |) ───────────────────────
+const DEFAULT_LIBRARY = 'General';
+const clauseLib = c => (c && c.library) || DEFAULT_LIBRARY;
+function libraryList(tl) {
+  const s = new Set([DEFAULT_LIBRARY]);
+  ((tl && tl.libraries) || []).forEach(x => x && s.add(x));
+  ((tl && tl.clauses) || []).forEach(c => s.add(clauseLib(c)));
+  return [...s];
+}
+function clauseBlocks(text) {
+  const out = []; let tbl = null, buf = [];
+  const flush = () => { if (buf.length) { out.push({ type: 'text', value: buf.join('\n') }); buf = []; } };
+  String(text || '').split('\n').forEach(line => {
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim().replace(/<br>/gi, '\n'));
+      if (cells.every(c => /^:?-{2,}:?$/.test(c))) return;
+      if (!tbl) { flush(); tbl = { type: 'table', rows: [] }; out.push(tbl); }
+      tbl.rows.push(cells);
+    } else { tbl = null; buf.push(line); }
+  });
+  flush();
+  out.forEach(b => { if (b.type === 'table') { const n = Math.max(...b.rows.map(r => r.length)); b.rows = b.rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; }); } });
+  return out;
+}
+function blocksToText(blocks) {
+  return blocks.map(b => {
+    if (b.type === 'text') return b.value;
+    const rows = b.rows.map(r => '| ' + r.map(c => String(c).replace(/\n/g, '<br>').replace(/\|/g, '/')).join(' | ') + ' |');
+    if (rows.length) rows.splice(1, 0, '| ' + b.rows[0].map(() => '---').join(' | ') + ' |');
+    return rows.join('\n');
+  }).filter(s => s !== '').join('\n');
+}
+const _escH = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function clauseHTML(text, indent) {
+  const ind = indent || 0;
+  return clauseBlocks(text).map(b => {
+    if (b.type === 'text') {
+      return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map(l => `<div style="margin:0 0 4px ${ind}px;">${_escH(l.trim())}</div>`).join('');
+    }
+    const cell = (c, th) => `<${th ? 'th' : 'td'} style="border:1px solid #888;padding:4px 7px;text-align:left;vertical-align:top;${th ? 'background:#EEF1F7;font-weight:700;' : ''}">${_escH(c).replace(/\n/g, '<br>')}</${th ? 'th' : 'td'}>`;
+    const head = `<thead><tr>${b.rows[0].map(c => cell(c, true)).join('')}</tr></thead>`;
+    const body = b.rows.slice(1).map(r => `<tr>${r.map(c => cell(c, false)).join('')}</tr>`).join('');
+    return `<table style="width:calc(100% - ${ind}px);margin:6px 0 10px ${ind}px;border-collapse:collapse;font-size:11.5px;">${head}<tbody>${body}</tbody></table>`;
+  }).join('');
+}
+function ClauseBody({ text, prefix = '', style }) {
+  let first = true;
+  return (
+    <div style={style}>
+      {clauseBlocks(text).map((b, i) => {
+        if (b.type === 'text') {
+          return b.value.replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l => l.trim()).map((l, j) => {
+            const p = first ? prefix : ''; first = false;
+            return <div key={i + '-' + j} style={{ marginBottom: 2 }}>{p}{l.trim()}</div>;
+          });
+        }
+        first = false;
+        return (
+          <table key={i} style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 10px', fontSize: '0.92em' }}>
+            <tbody>
+              {b.rows.map((r, ri) => (
+                <tr key={ri}>{r.map((c, ci) => React.createElement(ri === 0 ? 'th' : 'td', { key: ci, style: { border: '1px solid #999', padding: '4px 8px', textAlign: 'left', verticalAlign: 'top', whiteSpace: 'pre-wrap', ...(ri === 0 ? { background: '#EEF1F7', fontWeight: 700 } : {}) } }, c))}</tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Import clauses from DOCX / Excel / CSV ───────────────────────────────────
+let _mammothPromise = null;
+function loadMammoth() {
+  if (typeof window !== 'undefined' && window.mammoth) return Promise.resolve(window.mammoth);
+  if (_mammothPromise) return _mammothPromise;
+  const urls = ['https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js'];
+  _mammothPromise = new Promise((resolve, reject) => {
+    let i = 0;
+    const tryNext = () => {
+      if (i >= urls.length) { _mammothPromise = null; return reject(new Error('Could not load the Word reader (offline or blocked)')); }
+      const s = document.createElement('script'); s.src = urls[i++];
+      s.onload = () => window.mammoth ? resolve(window.mammoth) : tryNext();
+      s.onerror = tryNext; document.head.appendChild(s);
+    };
+    tryNext();
+  });
+  return _mammothPromise;
+}
+function guessClauseCategory(t) {
+  t = String(t || '');
+  const map = [['Force Majeure', /force majeure/i], ['Confidentiality', /confiden|non-?disclosure|\bnda\b/i], ['Dispute Resolution', /dispute|arbitrat|jurisdiction|governing law/i], ['Termination', /terminat|cancell?ation/i], ['Warranty', /warrant|guarantee|defect|\bdlp\b/i], ['Liability', /liabil|liquidated|penalt|indemn|damages/i], ['Payment', /payment|invoice|advance|retention|billing/i], ['Delivery', /deliver|dispatch|shipment|freight|packing/i]];
+  for (const [c, re] of map) if (re.test(t)) return c;
+  return 'Other';
+}
+function matchClauseCategory(v) {
+  const x = String(v || '').toLowerCase();
+  return CLAUSE_CATEGORIES.find(c => c.toLowerCase() === x) || guessClauseCategory(v);
+}
+function rowsToClauses(rows, sheetName) {
+  rows = rows.map(r => r.map(c => String(c == null ? '' : c).trim())).filter(r => r.some(Boolean));
+  if (!rows.length) return [];
+  let hi = -1, ti = -1, xi = -1, ci = -1;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const h = rows[i].map(c => c.toLowerCase());
+    const t = h.findIndex(c => /^(title|clause|heading|subject|name|clause title)/.test(c));
+    const x = h.findIndex((c, k) => k !== t && /(text|description|details|condition|terms|content|wording)/.test(c));
+    if (t >= 0 && x >= 0) { hi = i; ti = t; xi = x; ci = h.findIndex(c => /categor|type|group/.test(c)); break; }
+  }
+  if (hi >= 0) {
+    return rows.slice(hi + 1).filter(r => r[ti] || r[xi]).map((r, k) => ({ title: r[ti] || 'Clause ' + (k + 1), text: r[xi] || '', category: ci >= 0 && r[ci] ? matchClauseCategory(r[ci]) : guessClauseCategory((r[ti] || '') + ' ' + (r[xi] || '')) }));
+  }
+  const n = Math.max(...rows.map(r => r.length));
+  const grid = rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; });
+  return [{ title: sheetName || 'Table', text: blocksToText([{ type: 'table', rows: grid }]), category: 'Other' }];
+}
+async function parseClauseFile(file) {
+  const name = file.name || 'clauses';
+  if (/\.(xlsx|xls)$/i.test(name)) {
+    const X = await loadXLSX();
+    const wb = X.read(await file.arrayBuffer(), { type: 'array' });
+    let out = [];
+    wb.SheetNames.forEach(sn => { out = out.concat(rowsToClauses(X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', blankrows: false }), sn)); });
+    return out;
+  }
+  if (/\.(csv|tsv|txt)$/i.test(name)) return rowsToClauses(parseCsvText(await file.text()), name.replace(/\.[^.]+$/, ''));
+  if (/\.docx$/i.test(name)) {
+    const M = await loadMammoth();
+    const res = await M.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+    const dom = new DOMParser().parseFromString('<div id="r">' + res.value + '</div>', 'text/html');
+    const items = []; let cur = null;
+    const start = t => { cur = { title: t.trim(), lines: [] }; items.push(cur); };
+    const ensure = () => { if (!cur) start(name.replace(/\.[^.]+$/, '')); };
+    const boldOnly = el => { const t = (el.textContent || '').trim(); const b = [...el.querySelectorAll('strong,b')].map(x => x.textContent).join('').trim(); return !!t && b.length >= t.length - 2; };
+    const isTitle = (el, t) => /^H[1-6]$/.test(el.tagName) || (t.length <= 120 && !/^\d+\.\d+/.test(t) && (boldOnly(el) || /^(clause|article|section)\s*\d+/i.test(t)));
+    [...dom.getElementById('r').children].forEach(el => {
+      const tag = el.tagName; const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (tag === 'TABLE') {
+        ensure();
+        const rows = [...el.querySelectorAll('tr')].map(tr => [...tr.children].map(td => (td.textContent || '').replace(/\s+/g, ' ').trim()));
+        const n = Math.max(...rows.map(r => r.length));
+        cur.lines.push(blocksToText([{ type: 'table', rows: rows.map(r => { const x = r.slice(); while (x.length < n) x.push(''); return x; }) }]));
+        return;
+      }
+      if (!t) return;
+      if (tag === 'UL' || tag === 'OL') { ensure(); [...el.querySelectorAll('li')].forEach((li, i) => cur.lines.push((tag === 'OL' ? (i + 1) + '. ' : '• ') + (li.textContent || '').trim())); return; }
+      if (isTitle(el, t)) { start(t); return; }
+      ensure(); cur.lines.push(t);
+    });
+    return items.filter(c => c.lines.length).map(c => { const text = c.lines.join('\n'); return { title: c.title, text, category: guessClauseCategory(c.title + ' ' + text) }; });
+  }
+  throw new Error('Unsupported file type — use .docx, .xlsx, .xls or .csv');
+}
+
+function ImportClausesModal({ libraries, defaultLibrary, onImport, onClose }) {
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [fname, setFname] = useState('');
+  const [lib, setLib] = useState(defaultLibrary && defaultLibrary !== 'All' ? defaultLibrary : DEFAULT_LIBRARY);
+  const [newLib, setNewLib] = useState('');
+  async function pick(e) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy(true); setErr(''); setItems([]); setFname(f.name);
+    try {
+      const res = await parseClauseFile(f);
+      if (!res.length) setErr('No clauses could be found in this file.');
+      setItems(res.map(c => ({ ...c, include: true })));
+    } catch (ex) { setErr(ex.message || String(ex)); }
+    setBusy(false);
+  }
+  const upd = (i, p) => setItems(a => a.map((x, j) => j === i ? { ...x, ...p } : x));
+  const chosen = items.filter(c => c.include);
+  const target = lib === '__new' ? newLib.trim() : lib;
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, boxSizing: 'border-box' };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 26, width: 760, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 700 }}>Import clauses from a file</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#777' }}>Upload a Word (.docx) or Excel (.xlsx / .csv) file. Headings (or Excel Title + Text columns) become clauses; tables are kept as tables. Review, then choose the library to save them under.</p>
+        <input type="file" accept=".docx,.xlsx,.xls,.csv" onChange={pick} style={{ marginBottom: 12 }} />
+        {busy && <div style={{ fontSize: 13, color: '#888' }}>Reading {fname}…</div>}
+        {err && <div style={{ fontSize: 13, color: '#B5453A', marginBottom: 8 }}>{err}</div>}
+        {items.length > 0 && (
+          <>
+            <div style={{ fontSize: 12.5, fontWeight: 600, margin: '6px 0' }}>{chosen.length} of {items.length} clause(s) selected</div>
+            <div style={{ border: '1px solid #EAE6DB', borderRadius: 8, maxHeight: 320, overflowY: 'auto', marginBottom: 14 }}>
+              {items.map((c, i) => (
+                <div key={i} style={{ padding: '8px 10px', borderBottom: '1px solid #F0EDE6', background: c.include ? '#fff' : '#FAFAF8', opacity: c.include ? 1 : 0.55 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                    <input type="checkbox" checked={c.include} onChange={e => upd(i, { include: e.target.checked })} />
+                    <input value={c.title} onChange={e => upd(i, { title: e.target.value })} style={{ ...inp, flex: 1, fontWeight: 600 }} />
+                    <select value={c.category} onChange={e => upd(i, { category: e.target.value })} style={inp}>{CLAUSE_CATEGORIES.map(x => <option key={x}>{x}</option>)}</select>
+                  </div>
+                  <ClauseBody text={c.text} style={{ fontSize: 12, color: '#666', maxHeight: 90, overflow: 'hidden', marginLeft: 24 }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 600, color: '#555' }}>Save under library</label>
+              <select value={lib} onChange={e => setLib(e.target.value)} style={inp}>
+                {libraries.map(l => <option key={l} value={l}>{l}</option>)}
+                <option value="__new">＋ New library…</option>
+              </select>
+              {lib === '__new' && <input value={newLib} onChange={e => setNewLib(e.target.value)} placeholder="e.g. SOS, AMC Terms, PO Terms" style={{ ...inp, width: 200 }} />}
+            </div>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button disabled={!chosen.length} onClick={() => { if (!target) return alert('Enter a library name'); onImport(chosen.map(({ include, ...c }) => c), target); }}
+            style={{ padding: '9px 20px', background: chosen.length ? '#1E2A4A' : '#aaa', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: chosen.length ? 'pointer' : 'default' }}>Import {chosen.length || ''} clause(s)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   const [tab, setTab] = useState('clauses'); // 'clauses' | 'templates'
   const [clauseModal, setClauseModal] = useState(null); // null | clause obj
   const [tmplModal, setTmplModal] = useState(null);     // null | template obj
   const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
+  const [libFilter, setLibFilter] = useState('All');
+  const [importOpen, setImportOpen] = useState(false);
 
   const clauses   = termsLibrary.clauses   || [];
   const templates = termsLibrary.templates || [];
+  const libraries = libraryList(termsLibrary);
+  const libCount = l => clauses.filter(c => clauseLib(c) === l).length;
+
+  function addLibraryName(name) {
+    setTermsLibrary(prev => (prev.libraries || []).includes(name) ? prev : { ...prev, libraries: [...(prev.libraries || []), name] });
+  }
+  function newLibrary() {
+    const n = (window.prompt('New library name (e.g. SOS, AMC Terms, PO Terms):') || '').trim();
+    if (!n) return;
+    if (libraries.some(l => l.toLowerCase() === n.toLowerCase())) { alert('That library already exists.'); return; }
+    addLibraryName(n); setLibFilter(n);
+  }
+  function renameLibrary() {
+    if (libFilter === 'All' || libFilter === DEFAULT_LIBRARY) { alert('Select a library (other than General) to rename.'); return; }
+    const n = (window.prompt('Rename library "' + libFilter + '" to:', libFilter) || '').trim();
+    if (!n || n === libFilter) return;
+    setTermsLibrary(prev => ({ ...prev, libraries: (prev.libraries || []).map(l => l === libFilter ? n : l), clauses: (prev.clauses || []).map(c => clauseLib(c) === libFilter ? { ...c, library: n } : c) }));
+    setLibFilter(n);
+  }
+  function importClauses(items, libName) {
+    const stamp = Date.now().toString(36);
+    const add = items.map((c, i) => ({ id: stamp + i + Math.random().toString(36).slice(2, 6), title: c.title, category: c.category || 'Other', text: c.text, library: libName }));
+    saveClauses(prev => [...(prev || []), ...add]);
+    addLibraryName(libName);
+    setLibFilter(libName);
+    setImportOpen(false);
+    alert('✅ ' + add.length + ' clause(s) imported into "' + libName + '".');
+  }
 
   function saveClauses(updater) {
     setTermsLibrary(prev => {
@@ -17382,6 +17667,7 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   function handleSaveClause(form) {
     const saved = { ...form, id: form.id || crypto.randomUUID() };
     saveClauses(prev => form.id ? prev.map(c => c.id === form.id ? saved : c) : [...prev, saved]);
+    if (saved.library) addLibraryName(saved.library);
     setClauseModal(null);
   }
   function deleteClause(id) {
@@ -17402,8 +17688,9 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
   const filteredClauses = clauses.filter(c => {
     const matchCat = filterCat === 'All' || c.category === filterCat;
+    const matchLib = libFilter === 'All' || clauseLib(c) === libFilter;
     const matchSearch = `${c.title} ${c.text}`.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch;
+    return matchCat && matchSearch && matchLib;
   });
 
   const canEdit = userRole === 'admin';
@@ -17420,13 +17707,19 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
         {canEdit && (
           <div style={{ display:'flex', gap:8 }}>
             {tab === 'clauses' && (
+              <button onClick={() => setImportOpen(true)}
+                style={{ padding:'9px 16px', background:'#fff', color:'#1E2A4A', border:'1px solid #1E2A4A', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                ⬆ Import DOCX / Excel
+              </button>
+            )}
+            {tab === 'clauses' && (
               <button onClick={loadDefaultClauses}
                 style={{ padding:'9px 16px', background:'#fff', color:'#1E2A4A', border:'1px solid #1E2A4A', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
                 📋 Load Standard Clauses
               </button>
             )}
             <button
-              onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '' }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
+              onClick={() => tab === 'clauses' ? setClauseModal({ title: '', category: 'Payment', text: '', library: libFilter !== 'All' ? libFilter : DEFAULT_LIBRARY }) : setTmplModal({ name: '', description: '', clauseIds: [], customText: '' })}
               style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600 }}>
               + {tab === 'clauses' ? 'New Clause' : 'New Template'}
             </button>
@@ -17445,6 +17738,16 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
       {tab === 'clauses' && (
         <>
+          {/* Library selector */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center', background: '#FBF9F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '8px 12px' }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A' }}>Library</label>
+            <select value={libFilter} onChange={e => setLibFilter(e.target.value)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, minWidth: 190 }}>
+              <option value="All">All libraries ({clauses.length})</option>
+              {libraries.map(l => <option key={l} value={l}>{l} ({libCount(l)})</option>)}
+            </select>
+            {canEdit && <button onClick={newLibrary} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>＋ New library</button>}
+            {canEdit && <button onClick={renameLibrary} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 12px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Rename</button>}
+          </div>
           {/* Filters */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clauses…" style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '7px 12px', fontSize: 13, width: 220 }} />
@@ -17462,8 +17765,9 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{c.title}</span>
                     <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#666' }}>{c.category}</span>
+                    <span style={{ background: '#E3EAF7', borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 600, color: '#2B4A8B' }}>{clauseLib(c)}</span>
                   </div>
-                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                  <ClauseBody text={c.text} style={{ fontSize: 13, color: '#555', lineHeight: 1.7 }} />
                 </div>
                 {canEdit && (
                   <div style={{ display: 'flex', gap: 6, marginLeft: 16 }}>
@@ -17510,7 +17814,10 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
 
       {/* Clause Modal */}
       {clauseModal && (
-        <ClauseModal clause={clauseModal} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+        <ClauseModal clause={clauseModal} libraries={libraries} onSave={handleSaveClause} onClose={() => setClauseModal(null)} />
+      )}
+      {importOpen && (
+        <ImportClausesModal libraries={libraries} defaultLibrary={libFilter} onImport={importClauses} onClose={() => setImportOpen(false)} />
       )}
       {/* Template Modal */}
       {tmplModal && (
@@ -17520,24 +17827,94 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   );
 }
 
-function ClauseModal({ clause, onSave, onClose }) {
-  const [form, setForm] = useState({ title: '', category: 'Payment', text: '', ...clause });
+function ClauseModal({ clause, libraries, onSave, onClose }) {
+  const [form, setForm] = useState({ title: '', category: 'Payment', library: DEFAULT_LIBRARY, ...clause });
+  const [blocks, setBlocks] = useState(() => { const b = clauseBlocks(clause.text || ''); return b.length ? b : [{ type: 'text', value: '' }]; });
+  const [newLib, setNewLib] = useState('');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const setBlock = (i, patch) => setBlocks(bs => bs.map((b, j) => j === i ? { ...b, ...patch } : b));
+  const mapRows = (i, fn) => setBlocks(bs => bs.map((b, j) => j === i ? { ...b, rows: fn(b.rows) } : b));
+  const addTable = () => setBlocks(bs => [...bs, { type: 'table', rows: [['Column 1', 'Column 2', 'Column 3'], ['', '', ''], ['', '', '']] }]);
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' };
+  const mini = { border: '1px solid #DDD8CE', borderRadius: 5, padding: '3px 9px', fontSize: 11.5, background: '#fff', cursor: 'pointer', marginRight: 6 };
+  const libVal = form.library || DEFAULT_LIBRARY;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 540, maxHeight: '80vh', overflowY: 'auto' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 760, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{clause.id ? 'Edit Clause' : 'New Clause'}</h3>
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Title</label>
-        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
-        <select value={form.category} onChange={e => set('category', e.target.value)} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }}>
-          {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-        </select>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Text</label>
-        <textarea value={form.text} onChange={e => set('text', e.target.value)} placeholder="Write the full clause text here…" rows={6} style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 20, boxSizing: 'border-box', resize: 'vertical' }} />
+        <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Payment within 30 days" style={{ ...inp, width: '100%' }} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Category</label>
+            <select value={form.category} onChange={e => set('category', e.target.value)} style={{ ...inp, width: '100%' }}>
+              {CLAUSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Library</label>
+            <select value={libVal} onChange={e => set('library', e.target.value)} style={{ ...inp, width: '100%' }}>
+              {libraries.map(l => <option key={l} value={l}>{l}</option>)}
+              <option value="__new">＋ New library…</option>
+            </select>
+            {libVal === '__new' && <input value={newLib} onChange={e => setNewLib(e.target.value)} placeholder="Library name" style={{ ...inp, width: '100%', marginTop: -8 }} />}
+          </div>
+        </div>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Clause Content <span style={{ fontWeight: 400, color: '#999' }}>— text and tables, in the order they will print</span></label>
+        <div style={{ marginTop: 6, marginBottom: 12 }}>
+          {blocks.map((b, i) => (
+            <div key={i} style={{ border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 8, background: b.type === 'table' ? '#FBFAF6' : '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase' }}>{b.type === 'table' ? 'Table' : 'Text'}</span>
+                <span>
+                  {i > 0 && <button style={mini} onClick={() => setBlocks(bs => { const a = bs.slice(); [a[i - 1], a[i]] = [a[i], a[i - 1]]; return a; })}>↑</button>}
+                  {i < blocks.length - 1 && <button style={mini} onClick={() => setBlocks(bs => { const a = bs.slice(); [a[i + 1], a[i]] = [a[i], a[i + 1]]; return a; })}>↓</button>}
+                  {blocks.length > 1 && <button style={{ ...mini, color: '#B5453A', borderColor: '#F3C5C5' }} onClick={() => setBlocks(bs => bs.filter((_, j) => j !== i))}>Remove</button>}
+                </span>
+              </div>
+              {b.type === 'text' ? (
+                <textarea value={b.value} onChange={e => setBlock(i, { value: e.target.value })} rows={5} placeholder="Write the clause text here…" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              ) : (
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <tbody>
+                        {b.rows.map((row, ri) => (
+                          <tr key={ri}>
+                            {row.map((cell, ci) => (
+                              <td key={ci} style={{ border: '1px solid #CFC9BB', padding: 0, background: ri === 0 ? '#EEF1F7' : '#fff' }}>
+                                <textarea value={cell} rows={1} onChange={e => mapRows(i, rs => rs.map((r, a) => a !== ri ? r : r.map((c, k) => k !== ci ? c : e.target.value)))}
+                                  style={{ width: '100%', minWidth: 90, border: 'none', padding: '6px 8px', fontSize: 12.5, boxSizing: 'border-box', resize: 'vertical', background: 'transparent', fontWeight: ri === 0 ? 700 : 400 }} />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <button style={mini} onClick={() => mapRows(i, rs => [...rs, rs[0].map(() => '')])}>+ Row</button>
+                    <button style={mini} onClick={() => mapRows(i, rs => rs.map(r => [...r, '']))}>+ Column</button>
+                    <button style={mini} disabled={b.rows.length < 2} onClick={() => mapRows(i, rs => rs.length > 1 ? rs.slice(0, -1) : rs)}>− Row</button>
+                    <button style={mini} disabled={b.rows[0].length < 2} onClick={() => mapRows(i, rs => rs[0].length > 1 ? rs.map(r => r.slice(0, -1)) : rs)}>− Column</button>
+                    <span style={{ fontSize: 11, color: '#999' }}>First row is the heading row.</span>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+          <button style={mini} onClick={() => setBlocks(bs => [...bs, { type: 'text', value: '' }])}>+ Add text</button>
+          <button style={mini} onClick={addTable}>▦ Add table</button>
+        </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13 }}>Cancel</button>
-          <button onClick={() => { if (!form.title || !form.text) return alert('Title and text are required'); onSave(form); }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
+          <button onClick={() => {
+            const text = blocksToText(blocks);
+            if (!form.title || !text.trim()) return alert('Title and content are required');
+            const library = libVal === '__new' ? newLib.trim() : libVal;
+            if (!library) return alert('Enter a library name');
+            onSave({ ...form, text, library });
+          }} style={{ padding: '9px 20px', background: '#1E2A4A', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>Save Clause</button>
         </div>
       </div>
     </div>
@@ -17546,6 +17923,8 @@ function ClauseModal({ clause, onSave, onClose }) {
 
 function TemplateModal({ template, clauses, onSave, onClose }) {
   const [form, setForm] = useState({ name: '', description: '', clauseIds: [], customText: '', ...template });
+  const [tlib, setTlib] = useState('All');
+  const tLibs = libraryList({ clauses });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   function toggleClause(id) {
     set('clauseIds', form.clauseIds.includes(id) ? form.clauseIds.filter(x => x !== id) : [...form.clauseIds, id]);
@@ -17559,10 +17938,18 @@ function TemplateModal({ template, clauses, onSave, onClose }) {
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>Description (optional)</label>
         <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Short description" style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 6, padding: '8px 12px', fontSize: 13, marginTop: 4, marginBottom: 14, boxSizing: 'border-box' }} />
         <label style={{ fontSize: 12, fontWeight: 600, color: '#666', display: 'block', marginBottom: 8 }}>Select Clauses to include</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <select value={tlib} onChange={e => setTlib(e.target.value)} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '5px 10px', fontSize: 12 }}>
+            <option value="All">All libraries</option>
+            {tLibs.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <button type="button" onClick={() => { const ids = clauses.filter(c => tlib === 'All' || clauseLib(c) === tlib).map(c => c.id); set('clauseIds', [...new Set([...form.clauseIds, ...ids])]); }} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '4px 10px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Select all shown</button>
+          <button type="button" onClick={() => { const ids = new Set(clauses.filter(c => tlib === 'All' || clauseLib(c) === tlib).map(c => c.id)); set('clauseIds', form.clauseIds.filter(x => !ids.has(x))); }} style={{ border: '1px solid #DDD8CE', borderRadius: 6, padding: '4px 10px', background: '#fff', fontSize: 12, cursor: 'pointer' }}>Clear shown</button>
+        </div>
         {clauses.length === 0 && <div style={{ color: '#999', fontSize: 12, marginBottom: 14 }}>No clauses yet — add clauses in the Clauses tab first.</div>}
         <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, padding: 10, marginBottom: 14 }}>
           {CLAUSE_CATEGORIES.map(cat => {
-            const catClauses = clauses.filter(c => c.category === cat);
+            const catClauses = clauses.filter(c => c.category === cat && (tlib === 'All' || clauseLib(c) === tlib));
             if (!catClauses.length) return null;
             return (
               <div key={cat} style={{ marginBottom: 10 }}>
@@ -17744,6 +18131,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
   const setScope = (section, field, val) => setForm(p => ({ ...p, scope: { ...p.scope, [section]: { ...p.scope[section], [field]: val } } }));
 
   const [milestoneInput, setMilestoneInput] = useState({ milestone: '', percentage: '', dueDate: '' });
+  const [clauseLibSel, setClauseLibSel] = useState('All');
 
   const clauses   = termsLibrary.clauses   || [];
   const templates = termsLibrary.templates || [];
@@ -17987,8 +18375,16 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
       {!form.termsTemplateId && clauses.length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Select Clauses from Terms Library ({clauses.length} available)</label>
+          <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6, flexWrap:'wrap' }}>
+            <select value={clauseLibSel} onChange={e => setClauseLibSel(e.target.value)} style={{ ...inputStyle, width:'auto', minWidth:200, margin:0 }}>
+              <option value="All">All libraries</option>
+              {libraryList(termsLibrary).map(l => <option key={l} value={l}>{l} ({clauses.filter(c => clauseLib(c) === l).length})</option>)}
+            </select>
+            <button type="button" onClick={() => { const ids = clauses.filter(c => clauseLibSel === 'All' || clauseLib(c) === clauseLibSel).map(c => c.id); set('selectedClauseIds', [...new Set([...(form.selectedClauseIds||[]), ...ids])]); }} style={{ border:'1px solid #DDD8CE', borderRadius:6, padding:'6px 12px', background:'#fff', fontSize:12, cursor:'pointer' }}>Select all in library</button>
+            <button type="button" onClick={() => { const ids = new Set(clauses.filter(c => clauseLibSel === 'All' || clauseLib(c) === clauseLibSel).map(c => c.id)); set('selectedClauseIds', (form.selectedClauseIds||[]).filter(x => !ids.has(x))); }} style={{ border:'1px solid #DDD8CE', borderRadius:6, padding:'6px 12px', background:'#fff', fontSize:12, cursor:'pointer' }}>Clear</button>
+          </div>
           <div style={{ border:'1px solid #DDD8CE', borderRadius:8, maxHeight:220, overflowY:'auto', padding:'4px 0', background:'#fff' }}>
-            {clauses.map(cl => {
+            {clauses.filter(cl => clauseLibSel === 'All' || clauseLib(cl) === clauseLibSel).map(cl => {
               const sel = (form.selectedClauseIds||[]).includes(cl.id);
               return (
                 <label key={cl.id} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'7px 12px', cursor:'pointer', background:sel?'#EFF6FF':'transparent', borderBottom:'1px solid #f0ede6' }}>
@@ -17998,7 +18394,7 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
                   }} style={{ marginTop:2, accentColor:'#1E2A4A' }} />
                   <div>
                     <div style={{ fontWeight:600, fontSize:12, color:'#1E2A4A' }}>{cl.title}</div>
-                    <div style={{ fontSize:11, color:'#888' }}>{cl.category}</div>
+                    <div style={{ fontSize:11, color:'#888' }}>{cl.category} · {clauseLib(cl)}{(cl.text||'').includes('\n|') || (cl.text||'').startsWith('|') ? ' · contains table' : ''}</div>
                   </div>
                 </label>
               );
@@ -18183,12 +18579,9 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     const termsHTML = terms.items.length > 0 ? `
       <h3>Terms &amp; Conditions</h3>
       ${terms.items.map((item,i)=>`
-        <div style="margin-bottom:16px;font-size:12px;line-height:1.8;">
-          ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin-bottom:6px;">${item.title}</div>` : ''}
-          <div style="margin-left:${item.title?14:0}px;">
-            ${fmtClause(item.text).split('\n').filter(l=>l.trim()).map(line=>`
-              <div style="margin-bottom:4px;">${line.trim()}</div>`).join('')}
-          </div>
+        <div style="font-size:12px;line-height:1.8;">
+          ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin:12px 0 6px;">${item.title}</div>` : ''}
+          ${clauseHTML(item.text, item.title ? 14 : 0)}
         </div>`).join('')}
       ${terms.extra ? `<div style="font-size:12px;margin-top:10px">${terms.extra}</div>` : ''}` : '';
 
@@ -18347,12 +18740,11 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
           <div style={{ marginBottom: 32 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
             {terms.items.map((item, i) => {
-              const clauseLines = (item.text||'').replace(/ (?=\d+\.\d+\s)/g, '\n').split('\n').filter(l=>l.trim());
               return (
                 <div key={i} style={{ marginBottom: 14 }}>
                   {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{i + 1}. {item.title}</div>}
                   <div style={{ marginLeft: item.title ? 16 : 0, lineHeight: 1.9 }}>
-                    {clauseLines.map((line, j) => <div key={j} style={{ marginBottom: 2 }}>{j===0&&!item.title?`${i+1}. `:''}{line.trim()}</div>)}
+                    <ClauseBody text={item.text} prefix={!item.title ? `${i+1}. ` : ''} />
                   </div>
                 </div>
               );
@@ -18615,7 +19007,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
             {terms.items.map((item, i) => (
               <div key={i} style={{ marginBottom: 12 }}>
                 {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
-                <div style={{ marginLeft: item.title ? 16 : 0 }}>{!item.title && `${i + 1}. `}{item.text}</div>
+                <div style={{ marginLeft: item.title ? 16 : 0 }}><ClauseBody text={item.text} prefix={!item.title ? `${i + 1}. ` : ''} /></div>
               </div>
             ))}
             {terms.extra && <div style={{ marginTop: 12 }}>{terms.extra}</div>}
@@ -22336,7 +22728,221 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
+// ── Biometric / machine-export attendance import ─────────────────────────────
+// Reads whatever the machine software exports (Excel / CSV): daily summary (ID, Date, In, Out), raw punch log
+// (ID, Date-Time per punch) or a monthly matrix (employees × days with P / A). Headers are detected automatically.
+const _p2 = n => String(n).padStart(2, '0');
+function bioParseCell(v) {
+  if (v == null || v === '') return { d: null, m: null };
+  if (v instanceof Date && !isNaN(v)) {
+    const t = new Date(Math.round(v.getTime() / 60000) * 60000);
+    const mins = t.getHours() * 60 + t.getMinutes();
+    if (t.getFullYear() < 1950) return { d: null, m: mins };
+    return { d: t.getFullYear() + '-' + _p2(t.getMonth() + 1) + '-' + _p2(t.getDate()), m: mins ? mins : null };
+  }
+  if (typeof v === 'number') {
+    if (v > 0 && v < 1) return { d: null, m: Math.round(v * 1440) };
+    if (v > 30000) { const t = new Date(Math.round((v - 25569) * 86400) * 1000); const mins = t.getUTCHours() * 60 + t.getUTCMinutes(); return { d: t.getUTCFullYear() + '-' + _p2(t.getUTCMonth() + 1) + '-' + _p2(t.getUTCDate()), m: mins ? mins : null }; }
+    return { d: null, m: null };
+  }
+  const s = String(v).trim();
+  let d = null, m = null, mt = s.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (mt) d = mt[1] + '-' + _p2(mt[2]) + '-' + _p2(mt[3]);
+  else {
+    const MN = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+    const mn = s.match(/(\d{1,2})[-\/\s]([A-Za-z]{3})[a-z]*[-\/\s,]*(\d{2,4})/);
+    mt = s.match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
+    if (mn && MN[mn[2].toLowerCase()]) { let y = +mn[3]; if (y < 100) y += 2000; d = y + '-' + _p2(MN[mn[2].toLowerCase()]) + '-' + _p2(mn[1]); }
+    else if (mt) { let a = +mt[1], b = +mt[2], y = +mt[3]; if (y < 100) y += 2000; let day = a, mon = b; if (mon > 12 && day <= 12) { day = b; mon = a; } d = y + '-' + _p2(mon) + '-' + _p2(day); }
+  }
+  const tm = s.replace(/\d{1,4}[-\/.]\d{1,2}[-\/.]\d{1,4}/, ' ').replace(/\d{1,2}[-\/\s][A-Za-z]{3}[a-z]*[-\/\s,]*\d{2,4}/, ' ').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/);
+  if (tm) { let h = +tm[1]; const mi = +tm[2]; if (tm[3]) { const pm = /p/i.test(tm[3]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; } m = h * 60 + mi; }
+  return { d, m };
+}
+function bioStatus(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace(/[.\s]/g, '');
+  if (!s) return null;
+  if (/^(p|pr|present|1|✓|y)$/.test(s)) return 'present';
+  if (/^(a|ab|abs|absent|0|x|n)$/.test(s)) return 'absent';
+  if (/^(hd|h\/d|half|halfday|½|0\.5|p\/2|ph)$/.test(s) || /half/.test(s)) return 'half_day';
+  if (/^(od|onduty|officialduty|official|tour|ot_od)$/.test(s) || /onduty|officialduty/.test(s)) return 'od';
+  if (/^(l|cl|sl|el|pl|ml|lv|leave)$/.test(s) || /leave/.test(s)) return 'leave';
+  if (/^(wo|off|weekoff|wk|w|ho|hol|holiday|fh)$/.test(s)) return 'skip';
+  return null;
+}
+const BIO_ROLES = [
+  ['in',   /(in[\s._-]*time|time[\s._-]*in|check[\s._-]*in|punch[\s._-]*in|first[\s._-]*(in|punch)|^in$|arrival)/],
+  ['out',  /(out[\s._-]*time|time[\s._-]*out|check[\s._-]*out|punch[\s._-]*out|last[\s._-]*(out|punch)|^out$|departure)/],
+  ['dt',   /(date[\s._\/-]*time|timestamp|punch(es)?$|punch[\s._-]*time|check[\s._-]*time|verify[\s._-]*time|log[\s._-]*time|^time$)/],
+  ['date', /(^|[\s._-])date($|[\s._-])|^day$/],
+  ['id',   /(emp(loyee)?[\s._-]*(id|code|no|number)|user[\s._-]*id|enroll|badge|card[\s._-]*(no|id)?|biometric|person[\s._-]*id|^(id|code|ecode|e\.?code|emp|empno|no)$)/],
+  ['name', /(^|[\s._-])name($|[\s._-])/],
+  ['hrs',  /(work(ing)?[\s._-]*(hrs|hours)|duration|total[\s._-]*(hrs|hours)|^hours$)/],
+  ['status', /(status|attendance|remark|present|^p\/a$)/],
+];
+function bioDetect(rows) {
+  for (let i = 0; i < Math.min(12, rows.length); i++) {
+    const hdr = rows[i].map(c => String(c == null ? '' : c).trim().toLowerCase());
+    const dayCols = hdr.map((h, k) => (/^\d{1,2}$/.test(h) && +h >= 1 && +h <= 31) ? k : -1).filter(k => k >= 0);
+    const col = {};
+    hdr.forEach((h, k) => { if (!h) return; for (const [role, re] of BIO_ROLES) { if (col[role] == null && re.test(h) && !(role === 'status' && /date/.test(h)) && !(role === 'dt' && /^date$/.test(h))) { col[role] = k; break; } } });
+    const nRoles = Object.keys(col).length;
+    if (dayCols.length >= 15 && (col.id != null || col.name != null)) return { row: i, col, dayCols, matrix: true };
+    if ((col.id != null || col.name != null) && (col.date != null || col.dt != null || col.in != null)) return { row: i, col, matrix: false };
+    if (nRoles >= 3 && (col.id != null || col.name != null)) return { row: i, col, matrix: false };
+  }
+  return null;
+}
+// → { entries: [{key, id, name, date, mins:[...], ovr, hrs}], info } ; month = 'YYYY-MM' (for matrix files)
+function bioExtract(rows, month) {
+  rows = rows.map(r => r.slice ? r : []);
+  const info = bioDetect(rows);
+  if (!info) return { entries: [], info: null };
+  const { col } = info; const map = new Map(); const body = rows.slice(info.row + 1);
+  const norm = v => String(v == null ? '' : v).trim();
+  const push = (id, name, date, m, ovr, hrs) => {
+    if (!date || (!id && !name)) return;
+    const key = (id ? id.toLowerCase().replace(/^0+(?=\d)/, '') : name.toLowerCase()) + '|' + date;
+    let e = map.get(key); if (!e) { e = { key, id, name, date, mins: [], ovr: null, hrs: null }; map.set(key, e); }
+    if (m != null) e.mins.push(m);
+    if (ovr) e.ovr = ovr; if (hrs != null) e.hrs = hrs;
+  };
+  if (info.matrix) {
+    const [yy, mm] = (month || new Date().toISOString().slice(0, 7)).split('-').map(Number);
+    body.forEach(r => {
+      const id = col.id != null ? norm(r[col.id]) : '', name = col.name != null ? norm(r[col.name]) : '';
+      if (!id && !name) return;
+      info.dayCols.forEach(k => { const st = bioStatus(r[k]); if (!st) return; const dd = +String(rows[info.row][k]).trim(); push(id, name, yy + '-' + _p2(mm) + '-' + _p2(dd), null, st); });
+    });
+  } else {
+    body.forEach(r => {
+      const id = col.id != null ? norm(r[col.id]) : '', name = col.name != null ? norm(r[col.name]) : '';
+      let date = null; const mins = [];
+      if (col.date != null) date = bioParseCell(r[col.date]).d;
+      if (col.in != null) { const p = bioParseCell(r[col.in]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      if (col.out != null) { const p = bioParseCell(r[col.out]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      if (col.dt != null && col.in == null) { const p = bioParseCell(r[col.dt]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      const st = col.status != null ? bioStatus(r[col.status]) : null;
+      let hrs = null; if (col.hrs != null) { const p = bioParseCell(r[col.hrs]); const raw = r[col.hrs]; hrs = typeof raw === 'number' ? (raw < 1 ? raw * 24 : raw) : (p.m != null ? p.m / 60 : (parseFloat(raw) || null)); }
+      if (!date) return;
+      if (!mins.length) push(id, name, date, null, st, hrs); else mins.forEach(m => push(id, name, date, m, st, hrs));
+    });
+  }
+  return { entries: [...map.values()], info };
+}
+// settings → per employee-day results
+function bioEvaluate(entries, employees, st, weekOff, holidays) {
+  const norm = v => String(v || '').trim().toLowerCase().replace(/^0+(?=\d)/, '');
+  const nName = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const byId = new Map(); employees.forEach(e => { [e.biometricId, e.empId].filter(Boolean).forEach(x => byId.set(norm(x), e)); });
+  const byName = new Map(); employees.forEach(e => e.name && byName.set(nName(e.name), e));
+  const unmatched = new Map(); const days = []; const seen = new Map();
+  entries.forEach(en => {
+    const emp = (en.id && byId.get(norm(en.id))) || (en.name && byName.get(nName(en.name))) || null;
+    if (!emp) { unmatched.set(en.id || en.name, en.name || en.id); return; }
+    let status, ot = 0, note = '', inM = null, outM = null;
+    if (en.ovr === 'skip') { if (!seen.has(emp.id)) seen.set(emp.id, new Set()); seen.get(emp.id).add(en.date); return; }
+    if (en.ovr) status = en.ovr;
+    else {
+      if (en.mins.length) { inM = Math.min(...en.mins); outM = en.mins.length > 1 ? Math.max(...en.mins) : null; }
+      let h = en.hrs; if (h == null && outM != null) { h = (outM - inM) / 60; if (h < 0) h += 24; }
+      if (h == null) { status = en.mins.length ? 'present' : 'absent'; if (en.mins.length) note = 'single punch'; }
+      else if (h >= st.fullHrs) status = 'present';
+      else if (h >= st.halfHrs) { status = 'half_day'; note = h.toFixed(1) + ' h'; }
+      else { status = 'absent'; note = 'only ' + h.toFixed(1) + ' h'; }
+      if (st.otOn && h != null && h > st.shiftHrs && status === 'present') ot = Math.round((h - st.shiftHrs) * 2) / 2;
+    }
+    if (inM != null) note = (note ? note + ' · ' : '') + _p2(Math.floor(inM / 60)) + ':' + _p2(inM % 60) + (outM != null ? '–' + _p2(Math.floor(outM / 60)) + ':' + _p2(outM % 60) : '');
+    days.push({ employeeId: emp.id, empName: emp.name, date: en.date, status, otHours: ot, note });
+    if (!seen.has(emp.id)) seen.set(emp.id, new Set()); seen.get(emp.id).add(en.date);
+  });
+  if (st.fillAbsent) {
+    const allDates = [...new Set(days.map(d => d.date))].sort();
+    seen.forEach((ds, empId) => {
+      const emp = employees.find(e => e.id === empId);
+      allDates.forEach(d => {
+        if (ds.has(d)) return;
+        if (new Date(d + 'T00:00:00').getDay() === weekOff) return;
+        if (holidays.has(d)) return;
+        days.push({ employeeId: empId, empName: emp && emp.name, date: d, status: 'absent', otHours: 0, note: 'no punch' });
+      });
+    });
+  }
+  return { days, unmatched: [...unmatched.entries()] };
+}
+
+function BiometricImportModal({ employees, weekOff, holidays, defaultMonth, onApply, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [fname, setFname] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [month, setMonth] = useState(defaultMonth || new Date().toISOString().slice(0, 7));
+  const [st, setSt] = useState({ fullHrs: 7, halfHrs: 4, shiftHrs: 8, otOn: false, fillAbsent: true });
+  async function pick(e) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy(true); setErr(''); setRows(null); setFname(f.name);
+    try {
+      let all = [];
+      if (/\.(xlsx|xls)$/i.test(f.name)) {
+        const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+        wb.SheetNames.forEach(sn => { all = all.concat(X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', blankrows: false, raw: true })); });
+      } else {
+        const txt = await f.text();
+        all = parseCsvText(txt.indexOf('\t') >= 0 && txt.split('\n')[0].indexOf(',') < 0 ? txt.replace(/\t/g, ',') : txt);
+      }
+      setRows(all);
+    } catch (ex) { setErr(ex.message || String(ex)); }
+    setBusy(false);
+  }
+  const ext = useMemo(() => rows ? bioExtract(rows, month) : null, [rows, month]);
+  const res = useMemo(() => ext && ext.info ? bioEvaluate(ext.entries, employees, st, weekOff, holidays) : null, [ext, st, employees, weekOff, holidays]);
+  const sum = useMemo(() => {
+    const m = {}; (res ? res.days : []).forEach(d => { const x = m[d.employeeId] || (m[d.employeeId] = { name: d.empName, present: 0, half: 0, absent: 0, leave: 0, ot: 0 }); if (d.status === 'present') x.present++; else if (d.status === 'half_day') x.half++; else if (d.status === 'absent') x.absent++; else if (d.status === 'leave') x.leave++; x.ot += d.otHours || 0; });
+    return Object.values(m);
+  }, [res]);
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, width: 70, boxSizing: 'border-box' };
+  const setS = (k, v) => setSt(s => ({ ...s, [k]: v }));
+  const th = { textAlign: 'left', padding: '6px 8px', fontSize: 12, background: '#F5F3EE', borderBottom: '1px solid #E5E1D8' };
+  const td = { padding: '5px 8px', fontSize: 12.5, borderBottom: '1px solid #F0EDE6' };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 26, width: 820, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 700 }}>Import biometric / machine attendance</h3>
+        <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#777' }}>Upload the Excel / CSV exported from your biometric software. Daily summary (ID, Date, In, Out), raw punch log, or a monthly sheet (employees × days with P / A) are all read automatically. Employees are matched by <b>Biometric ID</b> (set on the employee profile), Employee ID, or name.</p>
+        <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={pick} style={{ marginBottom: 10 }} />
+        {busy && <div style={{ fontSize: 13, color: '#888' }}>Reading {fname}…</div>}
+        {err && <div style={{ fontSize: 13, color: '#B5453A' }}>{err}</div>}
+        {rows && ext && !ext.info && <div style={{ fontSize: 13, color: '#B5453A', marginBottom: 8 }}>Could not find an Employee ID / Name column together with Date or In/Out columns in this file. Check the first rows have column headings.</div>}
+        {res && (
+          <>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', background: '#FBF9F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 12px', margin: '8px 0 12px', fontSize: 12.5 }}>
+              <label>Full day ≥ <input type="number" step="0.5" value={st.fullHrs} onChange={e => setS('fullHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label>Half day ≥ <input type="number" step="0.5" value={st.halfHrs} onChange={e => setS('halfHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label><input type="checkbox" checked={st.otOn} onChange={e => setS('otOn', e.target.checked)} /> OT after <input type="number" step="0.5" value={st.shiftHrs} onChange={e => setS('shiftHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label><input type="checkbox" checked={st.fillAbsent} onChange={e => setS('fillAbsent', e.target.checked)} /> No punch on a working day = Absent (skips week-off &amp; holidays)</label>
+              {ext.info.matrix && <label>Month of sheet <input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...inp, width: 140 }} /></label>}
+            </div>
+            <div style={{ fontSize: 12.5, marginBottom: 6 }}><b>{sum.length}</b> employee(s) matched · <b>{res.days.length}</b> daily record(s){ext.info.matrix ? ' (monthly sheet)' : ''}</div>
+            {res.unmatched.length > 0 && <div style={{ fontSize: 12, color: '#B45309', background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>Not matched ({res.unmatched.length}) — add their Biometric ID in Employees, then import again: {res.unmatched.slice(0, 12).map(u => u[1] || u[0]).join(', ')}{res.unmatched.length > 12 ? '…' : ''}</div>}
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, marginBottom: 14 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><th style={th}>Employee</th><th style={th}>Present</th><th style={th}>Half</th><th style={th}>Absent</th><th style={th}>Leave</th><th style={th}>OT h</th></tr></thead>
+                <tbody>{sum.map((x, i) => <tr key={i}><td style={td}>{x.name}</td><td style={td}>{x.present}</td><td style={td}>{x.half}</td><td style={{ ...td, color: x.absent ? '#B5453A' : undefined }}>{x.absent}</td><td style={td}>{x.leave}</td><td style={td}>{x.ot}</td></tr>)}</tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#888', marginBottom: 12 }}>Importing replaces the attendance of these employees on those dates; other employees and dates are untouched.</div>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button disabled={!res || !res.days.length} onClick={() => onApply(res.days)} style={{ padding: '9px 20px', background: res && res.days.length ? '#1E2A4A' : '#aaa', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: res && res.days.length ? 'pointer' : 'default' }}>Import {res ? res.days.length : ''} record(s)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, labourGroups: _allLG = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -22345,11 +22951,21 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [printSheet, setPrintSheet] = useState(false);
   const [printAbsent, setPrintAbsent] = useState(false);
+  const [bioOpen, setBioOpen] = useState(false);
   const [holForm, setHolForm] = useState({date:'',name:'',type:'govt',projectId:''});
   const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
   const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const fmt = makeFmt(businessInfo);
 
+  // Data isolation per business: employees arrive already scoped to this workspace; groups & daily records are tagged with
+  // bizType (older untagged ones are matched through their employees). Same module + same alert logic in every business.
+  const _empIds = new Set((employees || []).map(e => e.id));
+  const _mineR = r => r.bizType ? r.bizType === currentBizType : ((r.records || []).length ? (r.records || []).some(x => _empIds.has(x.employeeId)) : currentBizType === 'service');
+  const _mineG = g => g.bizType ? g.bizType === currentBizType : ((g.memberIds || []).length ? (g.memberIds || []).some(id => _empIds.has(id)) : currentBizType === 'service');
+  const siteAttendance = isMultiBiz ? _allSA.filter(_mineR) : _allSA;
+  const labourGroups = isMultiBiz ? _allLG.filter(_mineG) : _allLG;
+
+  const showProj = ['service', 'fmamc'].includes(currentBizType);
   const isForeman = userRole === 'foreman';
   const canManageGroups = ['admin','manager','hr'].includes(userRole);
   const myEmp = employees.find(e => e.email && user?.email && String(e.email).toLowerCase() === String(user.email).toLowerCase());
@@ -22359,13 +22975,13 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const projName = id => siteProjects.find(p=>p.id===id)?.name || '—';
 
   function saveAtt(form) {
-    const rec = { ...form, id: form.id || crypto.randomUUID(), updatedBy: user?.email||'' };
+    const rec = { ...form, id: form.id || crypto.randomUUID(), bizType: form.bizType || currentBizType, updatedBy: user?.email||'' };
     setSiteAttendance(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
     setEditing(null);
   }
   function delAtt(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
   function saveGroup(g) {
-    const rec = { ...g, id: g.id || crypto.randomUUID() };
+    const rec = { ...g, id: g.id || crypto.randomUUID(), bizType: g.bizType || currentBizType };
     const eff = rec.effectiveFrom || new Date().toISOString().slice(0,10);
     delete rec.effectiveFrom;
     setLabourGroups(prev => {
@@ -22381,9 +22997,36 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     });
     setEditingGroup(null);
   }
+  function applyBio(days) {
+    const grpOf = id => labourGroups.find(g => (g.memberIds || []).includes(id));
+    let newGroup = null; const byKey = {};
+    days.forEach(d => {
+      let g = grpOf(d.employeeId);
+      if (!g) {
+        if (!newGroup) newGroup = { id: crypto.randomUUID(), name: 'General (Biometric)', type: 'office', leaderId: '', projectId: '', memberIds: [], bizType: currentBizType };
+        if (!newGroup.memberIds.includes(d.employeeId)) newGroup.memberIds.push(d.employeeId);
+        g = newGroup;
+      }
+      const k = d.date + '|' + g.id;
+      (byKey[k] = byKey[k] || { date: d.date, group: g, recs: [] }).recs.push({ employeeId: d.employeeId, status: d.status, otHours: d.otHours || 0, note: d.note || '' });
+    });
+    if (newGroup) setLabourGroups(prev => [...prev, newGroup]);
+    setSiteAttendance(prev => {
+      const out = prev.slice();
+      Object.values(byKey).forEach(b => {
+        const ids = new Set(b.recs.map(r => r.employeeId));
+        const i = out.findIndex(r => r.date === b.date && r.groupId === b.group.id);
+        if (i >= 0) out[i] = { ...out[i], records: [...(out[i].records || []).filter(x => !ids.has(x.employeeId)), ...b.recs], updatedBy: user?.email || '' };
+        else out.push({ id: crypto.randomUUID(), date: b.date, groupId: b.group.id, projectId: b.group.projectId || '', records: b.recs, bizType: currentBizType, updatedBy: user?.email || '' });
+      });
+      return out;
+    });
+    setBioOpen(false);
+    alert('✅ ' + days.length + ' attendance record(s) imported.' + (newGroup ? ' Employees without a group were added to "General (Biometric)".' : ''));
+  }
   function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
 
-  const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵' };
+  const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵', od: '🏢' };
   const sorted = [...siteAttendance]
     .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
     .filter(r => !isForeman || visibleGroups.some(g=>g.id===r.groupId))
@@ -22398,6 +23041,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       halfDay: records.filter(x => x.status === 'half_day').length,
       absent: records.filter(x => x.status === 'absent').length,
       leave: records.filter(x => x.status === 'leave').length,
+      od: records.filter(x => x.status === 'od').length,
       ot: records.reduce((s,x)=>s+(parseFloat(x.otHours)||0),0),
       total: records.length,
     };
@@ -22431,25 +23075,25 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
     (holidayCalendar||[]).forEach(h => { if ((h.date||'').startsWith(ym) && (!h.projectId || !filterProject || h.projectId===filterProject)) { const dd=parseInt((h.date||'').slice(8,10),10); if(dd>=1&&dd<=dim) holDays.add(dd); } });
     const holidays = holDays.size;
     const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
-    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
+    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L', od:'OD' };
     const rows = scopeEmps.map(emp => {
       const byDay = {}; let ot=0;
       recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; ot+=parseFloat(rec.otHours)||0; });
       // Classify each calendar day ONCE: holiday days are never double-counted as present.
-      let present=0, half=0, absent=0, leave=0;
-      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
+      let present=0, half=0, absent=0, leave=0, od=0;
+      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='OD')od++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
       const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/dim;
-      const payable = Math.min(dim, present + 0.5*half + holidays);
+      const payable = Math.min(dim, present + od + 0.5*half + holidays);
       const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
-      return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
+      return { emp, byDay, present, half, absent, leave, od, ot, basic, payable, inHand };
     });
     return { ym, yy, mm, dim, holidays, holDays, effWeek, rows };
   }
   async function exportSalaryXlsx() {
     const { ym, dim, holidays, rows } = salaryData();
     const days = Array.from({length:dim},(_,i)=>i+1);
-    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
-    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
+    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Official Duty (OD)','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
+    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.od, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
     try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
     catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
   }
@@ -22487,8 +23131,9 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   return (
     <div style={styles.page}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
+        <div><h2 className="serif" style={styles.h2}>{currentBizType === 'service' ? 'Site Attendance' : 'Attendance & Salary'}</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
         <div style={{ display:'flex', gap:8 }}>
+          {canManageGroups && <button onClick={()=>setBioOpen(true)} style={{ ...styles.ghostBtn, fontSize:12, border:'1px solid #1E2A4A', color:'#1E2A4A', fontWeight:600 }}>⬆ Import Biometric</button>}
           {['mark', ...(canManageGroups?['groups','sheet','holidays']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':k==='sheet'?'Monthly Sheet':'Holidays'}</button>)}
         </div>
       </div>
@@ -22496,6 +23141,8 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
 
       {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d'+(a.endD?', to '+a.endD:'')+')').join(', ')}. Please review.</div>}
+
+      {bioOpen && <BiometricImportModal employees={employees} weekOff={weekOff} holidays={new Set((holidayCalendar||[]).map(h=>h.date))} defaultMonth={filterMonth} onApply={applyBio} onClose={()=>setBioOpen(false)} />}
 
       {tab === 'groups' && canManageGroups && (
         <div>
@@ -22539,7 +23186,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
           ); })()}
           <button style={styles.primaryBtn} disabled={!markGroupId} onClick={startMark}>+ Mark Attendance</button>
           <span style={{ flex:1 }}/>
-          <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          {showProj && <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
           <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
           {['admin','manager','hr'].includes(userRole) && <button style={styles.ghostBtn} onClick={()=>setPrintAbsent(true)} title="Absent report — grouped by site & foreman"><Printer size={13}/> Absent Report</button>}
         </div>
@@ -22549,13 +23196,14 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
             <div style={styles.dashSection}>Monthly Summary — {filterMonth||'All time'}</div>
             <div style={{ overflowX:'auto', marginBottom:20 }}>
               <table style={styles.table}>
-                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
+                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','OD','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.halfDay||0)*0.5)/su.total)*100):0; return (
+                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.od||0)+(su.halfDay||0)*0.5)/su.total)*100):0; return (
                     <tr key={emp.id} style={{ borderTop:'1px solid #EAE6DB' }}>
                       <td style={styles.td}>{emp.name}</td>
                       <td style={{ ...styles.td, textAlign:'center' }}>{su.total||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{su.present||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#2563EB' }}>{su.od||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{su.halfDay||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{su.absent||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{su.leave||0}</td>
@@ -22598,13 +23246,13 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         const days = Array.from({length:dim},(_,i)=>i+1);
         const isOff = d => holDays.has(d);
         const selProjObj = siteProjects.find(p=>p.id===filterProject);
-        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
+        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE', OD:'#2563EB' };
         const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, payable:a.payable+r.payable, inHand:a.inHand+r.inHand }), {present:0,half:0,absent:0,leave:0,ot:0,payable:0,inHand:0});
         return (
           <div>
             <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
               <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
-              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              {showProj && <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
               <span style={{ fontSize:11.5, color:'#B0AC9F' }}>Week off: <b style={{ color:'#666' }}>{DOW_NAMES[effWeek]}</b>{selProjObj?' ('+(selProjObj.name||'site')+')':''} — set it in the Attendance tab</span>
               <span style={{ flex:1 }}/>
               {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
@@ -22617,7 +23265,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                   <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
                     <th style={{ padding:'5px 8px', textAlign:'left', position:'sticky', left:0, background:'#1E2A4A', whiteSpace:'nowrap' }}>Employee</th>
                     {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center', background:isOff(d)?'#B5453A':'#1E2A4A' }}>{d}</th>)}
-                    {['P','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
+                    {['P','OD','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {rows.map((r,ri)=>(
@@ -22625,6 +23273,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                         <td style={{ padding:'4px 8px', fontWeight:600, position:'sticky', left:0, background:ri%2?'#F6F5F2':'#fff', whiteSpace:'nowrap' }}>{r.emp.name}</td>
                         {days.map(d=>{ const v=r.byDay[d]||''; const off=isOff(d); return <td key={d} style={{ padding:'3px 2px', textAlign:'center', background:off?'#FBE4E4':'transparent', color:STC[v]||'#ccc', fontWeight:700 }}>{v||(off?'':'·')}</td>; })}
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#1A7A3E' }}>{r.present}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#2563EB' }}>{r.od||0}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#C9A24B' }}>{r.half}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#B5453A' }}>{r.absent}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#6B5BAE' }}>{r.leave}</td>
@@ -22665,7 +23314,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
               <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Date</div><input type='date' value={holForm.date} onChange={e=>setHolForm(fm=>({...fm,date:e.target.value}))} style={{ ...styles.input, margin:0 }}/></div>
               <div style={{ flex:1, minWidth:180 }}><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Name</div><input value={holForm.name} onChange={e=>setHolForm(fm=>({...fm,name:e.target.value}))} style={{ ...styles.input, margin:0 }} placeholder='e.g. UAE National Day'/></div>
               <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Type</div><select value={holForm.type} onChange={e=>setHolForm(fm=>({...fm,type:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value='govt'>Government</option><option value='company'>Company</option></select></div>
-              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              {showProj && <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
               <button style={styles.primaryBtn} onClick={()=>{ if(!holForm.date){alert('Pick a date');return;} setHolidayCalendar(prev=>[...prev,{ id:crypto.randomUUID(), ...holForm }]); setHolForm({date:'',name:'',type:'govt',projectId:''}); }}><Plus size={14}/> Add</button>
             </div>
           </div>
@@ -22700,8 +23349,8 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         const monthName = new Date(yy, mm-1, 1).toLocaleString('default',{month:'long', year:'numeric'});
         const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
         const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
-        const calc = r => { const payable = r.present + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
-        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present, absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
+        const calc = r => { const payable = r.present + (r.od||0) + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
+        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present+(r.od||0), absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
         const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
         const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
@@ -22712,24 +23361,24 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
               <div style={{ fontSize:12, fontWeight:700, background:'#FFF3B0', padding:'2px 10px', borderRadius:4 }}>{monthName}</div>
             </div>
             <div style={{ display:'flex', gap:24, fontSize:10, marginBottom:8 }}><span>From: <b>{fromD}</b></span><span>To: <b style={{ background:'#FFF3B0', padding:'0 4px' }}>{toD}</b></span></div>
-            <table style={{ borderCollapse:'collapse', width:'100%', fontFamily:'Arial, sans-serif' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed', fontFamily:'Arial, sans-serif' }}>
               <thead>
                 <tr>
-                  {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
-                  {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
+                  {[['S.No',3],['Emp ID',7],['Employee Name',11],['Designation',9]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, width:(39.5/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {[['Present',4],['Absent',4],['Holiday',4],['Total Days',3.5],['Payable Days',4],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
                 </tr>
-                <tr>{days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r,ri)=>{ const c=calc(r); return (
                   <tr key={r.emp.id}>
                     <td style={td}>{ri+1}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
-                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
-                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
-                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.name}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.designation||''}</td>
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present+(r.od||0)}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
                     <td style={td}>{holidays}</td>
                     <td style={td}>{dim}</td>
@@ -22753,7 +23402,7 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
                 </tr>
               </tfoot>
             </table>
-            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
+            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · OD=Official Duty (paid) · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
           </DocPrintOverlay>
         );
       })()}
@@ -22808,27 +23457,27 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
         const proj = g && siteProjects.find(p=>p.id===g.projectId);
         const woDay = proj ? (proj.weekOff!=null?proj.weekOff:weekOff) : weekOff;
         const holDates = (holidayCalendar||[]).filter(h=>!h.projectId || (g && h.projectId===g.projectId)).map(h=>h.date);
-        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
+        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} showProj={showProj} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
       })()}
-      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
+      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} showProj={showProj} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
     </div>
   );
 }
 
-function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
-  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type:'site', memberIds:[], ...group });
+function GroupForm({ group, employees, siteProjects, showProj = true, onSave, onClose }) {
+  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type: showProj ? 'site' : 'office', memberIds:[], ...group });
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const toggle=id=>setForm(f=>({ ...f, memberIds: (f.memberIds||[]).includes(id) ? f.memberIds.filter(x=>x!==id) : [...(f.memberIds||[]), id] }));
   return (
     <Modal title={form.id?'Edit Group':'New Labour Group'} onClose={onClose} width={560}>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
         <div style={styles.formGroup}><label style={styles.label}>Group Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder="e.g. Electrical Gang A"/></div>
-        <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>
+        {showProj && <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>}
         <div style={styles.formGroup}><label style={styles.label}>Leader / Foreman</label><select value={form.leaderId} onChange={e=>set('leaderId',e.target.value)} style={styles.input}><option value="">— Select —</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
-        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
-        {form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
+        {showProj && form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+        {showProj && form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
       </div>
-      {form.type!=='office' && (form.siteHistory||[]).length>0 && (
+      {showProj && form.type!=='office' && (form.siteHistory||[]).length>0 && (
         <div style={{ background:'#F8F7F4', border:'1px solid #EAE6DB', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:11.5, color:'#666' }}>
           <b style={{ color:'#1E2A4A' }}>Site history:</b> {(form.siteHistory||[]).map((h,i)=>(siteProjects.find(p=>p.id===h.projectId)?.name||'—')+' (from '+h.fromDate+')').join('  →  ')}
         </div>
@@ -22851,7 +23500,7 @@ function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
   );
 }
 
-function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
+function AttendanceSheet({ sheet, group, siteProjects, showProj = true, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
   const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), projectId:'', records:[], ...sheet });
   const [bypass, setBypass] = useState(false);
   const _DOWN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -22861,12 +23510,12 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
   useEffect(()=>{ if((form.records||[]).length===0){ const mem = group ? employees.filter(e=>(group.memberIds||[]).includes(e.id)) : employees; setForm(f=>({ ...f, records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) })); } }, []);
   function set(k,v){ setForm(f=>({...f,[k]:v})); }
   function setRecord(i,k,v){ const recs=[...form.records]; recs[i]={...recs[i],[k]:v}; set('records',recs); }
-  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'}];
+  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'},{value:'od',label:'OD',color:'#2563EB',title:'Official duty / on duty (paid, counted as present)'}];
   return (
     <Modal title={'Mark Attendance'+(group?' — '+group.name:'')} onClose={onClose} width={620}>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
         <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        {showProj && <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
       </div>
       {offInfo && (
         <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12.5, color:'#92400E' }}>
@@ -22877,11 +23526,11 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
       <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
         {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
-          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'1.5fr auto 66px 130px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
+          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns: showProj ? '1.5fr auto 66px 130px' : '1.5fr auto 66px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
             <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
-            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
+            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} title={st.title||''} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
             <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 6px', margin:0 }} placeholder="OT" title="Overtime hours" />
-            <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            {showProj && <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
           </div>
         ); })}
         {form.records.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No members in this group. Add members in Labour Groups.</div>}
@@ -22908,7 +23557,7 @@ function QuarterlyEvalView({ evaluations, setEvaluations, employees, siteAttenda
     const prefix = qMonths.map(m => `${year}-${m}`);
     const attRecs = siteAttendance.filter(r=>prefix.some(p=>(r.date||'').startsWith(p))).flatMap(r=>(r.records||[]).filter(x=>x.employeeId===employeeId));
     const total = attRecs.length;
-    const present = attRecs.filter(x=>x.status==='present').length;
+    const present = attRecs.filter(x=>x.status==='present'||x.status==='od').length;
     const halfDay = attRecs.filter(x=>x.status==='half_day').length;
     const attPct = total ? Math.round(((present+halfDay*0.5)/total)*100) : 0;
     const dsrCount = progressUpdates.filter(u=>prefix.some(p=>(u.date||'').startsWith(p))).filter(u=>(u.workers||[]).some(w=>w.employeeId===employeeId)).length;
@@ -29090,7 +29739,7 @@ export default function App() {
             holidayCalendar={holidayCalendar}
             setHolidayCalendar={setHolidayCalendar}
             currentBizType={sessionContext || effectiveBizContext}
-            isMultiBiz={sessionIsMultiBiz}
+            isMultiBiz={_sessScoped || sessionIsMultiBiz}
           />
         );
       case 'evaluation':
