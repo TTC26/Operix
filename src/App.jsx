@@ -209,6 +209,7 @@ const blankDoc = (type, businessInfo) => ({
   notes: '',
   dueDate: '',
   placeOfSupply: '',
+  supplyType: 'domestic',
   refNumber: '',
   status: 'draft',
   createdAt: Date.now(),
@@ -270,14 +271,17 @@ function computeTotals(doc, sellerState, country) {
   if (doc && doc.status === 'deleted') doc = { ...doc, items: [] };
   let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
-  const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
+  const st = (doc && doc.supplyType) || 'domestic';
+  const isExp = cc.splitTax && st !== 'domestic';
+  const zeroRated = isExp && /_lut$/.test(st);
+  const sameState = !isExp && cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
   (doc.items || []).forEach((it) => {
     const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
     const disc = amt * (Number(it.discount) || 0) / 100;
     subtotal += amt;
     discountTotal += disc;
-    if (cc.hasTax) {
+    if (cc.hasTax && !zeroRated) {
       const taxAmt = (amt - disc) * (Number(it.gst) || 0) / 100;
       if (cc.splitTax) {
         if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
@@ -289,7 +293,40 @@ function computeTotals(doc, sellerState, country) {
   });
   const totalTax = cgst + sgst + igst + vat;
   const grandTotal = subtotal - discountTotal + totalTax;
-  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
+  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState, supplyType: st, isExport: isExp, zeroRated };
+}
+
+// Export / SEZ supply types (GST). *_lut = zero-rated without payment of IGST; *_igst = on payment of IGST.
+const SUPPLY_TYPES = [
+  ['domestic', 'Domestic (regular)'],
+  ['export_lut', 'Export under LUT / Bond (zero-rated, no IGST)'],
+  ['export_igst', 'Export with payment of IGST (refund claim)'],
+  ['sez_lut', 'SEZ supply under LUT (zero-rated, no IGST)'],
+  ['sez_igst', 'SEZ supply with payment of IGST'],
+];
+const isExportDoc = (d) => !!d && !!d.supplyType && d.supplyType !== 'domestic';
+const isSezDoc = (d) => !!d && /^sez_/.test(d.supplyType || '');
+const exportDeclaration = (d) => {
+  if (!isExportDoc(d)) return '';
+  const lut = /_lut$/.test(d.supplyType);
+  const who = isSezDoc(d) ? 'SUPPLY TO SEZ' : 'SUPPLY MEANT FOR EXPORT';
+  return lut
+    ? who + ' UNDER LETTER OF UNDERTAKING' + (d.lutNo ? ' (LUT No. ' + d.lutNo + (d.lutDate ? ' dt. ' + d.lutDate : '') + ')' : '') + ' WITHOUT PAYMENT OF INTEGRATED TAX'
+    : who + ' ON PAYMENT OF INTEGRATED TAX';
+};
+
+function ExportInfoBlock({ doc, totals }) {
+  if (!isExportDoc(doc) || doc.type !== 'invoice') return null;
+  const fx = Number(doc.exRate) || 0, cur = doc.exCurrency || '';
+  const rows = [['Shipping Bill No', doc.shipBillNo], ['Shipping Bill Date', doc.shipBillDate], ['Port Code', doc.portCode], ['Destination', doc.destCountry], ['Incoterm', doc.incoterm]].filter(r => r[1]);
+  return (
+    <div style={{ border: '1px solid #000', padding: '6px 10px', margin: '8px 0', fontSize: 11.5, color: '#000' }}>
+      <div style={{ fontWeight: 700 }}>{exportDeclaration(doc)}</div>
+      {doc.lutArn && <div>LUT ARN: {doc.lutArn}</div>}
+      {rows.length > 0 && <div style={{ marginTop: 3 }}>{rows.map(r => r[0] + ': ' + r[1]).join('  |  ')}</div>}
+      {fx > 0 && cur && <div style={{ marginTop: 3 }}>Invoice value in {cur}: <b>{cur} {(totals.grandTotal / fx).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (at ₹{fx} per {cur})</div>}
+    </div>
+  );
 }
 
 // ─── Shared tax helper for non-DocEditor modules (Tender, RA Bill, AMC, etc.) ─
@@ -814,7 +851,8 @@ function buildZohoDocPrint(o) {
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl = (v) => esc(v).replace(/\n/g, '<br>');
   const isPL = doc.type === 'packing_list';
-  const title = doc.type === 'invoice' ? 'TAX INVOICE' : String(t.label || doc.type).toUpperCase();
+  const isExp = doc.type === 'invoice' && isExportDoc(doc);
+  const title = doc.type === 'invoice' ? (isExp ? (isSezDoc(doc) ? 'TAX INVOICE (SEZ SUPPLY)' : 'EXPORT INVOICE') : 'TAX INVOICE') : String(t.label || doc.type).toUpperCase();
   const blocks = [];
   const B = (h) => blocks.push({ h, t: '' });
   const TL = (h) => blocks.push({ h, t: 'tail' });
@@ -827,7 +865,7 @@ function buildZohoDocPrint(o) {
 
   B('<div class="zh1">' + esc(title) + '' + '</div>');
 
-  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
+  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].concat(isExp ? [['Supply Type', (SUPPLY_TYPES.find(x => x[0] === doc.supplyType) || [])[1] ? (SUPPLY_TYPES.find(x => x[0] === doc.supplyType)[1].split(' (')[0]) : ''], ['Shipping Bill No', doc.shipBillNo], ['Shipping Bill Date', doc.shipBillDate], ['Port Code', doc.portCode], ['Destination', doc.destCountry], ['Incoterm', doc.incoterm]] : []).filter(r => r[1]);
   if (meta.length) B('<div class="zmeta">' + meta.map(r => '<div><div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div></div>').join('') + '</div>');
 
   const pl = [];
@@ -870,7 +908,7 @@ function buildZohoDocPrint(o) {
     if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
     h += cell('r', esc(it.qty || 0));
     if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
-    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(it.gst || 0)); h += cell('r amt', esc(fmt(amount))); }
+    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(totals.zeroRated ? 0 : (it.gst || 0))); h += cell('r amt', esc(fmt(amount))); }
     return h;
   };
   let i = 0;
@@ -906,6 +944,13 @@ function buildZohoDocPrint(o) {
         + (bi.upi ? '<div><b>UPI:</b> ' + esc(bi.upi) + '</div>' : '') + '</div>';
     }
   }
+  if (isExp && !isPL) {
+    const fx = Number(doc.exRate) || 0, cur = doc.exCurrency || '';
+    left += '<div class="zbox" style="margin-top:6px;font-size:10.5px;font-weight:700">' + esc(exportDeclaration(doc))
+      + (doc.lutArn ? '<div style="font-weight:400">LUT ARN: ' + esc(doc.lutArn) + '</div>' : '')
+      + (fx > 0 && cur ? '<div style="font-weight:400;margin-top:3px">Invoice value in ' + esc(cur) + ': <b>' + esc(cur) + ' ' + (totals.grandTotal / fx).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</b> (at ₹' + fx + ' per ' + esc(cur) + ')</div>' : '')
+      + '</div>';
+  }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
   let qrBlock = '';
   if (!isPL) {
@@ -919,8 +964,9 @@ function buildZohoDocPrint(o) {
     const grp = {};
     items.forEach(it => {
       const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0); if (!amt) return;
-      const k = (it.hsn || '-') + '|' + (Number(it.gst) || 0);
-      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: Number(it.gst) || 0, taxable: 0 }).taxable += amt;
+      const rt = totals.zeroRated ? 0 : (Number(it.gst) || 0);
+      const k = (it.hsn || '-') + '|' + rt;
+      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: rt, taxable: 0 }).taxable += amt;
     });
     const rowsT = Object.values(grp);
     if (rowsT.length) {
@@ -6569,6 +6615,57 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
           )}
+          {cc.splitTax && doc.type === 'invoice' && (() => {
+            const ro = isEditable ? {} : styles.inputReadOnly;
+            const fld = (label, key, ph, type) => (
+              <div style={{ ...styles.formGroup, flex: 1, minWidth: 130 }}>
+                <label style={styles.label}>{label}</label>
+                <input type={type || 'text'} value={doc[key] || ''} placeholder={ph || ''} onChange={(e) => update(key, e.target.value)} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
+              </div>
+            );
+            const setSupply = (v) => {
+              setDoc((d) => {
+                const n = { ...d, supplyType: v };
+                if (v !== 'domestic') {
+                  if (!n.placeOfSupply || !/other|sez/i.test(n.placeOfSupply)) n.placeOfSupply = /^sez_/.test(v) ? (n.placeOfSupply || '') : '96-Other Countries';
+                  if (!n.exCurrency) n.exCurrency = 'USD';
+                }
+                return n;
+              });
+            };
+            return (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Supply type (GST)</label>
+                <select value={doc.supplyType || 'domestic'} onChange={(e) => isEditable && setSupply(e.target.value)} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+                  {SUPPLY_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                {isExportDoc(doc) && (
+                  <div style={{ marginTop: 8, padding: 10, border: '1px solid #E5DFC9', borderRadius: 8, background: '#FBF8EC' }}>
+                    <div style={{ fontSize: 11.5, color: '#7A6A2A', marginBottom: 6 }}>
+                      {/_lut$/.test(doc.supplyType) ? 'Zero-rated: GST is not charged on this invoice (item GST % is ignored).' : 'IGST is charged on the full taxable value (claim refund of IGST paid).'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {/_lut$/.test(doc.supplyType) && fld('LUT / Bond No.', 'lutNo', 'AD330…')}
+                      {/_lut$/.test(doc.supplyType) && fld('LUT date', 'lutDate', '', 'date')}
+                      {/_lut$/.test(doc.supplyType) && fld('LUT ARN', 'lutArn')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {fld('Shipping bill no.', 'shipBillNo')}
+                      {fld('Shipping bill date', 'shipBillDate', '', 'date')}
+                      {fld('Port code', 'portCode', 'INMAA1')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {fld('Destination country', 'destCountry')}
+                      {fld('Incoterm', 'incoterm', 'FOB / CIF / EXW')}
+                      {fld('Currency', 'exCurrency', 'USD')}
+                      {fld('Exchange rate (₹ per 1 unit)', 'exRate', '83.50', 'number')}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#888' }}>Amounts are entered in ₹. Foreign-currency value on the print = Total ÷ exchange rate.</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div style={styles.formGroup}>
             <label style={styles.label}>{isVendorDoc ? 'Vendor' : 'Customer'}</label>
@@ -7029,7 +7126,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 <div style={{ margin: '-40px -48px', border: bdr, fontSize: 12, fontFamily: 'Arial, sans-serif', color: '#222', lineHeight: 1.5 }}>
                   {/* Header band */}
                   <div style={{ background: isPrestige ? '#1E2A4A' : '#fff', color: isPrestige ? '#fff' : '#000', textAlign: 'center', padding: '8px 16px', fontWeight: 700, fontSize: 15, letterSpacing: 1, borderBottom: bdr }}>
-                    {doc.type === 'invoice' ? 'TAX INVOICE' : t.label.toUpperCase()}
+                    {doc.type === 'invoice' ? (isExportDoc(doc) ? (isSezDoc(doc) ? 'TAX INVOICE (SEZ SUPPLY)' : 'EXPORT INVOICE') : 'TAX INVOICE') : t.label.toUpperCase()}
                   </div>
                   {/* Seller + Logo */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 18px', borderBottom: bdr }}>
@@ -7059,7 +7156,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       ))}
                     </div>
                     <div style={{ width: 270, padding: '10px 18px' }}>
-                      {[[`${t.label} No`, doc.number],['Date', doc.date],['Due Date', doc.dueDate],['Place of Supply', doc.placeOfSupply]].filter(([,v])=>v).map(([k,v])=>(
+                      {[[`${t.label} No`, doc.number],['Date', doc.date],['Due Date', doc.dueDate],['Place of Supply', doc.placeOfSupply], ...(isExportDoc(doc) && doc.type === 'invoice' ? [['Supply Type', (SUPPLY_TYPES.find(x => x[0] === doc.supplyType) || ['',''])[1].split(' (')[0]]] : [])].filter(([,v])=>v).map(([k,v])=>(
                         <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 5 }}>
                           <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{k}:</span>
                           <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{v}</span>
@@ -7084,7 +7181,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{i+1}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
                             <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.gst||0}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{totals.zeroRated ? 0 : (it.gst||0)}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
                             <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmt(amt)}</td>
@@ -7106,6 +7203,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         <div style={{ fontWeight:700, textDecoration:'underline', marginBottom:3 }}>Amount in words:</div>
                         <div style={{ fontStyle:'italic' }}>{numToWords(Math.round(totals.grandTotal))} Rupees Only.</div>
                       </div>
+                      <ExportInfoBlock doc={doc} totals={totals} />
                       {doc.notes && <div style={{ marginBottom:6 }}><div style={{ fontWeight:700 }}>Notes:</div><div style={{ color:'#444' }}>{doc.notes}</div></div>}
                       {(businessInfo.bankName||businessInfo.bankAccount) && (
                         <div style={{ marginTop:6 }}>
@@ -7224,6 +7322,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           )}
 
+          {doc.type === 'invoice' && <ExportInfoBlock doc={doc} totals={totals} />}
           <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }
             /* Editor uses a stacked block per item; print uses the columnar table row */
             .di-screen-row { display: table-row; } .di-print-row { display: none; }
@@ -7292,7 +7391,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 </>) : (<>
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}</td>
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.rate, (e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0), 84)}</td>
-                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
+                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{totals.zeroRated ? <span style={{ color: '#888' }}>0</span> : numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmt(amount)}</td>
                 </>);
                 return (
@@ -15120,11 +15219,15 @@ function GSTR1Report({ documents, customers, businessInfo }) {
     const c = customers.find(x => x.id === d.customerId);
     const t = computeTotals(d, businessInfo.state, 'india');
     const gstin = c ? (c.gstin || '') : '';
-    return { ...t, number: d.number, date: d.date, party: c ? c.name : (d.customerSnapshot?.name || '—'), gstin, type: gstin ? 'B2B' : 'B2C', state: c ? c.state : '' };
+    const ex = isExportDoc(d);
+    return { ...t, number: d.number, date: d.date, party: c ? c.name : (d.customerSnapshot?.name || '—'), gstin, type: ex ? (isSezDoc(d) ? 'SEZ' : 'EXP') : (gstin ? 'B2B' : 'B2C'), state: c ? c.state : '',
+      pay: /_lut$/.test(d.supplyType || '') ? 'WOPAY' : 'WPAY', sbNo: d.shipBillNo || '', sbDate: d.shipBillDate || '', port: d.portCode || '', cur: d.exCurrency || '', fx: d.exRate || '' };
   }).sort((a, b) => a.date > b.date ? 1 : -1);
 
   const b2b = rows.filter(r => r.type === 'B2B');
   const b2c = rows.filter(r => r.type === 'B2C');
+  const expR = rows.filter(r => r.type === 'EXP');
+  const sezR = rows.filter(r => r.type === 'SEZ');
   const totalTaxable = rows.reduce((s, r) => s + r.subtotal, 0);
   const totalCGST    = rows.reduce((s, r) => s + r.cgst, 0);
   const totalSGST    = rows.reduce((s, r) => s + r.sgst, 0);
@@ -15167,6 +15270,16 @@ function GSTR1Report({ documents, customers, businessInfo }) {
                 <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
               </tr>)}</tbody>
             </table></>}
+          {[['Exports 6A', expR], ['SEZ 6B', sezR]].map(([ttl, list]) => list.length > 0 && <React.Fragment key={ttl}><div style={{ fontWeight:700, fontSize:12, marginBottom:6 }}>{ttl} ({list.length})</div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, marginBottom:12 }}>
+              <thead><tr style={{ background:'#f0f0f0' }}>{['Invoice','Date','Party','Pay','Ship Bill','SB Date','Port','Taxable','IGST','Total'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left' }}>{h}</th>)}</tr></thead>
+              <tbody>{list.map(r=><tr key={r.number} style={{ borderBottom:'1px solid #f5f5f5' }}>
+                <td style={{ padding:'4px 6px' }}>{r.number}</td><td style={{ padding:'4px 6px' }}>{r.date}</td><td style={{ padding:'4px 6px' }}>{r.party}</td>
+                <td style={{ padding:'4px 6px' }}>{r.pay}</td><td style={{ padding:'4px 6px' }}>{r.sbNo}</td><td style={{ padding:'4px 6px' }}>{r.sbDate}</td><td style={{ padding:'4px 6px' }}>{r.port}</td>
+                <td style={{ padding:'4px 6px', textAlign:'right' }}>{fmt(r.subtotal)}</td><td style={{ padding:'4px 6px', textAlign:'right' }}>{fmt(r.igst)}</td>
+                <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
+              </tr>)}</tbody>
+            </table></React.Fragment>)}
           {b2c.length > 0 && <><div style={{ fontWeight:700, fontSize:12, marginBottom:6 }}>B2C ({b2c.length})</div>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
               <thead><tr style={{ background:'#f0f0f0' }}>{['Invoice','Date','Party','Taxable','CGST','SGST','IGST','Total'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left' }}>{h}</th>)}</tr></thead>
@@ -15189,9 +15302,10 @@ function GSTR1Report({ documents, customers, businessInfo }) {
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button style={styles.secondaryBtn} onClick={() => downloadCSV('gstr1-' + from + '-to-' + to + '.csv',
-            ['Type','Invoice No','Date','Party','GSTIN','State','Taxable','CGST','SGST','IGST','Total'],
+            ['Type','Invoice No','Date','Party','GSTIN','State','Taxable','CGST','SGST','IGST','Total','Export Pay Type','Shipping Bill No','Shipping Bill Date','Port Code'],
             [...rows.map(r => [r.type, r.number, r.date, r.party, r.gstin, r.state,
-              r.subtotal.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.grandTotal.toFixed(2)])])
+              r.subtotal.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.grandTotal.toFixed(2),
+              (r.type === 'EXP' || r.type === 'SEZ') ? r.pay : '', r.sbNo, r.sbDate, r.port])])
           }><Download size={15}/> Export CSV</button>
           <button style={styles.primaryBtn} onClick={() => setShowPrint(true)}><Printer size={15}/> Print / PDF</button>
         </div>
@@ -15232,6 +15346,32 @@ function GSTR1Report({ documents, customers, businessInfo }) {
           </table>
         </div>
       </>)}
+
+
+      {[['Exports — Table 6A', expR], ['SEZ supplies — Table 6B', sezR]].map(([ttl, list]) => list.length > 0 && (<React.Fragment key={ttl}>
+        <div style={styles.dashSection}>{ttl}</div>
+        <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+          <table style={styles.table}>
+            <thead><tr>{['Invoice No','Date','Party','Pay type','Shipping Bill','SB Date','Port','Taxable','IGST','Total'].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(r=>(
+                <tr key={r.number}>
+                  <td style={{ ...styles.td, fontFamily:'monospace', fontSize:11 }}>{r.number}</td>
+                  <td style={styles.td}>{r.date}</td>
+                  <td style={{ ...styles.td, fontWeight:500 }}>{r.party}</td>
+                  <td style={styles.td}>{r.pay}</td>
+                  <td style={styles.td}>{r.sbNo || '—'}</td>
+                  <td style={styles.td}>{r.sbDate || '—'}</td>
+                  <td style={styles.td}>{r.port || '—'}</td>
+                  <td style={{ ...styles.td, textAlign:'right' }}>{fmt(r.subtotal)}</td>
+                  <td style={{ ...styles.td, textAlign:'right' }}>{fmt(r.igst)}</td>
+                  <td style={{ ...styles.td, textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </React.Fragment>))}
 
       {b2c.length > 0 && (<>
         <div style={styles.dashSection}>B2C Invoices (without GSTIN)</div>
@@ -15306,6 +15446,8 @@ function GSTR3BReport({ documents, customers, vendors, businessInfo }) {
   }
 
   const out = sumTotals(outDocs);
+  const outDom = sumTotals(outDocs.filter(d => !isExportDoc(d)));
+  const outExp = sumTotals(outDocs.filter(d => isExportDoc(d)));
   const itc = sumTotals(inDocs);
   const netCGST = Math.max(0, out.cgst - itc.cgst);
   const netSGST = Math.max(0, out.sgst - itc.sgst);
@@ -15315,14 +15457,14 @@ function GSTR3BReport({ documents, customers, vendors, businessInfo }) {
   // Table 3.2 — interstate to unregistered (IGST only, no GSTIN)
   const unreg = outDocs.filter(d => {
     const c = customers?.find(x=>x.id===d.customerId);
-    return d.type==='invoice' && !c?.gstin;
+    return d.type==='invoice' && !c?.gstin && !isExportDoc(d);
   });
   const unreg3p2 = sumTotals(unreg);
 
   // Rows for output breakdown
   const outRows = [
-    ['3.1(a)','Outward taxable supplies (other than zero rated/nil/exempt)', out.subtotal, out.cgst, out.sgst, out.igst],
-    ['3.1(b)','Zero rated supplies (Exports)', 0, 0, 0, 0],
+    ['3.1(a)','Outward taxable supplies (other than zero rated/nil/exempt)', outDom.subtotal, outDom.cgst, outDom.sgst, outDom.igst],
+    ['3.1(b)','Zero rated supplies (Exports / SEZ)', outExp.subtotal, '-', '-', outExp.igst],
     ['3.1(c)','Nil rated / Exempt supplies', 0, 0, 0, 0],
     ['3.2','Supplies to unregistered / composition (IGST only)', unreg3p2.subtotal, '-', '-', unreg3p2.igst],
   ];
@@ -28739,6 +28881,13 @@ export default function App() {
       terms: srcDoc.terms || '',
       discount: srcDoc.discount || 0,
       placeOfSupply: srcDoc.placeOfSupply || '',
+      supplyType: srcDoc.supplyType || (srcDoc.overseas ? 'export_lut' : 'domestic'),
+      ...(((srcDoc.supplyType && srcDoc.supplyType !== 'domestic') || srcDoc.overseas) ? {
+        lutNo: srcDoc.lutNo || '', lutDate: srcDoc.lutDate || '', lutArn: srcDoc.lutArn || '',
+        shipBillNo: srcDoc.shipBillNo || '', shipBillDate: srcDoc.shipBillDate || '', portCode: srcDoc.portCode || '',
+        destCountry: srcDoc.destCountry || '', incoterm: srcDoc.incoterm || '',
+        exCurrency: srcDoc.exCurrency || srcDoc.ovCurrency || 'USD', exRate: srcDoc.exRate || '',
+      } : {}),
       refNumber: srcDoc.refNumber || '',
       // shipping / transport details travel with the goods (invoice → delivery note → packing list)
       shipmentType: srcDoc.shipmentType || 'domestic', shipToSameAsBilling: !!srcDoc.shipToSameAsBilling,
