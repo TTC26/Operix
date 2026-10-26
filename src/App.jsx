@@ -22765,7 +22765,8 @@ function bioStatus(v) {
   if (/^(p|pr|present|1|✓|y)$/.test(s)) return 'present';
   if (/^(a|ab|abs|absent|0|x|n)$/.test(s)) return 'absent';
   if (/^(hd|h\/d|half|halfday|½|0\.5|p\/2|ph)$/.test(s) || /half/.test(s)) return 'half_day';
-  if (/^(l|cl|sl|el|pl|ml|lv|leave|od)$/.test(s) || /leave/.test(s)) return 'leave';
+  if (/^(od|onduty|officialduty|official|tour|ot_od)$/.test(s) || /onduty|officialduty/.test(s)) return 'od';
+  if (/^(l|cl|sl|el|pl|ml|lv|leave)$/.test(s) || /leave/.test(s)) return 'leave';
   if (/^(wo|off|weekoff|wk|w|ho|hol|holiday|fh)$/.test(s)) return 'skip';
   return null;
 }
@@ -22964,6 +22965,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
   const siteAttendance = isMultiBiz ? _allSA.filter(_mineR) : _allSA;
   const labourGroups = isMultiBiz ? _allLG.filter(_mineG) : _allLG;
 
+  const showProj = ['service', 'fmamc'].includes(currentBizType);
   const isForeman = userRole === 'foreman';
   const canManageGroups = ['admin','manager','hr'].includes(userRole);
   const myEmp = employees.find(e => e.email && user?.email && String(e.email).toLowerCase() === String(user.email).toLowerCase());
@@ -23024,7 +23026,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
   }
   function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
 
-  const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵' };
+  const STATUS_ICON = { present: '✅', absent: '❌', half_day: '🔶', leave: '🔵', od: '🏢' };
   const sorted = [...siteAttendance]
     .filter(r => (!filterProject || r.projectId === filterProject) && (!filterMonth || (r.date || '').startsWith(filterMonth)))
     .filter(r => !isForeman || visibleGroups.some(g=>g.id===r.groupId))
@@ -23039,6 +23041,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
       halfDay: records.filter(x => x.status === 'half_day').length,
       absent: records.filter(x => x.status === 'absent').length,
       leave: records.filter(x => x.status === 'leave').length,
+      od: records.filter(x => x.status === 'od').length,
       ot: records.reduce((s,x)=>s+(parseFloat(x.otHours)||0),0),
       total: records.length,
     };
@@ -23072,25 +23075,25 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
     (holidayCalendar||[]).forEach(h => { if ((h.date||'').startsWith(ym) && (!h.projectId || !filterProject || h.projectId===filterProject)) { const dd=parseInt((h.date||'').slice(8,10),10); if(dd>=1&&dd<=dim) holDays.add(dd); } });
     const holidays = holDays.size;
     const recs = siteAttendance.filter(r => (r.date||'').startsWith(ym) && (!isForeman || visibleGroups.some(g=>g.id===r.groupId)));
-    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L' };
+    const STMAP = { present:'P', absent:'A', half_day:'H', leave:'L', od:'OD' };
     const rows = scopeEmps.map(emp => {
       const byDay = {}; let ot=0;
       recs.forEach(r => { const rec=(r.records||[]).find(x=>x.employeeId===emp.id); if(!rec) return; const effProj = rec.projectId || r.projectId; if(filterProject && effProj!==filterProject) return; const d = parseInt((r.date||'').slice(8,10),10); byDay[d]=STMAP[rec.status]||''; ot+=parseFloat(rec.otHours)||0; });
       // Classify each calendar day ONCE: holiday days are never double-counted as present.
-      let present=0, half=0, absent=0, leave=0;
-      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
+      let present=0, half=0, absent=0, leave=0, od=0;
+      for(let d=1; d<=dim; d++){ if(holDays.has(d)) continue; const st=byDay[d]; if(st==='P')present++; else if(st==='OD')od++; else if(st==='H')half++; else if(st==='A')absent++; else if(st==='L')leave++; }
       const basic = parseFloat(emp.basicSalary)||0; const dayRate = basic/dim;
-      const payable = Math.min(dim, present + 0.5*half + holidays);
+      const payable = Math.min(dim, present + od + 0.5*half + holidays);
       const inHand = dayRate*payable + ot*(dayRate/8)*OT_MULT;
-      return { emp, byDay, present, half, absent, leave, ot, basic, payable, inHand };
+      return { emp, byDay, present, half, absent, leave, od, ot, basic, payable, inHand };
     });
     return { ym, yy, mm, dim, holidays, holDays, effWeek, rows };
   }
   async function exportSalaryXlsx() {
     const { ym, dim, holidays, rows } = salaryData();
     const days = Array.from({length:dim},(_,i)=>i+1);
-    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
-    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
+    const head = ['Emp ID','Employee','Designation', ...days.map(String), 'Present','Official Duty (OD)','Half','Absent','Leave','OT hrs','Holiday','Payable Days','Total Days','Basic','Salary in Hand'];
+    const aoa = [head, ...rows.map(r=>[r.emp.empId||'', r.emp.name||'', r.emp.designation||'', ...days.map(d=>r.byDay[d]||''), r.present, r.od, r.half, r.absent, r.leave, r.ot, holidays, r.payable, dim, r.basic, Math.round(r.inHand)])];
     try { const XLSX=await loadXLSX(); const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Salary '+ym); XLSX.writeFile(wb,'Attendance-Salary-'+ym+'.xlsx'); }
     catch(err){ const csv=aoa.map(r=>r.map(c=>{const v=String(c==null?'':c);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\n'); const url=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'})); const el=document.createElement('a'); el.href=url; el.download='Attendance-Salary-'+ym+'.csv'; el.click(); URL.revokeObjectURL(url); }
   }
@@ -23183,7 +23186,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
           ); })()}
           <button style={styles.primaryBtn} disabled={!markGroupId} onClick={startMark}>+ Mark Attendance</button>
           <span style={{ flex:1 }}/>
-          <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          {showProj && <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:180, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
           <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
           {['admin','manager','hr'].includes(userRole) && <button style={styles.ghostBtn} onClick={()=>setPrintAbsent(true)} title="Absent report — grouped by site & foreman"><Printer size={13}/> Absent Report</button>}
         </div>
@@ -23193,13 +23196,14 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
             <div style={styles.dashSection}>Monthly Summary — {filterMonth||'All time'}</div>
             <div style={{ overflowX:'auto', marginBottom:20 }}>
               <table style={styles.table}>
-                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
+                <thead><tr style={{ background:'#F5F3EE' }}>{['Employee','Days','Present','OD','Half','Absent','Leave','OT hrs','Att %'].map(h=><th key={h} style={{ ...styles.th, textAlign:h==='Employee'?'left':'center' }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.halfDay||0)*0.5)/su.total)*100):0; return (
+                  {scopeEmps.map(emp=>{ const su=empSummary[emp.id]||{}; const pct=su.total?Math.round(((su.present+(su.od||0)+(su.halfDay||0)*0.5)/su.total)*100):0; return (
                     <tr key={emp.id} style={{ borderTop:'1px solid #EAE6DB' }}>
                       <td style={styles.td}>{emp.name}</td>
                       <td style={{ ...styles.td, textAlign:'center' }}>{su.total||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#1A7A3E', fontWeight:600 }}>{su.present||0}</td>
+                      <td style={{ ...styles.td, textAlign:'center', color:'#2563EB' }}>{su.od||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#C9A24B' }}>{su.halfDay||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#B5453A' }}>{su.absent||0}</td>
                       <td style={{ ...styles.td, textAlign:'center', color:'#6B5BAE' }}>{su.leave||0}</td>
@@ -23242,13 +23246,13 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
         const days = Array.from({length:dim},(_,i)=>i+1);
         const isOff = d => holDays.has(d);
         const selProjObj = siteProjects.find(p=>p.id===filterProject);
-        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE' };
+        const STC = { P:'#1A7A3E', A:'#B5453A', H:'#C9A24B', L:'#6B5BAE', OD:'#2563EB' };
         const tot = rows.reduce((a,r)=>({ present:a.present+r.present, half:a.half+r.half, absent:a.absent+r.absent, leave:a.leave+r.leave, ot:a.ot+r.ot, payable:a.payable+r.payable, inHand:a.inHand+r.inHand }), {present:0,half:0,absent:0,leave:0,ot:0,payable:0,inHand:0});
         return (
           <div>
             <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
               <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{ ...styles.input, width:150, margin:0 }} />
-              <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              {showProj && <select value={filterProject} onChange={e=>setFilterProject(e.target.value)} style={{ ...styles.input, width:170, margin:0 }}><option value="">All Projects</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
               <span style={{ fontSize:11.5, color:'#B0AC9F' }}>Week off: <b style={{ color:'#666' }}>{DOW_NAMES[effWeek]}</b>{selProjObj?' ('+(selProjObj.name||'site')+')':''} — set it in the Attendance tab</span>
               <span style={{ flex:1 }}/>
               {rows.length>0 && <button style={styles.ghostBtn} onClick={exportSalaryXlsx} title="Export to Excel">⭳ Excel</button>}
@@ -23261,7 +23265,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                   <thead><tr style={{ background:'#1E2A4A', color:'#fff' }}>
                     <th style={{ padding:'5px 8px', textAlign:'left', position:'sticky', left:0, background:'#1E2A4A', whiteSpace:'nowrap' }}>Employee</th>
                     {days.map(d=><th key={d} style={{ padding:'4px 3px', width:20, textAlign:'center', background:isOff(d)?'#B5453A':'#1E2A4A' }}>{d}</th>)}
-                    {['P','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
+                    {['P','OD','H','A','L','OT','Hol','Pay','Basic','In Hand'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'right', whiteSpace:'nowrap' }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {rows.map((r,ri)=>(
@@ -23269,6 +23273,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                         <td style={{ padding:'4px 8px', fontWeight:600, position:'sticky', left:0, background:ri%2?'#F6F5F2':'#fff', whiteSpace:'nowrap' }}>{r.emp.name}</td>
                         {days.map(d=>{ const v=r.byDay[d]||''; const off=isOff(d); return <td key={d} style={{ padding:'3px 2px', textAlign:'center', background:off?'#FBE4E4':'transparent', color:STC[v]||'#ccc', fontWeight:700 }}>{v||(off?'':'·')}</td>; })}
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#1A7A3E' }}>{r.present}</td>
+                        <td style={{ padding:'4px 6px', textAlign:'right', color:'#2563EB' }}>{r.od||0}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#C9A24B' }}>{r.half}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#B5453A' }}>{r.absent}</td>
                         <td style={{ padding:'4px 6px', textAlign:'right', color:'#6B5BAE' }}>{r.leave}</td>
@@ -23309,7 +23314,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
               <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Date</div><input type='date' value={holForm.date} onChange={e=>setHolForm(fm=>({...fm,date:e.target.value}))} style={{ ...styles.input, margin:0 }}/></div>
               <div style={{ flex:1, minWidth:180 }}><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Name</div><input value={holForm.name} onChange={e=>setHolForm(fm=>({...fm,name:e.target.value}))} style={{ ...styles.input, margin:0 }} placeholder='e.g. UAE National Day'/></div>
               <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Type</div><select value={holForm.type} onChange={e=>setHolForm(fm=>({...fm,type:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value='govt'>Government</option><option value='company'>Company</option></select></div>
-              <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              {showProj && <div><div style={{ fontSize:11, color:'#888', marginBottom:3 }}>Site (optional)</div><select value={holForm.projectId} onChange={e=>setHolForm(fm=>({...fm,projectId:e.target.value}))} style={{ ...styles.input, margin:0 }}><option value=''>All sites</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
               <button style={styles.primaryBtn} onClick={()=>{ if(!holForm.date){alert('Pick a date');return;} setHolidayCalendar(prev=>[...prev,{ id:crypto.randomUUID(), ...holForm }]); setHolForm({date:'',name:'',type:'govt',projectId:''}); }}><Plus size={14}/> Add</button>
             </div>
           </div>
@@ -23344,8 +23349,8 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
         const monthName = new Date(yy, mm-1, 1).toLocaleString('default',{month:'long', year:'numeric'});
         const fromD = new Date(yy,mm-1,1).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
         const toD = new Date(yy,mm-1,dim).toLocaleDateString('default',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
-        const calc = r => { const payable = r.present + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
-        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present, absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
+        const calc = r => { const payable = r.present + (r.od||0) + 0.5*r.half + holidays; const otPay = r.ot*((r.basic/dim)/8)*1.25; const inHand = (r.basic/dim)*payable + otPay; return { payable, inHand }; };
+        const gtot = rows.reduce((a,r)=>{ const c=calc(r); return { present:a.present+r.present+(r.od||0), absent:a.absent+r.absent, payable:a.payable+c.payable, basic:a.basic+(parseFloat(r.basic)||0), inHand:a.inHand+c.inHand }; }, {present:0,absent:0,payable:0,basic:0,inHand:0});
         const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
         const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
@@ -23372,8 +23377,8 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
                     <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
-                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':'#fff'), color:v==='A'?'#B5453A':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
-                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present}</td>
+                    {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
+                    <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present+(r.od||0)}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
                     <td style={td}>{holidays}</td>
                     <td style={td}>{dim}</td>
@@ -23452,27 +23457,27 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
         const proj = g && siteProjects.find(p=>p.id===g.projectId);
         const woDay = proj ? (proj.weekOff!=null?proj.weekOff:weekOff) : weekOff;
         const holDates = (holidayCalendar||[]).filter(h=>!h.projectId || (g && h.projectId===g.projectId)).map(h=>h.date);
-        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
+        return <AttendanceSheet sheet={editing} group={g} siteProjects={siteProjects} showProj={showProj} employees={employees} weekOffDay={woDay} holidayDates={holDates} userRole={userRole} onSave={saveAtt} onClose={()=>setEditing(null)} />;
       })()}
-      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
+      {editingGroup && <GroupForm group={editingGroup} employees={employees} siteProjects={siteProjects} showProj={showProj} onSave={saveGroup} onClose={()=>setEditingGroup(null)} />}
     </div>
   );
 }
 
-function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
-  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type:'site', memberIds:[], ...group });
+function GroupForm({ group, employees, siteProjects, showProj = true, onSave, onClose }) {
+  const [form, setForm] = useState({ name:'', leaderId:'', projectId:'', type: showProj ? 'site' : 'office', memberIds:[], ...group });
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const toggle=id=>setForm(f=>({ ...f, memberIds: (f.memberIds||[]).includes(id) ? f.memberIds.filter(x=>x!==id) : [...(f.memberIds||[]), id] }));
   return (
     <Modal title={form.id?'Edit Group':'New Labour Group'} onClose={onClose} width={560}>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
         <div style={styles.formGroup}><label style={styles.label}>Group Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} style={styles.input} placeholder="e.g. Electrical Gang A"/></div>
-        <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>
+        {showProj && <div style={styles.formGroup}><label style={styles.label}>Type</label><select value={form.type} onChange={e=>set('type',e.target.value)} style={styles.input}><option value="site">Site</option><option value="office">Office / General</option></select></div>}
         <div style={styles.formGroup}><label style={styles.label}>Leader / Foreman</label><select value={form.leaderId} onChange={e=>set('leaderId',e.target.value)} style={styles.input}><option value="">— Select —</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
-        {form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
-        {form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
+        {showProj && form.type!=='office' && <div style={styles.formGroup}><label style={styles.label}>Project / Site (current)</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— Select —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
+        {showProj && form.type!=='office' && form.id && <div style={styles.formGroup}><label style={styles.label}>Effective From (if moving site)</label><input type='date' value={form.effectiveFrom||new Date().toISOString().slice(0,10)} onChange={e=>set('effectiveFrom',e.target.value)} style={styles.input}/></div>}
       </div>
-      {form.type!=='office' && (form.siteHistory||[]).length>0 && (
+      {showProj && form.type!=='office' && (form.siteHistory||[]).length>0 && (
         <div style={{ background:'#F8F7F4', border:'1px solid #EAE6DB', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:11.5, color:'#666' }}>
           <b style={{ color:'#1E2A4A' }}>Site history:</b> {(form.siteHistory||[]).map((h,i)=>(siteProjects.find(p=>p.id===h.projectId)?.name||'—')+' (from '+h.fromDate+')').join('  →  ')}
         </div>
@@ -23495,7 +23500,7 @@ function GroupForm({ group, employees, siteProjects, onSave, onClose }) {
   );
 }
 
-function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
+function AttendanceSheet({ sheet, group, siteProjects, showProj = true, employees, onSave, onClose, weekOffDay = 5, holidayDates = [], userRole = '' }) {
   const [form, setForm] = useState({ date:new Date().toISOString().slice(0,10), projectId:'', records:[], ...sheet });
   const [bypass, setBypass] = useState(false);
   const _DOWN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -23505,12 +23510,12 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
   useEffect(()=>{ if((form.records||[]).length===0){ const mem = group ? employees.filter(e=>(group.memberIds||[]).includes(e.id)) : employees; setForm(f=>({ ...f, records: mem.map(e=>({ employeeId:e.id, status:'present', otHours:0, note:'' })) })); } }, []);
   function set(k,v){ setForm(f=>({...f,[k]:v})); }
   function setRecord(i,k,v){ const recs=[...form.records]; recs[i]={...recs[i],[k]:v}; set('records',recs); }
-  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'}];
+  const STATUSES=[{value:'present',label:'P',color:'#1A7A3E'},{value:'absent',label:'A',color:'#B5453A'},{value:'half_day',label:'½',color:'#C9A24B'},{value:'leave',label:'L',color:'#6B5BAE'},{value:'od',label:'OD',color:'#2563EB',title:'Official duty / on duty (paid, counted as present)'}];
   return (
     <Modal title={'Mark Attendance'+(group?' — '+group.name:'')} onClose={onClose} width={620}>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
         <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={styles.input} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        {showProj && <div style={styles.formGroup}><label style={styles.label}>Project</label><select value={form.projectId} onChange={e=>set('projectId',e.target.value)} style={styles.input}><option value="">— All / General —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
       </div>
       {offInfo && (
         <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12.5, color:'#92400E' }}>
@@ -23521,11 +23526,11 @@ function AttendanceSheet({ sheet, group, siteProjects, employees, onSave, onClos
       <div style={{ fontWeight:600, fontSize:13, color:'#1E2A4A', marginBottom:8 }}>Members ({form.records.length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:360, overflowY:'auto' }}>
         {form.records.map((rec,i)=>{ const emp=employees.find(e=>e.id===rec.employeeId); return (
-          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns:'1.5fr auto 66px 130px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
+          <div key={rec.employeeId} style={{ display:'grid', gridTemplateColumns: showProj ? '1.5fr auto 66px 130px' : '1.5fr auto 66px', gap:8, alignItems:'center', padding:'8px 12px', background:'#FAF8F4', borderRadius:8 }}>
             <span style={{ fontSize:13, fontWeight:500 }}>{emp?.name||'?'}</span>
-            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
+            <div style={{ display:'flex', gap:4 }}>{STATUSES.map(st=><button key={st.value} title={st.title||''} onClick={()=>setRecord(i,'status',st.value)} style={{ fontSize:12, padding:'3px 8px', borderRadius:6, border:'none', cursor:'pointer', background:rec.status===st.value?st.color:'#EAE6DB', color:rec.status===st.value?'#fff':'#666', fontWeight:700 }}>{st.label}</button>)}</div>
             <input type="number" value={rec.otHours||''} onChange={e=>setRecord(i,'otHours',e.target.value)} style={{ ...styles.input, fontSize:12, padding:'4px 6px', margin:0 }} placeholder="OT" title="Overtime hours" />
-            <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            {showProj && <select value={rec.projectId||''} onChange={e=>setRecord(i,'projectId',e.target.value)} style={{ ...styles.input, fontSize:11, padding:'4px 6px', margin:0 }} title="Reassign to another site for this day (leave blank = same site)"><option value="">— same site —</option>{siteProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
           </div>
         ); })}
         {form.records.length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No members in this group. Add members in Labour Groups.</div>}
@@ -23552,7 +23557,7 @@ function QuarterlyEvalView({ evaluations, setEvaluations, employees, siteAttenda
     const prefix = qMonths.map(m => `${year}-${m}`);
     const attRecs = siteAttendance.filter(r=>prefix.some(p=>(r.date||'').startsWith(p))).flatMap(r=>(r.records||[]).filter(x=>x.employeeId===employeeId));
     const total = attRecs.length;
-    const present = attRecs.filter(x=>x.status==='present').length;
+    const present = attRecs.filter(x=>x.status==='present'||x.status==='od').length;
     const halfDay = attRecs.filter(x=>x.status==='half_day').length;
     const attPct = total ? Math.round(((present+halfDay*0.5)/total)*100) : 0;
     const dsrCount = progressUpdates.filter(u=>prefix.some(p=>(u.date||'').startsWith(p))).filter(u=>(u.workers||[]).some(w=>w.employeeId===employeeId)).length;
