@@ -23361,22 +23361,22 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
               <div style={{ fontSize:12, fontWeight:700, background:'#FFF3B0', padding:'2px 10px', borderRadius:4 }}>{monthName}</div>
             </div>
             <div style={{ display:'flex', gap:24, fontSize:10, marginBottom:8 }}><span>From: <b>{fromD}</b></span><span>To: <b style={{ background:'#FFF3B0', padding:'0 4px' }}>{toD}</b></span></div>
-            <table style={{ borderCollapse:'collapse', width:'100%', fontFamily:'Arial, sans-serif' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed', fontFamily:'Arial, sans-serif' }}>
               <thead>
                 <tr>
-                  {['S.No','Emp ID','Employee Name','Designation'].map(h=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
-                  {['Present','Absent','Holiday','Total Days','Payable Days','Total Salary','Salary in Hand'].map(h=><th key={h} rowSpan={2} style={th}>{h}</th>)}
+                  {[['S.No',3],['Emp ID',6],['Employee Name',11],['Designation',8]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, width:(43.2/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {[['Present',3.5],['Absent',3.5],['Holiday',3.5],['Total Days',3.5],['Payable Days',3.8],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%' }}>{h}</th>)}
                 </tr>
-                <tr>{days.map(d=><th key={d} style={{ ...th, background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
+                <tr>{days.map(d=><th key={d} style={{ ...th, padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r,ri)=>{ const c=calc(r); return (
                   <tr key={r.emp.id}>
                     <td style={td}>{ri+1}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
-                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap' }}>{r.emp.name}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.designation||''}</td>
+                    <td style={{ ...td, textAlign:'left', overflowWrap:'anywhere' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', fontWeight:600, overflowWrap:'anywhere' }}>{r.emp.name}</td>
+                    <td style={{ ...td, textAlign:'left', overflowWrap:'anywhere' }}>{r.emp.designation||''}</td>
                     {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
                     <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present+(r.od||0)}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
@@ -23402,7 +23402,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                 </tr>
               </tfoot>
             </table>
-            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
+            <div style={{ fontSize:8, color:'#666', marginTop:6 }}>P=Present · A=Absent · H=Half · L=Leave · OD=Official Duty (paid) · {DOW_NAMES[effWeek]} = weekly off (holiday). Payable Days = Present + ½·Half + Holidays. Salary in Hand = (Basic ÷ {dim}) × Payable Days + OT.</div>
           </DocPrintOverlay>
         );
       })()}
