@@ -274,10 +274,11 @@ function computeTotals(doc, sellerState, country) {
   const st = (doc && doc.supplyType) || 'domestic';
   const isExp = cc.splitTax && st !== 'domestic';
   const zeroRated = isExp && /_lut$/.test(st);
+  const _fc = fcInfo(doc), fxm = _fc.on ? _fc.fx : 1;
   const sameState = !isExp && cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
   (doc.items || []).forEach((it) => {
-    const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0) * fxm;
     const disc = amt * (Number(it.discount) || 0) / 100;
     subtotal += amt;
     discountTotal += disc;
@@ -304,6 +305,11 @@ const SUPPLY_TYPES = [
   ['sez_lut', 'SEZ supply under LUT (zero-rated, no IGST)'],
   ['sez_igst', 'SEZ supply with payment of IGST'],
 ];
+const CUR_SYM = { USD: '$', EUR: '€', GBP: '£', INR: '₹', AUD: 'A$', SGD: 'S$' };
+// Foreign-currency invoice: when an export invoice has a currency (≠INR) AND an exchange rate, item rates are entered
+// in that currency; computeTotals returns INR (rate × exRate) for books/GST reports, screens & prints show the currency.
+const fcInfo = (d) => { const cur = d && d.exCurrency, fx = Number(d && d.exRate) || 0; const on = !!d && d.type === 'invoice' && !!d.supplyType && d.supplyType !== 'domestic' && !!cur && cur !== 'INR' && fx > 0; return { on, cur, fx, sym: CUR_SYM[cur] || (cur + ' ') }; };
+const fcFmt = (fc, n, raw) => fc.sym + ((raw ? (Number(n) || 0) : (Number(n) || 0) / fc.fx)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const isExportDoc = (d) => !!d && !!d.supplyType && d.supplyType !== 'domestic';
 const isSezDoc = (d) => !!d && /^sez_/.test(d.supplyType || '');
 const exportDeclaration = (d) => {
@@ -324,7 +330,7 @@ function ExportInfoBlock({ doc, totals }) {
       <div style={{ fontWeight: 700 }}>{exportDeclaration(doc)}</div>
       {doc.lutArn && <div>LUT ARN: {doc.lutArn}</div>}
       {rows.length > 0 && <div style={{ marginTop: 3 }}>{rows.map(r => r[0] + ': ' + r[1]).join('  |  ')}</div>}
-      {fx > 0 && cur && <div style={{ marginTop: 3 }}>Invoice value in {cur}: <b>{cur} {(totals.grandTotal / fx).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (at ₹{fx} per {cur})</div>}
+      {fcInfo(doc).on && <div style={{ marginTop: 3 }}>INR equivalent: <b>₹ {totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (at ₹{fcInfo(doc).fx} per {fcInfo(doc).cur})</div>}
     </div>
   );
 }
@@ -848,6 +854,7 @@ const ZOHO_PRINT_CSS =
 
 function buildZohoDocPrint(o) {
   const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
+  const fc = fcInfo(doc); const fmtL = o.fmtL || fmt;
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl = (v) => esc(v).replace(/\n/g, '<br>');
   const isPL = doc.type === 'packing_list';
@@ -906,9 +913,9 @@ function buildZohoDocPrint(o) {
     const cell = (cls, v) => '<td class="' + cls + '"' + span + '>' + v + '</td>';
     let h = '';
     if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
-    h += cell('r', esc(it.qty || 0));
+    h += cell('r', esc(it.qty || 0) + (it.unit ? ' <span style="font-size:9px;color:#444">' + esc(it.unit) + '</span>' : ''));
     if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
-    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(totals.zeroRated ? 0 : (it.gst || 0))); h += cell('r amt', esc(fmt(amount))); }
+    else { h += cell('r', esc(fmtL(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(totals.zeroRated ? 0 : (it.gst || 0))); h += cell('r amt', esc(fmtL(amount))); }
     return h;
   };
   let i = 0;
@@ -935,7 +942,7 @@ function buildZohoDocPrint(o) {
     if (totals.discountTotal > 0) rows.push(['Less: Discount', '− ' + fmt(totals.discountTotal)]);
     taxRows.forEach(r => rows.push([r[0], fmt(r[1] || 0)]));
     rightTot = '<table class="ztot">' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '<tr class="g"><td>Total</td><td>' + esc(fmt(totals.grandTotal)) + '</td></tr></table>';
-    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(numToWords(Math.round(totals.grandTotal))) + (cc.splitTax ? ' Rupees Only.' : ' Only.') + '</div>';
+    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(fc.on ? numToWordsIntl(Math.round(totals.grandTotal / fc.fx)) + ' ' + fc.cur + ' Only.' : numToWords(Math.round(totals.grandTotal)) + (cc.splitTax ? ' Rupees Only.' : ' Only.')) + '</div>';
     if (bi.bankName || bi.bankAccount || bi.upi) {
       left += '<div class="zbank"><div class="zlbl">Bank Details</div>'
         + (bi.bankName ? '<div><b>Bank:</b> ' + esc(bi.bankName) + '</div>' : '')
@@ -948,7 +955,7 @@ function buildZohoDocPrint(o) {
     const fx = Number(doc.exRate) || 0, cur = doc.exCurrency || '';
     left += '<div class="zbox" style="margin-top:6px;font-size:10.5px;font-weight:700">' + esc(exportDeclaration(doc))
       + (doc.lutArn ? '<div style="font-weight:400">LUT ARN: ' + esc(doc.lutArn) + '</div>' : '')
-      + (fx > 0 && cur ? '<div style="font-weight:400;margin-top:3px">Invoice value in ' + esc(cur) + ': <b>' + esc(cur) + ' ' + (totals.grandTotal / fx).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</b> (at ₹' + fx + ' per ' + esc(cur) + ')</div>' : '')
+      + (fc.on ? '<div style="font-weight:400;margin-top:3px">INR equivalent: <b>₹ ' + totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</b> (at ₹' + fc.fx + ' per ' + esc(fc.cur) + ')</div>' : '')
       + '</div>';
   }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
@@ -4813,7 +4820,7 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
   const safeTab = activeTab.id;
 
   function mKey(s) { return (s || '').slice(0, 7); }
-  function docAmt(d) { return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0); }
+  function docAmt(d) { const _f = fcInfo(d); return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) * (_f.on ? _f.fx : 1); }
 
   const data = React.useMemo(() => {
     switch (safeTab) {
@@ -6367,7 +6374,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   // Screen preview: bordered "formal" layout for the new templates, original look for "classic". Print uses buildZohoDocPrint + the chosen theme.
   const template = 'classic'; // editor layout (has the editable items table); the chosen print template is applied by buildZohoDocPrint
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
-  const fmt = (n) => currency(n, cc.currency);
+  const fc = fcInfo(doc);
+  // fmt = totals (INR values shown in the invoice currency); fmtL = line values already entered in the invoice currency
+  const fmt = fc.on ? (n) => fcFmt(fc, n) : (n) => currency(n, cc.currency);
+  const fmtL = fc.on ? (n) => fcFmt(fc, n, true) : fmt;
 
   // Field editing rules
   const isApproved = doc.status === 'approved';
@@ -6434,7 +6444,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
     setDoc((d) => ({
       ...d,
       items: d.items.map((it) => (it.id === rowId
-        ? { ...it, itemId, name: master ? master.name : it.name, hsn: master ? master.hsn : it.hsn, rate: master ? autoRate : it.rate, gst: master ? master.gst : it.gst }
+        ? { ...it, itemId, name: master ? master.name : it.name, hsn: master ? master.hsn : it.hsn, rate: master ? autoRate : it.rate, gst: master ? master.gst : it.gst, unit: master ? (master.unit || '') : it.unit }
         : it)),
     }));
   }
@@ -6510,7 +6520,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </button>
           )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, fmtL, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
           <button onClick={() => { const b = document.getElementById('doc-print-btn'); if (b) b.click(); }} style={styles.ghostBtn} title="Opens the print dialog — choose 'Save as PDF'"><Download size={15}/> Save as PDF</button>
           {userRole === 'admin' && !isDeleted && onDeleteDoc && documents.some(d => d.id === doc.id) && (
             <button onClick={() => onDeleteDoc(doc.id)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}><Trash2 size={15} /> Delete</button>
@@ -6663,7 +6673,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       {fld('Currency', 'exCurrency', 'USD')}
                       {fld('Exchange rate (₹ per 1 unit)', 'exRate', '83.50', 'number')}
                     </div>
-                    <div style={{ fontSize: 11, color: '#888' }}>Amounts are entered in ₹. Foreign-currency value on the print = Total ÷ exchange rate.</div>
+                    {fcInfo(doc).on
+                      ? <div style={{ fontSize: 11, color: '#1A7A3E' }}>Invoice is in <b>{doc.exCurrency}</b>: enter rates in {doc.exCurrency}. Books / GST reports use ₹ (= {doc.exCurrency} × {doc.exRate}).
+                          {isEditable && <button type="button" onClick={() => { if (window.confirm('Divide all item rates by ' + doc.exRate + ' (₹ → ' + doc.exCurrency + ')?')) setDoc((d) => ({ ...d, items: (d.items || []).map(it => ({ ...it, rate: Math.round(((Number(it.rate) || 0) / Number(d.exRate)) * 10000) / 10000 })) })); }} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 8px', marginLeft: 8 }}>Rates were in ₹ → convert to {doc.exCurrency}</button>}</div>
+                      : <div style={{ fontSize: 11, color: '#888' }}>Enter currency + exchange rate (₹ per 1 unit): the whole invoice then shows and prints in that currency; rates are entered in it.</div>}
                   </div>
                 )}
               </div>
@@ -7185,9 +7198,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
                             <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{totals.zeroRated ? 0 : (it.gst||0)}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmt(amt)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}{it.unit ? ' ' + it.unit : ''}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmtL(it.rate||0)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmtL(amt)}</td>
                           </tr>
                         );
                       })}
@@ -7204,7 +7217,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       <div style={{ color:'#555', fontStyle:'italic', marginBottom:8 }}>Thank you for your valuable business!</div>
                       <div style={{ marginBottom:8 }}>
                         <div style={{ fontWeight:700, textDecoration:'underline', marginBottom:3 }}>Amount in words:</div>
-                        <div style={{ fontStyle:'italic' }}>{numToWords(Math.round(totals.grandTotal))} Rupees Only.</div>
+                        <div style={{ fontStyle:'italic' }}>{fc.on ? numToWordsIntl(Math.round(totals.grandTotal / fc.fx)) + ' ' + fc.cur + ' Only.' : numToWords(Math.round(totals.grandTotal)) + ' Rupees Only.'}</div>
                       </div>
                       <ExportInfoBlock doc={doc} totals={totals} />
                       {doc.notes && <div style={{ marginBottom:6 }}><div style={{ fontWeight:700 }}>Notes:</div><div style={{ color:'#444' }}>{doc.notes}</div></div>}
@@ -7392,10 +7405,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.grossWeight ?? 0, (e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0), 72)}</td>
                   <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 96, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H" readOnly={!isEditable} /></td>
                 </>) : (<>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}<input className="di-input" value={it.unit || ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} title="Unit (Nos / Mtr / Kg …)" placeholder="unit" style={{ ...styles.inlineInput, width: 54, textAlign: 'right', fontSize: 11, color: '#666', display: 'block', marginTop: 2, marginLeft: 'auto', ...(isEditable ? styles.inlineInputEditable : {}) }} /></td>
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.rate, (e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0), 84)}</td>
                   {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{totals.zeroRated ? <span style={{ color: '#888' }}>0</span> : numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmt(amount)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmtL(amount)}</td>
                 </>);
                 return (
                   <tr key={it.id}>
@@ -28889,7 +28902,7 @@ export default function App() {
         lutNo: srcDoc.lutNo || '', lutDate: srcDoc.lutDate || '', lutArn: srcDoc.lutArn || '',
         shipBillNo: srcDoc.shipBillNo || '', shipBillDate: srcDoc.shipBillDate || '', portCode: srcDoc.portCode || '',
         destCountry: srcDoc.destCountry || '', incoterm: srcDoc.incoterm || '',
-        exCurrency: srcDoc.exCurrency || srcDoc.ovCurrency || 'USD', exRate: srcDoc.exRate || '',
+        exCurrency: srcDoc.exCurrency || srcDoc.ovCurrency || 'USD', exRate: srcDoc.exRate || srcDoc.ovFx || '',
       } : {}),
       refNumber: srcDoc.refNumber || '',
       // shipping / transport details travel with the goods (invoice → delivery note → packing list)
