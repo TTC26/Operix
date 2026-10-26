@@ -67,10 +67,10 @@ const PLAN_MODULES = {
     'stock','bincard','grn','storeissue','stockledger','verticalrack',
   ],
   trading: [
-    'hr','payroll','employees',
+    'hr','payroll','employees','siteattendance',
   ],
   manufacturing: [
-    'hr','payroll',
+    'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
     'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds',
@@ -5124,7 +5124,7 @@ const SECTION_VIEWS = {
   engineering: ['partsmaster', 'engdocs', 'tds'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
   quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
-  hr:          ['employees', 'payroll', 'offerletter', 'warnletter', 'termletter'],
+  hr:          ['employees', 'payroll', 'siteattendance', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   mep_clients: ['customers', 'enquiries', 'items'],
   site:        ['siteprojects', 'tender', 'activityplanner', 'rabilling', 'subcontractors', 'hse', 'tcommissioning', 'handover', 'dailyupdates', 'progressboard', 'clientmaterials', 'siteattendance', 'evaluation', 'mepreports'],
@@ -5139,7 +5139,7 @@ const BIZ_SECTION_VIEWS = {
   manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
-  hr:            ['employees','payroll','offerletter','warnletter','termletter'],
+  hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
 
@@ -5826,6 +5826,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <BizSection bizType="hr" defaultOpen={false}>
           <NavBtn id="employees"  label="Employees"          icon={Users} />
           <NavBtn id="payroll"    label="Payroll"            icon={FileText} />
+          {!showService && <NavBtn id="siteattendance" label="Attendance & Salary" icon={Users} />}
           <NavBtn id="offerletter" label="Offer Letters"        icon={FileText} />
           <NavBtn id="warnletter"  label="Warning Letters"    icon={AlertTriangle} />
           <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
@@ -5834,6 +5835,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <Section sectionKey="hr" label="HR & Payroll">
           <NavBtn id="employees"   label="Employees"           icon={Users} />
           <NavBtn id="payroll"     label="Payroll"             icon={FileText} />
+          {!showService && <NavBtn id="siteattendance" label="Attendance & Salary" icon={Users} />}
           <NavBtn id="offerletter" label="Offer Letters"       icon={FileText} />
           <NavBtn id="warnletter"  label="Warning Letters"     icon={AlertTriangle} />
           <NavBtn id="termletter"  label="Termination Letters" icon={FileSignature} />
@@ -11621,6 +11623,7 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <EmpField {...fp} label="Employee ID" name="empId" required />
+            <EmpField {...fp} label="Biometric / Machine ID" name="biometricId" />
             <EmpField {...fp} label="Full Name"   name="name"  required />
             <EmpField {...fp} label="Date of Birth" name="dob" type="date" />
             <EmpField {...fp} label="Nationality" name="nationality" />
@@ -22725,7 +22728,220 @@ function ClientMaterialForm({ record, siteProjects, employees, onSave, onClose }
 }
 
 // ── Site Attendance ─────────────────────────────────────────────────────────────
-function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
+// ── Biometric / machine-export attendance import ─────────────────────────────
+// Reads whatever the machine software exports (Excel / CSV): daily summary (ID, Date, In, Out), raw punch log
+// (ID, Date-Time per punch) or a monthly matrix (employees × days with P / A). Headers are detected automatically.
+const _p2 = n => String(n).padStart(2, '0');
+function bioParseCell(v) {
+  if (v == null || v === '') return { d: null, m: null };
+  if (v instanceof Date && !isNaN(v)) {
+    const t = new Date(Math.round(v.getTime() / 60000) * 60000);
+    const mins = t.getHours() * 60 + t.getMinutes();
+    if (t.getFullYear() < 1950) return { d: null, m: mins };
+    return { d: t.getFullYear() + '-' + _p2(t.getMonth() + 1) + '-' + _p2(t.getDate()), m: mins ? mins : null };
+  }
+  if (typeof v === 'number') {
+    if (v > 0 && v < 1) return { d: null, m: Math.round(v * 1440) };
+    if (v > 30000) { const t = new Date(Math.round((v - 25569) * 86400) * 1000); const mins = t.getUTCHours() * 60 + t.getUTCMinutes(); return { d: t.getUTCFullYear() + '-' + _p2(t.getUTCMonth() + 1) + '-' + _p2(t.getUTCDate()), m: mins ? mins : null }; }
+    return { d: null, m: null };
+  }
+  const s = String(v).trim();
+  let d = null, m = null, mt = s.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (mt) d = mt[1] + '-' + _p2(mt[2]) + '-' + _p2(mt[3]);
+  else {
+    const MN = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+    const mn = s.match(/(\d{1,2})[-\/\s]([A-Za-z]{3})[a-z]*[-\/\s,]*(\d{2,4})/);
+    mt = s.match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
+    if (mn && MN[mn[2].toLowerCase()]) { let y = +mn[3]; if (y < 100) y += 2000; d = y + '-' + _p2(MN[mn[2].toLowerCase()]) + '-' + _p2(mn[1]); }
+    else if (mt) { let a = +mt[1], b = +mt[2], y = +mt[3]; if (y < 100) y += 2000; let day = a, mon = b; if (mon > 12 && day <= 12) { day = b; mon = a; } d = y + '-' + _p2(mon) + '-' + _p2(day); }
+  }
+  const tm = s.replace(/\d{1,4}[-\/.]\d{1,2}[-\/.]\d{1,4}/, ' ').replace(/\d{1,2}[-\/\s][A-Za-z]{3}[a-z]*[-\/\s,]*\d{2,4}/, ' ').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/);
+  if (tm) { let h = +tm[1]; const mi = +tm[2]; if (tm[3]) { const pm = /p/i.test(tm[3]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; } m = h * 60 + mi; }
+  return { d, m };
+}
+function bioStatus(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace(/[.\s]/g, '');
+  if (!s) return null;
+  if (/^(p|pr|present|1|✓|y)$/.test(s)) return 'present';
+  if (/^(a|ab|abs|absent|0|x|n)$/.test(s)) return 'absent';
+  if (/^(hd|h\/d|half|halfday|½|0\.5|p\/2|ph)$/.test(s) || /half/.test(s)) return 'half_day';
+  if (/^(l|cl|sl|el|pl|ml|lv|leave|od)$/.test(s) || /leave/.test(s)) return 'leave';
+  if (/^(wo|off|weekoff|wk|w|ho|hol|holiday|fh)$/.test(s)) return 'skip';
+  return null;
+}
+const BIO_ROLES = [
+  ['in',   /(in[\s._-]*time|time[\s._-]*in|check[\s._-]*in|punch[\s._-]*in|first[\s._-]*(in|punch)|^in$|arrival)/],
+  ['out',  /(out[\s._-]*time|time[\s._-]*out|check[\s._-]*out|punch[\s._-]*out|last[\s._-]*(out|punch)|^out$|departure)/],
+  ['dt',   /(date[\s._\/-]*time|timestamp|punch(es)?$|punch[\s._-]*time|check[\s._-]*time|verify[\s._-]*time|log[\s._-]*time|^time$)/],
+  ['date', /(^|[\s._-])date($|[\s._-])|^day$/],
+  ['id',   /(emp(loyee)?[\s._-]*(id|code|no|number)|user[\s._-]*id|enroll|badge|card[\s._-]*(no|id)?|biometric|person[\s._-]*id|^(id|code|ecode|e\.?code|emp|empno|no)$)/],
+  ['name', /(^|[\s._-])name($|[\s._-])/],
+  ['hrs',  /(work(ing)?[\s._-]*(hrs|hours)|duration|total[\s._-]*(hrs|hours)|^hours$)/],
+  ['status', /(status|attendance|remark|present|^p\/a$)/],
+];
+function bioDetect(rows) {
+  for (let i = 0; i < Math.min(12, rows.length); i++) {
+    const hdr = rows[i].map(c => String(c == null ? '' : c).trim().toLowerCase());
+    const dayCols = hdr.map((h, k) => (/^\d{1,2}$/.test(h) && +h >= 1 && +h <= 31) ? k : -1).filter(k => k >= 0);
+    const col = {};
+    hdr.forEach((h, k) => { if (!h) return; for (const [role, re] of BIO_ROLES) { if (col[role] == null && re.test(h) && !(role === 'status' && /date/.test(h)) && !(role === 'dt' && /^date$/.test(h))) { col[role] = k; break; } } });
+    const nRoles = Object.keys(col).length;
+    if (dayCols.length >= 15 && (col.id != null || col.name != null)) return { row: i, col, dayCols, matrix: true };
+    if ((col.id != null || col.name != null) && (col.date != null || col.dt != null || col.in != null)) return { row: i, col, matrix: false };
+    if (nRoles >= 3 && (col.id != null || col.name != null)) return { row: i, col, matrix: false };
+  }
+  return null;
+}
+// → { entries: [{key, id, name, date, mins:[...], ovr, hrs}], info } ; month = 'YYYY-MM' (for matrix files)
+function bioExtract(rows, month) {
+  rows = rows.map(r => r.slice ? r : []);
+  const info = bioDetect(rows);
+  if (!info) return { entries: [], info: null };
+  const { col } = info; const map = new Map(); const body = rows.slice(info.row + 1);
+  const norm = v => String(v == null ? '' : v).trim();
+  const push = (id, name, date, m, ovr, hrs) => {
+    if (!date || (!id && !name)) return;
+    const key = (id ? id.toLowerCase().replace(/^0+(?=\d)/, '') : name.toLowerCase()) + '|' + date;
+    let e = map.get(key); if (!e) { e = { key, id, name, date, mins: [], ovr: null, hrs: null }; map.set(key, e); }
+    if (m != null) e.mins.push(m);
+    if (ovr) e.ovr = ovr; if (hrs != null) e.hrs = hrs;
+  };
+  if (info.matrix) {
+    const [yy, mm] = (month || new Date().toISOString().slice(0, 7)).split('-').map(Number);
+    body.forEach(r => {
+      const id = col.id != null ? norm(r[col.id]) : '', name = col.name != null ? norm(r[col.name]) : '';
+      if (!id && !name) return;
+      info.dayCols.forEach(k => { const st = bioStatus(r[k]); if (!st) return; const dd = +String(rows[info.row][k]).trim(); push(id, name, yy + '-' + _p2(mm) + '-' + _p2(dd), null, st); });
+    });
+  } else {
+    body.forEach(r => {
+      const id = col.id != null ? norm(r[col.id]) : '', name = col.name != null ? norm(r[col.name]) : '';
+      let date = null; const mins = [];
+      if (col.date != null) date = bioParseCell(r[col.date]).d;
+      if (col.in != null) { const p = bioParseCell(r[col.in]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      if (col.out != null) { const p = bioParseCell(r[col.out]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      if (col.dt != null && col.in == null) { const p = bioParseCell(r[col.dt]); if (!date) date = p.d; if (p.m != null) mins.push(p.m); }
+      const st = col.status != null ? bioStatus(r[col.status]) : null;
+      let hrs = null; if (col.hrs != null) { const p = bioParseCell(r[col.hrs]); const raw = r[col.hrs]; hrs = typeof raw === 'number' ? (raw < 1 ? raw * 24 : raw) : (p.m != null ? p.m / 60 : (parseFloat(raw) || null)); }
+      if (!date) return;
+      if (!mins.length) push(id, name, date, null, st, hrs); else mins.forEach(m => push(id, name, date, m, st, hrs));
+    });
+  }
+  return { entries: [...map.values()], info };
+}
+// settings → per employee-day results
+function bioEvaluate(entries, employees, st, weekOff, holidays) {
+  const norm = v => String(v || '').trim().toLowerCase().replace(/^0+(?=\d)/, '');
+  const nName = v => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const byId = new Map(); employees.forEach(e => { [e.biometricId, e.empId].filter(Boolean).forEach(x => byId.set(norm(x), e)); });
+  const byName = new Map(); employees.forEach(e => e.name && byName.set(nName(e.name), e));
+  const unmatched = new Map(); const days = []; const seen = new Map();
+  entries.forEach(en => {
+    const emp = (en.id && byId.get(norm(en.id))) || (en.name && byName.get(nName(en.name))) || null;
+    if (!emp) { unmatched.set(en.id || en.name, en.name || en.id); return; }
+    let status, ot = 0, note = '', inM = null, outM = null;
+    if (en.ovr === 'skip') { if (!seen.has(emp.id)) seen.set(emp.id, new Set()); seen.get(emp.id).add(en.date); return; }
+    if (en.ovr) status = en.ovr;
+    else {
+      if (en.mins.length) { inM = Math.min(...en.mins); outM = en.mins.length > 1 ? Math.max(...en.mins) : null; }
+      let h = en.hrs; if (h == null && outM != null) { h = (outM - inM) / 60; if (h < 0) h += 24; }
+      if (h == null) { status = en.mins.length ? 'present' : 'absent'; if (en.mins.length) note = 'single punch'; }
+      else if (h >= st.fullHrs) status = 'present';
+      else if (h >= st.halfHrs) { status = 'half_day'; note = h.toFixed(1) + ' h'; }
+      else { status = 'absent'; note = 'only ' + h.toFixed(1) + ' h'; }
+      if (st.otOn && h != null && h > st.shiftHrs && status === 'present') ot = Math.round((h - st.shiftHrs) * 2) / 2;
+    }
+    if (inM != null) note = (note ? note + ' · ' : '') + _p2(Math.floor(inM / 60)) + ':' + _p2(inM % 60) + (outM != null ? '–' + _p2(Math.floor(outM / 60)) + ':' + _p2(outM % 60) : '');
+    days.push({ employeeId: emp.id, empName: emp.name, date: en.date, status, otHours: ot, note });
+    if (!seen.has(emp.id)) seen.set(emp.id, new Set()); seen.get(emp.id).add(en.date);
+  });
+  if (st.fillAbsent) {
+    const allDates = [...new Set(days.map(d => d.date))].sort();
+    seen.forEach((ds, empId) => {
+      const emp = employees.find(e => e.id === empId);
+      allDates.forEach(d => {
+        if (ds.has(d)) return;
+        if (new Date(d + 'T00:00:00').getDay() === weekOff) return;
+        if (holidays.has(d)) return;
+        days.push({ employeeId: empId, empName: emp && emp.name, date: d, status: 'absent', otHours: 0, note: 'no punch' });
+      });
+    });
+  }
+  return { days, unmatched: [...unmatched.entries()] };
+}
+
+function BiometricImportModal({ employees, weekOff, holidays, defaultMonth, onApply, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [fname, setFname] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [month, setMonth] = useState(defaultMonth || new Date().toISOString().slice(0, 7));
+  const [st, setSt] = useState({ fullHrs: 7, halfHrs: 4, shiftHrs: 8, otOn: false, fillAbsent: true });
+  async function pick(e) {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setBusy(true); setErr(''); setRows(null); setFname(f.name);
+    try {
+      let all = [];
+      if (/\.(xlsx|xls)$/i.test(f.name)) {
+        const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+        wb.SheetNames.forEach(sn => { all = all.concat(X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', blankrows: false, raw: true })); });
+      } else {
+        const txt = await f.text();
+        all = parseCsvText(txt.indexOf('\t') >= 0 && txt.split('\n')[0].indexOf(',') < 0 ? txt.replace(/\t/g, ',') : txt);
+      }
+      setRows(all);
+    } catch (ex) { setErr(ex.message || String(ex)); }
+    setBusy(false);
+  }
+  const ext = useMemo(() => rows ? bioExtract(rows, month) : null, [rows, month]);
+  const res = useMemo(() => ext && ext.info ? bioEvaluate(ext.entries, employees, st, weekOff, holidays) : null, [ext, st, employees, weekOff, holidays]);
+  const sum = useMemo(() => {
+    const m = {}; (res ? res.days : []).forEach(d => { const x = m[d.employeeId] || (m[d.employeeId] = { name: d.empName, present: 0, half: 0, absent: 0, leave: 0, ot: 0 }); if (d.status === 'present') x.present++; else if (d.status === 'half_day') x.half++; else if (d.status === 'absent') x.absent++; else if (d.status === 'leave') x.leave++; x.ot += d.otHours || 0; });
+    return Object.values(m);
+  }, [res]);
+  const inp = { border: '1px solid #DDD8CE', borderRadius: 6, padding: '6px 10px', fontSize: 13, width: 70, boxSizing: 'border-box' };
+  const setS = (k, v) => setSt(s => ({ ...s, [k]: v }));
+  const th = { textAlign: 'left', padding: '6px 8px', fontSize: 12, background: '#F5F3EE', borderBottom: '1px solid #E5E1D8' };
+  const td = { padding: '5px 8px', fontSize: 12.5, borderBottom: '1px solid #F0EDE6' };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 26, width: 820, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 700 }}>Import biometric / machine attendance</h3>
+        <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#777' }}>Upload the Excel / CSV exported from your biometric software. Daily summary (ID, Date, In, Out), raw punch log, or a monthly sheet (employees × days with P / A) are all read automatically. Employees are matched by <b>Biometric ID</b> (set on the employee profile), Employee ID, or name.</p>
+        <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={pick} style={{ marginBottom: 10 }} />
+        {busy && <div style={{ fontSize: 13, color: '#888' }}>Reading {fname}…</div>}
+        {err && <div style={{ fontSize: 13, color: '#B5453A' }}>{err}</div>}
+        {rows && ext && !ext.info && <div style={{ fontSize: 13, color: '#B5453A', marginBottom: 8 }}>Could not find an Employee ID / Name column together with Date or In/Out columns in this file. Check the first rows have column headings.</div>}
+        {res && (
+          <>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', background: '#FBF9F3', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 12px', margin: '8px 0 12px', fontSize: 12.5 }}>
+              <label>Full day ≥ <input type="number" step="0.5" value={st.fullHrs} onChange={e => setS('fullHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label>Half day ≥ <input type="number" step="0.5" value={st.halfHrs} onChange={e => setS('halfHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label><input type="checkbox" checked={st.otOn} onChange={e => setS('otOn', e.target.checked)} /> OT after <input type="number" step="0.5" value={st.shiftHrs} onChange={e => setS('shiftHrs', parseFloat(e.target.value) || 0)} style={inp} /> h</label>
+              <label><input type="checkbox" checked={st.fillAbsent} onChange={e => setS('fillAbsent', e.target.checked)} /> No punch on a working day = Absent (skips week-off &amp; holidays)</label>
+              {ext.info.matrix && <label>Month of sheet <input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...inp, width: 140 }} /></label>}
+            </div>
+            <div style={{ fontSize: 12.5, marginBottom: 6 }}><b>{sum.length}</b> employee(s) matched · <b>{res.days.length}</b> daily record(s){ext.info.matrix ? ' (monthly sheet)' : ''}</div>
+            {res.unmatched.length > 0 && <div style={{ fontSize: 12, color: '#B45309', background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>Not matched ({res.unmatched.length}) — add their Biometric ID in Employees, then import again: {res.unmatched.slice(0, 12).map(u => u[1] || u[0]).join(', ')}{res.unmatched.length > 12 ? '…' : ''}</div>}
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 8, marginBottom: 14 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><th style={th}>Employee</th><th style={th}>Present</th><th style={th}>Half</th><th style={th}>Absent</th><th style={th}>Leave</th><th style={th}>OT h</th></tr></thead>
+                <tbody>{sum.map((x, i) => <tr key={i}><td style={td}>{x.name}</td><td style={td}>{x.present}</td><td style={td}>{x.half}</td><td style={{ ...td, color: x.absent ? '#B5453A' : undefined }}>{x.absent}</td><td style={td}>{x.leave}</td><td style={td}>{x.ot}</td></tr>)}</tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#888', marginBottom: 12 }}>Importing replaces the attendance of these employees on those dates; other employees and dates are untouched.</div>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '9px 20px', border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button disabled={!res || !res.days.length} onClick={() => onApply(res.days)} style={{ padding: '9px 20px', background: res && res.days.length ? '#1E2A4A' : '#aaa', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: res && res.days.length ? 'pointer' : 'default' }}>Import {res ? res.days.length : ''} record(s)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, labourGroups: _allLG = [], setLabourGroups, siteProjects, setSiteProjects, employees, userRole, user, businessInfo, payrollRuns = [], setPayrollRuns, holidayCalendar = [], setHolidayCalendar, currentBizType = 'trading', isMultiBiz = false }) {
   const [tab, setTab] = useState('mark');
   const [editing, setEditing] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
@@ -22734,10 +22950,19 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
   const [printSheet, setPrintSheet] = useState(false);
   const [printAbsent, setPrintAbsent] = useState(false);
+  const [bioOpen, setBioOpen] = useState(false);
   const [holForm, setHolForm] = useState({date:'',name:'',type:'govt',projectId:''});
   const [weekOff, setWeekOff] = useState((businessInfo && businessInfo.weekOff!=null) ? businessInfo.weekOff : 5);
   const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const fmt = makeFmt(businessInfo);
+
+  // Data isolation per business: employees arrive already scoped to this workspace; groups & daily records are tagged with
+  // bizType (older untagged ones are matched through their employees). Same module + same alert logic in every business.
+  const _empIds = new Set((employees || []).map(e => e.id));
+  const _mineR = r => r.bizType ? r.bizType === currentBizType : ((r.records || []).length ? (r.records || []).some(x => _empIds.has(x.employeeId)) : currentBizType === 'service');
+  const _mineG = g => g.bizType ? g.bizType === currentBizType : ((g.memberIds || []).length ? (g.memberIds || []).some(id => _empIds.has(id)) : currentBizType === 'service');
+  const siteAttendance = isMultiBiz ? _allSA.filter(_mineR) : _allSA;
+  const labourGroups = isMultiBiz ? _allLG.filter(_mineG) : _allLG;
 
   const isForeman = userRole === 'foreman';
   const canManageGroups = ['admin','manager','hr'].includes(userRole);
@@ -22748,13 +22973,13 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   const projName = id => siteProjects.find(p=>p.id===id)?.name || '—';
 
   function saveAtt(form) {
-    const rec = { ...form, id: form.id || crypto.randomUUID(), updatedBy: user?.email||'' };
+    const rec = { ...form, id: form.id || crypto.randomUUID(), bizType: form.bizType || currentBizType, updatedBy: user?.email||'' };
     setSiteAttendance(prev => form.id ? prev.map(r => r.id === form.id ? rec : r) : [...prev, rec]);
     setEditing(null);
   }
   function delAtt(id) { if (confirm('Delete attendance record?')) setSiteAttendance(prev => prev.filter(r => r.id !== id)); }
   function saveGroup(g) {
-    const rec = { ...g, id: g.id || crypto.randomUUID() };
+    const rec = { ...g, id: g.id || crypto.randomUUID(), bizType: g.bizType || currentBizType };
     const eff = rec.effectiveFrom || new Date().toISOString().slice(0,10);
     delete rec.effectiveFrom;
     setLabourGroups(prev => {
@@ -22769,6 +22994,33 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       return old ? prev.map(x=>x.id===rec.id?rec:x) : [...prev, rec];
     });
     setEditingGroup(null);
+  }
+  function applyBio(days) {
+    const grpOf = id => labourGroups.find(g => (g.memberIds || []).includes(id));
+    let newGroup = null; const byKey = {};
+    days.forEach(d => {
+      let g = grpOf(d.employeeId);
+      if (!g) {
+        if (!newGroup) newGroup = { id: crypto.randomUUID(), name: 'General (Biometric)', type: 'office', leaderId: '', projectId: '', memberIds: [], bizType: currentBizType };
+        if (!newGroup.memberIds.includes(d.employeeId)) newGroup.memberIds.push(d.employeeId);
+        g = newGroup;
+      }
+      const k = d.date + '|' + g.id;
+      (byKey[k] = byKey[k] || { date: d.date, group: g, recs: [] }).recs.push({ employeeId: d.employeeId, status: d.status, otHours: d.otHours || 0, note: d.note || '' });
+    });
+    if (newGroup) setLabourGroups(prev => [...prev, newGroup]);
+    setSiteAttendance(prev => {
+      const out = prev.slice();
+      Object.values(byKey).forEach(b => {
+        const ids = new Set(b.recs.map(r => r.employeeId));
+        const i = out.findIndex(r => r.date === b.date && r.groupId === b.group.id);
+        if (i >= 0) out[i] = { ...out[i], records: [...(out[i].records || []).filter(x => !ids.has(x.employeeId)), ...b.recs], updatedBy: user?.email || '' };
+        else out.push({ id: crypto.randomUUID(), date: b.date, groupId: b.group.id, projectId: b.group.projectId || '', records: b.recs, bizType: currentBizType, updatedBy: user?.email || '' });
+      });
+      return out;
+    });
+    setBioOpen(false);
+    alert('✅ ' + days.length + ' attendance record(s) imported.' + (newGroup ? ' Employees without a group were added to "General (Biometric)".' : ''));
   }
   function delGroup(id) { if (confirm('Delete this group?')) setLabourGroups(prev => prev.filter(g=>g.id!==id)); }
 
@@ -22876,8 +23128,9 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
   return (
     <div style={styles.page}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-        <div><h2 className="serif" style={styles.h2}>Site Attendance</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
+        <div><h2 className="serif" style={styles.h2}>{currentBizType === 'service' ? 'Site Attendance' : 'Attendance & Salary'}</h2><p style={styles.muted}>{labourGroups.length} group{labourGroups.length!==1?'s':''} · {siteAttendance.length} daily records</p></div>
         <div style={{ display:'flex', gap:8 }}>
+          {canManageGroups && <button onClick={()=>setBioOpen(true)} style={{ ...styles.ghostBtn, fontSize:12, border:'1px solid #1E2A4A', color:'#1E2A4A', fontWeight:600 }}>⬆ Import Biometric</button>}
           {['mark', ...(canManageGroups?['groups','sheet','holidays']:[])].map(k=><button key={k} onClick={()=>setTab(k)} style={{ ...styles.ghostBtn, background:tab===k?'#1E2A4A':'transparent', color:tab===k?'#fff':'#555', fontSize:12 }}>{k==='mark'?'Attendance':k==='groups'?'Labour Groups':k==='sheet'?'Monthly Sheet':'Holidays'}</button>)}
         </div>
       </div>
@@ -22885,6 +23138,8 @@ function SiteAttendanceView({ siteAttendance, setSiteAttendance, labourGroups = 
       {isForeman && !myEmp && <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#92400E' }}>Your login ({user?.email}) isn't linked to an employee record. Ask admin to set your email on your employee profile so your group appears here.</div>}
 
       {absentAlerts.length>0 && <div style={{ background:'#FEE2E2', border:'1px solid #FCA5A5', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13, color:'#B91C1C' }}><b>⚠ Continuous Absence Alert</b> — {absentAlerts.length} employee(s) absent 3+ days in a row: {absentAlerts.map(a=>a.emp.name+' ('+a.maxRun+'d'+(a.endD?', to '+a.endD:'')+')').join(', ')}. Please review.</div>}
+
+      {bioOpen && <BiometricImportModal employees={employees} weekOff={weekOff} holidays={new Set((holidayCalendar||[]).map(h=>h.date))} defaultMonth={filterMonth} onApply={applyBio} onClose={()=>setBioOpen(false)} />}
 
       {tab === 'groups' && canManageGroups && (
         <div>
@@ -29479,7 +29734,7 @@ export default function App() {
             holidayCalendar={holidayCalendar}
             setHolidayCalendar={setHolidayCalendar}
             currentBizType={sessionContext || effectiveBizContext}
-            isMultiBiz={sessionIsMultiBiz}
+            isMultiBiz={_sessScoped || sessionIsMultiBiz}
           />
         );
       case 'evaluation':
