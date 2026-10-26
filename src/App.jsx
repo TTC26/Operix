@@ -23364,9 +23364,9 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
             <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed', fontFamily:'Arial, sans-serif' }}>
               <thead>
                 <tr>
-                  {[['S.No',3],['Emp ID',6],['Employee Name',11],['Designation',8]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, width:(43.2/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
-                  {[['Present',3.5],['Absent',3.5],['Holiday',3.5],['Total Days',3.5],['Payable Days',3.8],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%' }}>{h}</th>)}
+                  {[['S.No',3],['Emp ID',7],['Employee Name',11],['Designation',9]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, width:(39.5/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {[['Present',4],['Absent',4],['Holiday',4],['Total Days',3.5],['Payable Days',4],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
                 </tr>
                 <tr>{days.map(d=><th key={d} style={{ ...th, padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
@@ -23374,9 +23374,9 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                 {rows.map((r,ri)=>{ const c=calc(r); return (
                   <tr key={r.emp.id}>
                     <td style={td}>{ri+1}</td>
-                    <td style={{ ...td, textAlign:'left', overflowWrap:'anywhere' }}>{r.emp.empId||''}</td>
-                    <td style={{ ...td, textAlign:'left', fontWeight:600, overflowWrap:'anywhere' }}>{r.emp.name}</td>
-                    <td style={{ ...td, textAlign:'left', overflowWrap:'anywhere' }}>{r.emp.designation||''}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.name}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.designation||''}</td>
                     {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
                     <td style={{ ...td, background:'#FFF3B0', fontWeight:700 }}>{r.present+(r.od||0)}</td>
                     <td style={{ ...td, color:'#B5453A' }}>{r.absent}</td>
