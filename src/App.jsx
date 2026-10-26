@@ -345,7 +345,7 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 }
 
 // ─── Shared Print Overlay (used by Tender, RA Bill, AMC, Sub WO, PTW, Handover)
-function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
+function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = false }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [autoWide, setAutoWide] = React.useState(false);
@@ -388,7 +388,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, wide ? { wide: true } : undefined)}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -1492,6 +1492,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
       + ((pre || gen) ? zohoThemeCss(bi && bi.template) + ZOHO_PRINT_CSS : '')
       + (gen ? ZOHO_GEN_CSS : '')
+      + (gen && gen.wide ? '.bd{left:0 !important;right:0 !important;padding:3mm 0 0 !important;border:0 !important;margin:0 !important;}.bd table{width:100% !important;}.bd > div{padding-left:3mm;padding-right:3mm;box-sizing:border-box;}' : '')
       + (pre && pre.css ? pre.css : '')
       + '</style></head><body>'
       + '<div id="out"></div>'
@@ -23354,7 +23355,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
         const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
         const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
-          <DocPrintOverlay onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
+          <DocPrintOverlay wide onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
             <style>{`@media print { @page { size: A4 landscape; margin: 6mm; } }`}</style>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
               <div style={{ fontSize:15, fontWeight:700, color:'#1E2A4A' }}>Attendance &amp; Salary Sheet</div>
@@ -23364,9 +23365,9 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
             <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed', fontFamily:'Arial, sans-serif' }}>
               <thead>
                 <tr>
-                  {[['S.No',3],['Emp ID',7],['Employee Name',11],['Designation',9]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, width:(39.5/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
-                  {[['Present',4],['Absent',4],['Holiday',4],['Total Days',3.5],['Payable Days',4],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
+                  {[['S.No',3],['Emp ID',8],['Employee Name',12],['Designation',10]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, width:(39.2/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {[['Present',3.6],['Absent',3.6],['Holiday',3.6],['Total Days',3.4],['Payable Days',3.6],['Total Salary',5],['Salary in Hand',5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
                 </tr>
                 <tr>{days.map(d=><th key={d} style={{ ...th, padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
@@ -23374,7 +23375,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                 {rows.map((r,ri)=>{ const c=calc(r); return (
                   <tr key={r.emp.id}>
                     <td style={td}>{ri+1}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
                     <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.name}</td>
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.designation||''}</td>
                     {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
