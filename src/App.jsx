@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Upload, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails, loadBranding, saveBranding } from './firebase';
 
 
@@ -2872,6 +2872,81 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
 }
 
 // ─── Vendors ───────────────────────────────────────────────────
+
+// ─── Common view tools: Print / Export Excel / Import — one rule for every list & register ───────────
+// p = print, x = export (all tables on the view → Excel sheets), i = import (master data only; handler supplied by App)
+// Data shown is already scoped to the active business, so print/export are isolated per business automatically.
+const VIEW_TOOLS = {
+  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Raw Materials', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
+  storeissue: { t: 'Store Issue', x: 1 }, verticalrack: { t: 'Vertical Rack', p: 1, x: 1 }, vendors: { t: 'Vendors', p: 1, x: 1, i: 1 },
+  vendoreval: { t: 'Vendor Evaluation', p: 1, x: 1 }, clientmaterials: { t: 'Client Materials', p: 1, x: 1 }, fmspareparts: { t: 'FM Spare Parts', p: 1, x: 1 },
+  isoprinciples: { t: 'ISO Principles', p: 1, x: 1 }, deptprocedures: { t: 'Department Procedures', p: 1, x: 1 }, inprocessqa: { t: 'Inprocess QA', p: 1, x: 1 },
+  qatesting: { t: 'QA Testing', x: 1 }, capa: { t: 'CAPA', p: 1, x: 1 }, internalaudit: { t: 'Internal Audit', p: 1, x: 1 }, fatsat: { t: 'FAT-SAT', x: 1 }, tds: { t: 'TDS', x: 1 },
+  productionorders: { t: 'Production Orders', x: 1 }, boshortage: { t: 'BO Shortage', x: 1 }, serviceorders: { t: 'Service Orders', x: 1 }, mepbom: { t: 'MEP BOM', x: 1 },
+  bom: { t: 'BOM', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
+};
+
+function tablesToSheets(root) {
+  const txt = (c) => {
+    const f = c.querySelector && c.querySelector('input:not([type=checkbox]),textarea,select');
+    if (f && !(c.innerText || '').trim()) return f.tagName === 'SELECT' ? ((f.options[f.selectedIndex] || {}).text || '') : f.value;
+    return (c.innerText || '').replace(/\s+/g, ' ').trim();
+  };
+  const sheets = [];
+  Array.from(root.querySelectorAll('table')).forEach((tb, n) => {
+    if (tb.closest('.no-print') && !tb.closest('.vt-keep')) return;
+    let aoa = Array.from(tb.querySelectorAll('tr')).filter(r => r.closest('table') === tb).map(r => Array.from(r.children).map(txt));
+    aoa = aoa.filter(r => r.some(c => c !== ''));
+    if (aoa.length < 1) return;
+    const w = Math.max(...aoa.map(r => r.length));
+    aoa = aoa.map(r => { while (r.length < w) r.push(''); return r; });
+    const keep = []; for (let c = 0; c < w; c++) if (aoa.some((r, ri) => ri > 0 ? r[c] !== '' : r[c] !== '') ) keep.push(c);
+    aoa = aoa.map(r => keep.map(c => r[c]));
+    let name = 'Table ' + (n + 1);
+    const hd = (tb.previousElementSibling && /^H[1-6]$|DIV$/.test(tb.previousElementSibling.tagName)) ? (tb.previousElementSibling.innerText || '').trim() : '';
+    if (hd && hd.length < 28) name = hd;
+    sheets.push({ name: name.replace(/[\\/?*\[\]:]/g, ' ').slice(0, 30), aoa });
+  });
+  return sheets;
+}
+
+function ViewTools({ cfg, businessInfo, bizLabel, onImportFile, children }) {
+  const ref = React.useRef(null);
+  const fileRef = React.useRef(null);
+  const [busy, setBusy] = React.useState(false);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const fname = (cfg.t + '-' + (bizLabel || 'all') + '-' + stamp).replace(/\s+/g, '_');
+  const doPrint = () => { if (ref.current) printView(ref.current, businessInfo, { pgf: [businessInfo && businessInfo.name, cfg.t, 'Page {p} of {n}'].filter(Boolean).join(' | ') }); };
+  const doExport = async () => {
+    if (!ref.current) return;
+    const sheets = tablesToSheets(ref.current);
+    if (!sheets.length) { alert('Nothing to export on this screen yet.'); return; }
+    setBusy(true);
+    try {
+      const X = await loadXLSX(); const wb = X.utils.book_new(); const used = {};
+      sheets.forEach((s, i) => { let nm = s.name; if (used[nm]) nm = (nm.slice(0, 26) + ' ' + (i + 1)); used[nm] = 1; X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(s.aoa), nm); });
+      X.writeFile(wb, fname + '.xlsx');
+    } catch (e) {
+      const a = sheets[0].aoa; const csv = a.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n');
+      const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); const l = document.createElement('a'); l.href = url; l.download = fname + '.csv'; l.click(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+    setBusy(false);
+  };
+  const btn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', fontSize: 12, border: '1px solid #DDD8CE', borderRadius: 7, background: '#fff', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600 };
+  return (
+    <div>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '0 0 8px' }}>
+        {cfg.p && <button type="button" style={btn} onClick={doPrint}><Printer size={13} /> Print / PDF</button>}
+        {cfg.x && <button type="button" style={btn} onClick={doExport} disabled={busy}><Download size={13} /> {busy ? 'Exporting…' : 'Export Excel'}</button>}
+        {cfg.i && onImportFile && (<>
+          <button type="button" style={btn} onClick={() => fileRef.current && fileRef.current.click()}><Upload size={13} /> Import</button>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onImportFile(f); }} />
+        </>)}
+      </div>
+      <div ref={ref} className="vt-area">{children}</div>
+    </div>
+  );
+}
 
 function VendorsList({ vendors, setEditing, setVendors, documents }) {
   return (
@@ -11175,7 +11250,7 @@ function printOfferLetter(emp, businessInfo) {
   printLetterFromHtml(html, biz);
 }
 
-function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
+function EmployeesView({ employees, allEmployees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
   const [subView,   setSubView]   = useState('list');
   const [activeEmp, setActiveEmp] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -11212,7 +11287,8 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
       else { start=0; idx={empId:-1,name:0,designation:1,department:-1,phone:-1,email:-1,nationality:-1,joining:-1,basic:-1}; }
       const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
       let count = employees.length;
-      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||('EMP-'+String(count).padStart(4,'0')), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
+      const addedSoFar = [];
+      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||(()=>{ const dc=matchEmpDept(g(c,idx.department)), rc=matchEmpRole(g(c,idx.designation)); const id=nextEmpId(dc,rc,[...(allEmployees||employees),...addedSoFar]); const fin=id||('EMP-'+String(count).padStart(4,'0')); addedSoFar.push({empId:fin}); return fin; })(), deptCode: matchEmpDept(g(c,idx.department)), roleCode: matchEmpRole(g(c,idx.designation)), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
       if(!added.length){ alert('No rows with a Name found. Check the Name column.'); e.target.value=''; return; }
       setEmployees(prev=>[...prev, ...added]);
       alert(added.length+' employee(s) added. Click each row to fill full details (documents, bank, salary breakup).');
@@ -11359,6 +11435,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           <EmployeeHRForm
             employee={activeEmp}
             count={employees.length}
+            allEmployees={allEmployees || employees}
             businessInfo={businessInfo}
             isGulf={isGulf}
             country={country}
@@ -11653,10 +11730,37 @@ function EmpField({ label, name, type='text', required=false, form, onSet, error
   );
 }
 
-function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave, onClose }) {
+// ─── Employee ID rule:  E + Department(2) + Role(2) + Running number(4)   e.g. E05070012 ───────────────
+const EMP_DEPTS = [['01', 'Admin + HRD'], ['02', 'Sales & Marketing'], ['03', 'Accounts + Finance + Purchase'], ['04', 'Engineering + Development'], ['05', 'Production + QA + Maintenance'], ['06', 'Stores + Dispatch']];
+const EMP_ROLES = [['01', 'MD'], ['02', 'GM'], ['03', 'AGM'], ['04', 'Sr. Manager (SM)'], ['05', 'Manager'], ['06', 'Asst. Manager'], ['07', 'Engineer'], ['08', 'Sr. Engineer'], ['09', 'Foreman'], ['10', 'Sr. Technician'], ['11', 'Technician'], ['12', 'Electrician']];
+function nextEmpId(deptCode, roleCode, employees) {
+  if (!deptCode || !roleCode) return '';
+  const pre = 'E' + deptCode + roleCode;
+  let mx = 0;
+  (employees || []).forEach(e => { const m = String(e.empId || '').match(new RegExp('^' + pre + '(\\d{4})$')); if (m) mx = Math.max(mx, parseInt(m[1], 10)); });
+  return pre + String(mx + 1).padStart(4, '0');
+}
+function matchEmpDept(txt) {
+  const t = String(txt || '').toLowerCase().trim(); if (!t) return '';
+  const d = EMP_DEPTS.find(x => x[1].toLowerCase() === t || x[0] === t || String(parseInt(t, 10)) === t && ('0' + t).slice(-2) === x[0]);
+  if (d) return d[0];
+  if (/admin|hr/.test(t)) return '01'; if (/sale|market/.test(t)) return '02'; if (/account|financ|purchas/.test(t)) return '03';
+  if (/engg|engineer|develop|design/.test(t)) return '04'; if (/prod|qa|quality|maint/.test(t)) return '05'; if (/store|dispatch|logistic/.test(t)) return '06';
+  return '';
+}
+function matchEmpRole(txt) {
+  const t = String(txt || '').toLowerCase().replace(/[.\s]+/g, ' ').trim(); if (!t) return '';
+  if (/^(md|managing director)$/.test(t)) return '01'; if (/^(gm|general manager)$/.test(t)) return '02'; if (/^(agm|asst general manager|assistant general manager)$/.test(t)) return '03';
+  if (/^(sm|sr manager|senior manager)$/.test(t)) return '04'; if (/^((asst|assistant) (manager|mang|mng|mgr)|am)$/.test(t)) return '06'; if (/^(manager|mng|mgr|mang)$/.test(t)) return '05';
+  if (/^(sr engineer|senior engineer|sr engr)$/.test(t)) return '08'; if (/^(engineer|engr|enginr)$/.test(t)) return '07'; if (/foreman|supervisor/.test(t)) return '09';
+  if (/^(sr technician|senior technician)$/.test(t)) return '10'; if (/technician/.test(t)) return '11'; if (/electrician/.test(t)) return '12';
+  return '';
+}
+
+function EmployeeHRForm({ employee, count, allEmployees = [], businessInfo, isGulf, country, onSave, onClose }) {
   const blank = {
     id: crypto.randomUUID(),
-    empId: 'EMP-' + String(count + 1).padStart(4, '0'),
+    empId: '', deptCode: '', roleCode: '', empIdManual: false,
     name: '', designation: '', department: '', phone: '', email: '',
     dob: '', address: '', emergencyContact: '', emergencyPhone: '', nationality: '',
     joiningDate: new Date().toISOString().slice(0, 10),
@@ -11678,6 +11782,13 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
   const [errors, setErrors] = useState({});
   const [tab, setTab]     = useState('personal');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  // Department / Role pickers drive the auto Employee ID (E + dept + role + number); the ID can still be typed manually.
+  const others = (allEmployees || []).filter(e => e.id !== form.id);
+  const pickDeptRole = (patch) => setForm(p => {
+    const n = { ...p, ...patch };
+    if (!employee && !n.empIdManual) n.empId = nextEmpId(n.deptCode, n.roleCode, others) || n.empId;
+    return n;
+  });
 
   const fmtEmp = makeFmt(businessInfo);
   const basic  = parseFloat(form.basicSalary) || 0;
@@ -11740,7 +11851,16 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
       {tab === 'personal' && (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Employee ID" name="empId" required />
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Employee ID * <span style={{ fontWeight: 400, color: '#888' }}>E · Dept(2) · Role(2) · No.(4)</span></label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...styles.input, flex: 1, fontFamily: 'monospace', ...(errors.empId ? { borderColor: '#EF4444' } : {}) }} value={form.empId || ''} placeholder="Pick Department & Role → auto"
+                  onChange={e => { setForm(p => ({ ...p, empId: e.target.value, empIdManual: true })); if (errors.empId) clearErr('empId'); }} />
+                <button type="button" style={styles.ghostBtn} title="Generate next number for this Department + Role"
+                  onClick={() => { const id = nextEmpId(form.deptCode, form.roleCode, others); if (!id) { alert('Select Department and Role first.'); return; } setForm(p => ({ ...p, empId: id, empIdManual: false })); }}>Auto</button>
+              </div>
+              {errors.empId && <div style={{ color: '#EF4444', fontSize: 11, marginTop: 2 }}>{errors.empId}</div>}
+            </div>
             <EmpField {...fp} label="Biometric / Machine ID" name="biometricId" />
             <EmpField {...fp} label="Full Name"   name="name"  required />
             <EmpField {...fp} label="Date of Birth" name="dob" type="date" />
@@ -11755,8 +11875,22 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <EmpField {...fp} label="Emergency Contact Name" name="emergencyContact" />
             <EmpField {...fp} label="Emergency Phone"        name="emergencyPhone" />
-            <EmpField {...fp} label="Designation"            name="designation" />
-            <EmpField {...fp} label="Department"             name="department" />
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Department</label>
+              <select style={styles.input} value={form.deptCode || (EMP_DEPTS.find(d => d[1] === form.department) || [''])[0]} onChange={e => { const d = EMP_DEPTS.find(x => x[0] === e.target.value); pickDeptRole({ deptCode: e.target.value, department: d ? d[1] : form.department }); }}>
+                <option value="">— Select —</option>
+                {EMP_DEPTS.map(([c, l]) => <option key={c} value={c}>{c} · {l}</option>)}
+              </select>
+              {!form.deptCode && form.department && !EMP_DEPTS.some(d => d[1] === form.department) && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Current: {form.department} (pick one above to use ID codes)</div>}
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Role</label>
+              <select style={styles.input} value={form.roleCode || ''} onChange={e => { const r = EMP_ROLES.find(x => x[0] === e.target.value); pickDeptRole({ roleCode: e.target.value, designation: r ? r[1].replace(' (SM)', '') : form.designation }); }}>
+                <option value="">— Select —</option>
+                {EMP_ROLES.map(([c, l]) => <option key={c} value={c}>{c} · {l}</option>)}
+              </select>
+            </div>
+            <EmpField {...fp} label="Designation (as printed)" name="designation" />
             <EmpField {...fp} label="Joining Date"           name="joiningDate" type="date" />
             <div style={styles.formGroup}>
               <label style={styles.label}>Status</label>
@@ -29290,6 +29424,40 @@ export default function App() {
     ? { ...pettyCash, entries: (pettyCash?.entries || []).filter(e => (e.bizType || 'trading') === sessionContext), openingBalance: (pettyCash?.openingBalances?.[sessionContext] ?? 0) }
     : pettyCash;
 
+  // Common Print / Export / Import toolbar for registers & lists (see VIEW_TOOLS). Data is already scoped to the active business.
+  async function importVendorsFile(file) {
+    try {
+      const rows = parseCsvText(await fileToCsvText(file));
+      if (rows.length < 2) { alert('The file has no data rows. First row must be headings: Name, GSTIN, Address, State, Phone, Email.'); return; }
+      const H = rows[0].map(h => String(h).toLowerCase().trim());
+      const ix = (arr) => { for (const n of arr) { const i = H.indexOf(n); if (i >= 0) return i; } return -1; };
+      const iN = ix(['name', 'vendor', 'vendor name', 'supplier', 'company']), iG = ix(['gstin', 'gst', 'gst no', 'tax id', 'trn', 'vat no']), iA = ix(['address']), iS = ix(['state', 'region', 'emirate']), iP = ix(['phone', 'mobile', 'contact', 'phone no']), iE = ix(['email', 'e-mail']);
+      if (iN < 0) { alert('Could not find a "Name" column. Headings needed: Name, GSTIN, Address, State, Phone, Email.'); return; }
+      const biz = sessionContext || effectiveBizContext;
+      const have = new Set((vendors || []).filter(v => (v.bizType || bizDefault) === biz).map(v => String(v.name || '').trim().toLowerCase()));
+      const add = []; let dup = 0;
+      rows.slice(1).forEach((r, k) => {
+        const g = (i) => (i >= 0 && r[i] != null) ? String(r[i]).trim() : '';
+        const name = g(iN); if (!name) return;
+        if (have.has(name.toLowerCase())) { dup++; return; }
+        have.add(name.toLowerCase());
+        add.push({ id: Date.now().toString() + '-' + k, name, gstin: g(iG), address: g(iA), state: g(iS), phone: g(iP), email: g(iE), bizType: biz });
+      });
+      if (!add.length) { alert('No new vendors to import' + (dup ? ' (' + dup + ' already exist).' : '.')); return; }
+      setVendors(prev => [...prev, ...add]);
+      alert('Imported ' + add.length + ' vendor(s)' + (dup ? '; skipped ' + dup + ' duplicate(s).' : '.'));
+    } catch (e) { alert('Import failed: ' + (e && e.message ? e.message : e)); }
+  }
+  function wrapViewTools(node) {
+    const cfg = VIEW_TOOLS[view];
+    if (!cfg || !node || COMING_SOON[view]) return node;
+    return (
+      <ViewTools key={view} cfg={cfg} businessInfo={businessInfo} bizLabel={sessionContext || effectiveBizContext} onImportFile={view === 'vendors' ? importVendorsFile : null}>
+        {node}
+      </ViewTools>
+    );
+  }
+
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
       return (
@@ -29770,6 +29938,7 @@ export default function App() {
         return (
           <EmployeesView
             employees={sessionEmployees}
+            allEmployees={employees}
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
@@ -30468,7 +30637,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {renderContent()}
+        {wrapViewTools(renderContent())}
       </div>
 
       {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
