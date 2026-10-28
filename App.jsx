@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Users, Wrench, X } from 'lucide-react';
+import { AlertTriangle, BarChart2, Bell, BookOpen, Briefcase, CheckCircle, CheckSquare, ChevronDown, ChevronRight, ClipboardList, Clock, Cloud, CloudOff, Copy, Download, Factory, FileMinus, FileSignature, FileText, LayoutDashboard, Layers, LogOut, MapPin, Package, Paperclip, Pencil, Plus, Printer, Search, Settings, Shield, ShoppingCart, Square, Trash2, Truck, Upload, Users, Wrench, X } from 'lucide-react';
 import { auth, watchAuth, signUp, signIn, logOut, loadCompanyData, saveCompanyData, subscribeCompanyData, resendVerificationEmail, refreshUser, getMembership, createStaffAccount, getStaffList, removeStaff, updateStaffRole, uploadDrawing, deleteDrawing, resetPassword, reauthenticateUser, deleteAllCompanyFirestore, deleteCompanyStorage, deleteFirebaseUser, lookupStaffEmail, stripBrandingFromMain, saveServerBackup, listServerBackups, fetchServerBackup, testServerWrite, subscribeBypassEmails, saveBypassEmails, loadBranding, saveBranding } from './firebase';
 
 
@@ -209,6 +209,7 @@ const blankDoc = (type, businessInfo) => ({
   notes: '',
   dueDate: '',
   placeOfSupply: '',
+  supplyType: 'domestic',
   refNumber: '',
   status: 'draft',
   createdAt: Date.now(),
@@ -270,14 +271,18 @@ function computeTotals(doc, sellerState, country) {
   if (doc && doc.status === 'deleted') doc = { ...doc, items: [] };
   let subtotal = 0, discountTotal = 0, cgst = 0, sgst = 0, igst = 0, vat = 0;
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
-  const sameState = cc.splitTax && sellerState && doc.placeOfSupply &&
+  const st = (doc && doc.supplyType) || 'domestic';
+  const isExp = cc.splitTax && st !== 'domestic';
+  const zeroRated = isExp && /_lut$/.test(st);
+  const _fc = fcInfo(doc), fxm = _fc.on ? _fc.fx : 1;
+  const sameState = !isExp && cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
   (doc.items || []).forEach((it) => {
-    const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+    const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0) * fxm;
     const disc = amt * (Number(it.discount) || 0) / 100;
     subtotal += amt;
     discountTotal += disc;
-    if (cc.hasTax) {
+    if (cc.hasTax && !zeroRated) {
       const taxAmt = (amt - disc) * (Number(it.gst) || 0) / 100;
       if (cc.splitTax) {
         if (sameState) { cgst += taxAmt / 2; sgst += taxAmt / 2; }
@@ -289,7 +294,45 @@ function computeTotals(doc, sellerState, country) {
   });
   const totalTax = cgst + sgst + igst + vat;
   const grandTotal = subtotal - discountTotal + totalTax;
-  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState };
+  return { subtotal, discountTotal, taxable: subtotal - discountTotal, cgst, sgst, igst, vat, totalTax, grandTotal, sameState, supplyType: st, isExport: isExp, zeroRated };
+}
+
+// Export / SEZ supply types (GST). *_lut = zero-rated without payment of IGST; *_igst = on payment of IGST.
+const SUPPLY_TYPES = [
+  ['domestic', 'Domestic (regular)'],
+  ['export_lut', 'Export under LUT / Bond (zero-rated, no IGST)'],
+  ['export_igst', 'Export with payment of IGST (refund claim)'],
+  ['sez_lut', 'SEZ supply under LUT (zero-rated, no IGST)'],
+  ['sez_igst', 'SEZ supply with payment of IGST'],
+];
+const CUR_SYM = { USD: '$', EUR: '€', GBP: '£', INR: '₹', AUD: 'A$', SGD: 'S$' };
+// Foreign-currency invoice: when an export invoice has a currency (≠INR) AND an exchange rate, item rates are entered
+// in that currency; computeTotals returns INR (rate × exRate) for books/GST reports, screens & prints show the currency.
+const fcInfo = (d) => { const cur = d && d.exCurrency, fx = Number(d && d.exRate) || 0; const on = !!d && d.type === 'invoice' && !!d.supplyType && d.supplyType !== 'domestic' && !!cur && cur !== 'INR' && fx > 0; return { on, cur, fx, sym: CUR_SYM[cur] || (cur + ' ') }; };
+const fcFmt = (fc, n, raw) => fc.sym + ((raw ? (Number(n) || 0) : (Number(n) || 0) / fc.fx)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const isExportDoc = (d) => !!d && !!d.supplyType && d.supplyType !== 'domestic';
+const isSezDoc = (d) => !!d && /^sez_/.test(d.supplyType || '');
+const exportDeclaration = (d) => {
+  if (!isExportDoc(d)) return '';
+  const lut = /_lut$/.test(d.supplyType);
+  const who = isSezDoc(d) ? 'SUPPLY TO SEZ' : 'SUPPLY MEANT FOR EXPORT';
+  return lut
+    ? who + ' UNDER LETTER OF UNDERTAKING' + (d.lutNo ? ' (LUT No. ' + d.lutNo + (d.lutDate ? ' dt. ' + d.lutDate : '') + ')' : '') + ' WITHOUT PAYMENT OF INTEGRATED TAX'
+    : who + ' ON PAYMENT OF INTEGRATED TAX';
+};
+
+function ExportInfoBlock({ doc, totals }) {
+  if (!isExportDoc(doc) || doc.type !== 'invoice') return null;
+  const fx = Number(doc.exRate) || 0, cur = doc.exCurrency || '';
+  const rows = [['Shipping Bill No', doc.shipBillNo], ['Shipping Bill Date', doc.shipBillDate], ['Port Code', doc.portCode], ['Destination', doc.destCountry], ['Incoterm', doc.incoterm]].filter(r => r[1]);
+  return (
+    <div style={{ border: '1px solid #000', padding: '6px 10px', margin: '8px 0', fontSize: 11.5, color: '#000' }}>
+      <div style={{ fontWeight: 700 }}>{exportDeclaration(doc)}</div>
+      {doc.lutArn && <div>LUT ARN: {doc.lutArn}</div>}
+      {rows.length > 0 && <div style={{ marginTop: 3 }}>{rows.map(r => r[0] + ': ' + r[1]).join('  |  ')}</div>}
+      {fcInfo(doc).on && <div style={{ marginTop: 3 }}>INR equivalent: <b>₹ {totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> (at ₹{fcInfo(doc).fx} per {fcInfo(doc).cur})</div>}
+    </div>
+  );
 }
 
 // ─── Shared tax helper for non-DocEditor modules (Tender, RA Bill, AMC, etc.) ─
@@ -345,7 +388,7 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 }
 
 // ─── Shared Print Overlay (used by Tender, RA Bill, AMC, Sub WO, PTW, Handover)
-function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
+function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = false }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [autoWide, setAutoWide] = React.useState(false);
@@ -388,7 +431,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children }) {
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, wide ? { wide: true } : undefined)}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -755,7 +798,7 @@ function printLetterFromHtml(html, biz, opts) {
       out.forEach(b => blocks.push(b));
     });
     if (_head) blocks.push({ t: '', h: _head });
-    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape), fitOne: !!(opts && opts.fitOne) });
   } catch (e) { console.error(e); printHTML(html); }
 }
 
@@ -811,10 +854,12 @@ const ZOHO_PRINT_CSS =
 
 function buildZohoDocPrint(o) {
   const { doc, t, totals, bi, party, cc, fmt, isVendorDoc, withCompany } = o;
+  const fc = fcInfo(doc); const fmtL = o.fmtL || fmt;
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const nl = (v) => esc(v).replace(/\n/g, '<br>');
   const isPL = doc.type === 'packing_list';
-  const title = doc.type === 'invoice' ? 'TAX INVOICE' : String(t.label || doc.type).toUpperCase();
+  const isExp = doc.type === 'invoice' && isExportDoc(doc);
+  const title = doc.type === 'invoice' ? (isExp ? (isSezDoc(doc) ? 'TAX INVOICE (SEZ SUPPLY)' : 'EXPORT INVOICE') : 'TAX INVOICE') : String(t.label || doc.type).toUpperCase();
   const blocks = [];
   const B = (h) => blocks.push({ h, t: '' });
   const TL = (h) => blocks.push({ h, t: 'tail' });
@@ -827,7 +872,7 @@ function buildZohoDocPrint(o) {
 
   B('<div class="zh1">' + esc(title) + '' + '</div>');
 
-  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].filter(r => r[1]);
+  const meta = [[(t.label || 'Document') + ' No', doc.number], ['Date', doc.date], ['Due Date', doc.dueDate], ['Ref No', doc.refNumber], ['Place of Supply', doc.placeOfSupply]].concat(isExp ? [['Supply Type', (SUPPLY_TYPES.find(x => x[0] === doc.supplyType) || [])[1] ? (SUPPLY_TYPES.find(x => x[0] === doc.supplyType)[1].split(' (')[0]) : ''], ['Shipping Bill No', doc.shipBillNo], ['Shipping Bill Date', doc.shipBillDate], ['Port Code', doc.portCode], ['Destination', doc.destCountry], ['Incoterm', doc.incoterm]] : []).filter(r => r[1]);
   if (meta.length) B('<div class="zmeta">' + meta.map(r => '<div><div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div></div>').join('') + '</div>');
 
   const pl = [];
@@ -868,9 +913,9 @@ function buildZohoDocPrint(o) {
     const cell = (cls, v) => '<td class="' + cls + '"' + span + '>' + v + '</td>';
     let h = '';
     if (!isPL && cc.splitTax) h += cell('c', esc(it.hsn || ''));
-    h += cell('r', esc(it.qty || 0));
+    h += cell('r', esc(it.qty || 0) + (it.unit ? ' <span style="font-size:9px;color:#444">' + esc(it.unit) + '</span>' : ''));
     if (isPL) h += cell('r', esc(it.packages ?? 1)) + cell('r', esc(it.netWeight ?? 0)) + cell('r', esc(it.grossWeight ?? 0)) + cell('c', esc(it.dimensions || ''));
-    else { h += cell('r', esc(fmt(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(it.gst || 0)); h += cell('r amt', esc(fmt(amount))); }
+    else { h += cell('r', esc(fmtL(it.rate || 0))); if (cc.hasTax) h += cell('r', esc(totals.zeroRated ? 0 : (it.gst || 0))); h += cell('r amt', esc(fmtL(amount))); }
     return h;
   };
   let i = 0;
@@ -897,7 +942,7 @@ function buildZohoDocPrint(o) {
     if (totals.discountTotal > 0) rows.push(['Less: Discount', '− ' + fmt(totals.discountTotal)]);
     taxRows.forEach(r => rows.push([r[0], fmt(r[1] || 0)]));
     rightTot = '<table class="ztot">' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '<tr class="g"><td>Total</td><td>' + esc(fmt(totals.grandTotal)) + '</td></tr></table>';
-    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(numToWords(Math.round(totals.grandTotal))) + (cc.splitTax ? ' Rupees Only.' : ' Only.') + '</div>';
+    left += '<div class="zlbl">Amount in words</div><div class="zwords">' + esc(fc.on ? numToWordsIntl(Math.round(totals.grandTotal / fc.fx)) + ' ' + fc.cur + ' Only.' : numToWords(Math.round(totals.grandTotal)) + (cc.splitTax ? ' Rupees Only.' : ' Only.')) + '</div>';
     if (bi.bankName || bi.bankAccount || bi.upi) {
       left += '<div class="zbank"><div class="zlbl">Bank Details</div>'
         + (bi.bankName ? '<div><b>Bank:</b> ' + esc(bi.bankName) + '</div>' : '')
@@ -905,6 +950,13 @@ function buildZohoDocPrint(o) {
         + (bi.ifsc ? '<div><b>IFSC:</b> ' + esc(bi.ifsc) + '</div>' : '')
         + (bi.upi ? '<div><b>UPI:</b> ' + esc(bi.upi) + '</div>' : '') + '</div>';
     }
+  }
+  if (isExp && !isPL) {
+    const fx = Number(doc.exRate) || 0, cur = doc.exCurrency || '';
+    left += '<div class="zbox" style="margin-top:6px;font-size:10.5px;font-weight:700">' + esc(exportDeclaration(doc))
+      + (doc.lutArn ? '<div style="font-weight:400">LUT ARN: ' + esc(doc.lutArn) + '</div>' : '')
+      + (fc.on ? '<div style="font-weight:400;margin-top:3px">INR equivalent: <b>₹ ' + totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</b> (at ₹' + fc.fx + ' per ' + esc(fc.cur) + ')</div>' : '')
+      + '</div>';
   }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
   let qrBlock = '';
@@ -919,8 +971,9 @@ function buildZohoDocPrint(o) {
     const grp = {};
     items.forEach(it => {
       const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0); if (!amt) return;
-      const k = (it.hsn || '-') + '|' + (Number(it.gst) || 0);
-      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: Number(it.gst) || 0, taxable: 0 }).taxable += amt;
+      const rt = totals.zeroRated ? 0 : (Number(it.gst) || 0);
+      const k = (it.hsn || '-') + '|' + rt;
+      (grp[k] = grp[k] || { hsn: it.hsn || '-', rate: rt, taxable: 0 }).taxable += amt;
     });
     const rowsT = Object.values(grp);
     if (rowsT.length) {
@@ -1457,18 +1510,27 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
       + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
-      + 'np();var LASTROW=-1,TH=0;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
+      + 'var zst=document.createElement("style");document.head.appendChild(zst);function setZ(z){zst.textContent=z<1?".bd>*{zoom:"+z+"}":"";}'
+      + 'function LAY(){out.innerHTML="";TAIL.length=0;np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
-      + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;curBody.insertAdjacentHTML("beforeend",B.h);'
+      + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;LB=B;curBody.insertAdjacentHTML("beforeend",B.h);'
       + 'var mv=false;if(fits()&&i===LASTROW&&TH>0&&used()+TH>bd.clientHeight){var rh=curBody.lastChild.offsetHeight;mv=(bd.clientHeight-(used()-rh))<140;}if(!fits()||mv){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",B.h);} }'
       + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;placeNode(node);}'
       + '}'
-      + 'if(TAIL.length){var tw=document.createElement("div");tw.style.display="flow-root";tw.innerHTML=TAIL.join("");bd.appendChild(tw);'
-      + 'if(!fits()){bd.removeChild(tw);np();bd.appendChild(tw);var fp=bd.clientHeight-(tw.offsetTop+tw.offsetHeight)-3;if(fp>0&&bd.children.length>1)tw.style.marginTop=fp+"px";}'
-      + 'else if(curBody){var tH=tw.offsetHeight;bd.removeChild(tw);var lastEl=bd.lastElementChild;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;'
-      + 'if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}'
-      + 'bd.appendChild(tw);} }'
+      + 'if(!TAIL.length&&out.children.length>1&&!bd.querySelector("table")&&bd.children.length<=2){var pb=out.children[out.children.length-2].querySelector(".bd");var plast=pb?pb.lastElementChild:null;'
+      + 'if(plast&&plast.tagName==="TABLE"&&LB){var ptb=plast.querySelector("tbody");var moved=[];if(ptb){for(var mi=0;mi<2;mi++){var rws=Array.prototype.filter.call(ptb.children,function(r){return r.className!=="fill";});if(rws.length<3)break;var lr=rws[rws.length-1];if(lr.querySelector("[rowspan]"))break;moved.unshift(lr);ptb.removeChild(lr);}}'
+      + 'if(moved.length){var wz=document.createElement("div");wz.innerHTML=(LB.o?LB.o:TBLOPEN)+(LB.o?LB.th:THEADHTML)+"<tbody></tbody></table>";var tz=wz.firstElementChild;bd.insertBefore(tz,bd.firstChild);var tbz=tz.querySelector("tbody");moved.forEach(function(r){tbz.appendChild(r);});}}'
+      + 'else if(plast&&plast.tagName!=="TABLE"){var mvk=[];for(var mj=0;mj<2&&pb.children.length>1;mj++){var le=pb.lastElementChild;if(!le||le.tagName==="TABLE"||le.offsetHeight>110)break;mvk.unshift(le);pb.removeChild(le);}for(var mm=mvk.length-1;mm>=0;mm--){bd.insertBefore(mvk[mm],bd.firstChild);}}}'
+      + 'if(TAIL.length){var parts=TAIL.slice();function mk(a){var d=document.createElement("div");d.style.display="flow-root";d.innerHTML=a.join("");return d;}'
+      + 'function fillAbove(tH){var lastEl=bd.lastElementChild;if(!curBody||!lastEl)return;var free=bd.clientHeight-(lastEl.offsetTop+lastEl.offsetHeight)-tH-3;if(free>6){var tb=curBody.parentNode;var nc=tb.querySelectorAll("thead th").length;var fr=document.createElement("tr");fr.className="fill";fr.style.height=free+"px";var fh="";for(var q=0;q<nc;q++)fh+="<td></td>";fr.innerHTML=fh;curBody.appendChild(fr);}}'
+      + 'var tw=mk(parts);bd.appendChild(tw);'
+      + 'if(fits()){var tH=tw.offsetHeight;bd.removeChild(tw);fillAbove(tH);bd.appendChild(tw);}'
+      + 'else{bd.removeChild(tw);var j=0;if(bd.children.length){for(;j<parts.length;j++){var t2=mk(parts.slice(0,j+1));bd.appendChild(t2);var ok=fits();bd.removeChild(t2);if(!ok)break;}}'
+      + 'if(parts.length-j===1&&j>1)j--;'
+      + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
+      + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
+      + '}setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}}'
       + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
@@ -1492,12 +1554,13 @@ async function printPaginated(sel, bi, pre, gen) {
       + '.di-input{border:none !important;background:transparent !important;box-shadow:none !important;outline:none !important;padding:0 2px !important;margin:0 !important;font:inherit !important;color:#000 !important;white-space:nowrap !important;-webkit-appearance:none;appearance:none;}'
       + ((pre || gen) ? zohoThemeCss(bi && bi.template) + ZOHO_PRINT_CSS : '')
       + (gen ? ZOHO_GEN_CSS : '')
+      + (gen && gen.wide ? '.bd{left:0 !important;right:0 !important;padding:3mm 0 0 !important;border:0 !important;margin:0 !important;}.bd table{width:100% !important;}.bd > div{padding-left:3mm;padding-right:3mm;box-sizing:border-box;}' : '')
       + (pre && pre.css ? pre.css : '')
       + '</style></head><body>'
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -2813,6 +2876,81 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
 }
 
 // ─── Vendors ───────────────────────────────────────────────────
+
+// ─── Common view tools: Print / Export Excel / Import — one rule for every list & register ───────────
+// p = print, x = export (all tables on the view → Excel sheets), i = import (master data only; handler supplied by App)
+// Data shown is already scoped to the active business, so print/export are isolated per business automatically.
+const VIEW_TOOLS = {
+  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Raw Materials', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
+  storeissue: { t: 'Store Issue', x: 1 }, verticalrack: { t: 'Vertical Rack', p: 1, x: 1 }, vendors: { t: 'Vendors', p: 1, x: 1, i: 1 },
+  vendoreval: { t: 'Vendor Evaluation', p: 1, x: 1 }, clientmaterials: { t: 'Client Materials', p: 1, x: 1 }, fmspareparts: { t: 'FM Spare Parts', p: 1, x: 1 },
+  isoprinciples: { t: 'ISO Principles', p: 1, x: 1 }, deptprocedures: { t: 'Department Procedures', p: 1, x: 1 }, inprocessqa: { t: 'Inprocess QA', p: 1, x: 1 },
+  qatesting: { t: 'QA Testing', x: 1 }, capa: { t: 'CAPA', p: 1, x: 1 }, internalaudit: { t: 'Internal Audit', p: 1, x: 1 }, fatsat: { t: 'FAT-SAT', x: 1 }, tds: { t: 'TDS', x: 1 },
+  productionorders: { t: 'Production Orders', x: 1 }, boshortage: { t: 'BO Shortage', x: 1 }, serviceorders: { t: 'Service Orders', x: 1 }, mepbom: { t: 'MEP BOM', x: 1 },
+  bom: { t: 'BOM', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
+};
+
+function tablesToSheets(root) {
+  const txt = (c) => {
+    const f = c.querySelector && c.querySelector('input:not([type=checkbox]),textarea,select');
+    if (f && !(c.innerText || '').trim()) return f.tagName === 'SELECT' ? ((f.options[f.selectedIndex] || {}).text || '') : f.value;
+    return (c.innerText || '').replace(/\s+/g, ' ').trim();
+  };
+  const sheets = [];
+  Array.from(root.querySelectorAll('table')).forEach((tb, n) => {
+    if (tb.closest('.no-print') && !tb.closest('.vt-keep')) return;
+    let aoa = Array.from(tb.querySelectorAll('tr')).filter(r => r.closest('table') === tb).map(r => Array.from(r.children).map(txt));
+    aoa = aoa.filter(r => r.some(c => c !== ''));
+    if (aoa.length < 1) return;
+    const w = Math.max(...aoa.map(r => r.length));
+    aoa = aoa.map(r => { while (r.length < w) r.push(''); return r; });
+    const keep = []; for (let c = 0; c < w; c++) if (aoa.some((r, ri) => ri > 0 ? r[c] !== '' : r[c] !== '') ) keep.push(c);
+    aoa = aoa.map(r => keep.map(c => r[c]));
+    let name = 'Table ' + (n + 1);
+    const hd = (tb.previousElementSibling && /^H[1-6]$|DIV$/.test(tb.previousElementSibling.tagName)) ? (tb.previousElementSibling.innerText || '').trim() : '';
+    if (hd && hd.length < 28) name = hd;
+    sheets.push({ name: name.replace(/[\\/?*\[\]:]/g, ' ').slice(0, 30), aoa });
+  });
+  return sheets;
+}
+
+function ViewTools({ cfg, businessInfo, bizLabel, onImportFile, children }) {
+  const ref = React.useRef(null);
+  const fileRef = React.useRef(null);
+  const [busy, setBusy] = React.useState(false);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const fname = (cfg.t + '-' + (bizLabel || 'all') + '-' + stamp).replace(/\s+/g, '_');
+  const doPrint = () => { if (ref.current) printView(ref.current, businessInfo, { pgf: [businessInfo && businessInfo.name, cfg.t, 'Page {p} of {n}'].filter(Boolean).join(' | ') }); };
+  const doExport = async () => {
+    if (!ref.current) return;
+    const sheets = tablesToSheets(ref.current);
+    if (!sheets.length) { alert('Nothing to export on this screen yet.'); return; }
+    setBusy(true);
+    try {
+      const X = await loadXLSX(); const wb = X.utils.book_new(); const used = {};
+      sheets.forEach((s, i) => { let nm = s.name; if (used[nm]) nm = (nm.slice(0, 26) + ' ' + (i + 1)); used[nm] = 1; X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(s.aoa), nm); });
+      X.writeFile(wb, fname + '.xlsx');
+    } catch (e) {
+      const a = sheets[0].aoa; const csv = a.map(r => r.map(c => { const v = String(c == null ? '' : c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n');
+      const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' })); const l = document.createElement('a'); l.href = url; l.download = fname + '.csv'; l.click(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+    setBusy(false);
+  };
+  const btn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', fontSize: 12, border: '1px solid #DDD8CE', borderRadius: 7, background: '#fff', color: '#1E2A4A', cursor: 'pointer', fontWeight: 600 };
+  return (
+    <div>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '0 0 8px' }}>
+        {cfg.p && <button type="button" style={btn} onClick={doPrint}><Printer size={13} /> Print / PDF</button>}
+        {cfg.x && <button type="button" style={btn} onClick={doExport} disabled={busy}><Download size={13} /> {busy ? 'Exporting…' : 'Export Excel'}</button>}
+        {cfg.i && onImportFile && (<>
+          <button type="button" style={btn} onClick={() => fileRef.current && fileRef.current.click()}><Upload size={13} /> Import</button>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onImportFile(f); }} />
+        </>)}
+      </div>
+      <div ref={ref} className="vt-area">{children}</div>
+    </div>
+  );
+}
 
 function VendorsList({ vendors, setEditing, setVendors, documents }) {
   return (
@@ -4763,7 +4901,7 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
   const safeTab = activeTab.id;
 
   function mKey(s) { return (s || '').slice(0, 7); }
-  function docAmt(d) { return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0); }
+  function docAmt(d) { const _f = fcInfo(d); return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) * (_f.on ? _f.fx : 1); }
 
   const data = React.useMemo(() => {
     switch (safeTab) {
@@ -6317,7 +6455,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
   // Screen preview: bordered "formal" layout for the new templates, original look for "classic". Print uses buildZohoDocPrint + the chosen theme.
   const template = 'classic'; // editor layout (has the editable items table); the chosen print template is applied by buildZohoDocPrint
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'];
-  const fmt = (n) => currency(n, cc.currency);
+  const fc = fcInfo(doc);
+  // fmt = totals (INR values shown in the invoice currency); fmtL = line values already entered in the invoice currency
+  const fmt = fc.on ? (n) => fcFmt(fc, n) : (n) => currency(n, cc.currency);
+  const fmtL = fc.on ? (n) => fcFmt(fc, n, true) : fmt;
 
   // Field editing rules
   const isApproved = doc.status === 'approved';
@@ -6384,7 +6525,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
     setDoc((d) => ({
       ...d,
       items: d.items.map((it) => (it.id === rowId
-        ? { ...it, itemId, name: master ? master.name : it.name, hsn: master ? master.hsn : it.hsn, rate: master ? autoRate : it.rate, gst: master ? master.gst : it.gst }
+        ? { ...it, itemId, name: master ? master.name : it.name, hsn: master ? master.hsn : it.hsn, rate: master ? autoRate : it.rate, gst: master ? master.gst : it.gst, unit: master ? (master.unit || '') : it.unit }
         : it)),
     }));
   }
@@ -6460,7 +6601,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </button>
           )}
           <button onClick={() => setShowScan(true)} style={styles.ghostBtn}>📷 Scan Bill</button>
-          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
+          <button id="doc-print-btn" onClick={() => { const _hasLH = useLH && (businessInfo?.letterhead || businessInfo?.letterheadFooter); const _pbi = useSeal ? businessInfo : { ...businessInfo, printSeal: false }; printPaginated('.print-area', _hasLH ? businessInfo : { ...businessInfo, letterhead: '', letterheadFooter: '' }, (doc.overseas && doc.type === 'quotation') ? buildOverseasQuotePrint({ doc, bi: _pbi, party: displayParty, withCompany: !_hasLH }) : buildZohoDocPrint({ doc, t, totals, bi: _pbi, party: displayParty, cc, fmt, fmtL, isVendorDoc, withCompany: !_hasLH })); }} style={styles.ghostBtn}><Printer size={15} /> Print / PDF</button>
           <button onClick={() => { const b = document.getElementById('doc-print-btn'); if (b) b.click(); }} style={styles.ghostBtn} title="Opens the print dialog — choose 'Save as PDF'"><Download size={15}/> Save as PDF</button>
           {userRole === 'admin' && !isDeleted && onDeleteDoc && documents.some(d => d.id === doc.id) && (
             <button onClick={() => onDeleteDoc(doc.id)} style={{ ...styles.ghostBtn, color: '#B5453A', borderColor: '#B5453A' }}><Trash2 size={15} /> Delete</button>
@@ -6568,6 +6709,60 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
           )}
+          {cc.splitTax && doc.type === 'invoice' && (() => {
+            const ro = isEditable ? {} : styles.inputReadOnly;
+            const fld = (label, key, ph, type) => (
+              <div style={{ ...styles.formGroup, flex: 1, minWidth: 130 }}>
+                <label style={styles.label}>{label}</label>
+                <input type={type || 'text'} value={doc[key] || ''} placeholder={ph || ''} onChange={(e) => update(key, e.target.value)} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
+              </div>
+            );
+            const setSupply = (v) => {
+              setDoc((d) => {
+                const n = { ...d, supplyType: v };
+                if (v !== 'domestic') {
+                  if (!n.placeOfSupply || !/other|sez/i.test(n.placeOfSupply)) n.placeOfSupply = /^sez_/.test(v) ? (n.placeOfSupply || '') : '96-Other Countries';
+                  if (!n.exCurrency) n.exCurrency = 'USD';
+                }
+                return n;
+              });
+            };
+            return (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Supply type (GST)</label>
+                <select value={doc.supplyType || 'domestic'} onChange={(e) => isEditable && setSupply(e.target.value)} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+                  {SUPPLY_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                {isExportDoc(doc) && (
+                  <div style={{ marginTop: 8, padding: 10, border: '1px solid #E5DFC9', borderRadius: 8, background: '#FBF8EC' }}>
+                    <div style={{ fontSize: 11.5, color: '#7A6A2A', marginBottom: 6 }}>
+                      {/_lut$/.test(doc.supplyType) ? 'Zero-rated: GST is not charged on this invoice (item GST % is ignored).' : 'IGST is charged on the full taxable value (claim refund of IGST paid).'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {/_lut$/.test(doc.supplyType) && fld('LUT / Bond No.', 'lutNo', 'AD330…')}
+                      {/_lut$/.test(doc.supplyType) && fld('LUT date', 'lutDate', '', 'date')}
+                      {/_lut$/.test(doc.supplyType) && fld('LUT ARN', 'lutArn')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {fld('Shipping bill no.', 'shipBillNo')}
+                      {fld('Shipping bill date', 'shipBillDate', '', 'date')}
+                      {fld('Port code', 'portCode', 'INMAA1')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {fld('Destination country', 'destCountry')}
+                      {fld('Incoterm', 'incoterm', 'FOB / CIF / EXW')}
+                      {fld('Currency', 'exCurrency', 'USD')}
+                      {fld('Exchange rate (₹ per 1 unit)', 'exRate', '83.50', 'number')}
+                    </div>
+                    {fcInfo(doc).on
+                      ? <div style={{ fontSize: 11, color: '#1A7A3E' }}>Invoice is in <b>{doc.exCurrency}</b>: enter rates in {doc.exCurrency}. Books / GST reports use ₹ (= {doc.exCurrency} × {doc.exRate}).
+                          {isEditable && <button type="button" onClick={() => { if (window.confirm('Divide all item rates by ' + doc.exRate + ' (₹ → ' + doc.exCurrency + ')?')) setDoc((d) => ({ ...d, items: (d.items || []).map(it => ({ ...it, rate: Math.round(((Number(it.rate) || 0) / Number(d.exRate)) * 10000) / 10000 })) })); }} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 8px', marginLeft: 8 }}>Rates were in ₹ → convert to {doc.exCurrency}</button>}</div>
+                      : <div style={{ fontSize: 11, color: '#888' }}>Enter currency + exchange rate (₹ per 1 unit): the whole invoice then shows and prints in that currency; rates are entered in it.</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div style={styles.formGroup}>
             <label style={styles.label}>{isVendorDoc ? 'Vendor' : 'Customer'}</label>
@@ -7028,7 +7223,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                 <div style={{ margin: '-40px -48px', border: bdr, fontSize: 12, fontFamily: 'Arial, sans-serif', color: '#222', lineHeight: 1.5 }}>
                   {/* Header band */}
                   <div style={{ background: isPrestige ? '#1E2A4A' : '#fff', color: isPrestige ? '#fff' : '#000', textAlign: 'center', padding: '8px 16px', fontWeight: 700, fontSize: 15, letterSpacing: 1, borderBottom: bdr }}>
-                    {doc.type === 'invoice' ? 'TAX INVOICE' : t.label.toUpperCase()}
+                    {doc.type === 'invoice' ? (isExportDoc(doc) ? (isSezDoc(doc) ? 'TAX INVOICE (SEZ SUPPLY)' : 'EXPORT INVOICE') : 'TAX INVOICE') : t.label.toUpperCase()}
                   </div>
                   {/* Seller + Logo */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 18px', borderBottom: bdr }}>
@@ -7058,7 +7253,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       ))}
                     </div>
                     <div style={{ width: 270, padding: '10px 18px' }}>
-                      {[[`${t.label} No`, doc.number],['Date', doc.date],['Due Date', doc.dueDate],['Place of Supply', doc.placeOfSupply]].filter(([,v])=>v).map(([k,v])=>(
+                      {[[`${t.label} No`, doc.number],['Date', doc.date],['Due Date', doc.dueDate],['Place of Supply', doc.placeOfSupply], ...(isExportDoc(doc) && doc.type === 'invoice' ? [['Supply Type', (SUPPLY_TYPES.find(x => x[0] === doc.supplyType) || ['',''])[1].split(' (')[0]]] : [])].filter(([,v])=>v).map(([k,v])=>(
                         <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 5 }}>
                           <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{k}:</span>
                           <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{v}</span>
@@ -7083,10 +7278,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{i+1}</td>
                             <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.hsn||''}</td>
                             <td style={{ padding:'6px 8px', borderRight:'1px solid #ddd', fontWeight:500, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{it.name||<span style={{color:'#bbb'}}>Item description</span>}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{it.gst||0}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmt(it.rate||0)}</td>
-                            <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmt(amt)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'center', borderRight:'1px solid #ddd' }}>{totals.zeroRated ? 0 : (it.gst||0)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{it.qty||0}{it.unit ? ' ' + it.unit : ''}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', borderRight:'1px solid #ddd' }}>{fmtL(it.rate||0)}</td>
+                            <td style={{ padding:'6px 8px', textAlign:'right', fontWeight:600 }}>{fmtL(amt)}</td>
                           </tr>
                         );
                       })}
@@ -7103,8 +7298,9 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       <div style={{ color:'#555', fontStyle:'italic', marginBottom:8 }}>Thank you for your valuable business!</div>
                       <div style={{ marginBottom:8 }}>
                         <div style={{ fontWeight:700, textDecoration:'underline', marginBottom:3 }}>Amount in words:</div>
-                        <div style={{ fontStyle:'italic' }}>{numToWords(Math.round(totals.grandTotal))} Rupees Only.</div>
+                        <div style={{ fontStyle:'italic' }}>{fc.on ? numToWordsIntl(Math.round(totals.grandTotal / fc.fx)) + ' ' + fc.cur + ' Only.' : numToWords(Math.round(totals.grandTotal)) + ' Rupees Only.'}</div>
                       </div>
+                      <ExportInfoBlock doc={doc} totals={totals} />
                       {doc.notes && <div style={{ marginBottom:6 }}><div style={{ fontWeight:700 }}>Notes:</div><div style={{ color:'#444' }}>{doc.notes}</div></div>}
                       {(businessInfo.bankName||businessInfo.bankAccount) && (
                         <div style={{ marginTop:6 }}>
@@ -7223,6 +7419,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
             </div>
           )}
 
+          {doc.type === 'invoice' && <ExportInfoBlock doc={doc} totals={totals} />}
           <style>{`@media print { .di-input { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 4px !important; -webkit-appearance: none !important; appearance: none !important; color: #000 !important; } .di-screen { display: none !important; } .di-print { display: block !important; } } .di-print { display: none; }
             /* Editor uses a stacked block per item; print uses the columnar table row */
             .di-screen-row { display: table-row; } .di-print-row { display: none; }
@@ -7289,10 +7486,10 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.grossWeight ?? 0, (e) => updateItem(it.id, 'grossWeight', parseFloat(e.target.value) || 0), 72)}</td>
                   <td rowSpan={_span} style={{ ...styles.td, verticalAlign: 'top' }}><input className="di-input" value={it.dimensions || ''} onChange={(e) => updateItem(it.id, 'dimensions', e.target.value)} style={{ ...styles.inlineInput, width: 96, ...(isEditable ? styles.inlineInputEditable : {}) }} placeholder="L×W×H" readOnly={!isEditable} /></td>
                 </>) : (<>
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}</td>
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.qty, (e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0), 54)}<input className="di-input" value={it.unit || ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} title="Unit (Nos / Mtr / Kg …)" placeholder="unit" style={{ ...styles.inlineInput, width: 54, textAlign: 'right', fontSize: 11, color: '#666', display: 'block', marginTop: 2, marginLeft: 'auto', ...(isEditable ? styles.inlineInputEditable : {}) }} /></td>
                   <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.rate, (e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0), 84)}</td>
-                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
-                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmt(amount)}</td>
+                  {cc.hasTax && <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', verticalAlign: 'top' }}>{totals.zeroRated ? <span style={{ color: '#888' }}>0</span> : numIn(it.gst, (e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0), 50)}</td>}
+                  <td rowSpan={_span} style={{ ...styles.td, textAlign: 'right', fontWeight: 600, verticalAlign: 'top' }}>{fmtL(amount)}</td>
                 </>);
                 return (
                   <tr key={it.id}>
@@ -10322,7 +10519,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
 
@@ -10396,7 +10593,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -11054,10 +11251,10 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
-function EmployeesView({ employees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
+function EmployeesView({ employees, allEmployees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
   const [subView,   setSubView]   = useState('list');
   const [activeEmp, setActiveEmp] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
@@ -11094,7 +11291,8 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
       else { start=0; idx={empId:-1,name:0,designation:1,department:-1,phone:-1,email:-1,nationality:-1,joining:-1,basic:-1}; }
       const g=(c,i)=>(i>=0&&i<c.length)?String(c[i]||'').trim():'';
       let count = employees.length;
-      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||('EMP-'+String(count).padStart(4,'0')), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
+      const addedSoFar = [];
+      const added = r2.slice(start).map(c=>{ const name=g(c,idx.name); if(!name || /^name$/i.test(name)) return null; count++; return { id: crypto.randomUUID(), empId: g(c,idx.empId)||(()=>{ const dc=matchEmpDept(g(c,idx.department)), rc=matchEmpRole(g(c,idx.designation)); const id=nextEmpId(dc,rc,[...(allEmployees||employees),...addedSoFar]); const fin=id||('EMP-'+String(count).padStart(4,'0')); addedSoFar.push({empId:fin}); return fin; })(), deptCode: matchEmpDept(g(c,idx.department)), roleCode: matchEmpRole(g(c,idx.designation)), name, designation:g(c,idx.designation), department:g(c,idx.department), phone:g(c,idx.phone), email:g(c,idx.email), nationality:g(c,idx.nationality), joiningDate:g(c,idx.joining)||new Date().toISOString().slice(0,10), basicSalary:parseFloat(g(c,idx.basic).replace(/[^0-9.]/g,''))||'', status:'active', bizType: currentBizType }; }).filter(Boolean);
       if(!added.length){ alert('No rows with a Name found. Check the Name column.'); e.target.value=''; return; }
       setEmployees(prev=>[...prev, ...added]);
       alert(added.length+' employee(s) added. Click each row to fill full details (documents, bank, salary breakup).');
@@ -11241,6 +11439,7 @@ function EmployeesView({ employees, setEmployees, userRole, businessInfo, curren
           <EmployeeHRForm
             employee={activeEmp}
             count={employees.length}
+            allEmployees={allEmployees || employees}
             businessInfo={businessInfo}
             isGulf={isGulf}
             country={country}
@@ -11535,10 +11734,37 @@ function EmpField({ label, name, type='text', required=false, form, onSet, error
   );
 }
 
-function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave, onClose }) {
+// ─── Employee ID rule:  E + Department(2) + Role(2) + Running number(4)   e.g. E05070012 ───────────────
+const EMP_DEPTS = [['01', 'Admin + HRD'], ['02', 'Sales & Marketing'], ['03', 'Accounts + Finance + Purchase'], ['04', 'Engineering + Development'], ['05', 'Production + QA + Maintenance'], ['06', 'Stores + Dispatch']];
+const EMP_ROLES = [['01', 'MD'], ['02', 'GM'], ['03', 'AGM'], ['04', 'Sr. Manager (SM)'], ['05', 'Manager'], ['06', 'Asst. Manager'], ['07', 'Engineer'], ['08', 'Sr. Engineer'], ['09', 'Foreman'], ['10', 'Sr. Technician'], ['11', 'Technician'], ['12', 'Electrician']];
+function nextEmpId(deptCode, roleCode, employees) {
+  if (!deptCode || !roleCode) return '';
+  const pre = 'E' + deptCode + roleCode;
+  let mx = 0;
+  (employees || []).forEach(e => { const m = String(e.empId || '').match(new RegExp('^' + pre + '(\\d{4})$')); if (m) mx = Math.max(mx, parseInt(m[1], 10)); });
+  return pre + String(mx + 1).padStart(4, '0');
+}
+function matchEmpDept(txt) {
+  const t = String(txt || '').toLowerCase().trim(); if (!t) return '';
+  const d = EMP_DEPTS.find(x => x[1].toLowerCase() === t || x[0] === t || String(parseInt(t, 10)) === t && ('0' + t).slice(-2) === x[0]);
+  if (d) return d[0];
+  if (/admin|hr/.test(t)) return '01'; if (/sale|market/.test(t)) return '02'; if (/account|financ|purchas/.test(t)) return '03';
+  if (/engg|engineer|develop|design/.test(t)) return '04'; if (/prod|qa|quality|maint/.test(t)) return '05'; if (/store|dispatch|logistic/.test(t)) return '06';
+  return '';
+}
+function matchEmpRole(txt) {
+  const t = String(txt || '').toLowerCase().replace(/[.\s]+/g, ' ').trim(); if (!t) return '';
+  if (/^(md|managing director)$/.test(t)) return '01'; if (/^(gm|general manager)$/.test(t)) return '02'; if (/^(agm|asst general manager|assistant general manager)$/.test(t)) return '03';
+  if (/^(sm|sr manager|senior manager)$/.test(t)) return '04'; if (/^((asst|assistant) (manager|mang|mng|mgr)|am)$/.test(t)) return '06'; if (/^(manager|mng|mgr|mang)$/.test(t)) return '05';
+  if (/^(sr engineer|senior engineer|sr engr)$/.test(t)) return '08'; if (/^(engineer|engr|enginr)$/.test(t)) return '07'; if (/foreman|supervisor/.test(t)) return '09';
+  if (/^(sr technician|senior technician)$/.test(t)) return '10'; if (/technician/.test(t)) return '11'; if (/electrician/.test(t)) return '12';
+  return '';
+}
+
+function EmployeeHRForm({ employee, count, allEmployees = [], businessInfo, isGulf, country, onSave, onClose }) {
   const blank = {
     id: crypto.randomUUID(),
-    empId: 'EMP-' + String(count + 1).padStart(4, '0'),
+    empId: '', deptCode: '', roleCode: '', empIdManual: false,
     name: '', designation: '', department: '', phone: '', email: '',
     dob: '', address: '', emergencyContact: '', emergencyPhone: '', nationality: '',
     joiningDate: new Date().toISOString().slice(0, 10),
@@ -11560,6 +11786,13 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
   const [errors, setErrors] = useState({});
   const [tab, setTab]     = useState('personal');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  // Department / Role pickers drive the auto Employee ID (E + dept + role + number); the ID can still be typed manually.
+  const others = (allEmployees || []).filter(e => e.id !== form.id);
+  const pickDeptRole = (patch) => setForm(p => {
+    const n = { ...p, ...patch };
+    if (!employee && !n.empIdManual) n.empId = nextEmpId(n.deptCode, n.roleCode, others) || n.empId;
+    return n;
+  });
 
   const fmtEmp = makeFmt(businessInfo);
   const basic  = parseFloat(form.basicSalary) || 0;
@@ -11622,7 +11855,16 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
       {tab === 'personal' && (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <EmpField {...fp} label="Employee ID" name="empId" required />
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Employee ID * <span style={{ fontWeight: 400, color: '#888' }}>E · Dept(2) · Role(2) · No.(4)</span></label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...styles.input, flex: 1, fontFamily: 'monospace', ...(errors.empId ? { borderColor: '#EF4444' } : {}) }} value={form.empId || ''} placeholder="Pick Department & Role → auto"
+                  onChange={e => { setForm(p => ({ ...p, empId: e.target.value, empIdManual: true })); if (errors.empId) clearErr('empId'); }} />
+                <button type="button" style={styles.ghostBtn} title="Generate next number for this Department + Role"
+                  onClick={() => { const id = nextEmpId(form.deptCode, form.roleCode, others); if (!id) { alert('Select Department and Role first.'); return; } setForm(p => ({ ...p, empId: id, empIdManual: false })); }}>Auto</button>
+              </div>
+              {errors.empId && <div style={{ color: '#EF4444', fontSize: 11, marginTop: 2 }}>{errors.empId}</div>}
+            </div>
             <EmpField {...fp} label="Biometric / Machine ID" name="biometricId" />
             <EmpField {...fp} label="Full Name"   name="name"  required />
             <EmpField {...fp} label="Date of Birth" name="dob" type="date" />
@@ -11637,8 +11879,22 @@ function EmployeeHRForm({ employee, count, businessInfo, isGulf, country, onSave
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <EmpField {...fp} label="Emergency Contact Name" name="emergencyContact" />
             <EmpField {...fp} label="Emergency Phone"        name="emergencyPhone" />
-            <EmpField {...fp} label="Designation"            name="designation" />
-            <EmpField {...fp} label="Department"             name="department" />
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Department</label>
+              <select style={styles.input} value={form.deptCode || (EMP_DEPTS.find(d => d[1] === form.department) || [''])[0]} onChange={e => { const d = EMP_DEPTS.find(x => x[0] === e.target.value); pickDeptRole({ deptCode: e.target.value, department: d ? d[1] : form.department }); }}>
+                <option value="">— Select —</option>
+                {EMP_DEPTS.map(([c, l]) => <option key={c} value={c}>{c} · {l}</option>)}
+              </select>
+              {!form.deptCode && form.department && !EMP_DEPTS.some(d => d[1] === form.department) && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Current: {form.department} (pick one above to use ID codes)</div>}
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Role</label>
+              <select style={styles.input} value={form.roleCode || ''} onChange={e => { const r = EMP_ROLES.find(x => x[0] === e.target.value); pickDeptRole({ roleCode: e.target.value, designation: r ? r[1].replace(' (SM)', '') : form.designation }); }}>
+                <option value="">— Select —</option>
+                {EMP_ROLES.map(([c, l]) => <option key={c} value={c}>{c} · {l}</option>)}
+              </select>
+            </div>
+            <EmpField {...fp} label="Designation (as printed)" name="designation" />
             <EmpField {...fp} label="Joining Date"           name="joiningDate" type="date" />
             <div style={styles.formGroup}>
               <label style={styles.label}>Status</label>
@@ -15119,11 +15375,15 @@ function GSTR1Report({ documents, customers, businessInfo }) {
     const c = customers.find(x => x.id === d.customerId);
     const t = computeTotals(d, businessInfo.state, 'india');
     const gstin = c ? (c.gstin || '') : '';
-    return { ...t, number: d.number, date: d.date, party: c ? c.name : (d.customerSnapshot?.name || '—'), gstin, type: gstin ? 'B2B' : 'B2C', state: c ? c.state : '' };
+    const ex = isExportDoc(d);
+    return { ...t, number: d.number, date: d.date, party: c ? c.name : (d.customerSnapshot?.name || '—'), gstin, type: ex ? (isSezDoc(d) ? 'SEZ' : 'EXP') : (gstin ? 'B2B' : 'B2C'), state: c ? c.state : '',
+      pay: /_lut$/.test(d.supplyType || '') ? 'WOPAY' : 'WPAY', sbNo: d.shipBillNo || '', sbDate: d.shipBillDate || '', port: d.portCode || '', cur: d.exCurrency || '', fx: d.exRate || '' };
   }).sort((a, b) => a.date > b.date ? 1 : -1);
 
   const b2b = rows.filter(r => r.type === 'B2B');
   const b2c = rows.filter(r => r.type === 'B2C');
+  const expR = rows.filter(r => r.type === 'EXP');
+  const sezR = rows.filter(r => r.type === 'SEZ');
   const totalTaxable = rows.reduce((s, r) => s + r.subtotal, 0);
   const totalCGST    = rows.reduce((s, r) => s + r.cgst, 0);
   const totalSGST    = rows.reduce((s, r) => s + r.sgst, 0);
@@ -15166,6 +15426,16 @@ function GSTR1Report({ documents, customers, businessInfo }) {
                 <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
               </tr>)}</tbody>
             </table></>}
+          {[['Exports 6A', expR], ['SEZ 6B', sezR]].map(([ttl, list]) => list.length > 0 && <React.Fragment key={ttl}><div style={{ fontWeight:700, fontSize:12, marginBottom:6 }}>{ttl} ({list.length})</div>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, marginBottom:12 }}>
+              <thead><tr style={{ background:'#f0f0f0' }}>{['Invoice','Date','Party','Pay','Ship Bill','SB Date','Port','Taxable','IGST','Total'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left' }}>{h}</th>)}</tr></thead>
+              <tbody>{list.map(r=><tr key={r.number} style={{ borderBottom:'1px solid #f5f5f5' }}>
+                <td style={{ padding:'4px 6px' }}>{r.number}</td><td style={{ padding:'4px 6px' }}>{r.date}</td><td style={{ padding:'4px 6px' }}>{r.party}</td>
+                <td style={{ padding:'4px 6px' }}>{r.pay}</td><td style={{ padding:'4px 6px' }}>{r.sbNo}</td><td style={{ padding:'4px 6px' }}>{r.sbDate}</td><td style={{ padding:'4px 6px' }}>{r.port}</td>
+                <td style={{ padding:'4px 6px', textAlign:'right' }}>{fmt(r.subtotal)}</td><td style={{ padding:'4px 6px', textAlign:'right' }}>{fmt(r.igst)}</td>
+                <td style={{ padding:'4px 6px', textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
+              </tr>)}</tbody>
+            </table></React.Fragment>)}
           {b2c.length > 0 && <><div style={{ fontWeight:700, fontSize:12, marginBottom:6 }}>B2C ({b2c.length})</div>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
               <thead><tr style={{ background:'#f0f0f0' }}>{['Invoice','Date','Party','Taxable','CGST','SGST','IGST','Total'].map(h=><th key={h} style={{ padding:'5px 6px', textAlign:'left' }}>{h}</th>)}</tr></thead>
@@ -15188,9 +15458,10 @@ function GSTR1Report({ documents, customers, businessInfo }) {
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button style={styles.secondaryBtn} onClick={() => downloadCSV('gstr1-' + from + '-to-' + to + '.csv',
-            ['Type','Invoice No','Date','Party','GSTIN','State','Taxable','CGST','SGST','IGST','Total'],
+            ['Type','Invoice No','Date','Party','GSTIN','State','Taxable','CGST','SGST','IGST','Total','Export Pay Type','Shipping Bill No','Shipping Bill Date','Port Code'],
             [...rows.map(r => [r.type, r.number, r.date, r.party, r.gstin, r.state,
-              r.subtotal.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.grandTotal.toFixed(2)])])
+              r.subtotal.toFixed(2), r.cgst.toFixed(2), r.sgst.toFixed(2), r.igst.toFixed(2), r.grandTotal.toFixed(2),
+              (r.type === 'EXP' || r.type === 'SEZ') ? r.pay : '', r.sbNo, r.sbDate, r.port])])
           }><Download size={15}/> Export CSV</button>
           <button style={styles.primaryBtn} onClick={() => setShowPrint(true)}><Printer size={15}/> Print / PDF</button>
         </div>
@@ -15231,6 +15502,32 @@ function GSTR1Report({ documents, customers, businessInfo }) {
           </table>
         </div>
       </>)}
+
+
+      {[['Exports — Table 6A', expR], ['SEZ supplies — Table 6B', sezR]].map(([ttl, list]) => list.length > 0 && (<React.Fragment key={ttl}>
+        <div style={styles.dashSection}>{ttl}</div>
+        <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+          <table style={styles.table}>
+            <thead><tr>{['Invoice No','Date','Party','Pay type','Shipping Bill','SB Date','Port','Taxable','IGST','Total'].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.map(r=>(
+                <tr key={r.number}>
+                  <td style={{ ...styles.td, fontFamily:'monospace', fontSize:11 }}>{r.number}</td>
+                  <td style={styles.td}>{r.date}</td>
+                  <td style={{ ...styles.td, fontWeight:500 }}>{r.party}</td>
+                  <td style={styles.td}>{r.pay}</td>
+                  <td style={styles.td}>{r.sbNo || '—'}</td>
+                  <td style={styles.td}>{r.sbDate || '—'}</td>
+                  <td style={styles.td}>{r.port || '—'}</td>
+                  <td style={{ ...styles.td, textAlign:'right' }}>{fmt(r.subtotal)}</td>
+                  <td style={{ ...styles.td, textAlign:'right' }}>{fmt(r.igst)}</td>
+                  <td style={{ ...styles.td, textAlign:'right', fontWeight:600 }}>{fmt(r.grandTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </React.Fragment>))}
 
       {b2c.length > 0 && (<>
         <div style={styles.dashSection}>B2C Invoices (without GSTIN)</div>
@@ -15305,6 +15602,8 @@ function GSTR3BReport({ documents, customers, vendors, businessInfo }) {
   }
 
   const out = sumTotals(outDocs);
+  const outDom = sumTotals(outDocs.filter(d => !isExportDoc(d)));
+  const outExp = sumTotals(outDocs.filter(d => isExportDoc(d)));
   const itc = sumTotals(inDocs);
   const netCGST = Math.max(0, out.cgst - itc.cgst);
   const netSGST = Math.max(0, out.sgst - itc.sgst);
@@ -15314,14 +15613,14 @@ function GSTR3BReport({ documents, customers, vendors, businessInfo }) {
   // Table 3.2 — interstate to unregistered (IGST only, no GSTIN)
   const unreg = outDocs.filter(d => {
     const c = customers?.find(x=>x.id===d.customerId);
-    return d.type==='invoice' && !c?.gstin;
+    return d.type==='invoice' && !c?.gstin && !isExportDoc(d);
   });
   const unreg3p2 = sumTotals(unreg);
 
   // Rows for output breakdown
   const outRows = [
-    ['3.1(a)','Outward taxable supplies (other than zero rated/nil/exempt)', out.subtotal, out.cgst, out.sgst, out.igst],
-    ['3.1(b)','Zero rated supplies (Exports)', 0, 0, 0, 0],
+    ['3.1(a)','Outward taxable supplies (other than zero rated/nil/exempt)', outDom.subtotal, outDom.cgst, outDom.sgst, outDom.igst],
+    ['3.1(b)','Zero rated supplies (Exports / SEZ)', outExp.subtotal, '-', '-', outExp.igst],
     ['3.1(c)','Nil rated / Exempt supplies', 0, 0, 0, 0],
     ['3.2','Supplies to unregistered / composition (IGST only)', unreg3p2.subtotal, '-', '-', unreg3p2.igst],
   ];
@@ -23354,7 +23653,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
         const th = { border:'1px solid #999', padding:'2px 3px', textAlign:'center', fontSize:7.5, background:'#F5F3EE', fontWeight:700 };
         const td = { border:'1px solid #ccc', padding:'1px 2px', textAlign:'center', fontSize:8 };
         return (
-          <DocPrintOverlay onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
+          <DocPrintOverlay wide onClose={()=>setPrintSheet(false)} filename={'Attendance-Salary-'+ym+'.pdf'} businessInfo={businessInfo}>
             <style>{`@media print { @page { size: A4 landscape; margin: 6mm; } }`}</style>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
               <div style={{ fontSize:15, fontWeight:700, color:'#1E2A4A' }}>Attendance &amp; Salary Sheet</div>
@@ -23364,9 +23663,9 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
             <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed', fontFamily:'Arial, sans-serif' }}>
               <thead>
                 <tr>
-                  {[['S.No',3],['Emp ID',7],['Employee Name',11],['Designation',9]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
-                  {days.map(d=><th key={d} style={{ ...th, width:(39.5/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
-                  {[['Present',4],['Absent',4],['Holiday',4],['Total Days',3.5],['Payable Days',4],['Total Salary',5.5],['Salary in Hand',5.5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
+                  {[['S.No',3],['Emp ID',8],['Employee Name',12],['Designation',10]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, textAlign:'left', width:w+'%' }}>{h}</th>)}
+                  {days.map(d=><th key={d} style={{ ...th, width:(39.2/dim)+'%', padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{DOW[dowOf(d)][0]}</th>)}
+                  {[['Present',3.6],['Absent',3.6],['Holiday',3.6],['Total Days',3.4],['Payable Days',3.6],['Total Salary',5],['Salary in Hand',5]].map(([h,w])=><th key={h} rowSpan={2} style={{ ...th, width:w+'%', padding:'2px 1px', fontSize:7 }}>{h}</th>)}
                 </tr>
                 <tr>{days.map(d=><th key={d} style={{ ...th, padding:'2px 0', background:holDays.has(d)?'#F8D2D2':'#F5F3EE' }}>{d}</th>)}</tr>
               </thead>
@@ -23374,7 +23673,7 @@ function SiteAttendanceView({ siteAttendance: _allSA = [], setSiteAttendance, la
                 {rows.map((r,ri)=>{ const c=calc(r); return (
                   <tr key={r.emp.id}>
                     <td style={td}>{ri+1}</td>
-                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.empId||''}</td>
+                    <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap' }}>{r.emp.empId||''}</td>
                     <td style={{ ...td, textAlign:'left', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.name}</td>
                     <td style={{ ...td, textAlign:'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.emp.designation||''}</td>
                     {days.map(d=>{ const v=r.byDay[d]||''; const fri=holDays.has(d); return <td key={d} style={{ ...td, background:fri?'#FBE4E4':(v==='A'?'#F8D2D2':v==='P'?'#E6F5EC':v==='OD'?'#E3EEFB':'#fff'), color:v==='A'?'#B5453A':v==='OD'?'#2563EB':'#1A7A3E', fontWeight:700 }}>{v}</td>; })}
@@ -28738,6 +29037,13 @@ export default function App() {
       terms: srcDoc.terms || '',
       discount: srcDoc.discount || 0,
       placeOfSupply: srcDoc.placeOfSupply || '',
+      supplyType: srcDoc.supplyType || (srcDoc.overseas ? 'export_lut' : 'domestic'),
+      ...(((srcDoc.supplyType && srcDoc.supplyType !== 'domestic') || srcDoc.overseas) ? {
+        lutNo: srcDoc.lutNo || '', lutDate: srcDoc.lutDate || '', lutArn: srcDoc.lutArn || '',
+        shipBillNo: srcDoc.shipBillNo || '', shipBillDate: srcDoc.shipBillDate || '', portCode: srcDoc.portCode || '',
+        destCountry: srcDoc.destCountry || '', incoterm: srcDoc.incoterm || '',
+        exCurrency: srcDoc.exCurrency || srcDoc.ovCurrency || 'USD', exRate: srcDoc.exRate || srcDoc.ovFx || '',
+      } : {}),
       refNumber: srcDoc.refNumber || '',
       // shipping / transport details travel with the goods (invoice → delivery note → packing list)
       shipmentType: srcDoc.shipmentType || 'domestic', shipToSameAsBilling: !!srcDoc.shipToSameAsBilling,
@@ -29121,6 +29427,40 @@ export default function App() {
   const sessionPettyCash = (sessionContext && isMultiBiz)
     ? { ...pettyCash, entries: (pettyCash?.entries || []).filter(e => (e.bizType || 'trading') === sessionContext), openingBalance: (pettyCash?.openingBalances?.[sessionContext] ?? 0) }
     : pettyCash;
+
+  // Common Print / Export / Import toolbar for registers & lists (see VIEW_TOOLS). Data is already scoped to the active business.
+  async function importVendorsFile(file) {
+    try {
+      const rows = parseCsvText(await fileToCsvText(file));
+      if (rows.length < 2) { alert('The file has no data rows. First row must be headings: Name, GSTIN, Address, State, Phone, Email.'); return; }
+      const H = rows[0].map(h => String(h).toLowerCase().trim());
+      const ix = (arr) => { for (const n of arr) { const i = H.indexOf(n); if (i >= 0) return i; } return -1; };
+      const iN = ix(['name', 'vendor', 'vendor name', 'supplier', 'company']), iG = ix(['gstin', 'gst', 'gst no', 'tax id', 'trn', 'vat no']), iA = ix(['address']), iS = ix(['state', 'region', 'emirate']), iP = ix(['phone', 'mobile', 'contact', 'phone no']), iE = ix(['email', 'e-mail']);
+      if (iN < 0) { alert('Could not find a "Name" column. Headings needed: Name, GSTIN, Address, State, Phone, Email.'); return; }
+      const biz = sessionContext || effectiveBizContext;
+      const have = new Set((vendors || []).filter(v => (v.bizType || bizDefault) === biz).map(v => String(v.name || '').trim().toLowerCase()));
+      const add = []; let dup = 0;
+      rows.slice(1).forEach((r, k) => {
+        const g = (i) => (i >= 0 && r[i] != null) ? String(r[i]).trim() : '';
+        const name = g(iN); if (!name) return;
+        if (have.has(name.toLowerCase())) { dup++; return; }
+        have.add(name.toLowerCase());
+        add.push({ id: Date.now().toString() + '-' + k, name, gstin: g(iG), address: g(iA), state: g(iS), phone: g(iP), email: g(iE), bizType: biz });
+      });
+      if (!add.length) { alert('No new vendors to import' + (dup ? ' (' + dup + ' already exist).' : '.')); return; }
+      setVendors(prev => [...prev, ...add]);
+      alert('Imported ' + add.length + ' vendor(s)' + (dup ? '; skipped ' + dup + ' duplicate(s).' : '.'));
+    } catch (e) { alert('Import failed: ' + (e && e.message ? e.message : e)); }
+  }
+  function wrapViewTools(node) {
+    const cfg = VIEW_TOOLS[view];
+    if (!cfg || !node || COMING_SOON[view]) return node;
+    return (
+      <ViewTools key={view} cfg={cfg} businessInfo={businessInfo} bizLabel={sessionContext || effectiveBizContext} onImportFile={view === 'vendors' ? importVendorsFile : null}>
+        {node}
+      </ViewTools>
+    );
+  }
 
   function renderContent() {
     if (view === 'doceditor' && activeDoc) {
@@ -29602,6 +29942,7 @@ export default function App() {
         return (
           <EmployeesView
             employees={sessionEmployees}
+            allEmployees={employees}
             setEmployees={setEmployees}
             userRole={userRole}
             ownerUid={ownerUid}
@@ -30300,7 +30641,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {renderContent()}
+        {wrapViewTools(renderContent())}
       </div>
 
       {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
