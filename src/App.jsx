@@ -1388,16 +1388,22 @@ async function printPaginated(sel, bi, pre, gen) {
         if (_cands.length) {
           _cands.forEach(el => {
             const hold = document.createElement('div'); hold.innerHTML = _sealImgs; const node = hold.firstElementChild;
-            const prev = el.previousElementSibling;
-            const _mb = parseFloat(el.style && el.style.marginBottom) || 0;
-            if (prev && !(prev.textContent || '').trim() && !prev.querySelector('img')) prev.replaceWith(node);
-            else if (_mb >= 20 && el.parentNode) { el.style.marginBottom = '2px'; el.parentNode.insertBefore(node, el.nextSibling); } // label, gap, line  →  label, seal, line
-            else if (el.parentNode) el.parentNode.insertBefore(node, el);
-            const box = el.parentElement, cont = box && box.parentElement;
+            const blank = (n) => n && !(n.textContent || '').trim() && !n.querySelector('img');
+            let anchor = el;                                   // seal goes ABOVE the signature line, never below it
+            const prev0 = el.previousElementSibling;
+            if (prev0 && !blank(prev0) && /solid|dashed|dotted/.test((prev0.style && prev0.style.borderTop) || '') && prev0.parentNode === el.parentNode) anchor = prev0;
+            const prev = anchor.previousElementSibling;
+            const _mb = parseFloat(anchor.style && anchor.style.marginBottom) || 0;
+            if (blank(prev)) prev.replaceWith(node);
+            else if (_mb >= 20 && anchor.parentNode) { anchor.style.marginBottom = '2px'; anchor.parentNode.insertBefore(node, anchor.nextSibling); } // label, gap, line  ->  label, seal, line
+            else if (anchor.parentNode) anchor.parentNode.insertBefore(node, anchor);
+            const box = anchor.parentElement, cont = box && box.parentElement;
             if (cont) {
-              if (cont.style.display === 'flex') cont.style.alignItems = 'flex-end';
-              else if (cont.style.display === 'grid') cont.style.alignItems = 'end';
-              Array.from(cont.children).filter(b => b !== box).forEach(b => { const f = b.firstElementChild; if (f && !(f.textContent || '').trim() && !f.querySelector('img')) f.style.height = '66px'; });
+              let eq = false;
+              Array.from(cont.children).filter(b => b !== box).forEach(b => { const f = b.firstElementChild; if (f && !(f.textContent || '').trim() && !f.querySelector('img')) { f.style.height = '66px'; eq = true; } });
+              // equal blank space above every signature line → lines sit on the same level
+              if (cont.style.display === 'flex') cont.style.alignItems = eq ? 'flex-start' : 'flex-end';
+              else if (cont.style.display === 'grid') cont.style.alignItems = eq ? 'start' : 'end';
             }
           });
         } else if (!(gen && gen.sealAppend === false)) _needSealAppend = true;
