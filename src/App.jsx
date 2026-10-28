@@ -798,7 +798,7 @@ function printLetterFromHtml(html, biz, opts) {
       out.forEach(b => blocks.push(b));
     });
     if (_head) blocks.push({ t: '', h: _head });
-    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape) });
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape), fitOne: !!(opts && opts.fitOne) });
   } catch (e) { console.error(e); printHTML(html); }
 }
 
@@ -1510,7 +1510,8 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
       + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
-      + 'np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
+      + 'var zst=document.createElement("style");document.head.appendChild(zst);function setZ(z){zst.textContent=z<1?".bd>*{zoom:"+z+"}":"";}'
+      + 'function LAY(){out.innerHTML="";TAIL.length=0;np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
       + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;LB=B;curBody.insertAdjacentHTML("beforeend",B.h);'
@@ -1529,6 +1530,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(parts.length-j===1&&j>1)j--;'
       + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
       + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
+      + '}setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}}'
       + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
@@ -1558,7 +1560,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -10517,7 +10519,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
 
@@ -10591,7 +10593,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -11249,7 +11251,7 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz);
+  printLetterFromHtml(html, biz, { fitOne: true });
 }
 
 function EmployeesView({ employees, allEmployees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
