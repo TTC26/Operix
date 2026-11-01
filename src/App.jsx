@@ -7081,6 +7081,181 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
   );
 }
 
+// ─── Step 4: WIP · Drum stock & scrap · Metal reconciliation · Machine log ──────────────────────────
+const _n = v => parseFloat(v) || 0;
+const r3 = v => Math.round(v * 1000) / 1000;
+// every drum recorded on any production order's final route stage
+function allDrums(productionOrders = [], boms = []) {
+  const out = [];
+  (productionOrders || []).forEach(o => {
+    const st = (o.route && o.route.stages) || [];
+    st.forEach((s, si) => (s.drums || []).forEach((d, di) => {
+      const bom = (boms || []).find(b => b.id === o.bomId);
+      out.push({ ...d, key: o.id + '-' + si + '-' + di, order: o, stageIdx: si, drumIdx: di, product: bom ? bom.name : '', net: r3(_n(d.gross) - _n(d.tare)), length: _n(d.length) });
+    }));
+  });
+  return out;
+}
+const DRUM_STATUS = { pending: ['Awaiting routine test', '#E07B00'], passed: ['Released (test passed)', '#1A7A3E'], failed: ['Failed — QA hold', '#B5453A'], dispatched: ['Dispatched', '#6B7494'] };
+
+function WIPView({ productionOrders = [], boms = [], setView }) {
+  const today = new Date();
+  const rows = (productionOrders || []).filter(o => !['completed', 'cancelled'].includes(o.status)).map(o => {
+    const st = (o.route && o.route.stages) || [], bom = (boms || []).find(b => b.id === o.bomId);
+    const curIdx = st.findIndex(s => s.status !== 'done'), last = [...st].reverse().find(s => s.status === 'done');
+    const cur = curIdx >= 0 ? st[curIdx] : null;
+    const refs = last ? [last.fields && (last.fields.bobbin || last.fields.drumNo), last.machine].filter(Boolean).join(' · ') : '';
+    const since = last && last.date ? Math.floor((today - new Date(last.date)) / 86400000) : null;
+    return { o, bom, total: st.length, done: st.filter(s => s.status === 'done').length, cur, last, refs, since, hold: st.some(s => s.status === 'hold') };
+  });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>WIP (Bobbins / Coils)</h1><p style={styles.muted}>Work in progress from the production routes — what came out of the last completed stage and where it waits next.</p></div>
+      {rows.length === 0 ? <div style={styles.emptyBox}>No open production orders.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Order', 'Product', 'Order item', 'Progress', 'Last stage output', 'Bobbin / machine', 'Waiting at', 'Since'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map(r => <tr key={r.o.id}>
+            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}</td><td style={td}>{r.o.orderRef ? r.o.orderRef.docNo + ' / ' + r.o.orderRef.itemNo : '—'}</td>
+            <td style={{ ...td, color: r.hold ? '#B5453A' : '#2255A0', fontWeight: 600 }}>{r.total ? r.done + '/' + r.total : 'Route not started'}{r.hold ? ' ⚠ QA hold' : ''}</td>
+            <td style={td}>{r.last ? r.last.name + ': ' + (r.last.outQty || 0) : '—'}</td><td style={td}>{r.refs || '—'}</td>
+            <td style={td}>{r.cur ? r.cur.name : (r.total ? 'All stages done' : '—')}</td><td style={{ ...td, color: r.since > 2 ? '#B5453A' : '#666' }}>{r.since === null ? '—' : r.since + ' d'}</td>
+          </tr>)}</tbody></table></div>}
+      {setView && <div style={{ marginTop: 10 }}><button onClick={() => setView('productionorders')} style={styles.ghostBtn}>Open Production Orders (🧭 Route)</button></div>}
+    </div>
+  );
+}
+
+function DrumStockView({ productionOrders = [], boms = [], setView }) {
+  const [tab, setTab] = useState('drums');
+  const [q, setQ] = useState('');
+  const drums = allDrums(productionOrders, boms);
+  const dupNo = {}; drums.forEach(d => { const k = _nm(d.drumNo); if (k) dupNo[k] = (dupNo[k] || 0) + 1; });
+  const shown = drums.filter(d => !q || _nm(d.drumNo).includes(_nm(q)) || _nm(d.product).includes(_nm(q)) || _nm(d.order.number).includes(_nm(q)));
+  const inStock = drums.filter(d => d.testStatus === 'passed' && !d.dispatched);
+  const byProd = {}; inStock.forEach(d => { const b = byProd[d.product] = byProd[d.product] || { m: 0, n: 0, kg: 0 }; b.m += d.length; b.n++; b.kg += d.net; });
+  const scrap = [];
+  (productionOrders || []).forEach(o => ((o.route && o.route.stages) || []).forEach(s => { if (_n(s.scrap) > 0) scrap.push({ o, stage: s.name, qty: _n(s.scrap), date: s.date, machine: s.machine, remarks: s.remarks }); }));
+  const scrapByStage = {}; scrap.forEach(x => { scrapByStage[x.stage] = (scrapByStage[x.stage] || 0) + x.qty; });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const pill = (id, l) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Drum Stock & Scrap</h1><p style={styles.muted}>Drums are recorded on the last route stage of each production order. A drum becomes stock only after its routine test passes (Quality → Routine Test).</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Drums recorded', drums.length], ['Released, in stock', inStock.length + ' · ' + r3(inStock.reduce((s, d) => s + d.length, 0)) + ' m'], ['Awaiting test', drums.filter(d => !d.testStatus || d.testStatus === 'pending').length], ['On QA hold', drums.filter(d => d.testStatus === 'failed').length]].map(([l, v]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div></div>)}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>{pill('drums', 'Drums')}{pill('stock', 'Stock by product')}{pill('scrap', 'Scrap & offcuts')}<input value={q} onChange={e => setQ(e.target.value)} placeholder="Drum no., product, order…" style={{ ...styles.input, margin: '0 0 0 auto', width: 230 }} /></div>
+      {tab === 'drums' && (shown.length === 0 ? <div style={styles.emptyBox}>No drums yet. Record drums on the last stage of a production order route (🧭 Route → Drumming).</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Drum no.', 'Product', 'Order', 'Quote / item', 'Length (m)', 'Net (kg)', 'Date', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{shown.map(d => { const stt = d.dispatched ? 'dispatched' : (d.testStatus || 'pending'), lab = DRUM_STATUS[stt] || DRUM_STATUS.pending; return <tr key={d.key}>
+            <td style={td}><b>{d.drumNo || '—'}</b>{dupNo[_nm(d.drumNo)] > 1 ? <span style={{ color: '#B5453A', fontSize: 11 }}> duplicate no.</span> : null}</td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td>
+            <td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td><td style={td}>{d.net || '—'}</td><td style={td}>{d.date || ''}</td>
+            <td style={{ ...td, color: lab[1], fontWeight: 700 }}>{lab[0]}</td></tr>; })}</tbody></table></div>)}
+      {tab === 'stock' && (Object.keys(byProd).length === 0 ? <div style={styles.emptyBox}>No released drums in stock yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Product', 'Drums', 'Metres', 'Net kg'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(byProd).map(([p, b]) => <tr key={p}><td style={td}><b>{p}</b></td><td style={td}>{b.n}</td><td style={td}>{r3(b.m)}</td><td style={td}>{r3(b.kg)}</td></tr>)}</tbody></table></div>)}
+      {tab === 'scrap' && <>
+        {Object.keys(scrapByStage).length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>{Object.entries(scrapByStage).map(([k, v]) => <span key={k} style={{ background: '#FBEAE7', color: '#B5453A', borderRadius: 14, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>{k}: {r3(v)}</span>)}</div>}
+        {scrap.length === 0 ? <div style={styles.emptyBox}>No scrap recorded on the routes yet.</div> :
+          <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{['Date', 'Order', 'Stage', 'Machine', 'Scrap qty', 'Remarks'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{scrap.map((x, i) => <tr key={i}><td style={td}>{x.date || ''}</td><td style={td}>{x.o.number}</td><td style={td}>{x.stage}</td><td style={td}>{x.machine || ''}</td><td style={{ ...td, fontWeight: 700 }}>{x.qty}</td><td style={td}>{x.remarks || ''}</td></tr>)}</tbody></table></div>}
+      </>}
+      {setView && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><button onClick={() => setView('qatesting')} style={styles.ghostBtn}>Routine Test & Certificates</button><button onClick={() => setView('productionorders')} style={styles.ghostBtn}>Production Orders</button></div>}
+    </div>
+  );
+}
+
+function MetalReconView({ productionOrders = [], boms = [], cableDesigns = [], storeIssues = [], items = [], stockLedger = [], setView }) {
+  const isMetal = it => !!it && /copper|alumin|\bcu\b|\bal\b/i.test((it.rmCategory || '') + ' ' + (it.name || '')) && !/armour/i.test((it.rmCategory || '') + ' ' + (it.name || ''));
+  const designOf = bom => { if (!bom) return null; const did = bom.designId || ((boms || []).find(b => b.id === bom.templateId) || {}).designId; return (cableDesigns || []).find(d => d.id === did) || (cableDesigns || []).find(d => _nm(d.name) === _nm(bom.name)) || null; };
+  const rows = (productionOrders || []).filter(o => o.route && (o.route.stages || []).some(s => s.status === 'done' || (s.drums || []).length)).map(o => {
+    const bom = (boms || []).find(b => b.id === o.bomId), des = designOf(bom), wCond = des && des.calc ? _n(des.calc.wCond) : 0;
+    const sivs = (storeIssues || []).filter(si => si.productionRef && si.productionRef === o.number);
+    let issued = 0; sivs.forEach(si => (si.lines || []).forEach(l => { const it = (items || []).find(x => x.id === l.itemId); if (isMetal(it || { name: l.itemName })) issued += _n(l.qty); }));
+    if (!issued) (stockLedger || []).filter(e => e.sourceId === o.id && e.type === 'out').forEach(e => { const it = (items || []).find(x => x.id === e.itemId); if (isMetal(it || { name: e.itemName })) issued += _n(e.qty); });
+    const st = o.route.stages || [];
+    const metres = st.reduce((s, x) => s + (x.drums || []).reduce((t, d) => t + _n(d.length), 0), 0);
+    const good = wCond ? metres / 1000 * wCond : 0;
+    const scrap = st.slice(0, 3).reduce((s, x) => s + _n(x.scrap), 0);
+    const loss = issued ? issued - good - scrap : 0;
+    return { o, bom, des, issued: r3(issued), metres: r3(metres), good: r3(good), scrap: r3(scrap), loss: r3(loss), pct: issued ? loss / issued * 100 : null, noDesign: !wCond };
+  });
+  const tot = rows.reduce((a, r) => ({ i: a.i + r.issued, g: a.g + r.good, s: a.s + r.scrap, l: a.l + (r.issued ? r.loss : 0) }), { i: 0, g: 0, s: 0, l: 0 });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Metal Reconciliation</h1><p style={styles.muted}>Per production order: conductor metal issued (Issue to Production against the order) vs metal in finished drums (length × conductor kg/km from the cable design) and scrap recorded on drawing / annealing / stranding.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Metal issued', r3(tot.i) + ' kg'], ['Metal in drums', r3(tot.g) + ' kg'], ['Recorded scrap', r3(tot.s) + ' kg'], ['Unaccounted', r3(tot.l) + ' kg' + (tot.i ? ' (' + (tot.l / tot.i * 100).toFixed(2) + '%)' : '')]].map(([l, v], i) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: i === 3 && tot.i && tot.l / tot.i * 100 > 1.5 ? '#B5453A' : '#1E2A4A' }}>{v}</div></div>)}
+      </div>
+      {rows.length === 0 ? <div style={styles.emptyBox}>No production orders with route progress yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Order', 'Product', 'Issued (kg)', 'Drum length (m)', 'Metal in drums (kg)', 'Scrap (kg)', 'Unaccounted (kg)', 'Loss %'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map(r => <tr key={r.o.id}>
+            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}{r.noDesign ? <div style={{ color: '#B5453A', fontSize: 11 }}>No cable design linked — metal in drums cannot be calculated</div> : null}</td>
+            <td style={td}>{r.issued || <span style={{ color: '#B5453A', fontSize: 12 }}>not issued against order</span>}</td><td style={td}>{r.metres}</td><td style={td}>{r.good}</td><td style={td}>{r.scrap}</td><td style={td}>{r.issued ? r.loss : '—'}</td>
+            <td style={{ ...td, fontWeight: 700, color: r.pct === null ? '#999' : r.pct > 1.5 ? '#B5453A' : r.pct > 0.5 ? '#E07B00' : '#1A7A3E' }}>{r.pct === null ? '—' : r.pct.toFixed(2) + '%'}</td></tr>)}</tbody></table></div>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Issue copper / aluminium rod with “Production Order Ref” = this order so it is counted. Above ~1.5% needs investigation (weighing, wire breaks, unrecorded scrap). Wire still on bobbins (WIP) shows as loss until it reaches a drum.</div>
+      {setView && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><button onClick={() => setView('storeissue')} style={styles.ghostBtn}>Issue to Production</button><button onClick={() => setView('insights')} style={styles.ghostBtn}>Manual reconciliation (Insights)</button></div>}
+    </div>
+  );
+}
+
+const ML_REASONS = ['Breakdown', 'Setup / changeover', 'Material shortage', 'Power cut', 'Quality hold', 'No operator', 'Planned maintenance', 'Other'];
+function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = [], setFmWorkOrders, userRole }) {
+  const canEdit = !['sales', 'accounts'].includes(userRole);
+  const iso = new Date().toISOString().slice(0, 10);
+  const blank = { date: iso, shift: 'A', machineId: '', orderNo: '', plannedHrs: 8, runHrs: '', output: '', unit: 'm', downMin: '', reason: '', operator: '', remarks: '' };
+  const [f, setF] = useState(blank);
+  const [days, setDays] = useState(30);
+  const machines = (assets || []).filter(a => a && a.status !== 'disposed');
+  const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const recent = (logs || []).filter(l => (l.date || '') >= from).sort((a, b) => (b.date + b.shift).localeCompare(a.date + a.shift));
+  const per = {}; recent.forEach(l => { const p = per[l.machineId || l.machineName] = per[l.machineId || l.machineName] || { name: l.machineName, plan: 0, run: 0, down: 0, out: 0, unit: l.unit, reasons: {} }; p.plan += _n(l.plannedHrs); p.run += _n(l.runHrs); p.down += _n(l.downMin); p.out += _n(l.output); if (l.reason && _n(l.downMin)) p.reasons[l.reason] = (p.reasons[l.reason] || 0) + _n(l.downMin); });
+  function add() {
+    if (!f.machineId) { alert('Select the machine.'); return; }
+    if (_n(f.downMin) > 0 && !f.reason) { alert('Select the downtime reason.'); return; }
+    const m = machines.find(x => x.id === f.machineId) || {};
+    const rec = { ...f, id: 'ml-' + Date.now(), machineName: m.name || '', createdAt: Date.now() };
+    setLogs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    if (f.reason === 'Breakdown' && setFmWorkOrders && window.confirm('Downtime reason is Breakdown. Create a breakdown work order for ' + (m.name || 'this machine') + ' in Maintenance → Breakdown Log?')) {
+      setFmWorkOrders(prev => [{ id: crypto.randomUUID(), woNumber: 'BD-' + Date.now().toString().slice(-6), type: 'corrective', assetId: m.id, assetName: m.name || '', title: 'Breakdown — ' + (m.name || ''), description: f.remarks || '', priority: 'high', raisedDate: f.date, dueDate: f.date, assignedTo: '', status: 'open', completedDate: '', cost: 0, sparesUsed: [], notes: 'From machine log ' + f.date + ' shift ' + f.shift }, ...(Array.isArray(prev) ? prev : [])]);
+    }
+    setF({ ...blank, date: f.date, shift: f.shift });
+  }
+  const inp = { ...styles.input, margin: 0 };
+  const fld = (k, l, w, type) => <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: w }}>{l}<input type={type || 'text'} value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={inp} /></label>;
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Machine Log & Downtime</h1><p style={styles.muted}>Shift-wise running hours, output and downtime per machine. Machines come from Maintenance → Machine / Equipment Register. A Breakdown entry can raise a breakdown work order.</p></div>
+      {machines.length === 0 && <div style={{ background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', fontSize: 12.5, marginBottom: 10 }}>No machines yet — add your drawing, annealing, stranding, extruder, armouring and drumming lines in Machine / Equipment Register first.</div>}
+      {canEdit && <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        {fld('date', 'Date', 150, 'date')}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 80 }}>Shift<select value={f.shift} onChange={e => setF(p => ({ ...p, shift: e.target.value }))} style={inp}>{['A', 'B', 'C', 'General'].map(x => <option key={x}>{x}</option>)}</select></label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 200 }}>Machine<select value={f.machineId} onChange={e => setF(p => ({ ...p, machineId: e.target.value }))} style={inp}><option value="">— Select —</option>{machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.assetId ? ' · ' + m.assetId : ''}</option>)}</select></label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 160 }}>Production order<select value={f.orderNo} onChange={e => setF(p => ({ ...p, orderNo: e.target.value }))} style={inp}><option value="">—</option>{(productionOrders || []).filter(o => o.status !== 'completed').map(o => <option key={o.id} value={o.number}>{o.number}</option>)}</select></label>
+        {fld('plannedHrs', 'Planned hrs', 90, 'number')}{fld('runHrs', 'Run hrs', 80, 'number')}{fld('output', 'Output', 90, 'number')}{fld('unit', 'Unit', 60)}{fld('downMin', 'Downtime (min)', 110, 'number')}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 170 }}>Reason<select value={f.reason} onChange={e => setF(p => ({ ...p, reason: e.target.value }))} style={inp}><option value="">—</option>{ML_REASONS.map(x => <option key={x}>{x}</option>)}</select></label>
+        {fld('operator', 'Operator', 130)}{fld('remarks', 'Remarks', 200)}
+        <button onClick={add} style={styles.primaryBtn}>Add entry</button>
+      </div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}><b style={{ fontSize: 13 }}>Summary</b><select value={days} onChange={e => setDays(parseInt(e.target.value))} style={{ ...inp, width: 150 }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></div>
+      {Object.keys(per).length === 0 ? <div style={styles.emptyBox}>No entries in this period.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Machine', 'Planned hrs', 'Run hrs', 'Availability', 'Output', 'Downtime', 'Top reason'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(per).map(([k, p]) => { const av = p.plan ? p.run / p.plan * 100 : null, top = Object.entries(p.reasons).sort((a, b) => b[1] - a[1])[0]; return <tr key={k}><td style={td}><b>{p.name}</b></td><td style={td}>{r3(p.plan)}</td><td style={td}>{r3(p.run)}</td><td style={{ ...td, fontWeight: 700, color: av === null ? '#999' : av >= 85 ? '#1A7A3E' : av >= 70 ? '#E07B00' : '#B5453A' }}>{av === null ? '—' : av.toFixed(1) + '%'}</td><td style={td}>{r3(p.out)} {p.unit || ''}</td><td style={td}>{Math.round(p.down)} min</td><td style={td}>{top ? top[0] + ' (' + Math.round(top[1]) + ' min)' : '—'}</td></tr>; })}</tbody></table></div>}
+      {recent.length > 0 && <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{['Date', 'Shift', 'Machine', 'Order', 'Run / plan hrs', 'Output', 'Downtime', 'Reason', 'Operator', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{recent.slice(0, 200).map(l => <tr key={l.id}><td style={td}>{l.date}</td><td style={td}>{l.shift}</td><td style={td}>{l.machineName}</td><td style={td}>{l.orderNo || ''}</td><td style={td}>{l.runHrs || 0} / {l.plannedHrs || 0}</td><td style={td}>{l.output || ''} {l.unit || ''}</td><td style={td}>{l.downMin ? l.downMin + ' min' : ''}</td><td style={{ ...td, color: l.reason === 'Breakdown' ? '#B5453A' : '#666' }}>{l.reason || ''}</td><td style={td}>{l.operator || ''}</td><td style={td}>{canEdit && <button onClick={() => { if (window.confirm('Delete this entry?')) setLogs(prev => (prev || []).filter(x => x.id !== l.id)); }} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
 function MfgNextStepView({ id, setView }) {
   const d = MFG_NEXT[id] || [id, 0, '', []];
   return (
@@ -19242,6 +19417,22 @@ function ProcessRouteModal({ order, bom, onSave, onClose }) {
                   <div><label style={lab}>Loss (unaccounted)</label><div style={{ ...inp, background: '#F8F6F0', color: '#555' }}>{num(s.inQty) > 0 ? (num(s.inQty) - num(s.outQty) - num(s.scrap)).toFixed(2) : '—'}</div></div>
                   {d.extra.map(([k, l, ph]) => <div key={k}><label style={lab}>{l}</label><input style={inp} placeholder={ph || ''} value={s.fields[k] || ''} onChange={e => updF(i, k, e.target.value)} /></div>)}
                 </div>
+                {/drum/i.test(s.name) && (() => {
+                  const drums = s.drums || [];
+                  const setDrums = (nd) => setStages(prev => prev.map((x, j) => j === i ? { ...x, drums: nd, outQty: String(Math.round(nd.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000) } : x));
+                  const upD = (k, f, v) => setDrums(drums.map((dr, z) => z === k ? { ...dr, [f]: v } : dr));
+                  return (<div style={{ background: '#F4F8FC', border: '1px solid #DCE6F2', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>Drums from this order ({drums.length}) · {Math.round(drums.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000} m</b>
+                      <button onClick={() => setDrums([...drums, { drumNo: '', length: '', gross: '', tare: '', date: new Date().toISOString().slice(0, 10), testStatus: 'pending' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add drum</button></div>
+                    {drums.length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add each drum wound from this order — drum no., length and weights. Routine test is done per drum in Quality.</div> :
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Drum no.', 'Length (m)', 'Gross kg', 'Tare kg', 'Net kg', 'Test', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 6px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
+                        <tbody>{drums.map((dr, k) => <tr key={k}>
+                          {['drumNo', 'length', 'gross', 'tare'].map(f => <td key={f} style={{ padding: '2px 4px' }}><input value={dr[f] || ''} type={f === 'drumNo' ? 'text' : 'number'} onChange={e => upD(k, f, e.target.value)} disabled={dr.testStatus === 'passed'} style={{ ...inp, padding: '4px 6px' }} /></td>)}
+                          <td style={{ padding: '2px 6px' }}>{Math.round(((parseFloat(dr.gross) || 0) - (parseFloat(dr.tare) || 0)) * 1000) / 1000 || ''}</td>
+                          <td style={{ padding: '2px 6px', fontWeight: 600, color: dr.testStatus === 'passed' ? '#1A7A3E' : dr.testStatus === 'failed' ? '#B5453A' : '#E07B00' }}>{dr.testStatus === 'passed' ? 'Passed' : dr.testStatus === 'failed' ? 'Failed' : 'Pending'}</td>
+                          <td style={{ padding: '2px 4px' }}>{dr.testStatus !== 'passed' && <button onClick={() => setDrums(drums.filter((_, z) => z !== k))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table>}
+                  </div>);
+                })()}
                 {d.qa.length > 0 && <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>QA check points — {s.name}</div>
                   {d.qa.map((q, qi) => <div key={qi} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', fontSize: 12.5 }}><span>{q}</span>
@@ -19264,7 +19455,7 @@ function ProcessRouteModal({ order, bom, onSave, onClose }) {
   );
 }
 
-function ProductionOrdersList({ productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
+function ProductionOrdersList({ storeIssues = [], productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
@@ -19331,9 +19522,12 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           const rm = rawMaterials.find(r => r.id === m.materialId);
           const itm = items.find(i => i.id === m.materialId) || (rm && rm.migratedItemId ? items.find(i => i.id === rm.migratedItemId) : null) || items.find(i => i.name === (rm ? rm.name : (m.name || '')));
           if (!itm) return;
+          const issuedQty = (storeIssues || []).filter(si => si.productionRef && si.productionRef === o.number).reduce((t, si) => t + (si.lines || []).filter(l => l.itemId === itm.id).reduce((u, l) => u + (parseFloat(l.qty) || 0), 0), 0);
+          const consume = Math.max(0, (parseFloat(m.qty) || 0) * factor - issuedQty);
+          if (consume <= 0) return;
           entries.push({
             id: crypto.randomUUID(), date, itemId: itm.id, itemName: itm.name,
-            type: 'out', qty: (parseFloat(m.qty) || 0) * factor, rate: parseFloat(itm.rate) || 0,
+            type: 'out', qty: consume, rate: parseFloat(itm.rate) || 0,
             sourceType: 'production', sourceId: o.id, sourceNumber: o.number, createdAt: now,
           });
         });
@@ -30779,6 +30973,7 @@ export default function App() {
   const [profitShares,     _setPS]         = useState([]);
   const [boShortages,      _setBOS]        = useState([]);
   const [cableDesigns,     _setCD]         = useState([]);
+  const [machineLogs,      _setML]         = useState([]);
   const [fatReports,       _setFAT]        = useState([]);
   const [tdsSheets,        _setTDS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
@@ -31000,6 +31195,7 @@ export default function App() {
       _setPS(data.profitShares || []);
       _setBOS(data.boShortages || []);
       _setCD(data.cableDesigns || []);
+      _setML(data.machineLogs || []);
       _setFAT(data.fatReports || []);
       _setTDS(data.tdsSheets || []);
     }, (err) => {
@@ -31105,6 +31301,7 @@ export default function App() {
   const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
   const setCableDesigns     = mkSet(_setCD,    'cableDesigns');
+  const setMachineLogs      = mkSet(_setML,    'machineLogs');
   const setFatReports       = mkSet(_setFAT,   'fatReports');
   const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
@@ -31344,7 +31541,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns, machineLogs,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -31420,6 +31617,7 @@ export default function App() {
     if (backup.profitShares)    setProfitShares(backup.profitShares);
     if (backup.boShortages)     setBoShortages(backup.boShortages);
     if (backup.cableDesigns)    setCableDesigns(backup.cableDesigns);
+    if (backup.machineLogs)     setMachineLogs(backup.machineLogs);
     if (backup.fatReports)      setFatReports(backup.fatReports);
     if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
@@ -31454,6 +31652,7 @@ export default function App() {
       ['Profit shares', profitShares, setProfitShares],
       ['BO shortages', boShortages, setBoShortages],
       ['Cable designs', cableDesigns, setCableDesigns],
+      ['Machine logs', machineLogs, setMachineLogs],
       ['FAT/SAT reports', fatReports, setFatReports],
       ['Technical data sheets', tdsSheets, setTdsSheets],
     ];
@@ -31837,6 +32036,7 @@ export default function App() {
       case 'productionorders':
         return (
           <ProductionOrdersList
+            storeIssues={storeIssues}
             productionOrders={productionOrders}
             setProductionOrders={setProductionOrders}
             boms={boms}
@@ -32548,12 +32748,11 @@ export default function App() {
           />
         );
       case 'insights':
-      case 'metalrecon':
       case 'calibration':
         return (
           <InsightsView
             key={view}
-            initialTab={view === 'metalrecon' ? 'cablepack' : view === 'calibration' ? 'qa' : undefined}
+            initialTab={view === 'calibration' ? 'qa' : undefined}
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
@@ -32656,9 +32855,13 @@ export default function App() {
           />
         );
       case 'wip':
+        return <WIPView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
       case 'drumstock':
+        return <DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
+      case 'metalrecon':
+        return <MetalReconView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} storeIssues={storeIssues} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} stockLedger={stockLedger} setView={setView} />;
       case 'machinelog':
-        return <MfgNextStepView id={view} setView={setView} />;
+        return <MachineLogView logs={scopeList(machineLogs, 'manufacturing')} setLogs={scopeSet(setMachineLogs, 'manufacturing')} assets={scopeList(assets, 'fmamc')} productionOrders={scopeList(productionOrders, 'manufacturing')} setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')} userRole={userRole} />;
       case 'boshortage':
         return (
           <BOShortageView
