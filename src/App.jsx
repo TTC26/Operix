@@ -2012,12 +2012,59 @@ function ScanBillModal({ onApply, onClose }) {
 }
 
 // ─── Activity Select Screen (shown after sign-in if no business type chosen) ───
+// Manufacturing sub-types: each one switches the manufacturing + QA options (Insights) to suit that industry.
+const MFG_TYPES = [
+  { id: 'wires_cables', icon: '🧵', label: 'Wires & Cables', desc: 'Drawing · extrusion · drums · copper reconciliation · IS 694 / 1554 tests' },
+  { id: 'fabrication', icon: '🔩', label: 'Fabrication / Structural', desc: 'Weight · weld & welder qualification · NDT · painting DFT' },
+  { id: 'machining', icon: '⚙️', label: 'Machining / Engineering parts', desc: 'Routing · job work · tool life · first-article & in-process inspection' },
+  { id: 'plastics', icon: '🧪', label: 'Plastics / Moulding', desc: 'Moulds · cycle time · regrind · dimensional & visual checks' },
+  { id: 'panels', icon: '🎛️', label: 'Panels / Electrical assembly', desc: 'BOM with make & rating · wiring check · IR / HV tests · FAT' },
+  { id: 'general', icon: '🏭', label: 'General manufacturing', desc: 'Common BOM, production, stores and QA modules only' },
+];
+const MFG_QA_PACK = {
+  wires_cables: { templates: [
+    ['Incoming copper rod / aluminium rod', ['Rod diameter within tolerance', 'Surface free of cracks / scale', 'Conductivity / resistivity certificate checked', 'Lot and heat number recorded']],
+    ['Incoming PVC / XLPE compound', ['Supplier test certificate available', 'Colour and grade as per order', 'Moisture / packing intact', 'Batch number recorded']],
+    ['In-process: drawing & stranding', ['Wire diameter within tolerance', 'Number of strands and lay length correct', 'Surface finish — no scratches / die marks', 'Conductor resistance spot check']],
+    ['In-process: insulation extrusion', ['Insulation thickness (avg / min)', 'Concentricity', 'Spark test passed', 'Core colour / marking correct']],
+    ['Final routine test — drum wise', ['Conductor resistance at 20 °C', 'Insulation resistance', 'High voltage withstand test', 'Overall diameter and sheath thickness', 'Length marking and drum length verified']],
+  ], instruments: ['Micrometer 0–25 mm', 'Vernier caliper 0–150 mm', 'Resistance bridge', 'Megger 1 kV / 5 kV', 'HV tester (AC)', 'Spark tester', 'Length counter / meter-marking', 'Weighing scale'] },
+  fabrication: { templates: [
+    ['Incoming steel plate / section', ['Mill test certificate (MTC) matched to heat number', 'Grade and thickness verified', 'Surface free of laminations / heavy rust', 'Dimensions and straightness']],
+    ['Fit-up inspection (before welding)', ['Drawing revision correct', 'Joint preparation, gap and root face', 'Alignment / hi-lo within limit', 'Weld consumables and WPS available']],
+    ['Weld visual inspection', ['Weld profile and size as per drawing', 'No undercut / porosity / cracks', 'Spatter and slag cleaned', 'Welder ID stamped / recorded']],
+    ['Dimensional & final inspection', ['Overall dimensions within tolerance', 'Squareness / flatness', 'Hole position and size', 'Mark number and weight recorded']],
+    ['Painting / galvanizing', ['Surface preparation grade (Sa 2½)', 'DFT measured at specified points', 'Colour and finish', 'Adhesion / holiday test where required']],
+  ], instruments: ['Vernier caliper 0–300 mm', 'Steel tape 30 m', 'Weld gauge', 'DFT gauge', 'Ultrasonic thickness gauge', 'Torque wrench', 'Welding machine ammeter / voltmeter'] },
+  machining: { templates: [
+    ['First-article inspection', ['All dimensions vs drawing recorded', 'Surface finish Ra', 'Material certificate / hardness', 'Drawing revision confirmed']],
+    ['In-process inspection', ['Critical dimension checked at set frequency', 'Tool wear / offset checked', 'Burrs removed', 'Operator ID recorded']],
+    ['Final inspection', ['Sample dimensions per sampling plan', 'Visual — no damage / rust', 'Marking and packing correct']],
+  ], instruments: ['Micrometer set', 'Vernier caliper', 'Height gauge', 'Dial gauge', 'Bore gauge', 'Surface roughness tester', 'Hardness tester'] },
+  plastics: { templates: [
+    ['Incoming resin / masterbatch', ['Grade and batch number', 'Moisture / drying done', 'Colour matches approved standard']],
+    ['First-off / mould setup', ['Critical dimensions vs drawing', 'Weight of shot', 'No flash / short shot / sink marks', 'Mould and cavity ID recorded']],
+    ['Final inspection', ['Sample dimensions per sampling plan', 'Visual and colour check', 'Fit / assembly check', 'Packing count correct']],
+  ], instruments: ['Vernier caliper', 'Weighing scale 0.01 g', 'Go / No-go gauges', 'Colour matching booth'] },
+  panels: { templates: [
+    ['Incoming components', ['Make, rating and type as per BOM', 'Test certificate / datasheet', 'Visual damage check']],
+    ['Wiring & assembly check', ['Wiring as per schematic', 'Ferrule / cable marking', 'Torque on terminals', 'Busbar clearance and creepage']],
+    ['Routine tests before dispatch', ['Insulation resistance', 'High voltage test', 'Functional / interlock test', 'Earth continuity', 'Name-plate and drawing handed over']],
+  ], instruments: ['Megger 1 kV / 5 kV', 'HV tester', 'Multimeter', 'Torque screwdriver', 'Clamp meter', 'Earth tester'] },
+  general: { templates: [
+    ['Incoming material inspection', ['Material as per PO', 'Quantity matches DC / invoice', 'Test certificate available', 'Visual damage check']],
+    ['In-process inspection', ['Operation as per work instruction', 'Critical dimension / parameter in limit', 'Operator ID recorded']],
+    ['Final inspection', ['Finished product vs specification', 'Marking and labelling', 'Packing and quantity']],
+  ], instruments: ['Vernier caliper', 'Weighing scale', 'Measuring tape'] },
+};
+
 function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
   const canMulti = isSubscribed || isTestAccount;
   const [selected, setSelected] = React.useState([]);
   const [companyName, setCompanyName] = React.useState('');
   const [country, setCountry] = React.useState('india');
   const [error, setError] = React.useState('');
+  const [mfgType, setMfgType] = React.useState('');
 
   const BIZ_TYPES = [
     {
@@ -2066,6 +2113,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
   function handleStart() {
     if (!selected.length) { setError('Please select at least one activity to continue.'); return; }
     if (!companyName.trim()) { setError('Please enter your company name.'); return; }
+    if (selected.includes('manufacturing') && !mfgType) { setError('Please choose your type of manufacturing.'); return; }
     const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
     setBusinessInfo(p => ({
       ...p,
@@ -2074,6 +2122,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
       taxRate: (p && p.taxRate != null) ? p.taxRate : cc.defaultTaxRate,
       activeTypes: selected,
       companyType: selected[0],
+      ...(selected.includes('manufacturing') ? { mfgType } : {}),
       trialStartDate: (p && p.trialStartDate) ? p.trialStartDate : new Date().toISOString(),
     }));
   }
@@ -2108,6 +2157,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
         </div>
 
         {/* 2×2 Activity Cards */}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
           {BIZ_TYPES.map(t => {
             const on = selected.includes(t.id);
@@ -2196,6 +2246,16 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
         </div>
 
         {/* Error */}
+        {selected.includes('manufacturing') && (
+          <div style={{ background: 'rgba(255,255,255,0.07)', border: '2px solid #C9752A', borderRadius: 18, padding: '18px 20px', marginBottom: 20 }}>
+            <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>What do you manufacture?</div>
+            <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12.5, marginBottom: 12 }}>This sets the manufacturing and QA options for your industry. You can change it later in Business Insights.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              {MFG_TYPES.map(t => <div key={t.id} onClick={() => { setMfgType(t.id); setError(''); }} style={{ cursor: 'pointer', borderRadius: 12, padding: '10px 14px', background: mfgType === t.id ? '#fff' : 'rgba(255,255,255,0.06)', border: mfgType === t.id ? '2px solid #C9752A' : '1.5px solid rgba(255,255,255,0.15)' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: mfgType === t.id ? '#1E2A4A' : '#fff' }}>{t.icon} {t.label}</div>
+                <div style={{ fontSize: 11.5, color: mfgType === t.id ? '#666' : 'rgba(255,255,255,0.5)', marginTop: 2 }}>{t.desc}</div></div>)}
+            </div></div>)}
+
         {error && (
           <div style={{ color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginBottom: 10 }}>
             {error}
@@ -5559,6 +5619,7 @@ function InsMfg({ ctx }) {
   const lateOpen = open.filter(o => o.targetDate && new Date(o.targetDate) < today);
   const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
   return (<>
+    <InsMfgTypeBar ctx={ctx} />
     <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('mrp', 'MRP shortages')}{pill('cost', 'Cost per unit')}{pill('otd', 'On-time delivery')}</div>
     {sub === 'mrp' && <div style={_iCard}><div style={{ fontSize: 12.5, color: '#666', marginBottom: 8 }}>Raw material needed for {open.length} open production order(s) vs stock on hand (matched by item name).</div>
       {mrp.length === 0 ? <div style={{ color: '#999' }}>No open production orders.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Material', 'Needed', 'In stock', 'Shortfall', 'For orders'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 4 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
@@ -5633,12 +5694,14 @@ function InsQA({ ctx }) {
         <input type="number" title="Frequency (months)" value={c.freq} onChange={e => setC(p => ({ ...p, freq: e.target.value }))} style={{ ...styles.input, width: 80, margin: 0 }} />
         <input placeholder="Agency / cert no." value={c.agency} onChange={e => setC(p => ({ ...p, agency: e.target.value }))} style={{ ...styles.input, width: 160, margin: 0 }} />
         <button style={styles.primaryBtn} onClick={() => { if (!c.name.trim() || !c.lastDate) return alert('Instrument name and last calibration date are required'); setIns('calibration', (p = []) => [...p, { ...c, id: 'cb-' + Date.now() }]); setC(blankC); }}>Add</button></div>}
+      {canEdit && ctx.mfgType && MFG_QA_PACK[ctx.mfgType] && <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Typical instruments for {(MFG_TYPES.find(t => t.id === ctx.mfgType) || {}).label}: {MFG_QA_PACK[ctx.mfgType].instruments.map(n => <button key={n} onClick={() => setC(p => ({ ...p, name: n }))} style={{ margin: '2px 4px 2px 0', padding: '2px 9px', borderRadius: 12, border: '1px solid #DDD', background: '#fff', fontSize: 11.5, cursor: 'pointer' }}>{n}</button>)}</div>}
       {cal.length === 0 ? <div style={{ color: '#999' }}>No instruments registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Instrument', 'ID', 'Location', 'Last done', 'Every', 'Next due', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
         {cal.map(x => <tr key={x.id}><td style={_iTd}>{x.name}</td><td style={_iTd}>{x.idNo}</td><td style={_iTd}>{x.location}</td><td style={_iTd}>{x.lastDate}</td><td style={_iTd}>{x.freq} m</td><td style={_iTd}>{x.next}</td>
           <td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? 'OVERDUE ' + (-x.d) + ' d — do not use' : x.d <= 30 ? 'Due in ' + x.d + ' d' : 'Valid'}</td>
           <td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px', marginRight: 4 }} onClick={() => setIns('calibration', (p = []) => p.map(y => y.id === x.id ? { ...y, lastDate: iso } : y))}>Done today</button>}{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('calibration', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
       <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Next due = last calibration + frequency. "Done today" resets the date; keep the certificate on file.</div></div>}
     {sub === 'insp' && <>
+      {canEdit && ctx.mfgType && MFG_QA_PACK[ctx.mfgType] && <div style={{ ..._iCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><span style={{ fontSize: 13 }}>Standard checklists for <b>{(MFG_TYPES.find(t => t.id === ctx.mfgType) || {}).label}</b> ({MFG_QA_PACK[ctx.mfgType].templates.length} templates)</span><button style={styles.primaryBtn} onClick={() => { const have = new Set(tpls.map(t => t.name)); const add = MFG_QA_PACK[ctx.mfgType].templates.filter(t => !have.has(t[0])).map((t, i) => ({ id: 't-' + Date.now() + '-' + i, name: t[0], points: t[1] })); if (!add.length) return alert('Standard checklists are already loaded.'); setIns('inspTemplates', (p = []) => [...p, ...add]); }}>Load standard checklists</button></div>}
       {canEdit && <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>New checklist template</div>
         <input placeholder="Template name (e.g. Incoming wire inspection)" value={tpl.name} onChange={e => setTpl(p => ({ ...p, name: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
         <textarea rows={4} placeholder={'Check points — one per line\nConductor diameter within tolerance\nInsulation thickness\nSurface finish / no cuts'} value={tpl.points} onChange={e => setTpl(p => ({ ...p, points: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
@@ -5729,7 +5792,9 @@ function InsMepCalc({ ctx }) {
 const INS_CU_R = { 0.5: 36, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601 }; // max ohm/km at 20 C
 function InsMfgTech({ ctx }) {
   const { productionOrders, boms, rawMaterials, sl, styles } = ctx;
-  const [sub, setSub] = React.useState('cond');
+  const isCable = ctx.mfgType === 'wires_cables';
+  const [sub0, setSub] = React.useState('cond');
+  const sub = isCable ? sub0 : 'var';
   const [f, setF] = React.useState({ size: '2.5', r: '', len: 100, t: 30, dia: '' });
   const maxR = INS_CU_R[parseFloat(f.size)] || 0, len = parseFloat(f.len) || 0, rm = parseFloat(f.r) || 0, t = parseFloat(f.t) || 20;
   const r20 = rm / (1 + 0.00393 * (t - 20)), perKm = len > 0 ? r20 / len * 1000 : 0;
@@ -5744,7 +5809,7 @@ function InsMfgTech({ ctx }) {
   }).filter(Boolean);
   const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
   return (<>
-    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('cond', 'Conductor resistance check')}{pill('var', 'Material usage variance')}</div>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{isCable && pill('cond', 'Conductor resistance check')}{pill('var', 'Material usage variance')}</div>
     {sub === 'cond' && <div style={_iCard}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Cu conductor size (mm²)<select value={f.size} onChange={e => setF(p => ({ ...p, size: e.target.value }))} style={{ ...styles.input, margin: 0, width: 150 }}>{Object.keys(INS_CU_R).map(k => <option key={k}>{k}</option>)}</select></label>
@@ -5777,6 +5842,107 @@ function InsFmTech({ ctx }) {
     <div style={_iCard}>{rows.length === 0 ? <div style={{ color: '#999' }}>No corrective / emergency work orders with an asset in this period.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Asset', 'Failures', 'MTBF (days)', 'MTTR (days)', 'Availability', 'Repair cost', 'Last failure', 'Flag'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 6 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
       {rows.map(r => <tr key={r.id}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{r.mtbf.toFixed(0)}</td><td style={{ ..._iTd, ..._iR }}>{r.mttr === null ? '—' : r.mttr.toFixed(1)}</td><td style={{ ..._iTd, ..._iR }}>{r.av === null ? '—' : r.av.toFixed(1) + '%'}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.cost)}</td><td style={_iTd}>{r.last}</td><td style={{ ..._iTd, fontWeight: 700, color: r.n >= 3 ? '#B5453A' : '#888' }}>{r.n >= 3 ? 'Repeat failure — root-cause / replace?' : ''}</td></tr>)}</tbody></table>}
       <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>MTBF = period ÷ number of breakdowns (a lower bound if the asset was not in service for the whole period). MTTR = average raised → completion date in days (needs a completion date on the work order). Availability = MTBF ÷ (MTBF + MTTR). Only corrective and emergency work orders linked to an asset count.</div></div>
+  </>);
+}
+
+// Manufacturing type strip + industry packs
+function InsMfgTypeBar({ ctx }) {
+  const { businessInfo, setBusinessInfo, canEdit, styles } = ctx;
+  const cur = MFG_TYPES.find(t => t.id === businessInfo.mfgType);
+  return <div style={{ ..._iCard, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderLeft: '4px solid ' + (cur ? '#C9752A' : '#B5453A') }}>
+    <b>Type of manufacturing</b>
+    {canEdit && setBusinessInfo ? <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ ...styles.input, width: 270, margin: 0 }}><option value="">— Choose —</option>{MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}</select> : <span>{cur ? cur.label : 'Not set'}</span>}
+    <span style={{ fontSize: 12, color: '#888' }}>{cur ? cur.desc : 'Choose a type to get the manufacturing and QA options for your industry.'}</span></div>;
+}
+
+function _insPill(sub, setSub, id, l) { return <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>; }
+
+// Wires & Cables pack: metal reconciliation + drum register
+function InsCablePack({ ctx }) {
+  const { ins, setIns, canEdit, styles } = ctx;
+  const [sub, setSub] = React.useState('metal');
+  const bm = { date: new Date().toISOString().slice(0, 10), metal: 'Copper', ref: '', input: '', good: '', scrap: '', offcut: '' };
+  const [m, setM] = React.useState(bm);
+  const bd = { drumNo: '', product: '', length: '', gross: '', tare: '', date: new Date().toISOString().slice(0, 10), testOk: 'yes', customer: '' };
+  const [d, setD] = React.useState(bd);
+  const recon = (ins.metalRecon || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const drums = (ins.drums || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const loss = r => { const i = parseFloat(r.input) || 0; return i > 0 ? (i - (parseFloat(r.good) || 0) - (parseFloat(r.scrap) || 0) - (parseFloat(r.offcut) || 0)) : 0; };
+  const tot = recon.reduce((a, r) => ({ i: a.i + (parseFloat(r.input) || 0), l: a.l + loss(r), s: a.s + (parseFloat(r.scrap) || 0) + (parseFloat(r.offcut) || 0) }), { i: 0, l: 0, s: 0 });
+  const dupDrum = drums.some(x => x.drumNo && x.drumNo === d.drumNo);
+  const mi = (k, ph, w, type) => <input type={type || 'text'} placeholder={ph} value={m[k]} onChange={e => setM(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: w, margin: 0 }} />;
+  const di = (k, ph, w, type) => <input type={type || 'text'} placeholder={ph} value={d[k]} onChange={e => setD(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: w, margin: 0 }} />;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{_insPill(sub, setSub, 'metal', 'Metal reconciliation')}{_insPill(sub, setSub, 'drum', 'Drum register')}</div>
+    {sub === 'metal' && <div style={_iCard}>
+      {recon.length > 0 && <div style={{ fontSize: 13, marginBottom: 10 }}>Overall: issued <b>{tot.i.toFixed(0)} kg</b> · recovered scrap/offcut <b>{tot.s.toFixed(0)} kg</b> · unaccounted loss <b style={{ color: tot.i && tot.l / tot.i * 100 > 1 ? '#B5453A' : '#1A7A3E' }}>{tot.l.toFixed(1)} kg ({tot.i ? (tot.l / tot.i * 100).toFixed(2) : 0}%)</b></div>}
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{mi('date', 'Date', 150, 'date')}
+        <select value={m.metal} onChange={e => setM(p => ({ ...p, metal: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }}><option>Copper</option><option>Aluminium</option></select>
+        {mi('ref', 'Batch / shift ref', 140)}{mi('input', 'Rod issued (kg)', 130, 'number')}{mi('good', 'Good output (kg)', 130, 'number')}{mi('scrap', 'Scrap (kg)', 100, 'number')}{mi('offcut', 'Offcut / ends (kg)', 130, 'number')}
+        <button style={styles.primaryBtn} onClick={() => { if (!(parseFloat(m.input) > 0)) return alert('Enter the metal issued (kg)'); setIns('metalRecon', (p = []) => [...p, { ...m, id: 'm-' + Date.now() }]); setM({ ...bm, metal: m.metal }); }}>Add</button></div>}
+      {recon.length === 0 ? <div style={{ color: '#999' }}>No entries. Enter rod issued vs good output + scrap + offcut for each batch or shift.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Date', 'Metal', 'Ref', 'Issued', 'Good', 'Scrap', 'Offcut', 'Unaccounted', 'Loss %', ''].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i > 2 && i < 9 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {recon.map(r => { const l = loss(r), pc = (parseFloat(r.input) || 0) > 0 ? l / parseFloat(r.input) * 100 : 0; return <tr key={r.id}><td style={_iTd}>{r.date}</td><td style={_iTd}>{r.metal}</td><td style={_iTd}>{r.ref}</td><td style={{ ..._iTd, ..._iR }}>{r.input}</td><td style={{ ..._iTd, ..._iR }}>{r.good || 0}</td><td style={{ ..._iTd, ..._iR }}>{r.scrap || 0}</td><td style={{ ..._iTd, ..._iR }}>{r.offcut || 0}</td><td style={{ ..._iTd, ..._iR }}>{l.toFixed(1)}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: pc > 1.5 ? '#B5453A' : pc > 0.5 ? '#E07B00' : '#1A7A3E' }}>{pc.toFixed(2)}%</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('metalRecon', (p = []) => p.filter(y => y.id !== r.id))}>✕</button>}</td></tr>; })}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Unaccounted = issued − good − scrap − offcut. Above about 1.5% needs investigation (weighing, wire breakage, moisture, pilferage). Use the same weighing scale every time.</div></div>}
+    {sub === 'drum' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{di('drumNo', 'Drum no.', 110)}{di('product', 'Product (e.g. 3C × 2.5 sq.mm)', 210)}{di('length', 'Length (m)', 100, 'number')}{di('gross', 'Gross wt (kg)', 110, 'number')}{di('tare', 'Drum tare (kg)', 110, 'number')}{di('date', 'Date', 150, 'date')}
+        <select value={d.testOk} onChange={e => setD(p => ({ ...p, testOk: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }}><option value="yes">Tests passed</option><option value="no">Tests pending / failed</option></select>{di('customer', 'Dispatched to (customer / DC)', 200)}
+        <button style={styles.primaryBtn} onClick={() => { if (!d.drumNo.trim() || !(parseFloat(d.length) > 0)) return alert('Drum no. and length are required'); if (dupDrum) return alert('This drum no. already exists'); setIns('drums', (p = []) => [...p, { ...d, id: 'd-' + Date.now() }]); setD({ ...bd, product: d.product }); }}>Add</button></div>}
+      {drums.length === 0 ? <div style={{ color: '#999' }}>No drums registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Drum', 'Product', 'Length m', 'Net kg', 'Date', 'Test', 'Dispatched to', ''].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i === 2 || i === 3 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {drums.map(x => <tr key={x.id}><td style={{ ..._iTd, fontWeight: 700 }}>{x.drumNo}</td><td style={_iTd}>{x.product}</td><td style={{ ..._iTd, ..._iR }}>{x.length}</td><td style={{ ..._iTd, ..._iR }}>{((parseFloat(x.gross) || 0) - (parseFloat(x.tare) || 0)).toFixed(1)}</td><td style={_iTd}>{x.date}</td><td style={{ ..._iTd, color: x.testOk === 'yes' ? '#1A7A3E' : '#B5453A', fontWeight: 600 }}>{x.testOk === 'yes' ? 'Passed' : 'Pending'}</td><td style={_iTd}>{canEdit ? <input value={x.customer || ''} placeholder="—" onChange={e => setIns('drums', (p = []) => p.map(y => y.id === x.id ? { ...y, customer: e.target.value } : y))} style={{ ...styles.input, margin: 0, width: 170 }} /> : x.customer}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('drums', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Dispatch only drums marked "Tests passed". Net weight = gross − drum tare.</div></div>}
+  </>);
+}
+
+// Fabrication pack: weight calculator, welder qualification, NDT log, painting DFT check
+function InsFabPack({ ctx }) {
+  const { ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('wt');
+  const [w, setW] = React.useState({ shape: 'plate', a: 1500, b: 6000, t: 10, qty: 1 });
+  const [wd, setWd] = React.useState({ name: '', idNo: '', process: 'SMAW', position: '3G', validTill: '' });
+  const [nd, setNd] = React.useState({ date: new Date().toISOString().slice(0, 10), mark: '', method: 'UT', joint: '', welder: '', result: 'Accepted', report: '' });
+  const [dft, setDft] = React.useState({ spec: 80, readings: '' });
+  const n = k => parseFloat(w[k]) || 0, DEN = 7.85;
+  let kgEach = 0, desc = '';
+  if (w.shape === 'plate') { kgEach = n('a') * n('b') * n('t') * DEN / 1e6; desc = 'Plate: width × length × thickness (mm)'; }
+  else if (w.shape === 'round') { kgEach = Math.PI * Math.pow(n('a') / 2, 2) * n('b') * DEN / 1e6; desc = 'Round bar: diameter × length (mm)'; }
+  else if (w.shape === 'pipe') { kgEach = Math.PI * (n('a') - n('t')) * n('t') * n('b') * DEN / 1e6; desc = 'Pipe: OD × length (mm), wall thickness t'; }
+  else if (w.shape === 'flat') { kgEach = n('a') * n('t') * n('b') * DEN / 1e6; desc = 'Flat: width × length, thickness t (mm)'; }
+  const welders = (ins.welders || []).map(x => ({ ...x, d: x.validTill ? Math.ceil((new Date(x.validTill) - today) / dayMs) : null })).sort((a, b) => (a.d ?? 9999) - (b.d ?? 9999));
+  const ndt = (ins.ndtLog || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const rej = ndt.filter(x => x.result === 'Rejected').length;
+  const reads = String(dft.readings).split(/[\s,;]+/).map(parseFloat).filter(x => !isNaN(x)), spec = parseFloat(dft.spec) || 0;
+  const avg = reads.length ? reads.reduce((s, x) => s + x, 0) / reads.length : 0, low = reads.filter(x => x < spec * 0.8).length;
+  const dftOk = reads.length > 0 && avg >= spec && low === 0;
+  const num = (k, l, wd2) => <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: wd2 || 120 }}>{l}<input type="number" value={w[k]} onChange={e => setW(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>;
+  const inp = (st, setSt, k, ph, wi, type) => <input type={type || 'text'} placeholder={ph} value={st[k]} onChange={e => setSt(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: wi, margin: 0 }} />;
+  const sel = (st, setSt, k, opts, wi) => <select value={st[k]} onChange={e => setSt(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: wi, margin: 0 }}>{opts.map(x => <option key={x}>{x}</option>)}</select>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>{_insPill(sub, setSub, 'wt', 'Steel weight')}{_insPill(sub, setSub, 'weld', 'Welder qualification')}{_insPill(sub, setSub, 'ndt', 'NDT log')}{_insPill(sub, setSub, 'dft', 'Painting DFT check')}</div>
+    {sub === 'wt' && <div style={_iCard}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Shape<select value={w.shape} onChange={e => setW(p => ({ ...p, shape: e.target.value }))} style={{ ...styles.input, margin: 0, width: 140 }}><option value="plate">Plate</option><option value="flat">Flat</option><option value="round">Round bar</option><option value="pipe">Pipe</option></select></label>
+      {num('a', w.shape === 'round' ? 'Diameter (mm)' : w.shape === 'pipe' ? 'OD (mm)' : 'Width (mm)')}{num('b', 'Length (mm)')}{w.shape !== 'round' && num('t', 'Thickness (mm)')}{num('qty', 'Quantity', 90)}</div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12, fontSize: 13 }}>{desc}<div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}><span>Weight each</span><b>{kgEach.toFixed(2)} kg</b></div><div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total ({n('qty')} nos)</span><b>{(kgEach * n('qty')).toFixed(2)} kg = {(kgEach * n('qty') / 1000).toFixed(3)} MT</b></div></div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Mild steel density 7.85 g/cm³. For rolled sections (ISMB, ISMC, angles) use the standard weight per metre from the section table; add 3–5% for welds and wastage when costing per MT.</div></div>}
+    {sub === 'weld' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{inp(wd, setWd, 'name', 'Welder name', 170)}{inp(wd, setWd, 'idNo', 'Welder ID / stamp', 130)}{sel(wd, setWd, 'process', ['SMAW', 'GMAW', 'GTAW', 'FCAW', 'SAW'], 100)}{sel(wd, setWd, 'position', ['1G', '2G', '3G', '4G', '5G', '6G'], 90)}
+        <input type="date" title="Qualification valid till" value={wd.validTill} onChange={e => setWd(p => ({ ...p, validTill: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!wd.name.trim() || !wd.validTill) return alert('Name and valid-till date are required'); setIns('welders', (p = []) => [...p, { ...wd, id: 'w-' + Date.now() }]); setWd({ name: '', idNo: '', process: 'SMAW', position: '3G', validTill: '' }); }}>Add</button></div>}
+      {welders.length === 0 ? <div style={{ color: '#999' }}>No welders registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Welder', 'ID', 'Process', 'Position', 'Valid till', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {welders.map(x => <tr key={x.id}><td style={_iTd}>{x.name}</td><td style={_iTd}>{x.idNo}</td><td style={_iTd}>{x.process}</td><td style={_iTd}>{x.position}</td><td style={_iTd}>{x.validTill}</td><td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? 'EXPIRED — do not weld' : x.d <= 30 ? 'Expires in ' + x.d + ' d' : 'Valid'}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('welders', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Keep the WPQ certificate and WPS reference on file. Continuity / re-test intervals depend on your code (AWS D1.1, ASME IX, IS 7310).</div></div>}
+    {sub === 'ndt' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{inp(nd, setNd, 'date', 'Date', 150, 'date')}{inp(nd, setNd, 'mark', 'Mark no. / item', 140)}{inp(nd, setNd, 'joint', 'Joint no.', 100)}{sel(nd, setNd, 'method', ['UT', 'RT', 'MPI', 'DPT', 'VT'], 90)}{inp(nd, setNd, 'welder', 'Welder ID', 110)}{sel(nd, setNd, 'result', ['Accepted', 'Rejected'], 120)}{inp(nd, setNd, 'report', 'Report no.', 120)}
+        <button style={styles.primaryBtn} onClick={() => { if (!nd.mark.trim()) return alert('Mark no. is required'); setIns('ndtLog', (p = []) => [...p, { ...nd, id: 'n-' + Date.now() }]); setNd({ ...nd, mark: '', joint: '', report: '' }); }}>Add</button></div>}
+      {ndt.length > 0 && <div style={{ fontSize: 13, marginBottom: 8 }}>{ndt.length} tests · rejection rate <b style={{ color: rej / ndt.length > 0.05 ? '#B5453A' : '#1A7A3E' }}>{(rej / ndt.length * 100).toFixed(1)}%</b></div>}
+      {ndt.length === 0 ? <div style={{ color: '#999' }}>No NDT records.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Date', 'Mark', 'Joint', 'Method', 'Welder', 'Result', 'Report', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {ndt.map(x => <tr key={x.id}><td style={_iTd}>{x.date}</td><td style={_iTd}>{x.mark}</td><td style={_iTd}>{x.joint}</td><td style={_iTd}>{x.method}</td><td style={_iTd}>{x.welder}</td><td style={{ ..._iTd, fontWeight: 700, color: x.result === 'Accepted' ? '#1A7A3E' : '#B5453A' }}>{x.result}</td><td style={_iTd}>{x.report}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('ndtLog', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Rejected joints: repair, re-test and raise a CAPA if the same welder repeats.</div></div>}
+    {sub === 'dft' && <div style={_iCard}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Specified DFT (µm)<input type="number" value={dft.spec} onChange={e => setDft(p => ({ ...p, spec: e.target.value }))} style={{ ...styles.input, margin: 0, width: 150 }} /></label>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, flex: 1 }}>Readings (µm, separated by space / comma)<input value={dft.readings} onChange={e => setDft(p => ({ ...p, readings: e.target.value }))} placeholder="82 90 78 85 95" style={{ ...styles.input, margin: 0 }} /></label></div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12, fontSize: 13 }}>
+        {[['Readings', reads.length], ['Average', reads.length ? avg.toFixed(1) + ' µm' : '—'], ['Minimum', reads.length ? Math.min(...reads) + ' µm' : '—'], ['Below 80% of spec', low], ['Result', reads.length ? (dftOk ? 'PASS' : 'FAIL — apply additional coat') : '—']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>{l}</span><b style={{ color: l === 'Result' ? (dftOk ? '#1A7A3E' : '#B5453A') : '#1E2A4A' }}>{v}</b></div>)}</div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Rule used: average ≥ specified and no single reading below 80% of specified. Follow your painting specification (SSPC-PA2 / ISO 19840) if the contract requires a different rule.</div></div>}
   </>);
 }
 
@@ -5877,10 +6043,10 @@ function InsightsView({ documents = [], customers = [], vendors = [], vouchers =
   const ins = ((businessInfo.insightsData || {})[bk]) || {};
   const setIns = (k, v) => { if (setBusinessInfo) setBusinessInfo(p => { const all = p.insightsData || {}, cur = all[bk] || {}; return { ...p, insightsData: { ...all, [bk]: { ...cur, [k]: typeof v === 'function' ? v(cur[k]) : v } } }; }); };
   const canEdit = ['admin', 'manager', 'accounts'].includes(userRole);
-  const ctx = { assets, sl, grns, capaRecords, boms, productionOrders, rawMaterials, pmSchedules, fmWorkOrders, fmSpareParts, fmt, docs, vch, items, stock, recvRows, payRows, pettyCash, inDiv, today, dayMs, businessInfo, ins, setIns, canEdit, styles, employees, setEmployees: setEmployees || (() => {}), siteAttendance, enquiries, contracts, amcContracts, customers,
+  const ctx = { mfgType: businessInfo.mfgType || '', assets, sl, grns, capaRecords, boms, productionOrders, rawMaterials, pmSchedules, fmWorkOrders, fmSpareParts, fmt, docs, vch, items, stock, recvRows, payRows, pettyCash, inDiv, today, dayMs, businessInfo, ins, setIns, canEdit, styles, employees, setEmployees: setEmployees || (() => {}), siteAttendance, enquiries, contracts, amcContracts, customers,
     totalOf: tot, taxableOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').taxable || 0, taxOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').totalTax || 0 };
   const _isTr = !isMultiBiz || currentBizType === 'trading';
-  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ['qa', '🔬 Quality (QA)'], ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 MRP, cost & on-time delivery'], ['mfgtech', '🧪 Conductor check & usage variance']]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
+  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ['qa', '🔬 Quality (QA)'], ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 MRP, cost & on-time delivery'], ['mfgtech', businessInfo.mfgType === 'wires_cables' ? '🧪 Conductor check & usage variance' : '🧪 Material usage variance'], ...(businessInfo.mfgType === 'wires_cables' ? [['cablepack', '🧵 Metal reconciliation & drums']] : []), ...(businessInfo.mfgType === 'fabrication' ? [['fabpack', '🔩 Weight, welders, NDT & DFT']] : [])]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}><div><h2 className="serif" style={styles.pageTitle}>Business Insights</h2><div style={{ fontSize: 13, color: '#888780' }}>Receivables, cash forecast, reorder planner and month-end checks — from your approved documents</div></div></div>
@@ -5891,6 +6057,8 @@ function InsightsView({ documents = [], customers = [], vendors = [], vouchers =
       {tab === 'qa' && <InsQA ctx={ctx} />}
       {tab === 'mfg' && <InsMfg ctx={ctx} />}
       {tab === 'mfgtech' && <InsMfgTech ctx={ctx} />}
+      {tab === 'cablepack' && <InsCablePack ctx={ctx} />}
+      {tab === 'fabpack' && <InsFabPack ctx={ctx} />}
       {tab === 'fm' && <InsFm ctx={ctx} />}
       {tab === 'fmtech' && <InsFmTech ctx={ctx} />}
       {tab === 'bs' && <InsBalanceSheet ctx={ctx} />}
