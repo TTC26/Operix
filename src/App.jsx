@@ -2058,6 +2058,237 @@ const MFG_QA_PACK = {
   ], instruments: ['Vernier caliper', 'Weighing scale', 'Measuring tape'] },
 };
 
+// Type-wise datasheet fields. Raw material categories (stores / production / QA) and product datasheet (engineering).
+// field = [key, label, placeholder]
+const _std = (extra) => [...extra, ['batchNo', 'Lot / batch / heat no.', ''], ['certNo', 'Test certificate no.', 'Supplier TC / MTC'], ['supplier', 'Approved supplier', '']];
+const RM_SPEC_PACK = {
+  wires_cables: {
+    'Copper rod': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 191 / ASTM B49'], ['grade', 'Grade', 'ETP / Cu-ETP'], ['rodDia', 'Rod diameter (mm)', '8.0'], ['purity', 'Copper purity (% min)', '99.90'], ['conductivity', 'Conductivity (% IACS min)', '100'], ['tensile', 'Tensile strength (MPa)', '220–260'], ['elongation', 'Elongation (% min)', '30'], ['oxygen', 'Oxygen content (ppm)', '≤ 400']]) },
+    'Aluminium rod': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 5484 / ASTM B233'], ['grade', 'Grade', 'EC grade 1350 / 1370'], ['rodDia', 'Rod diameter (mm)', '9.5'], ['conductivity', 'Conductivity (% IACS min)', '61.0'], ['tensile', 'Tensile strength (MPa)', ''], ['elongation', 'Elongation (% min)', ''], ['temper', 'Temper', 'H12 / O']]) },
+    'PVC compound': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 5831'], ['pvcType', 'Type', 'TI1 / TI2 (insulation), ST1 / ST2 (sheath)'], ['grade', 'Grade / code', ''], ['colour', 'Colour', ''], ['density', 'Density (g/cm³)', '1.35–1.45'], ['hardness', 'Hardness (Shore A / D)', ''], ['tempRating', 'Temperature rating (°C)', '70 / 85'], ['tensile', 'Tensile strength (MPa min)', '12.5'], ['elongation', 'Elongation at break (% min)', '125'], ['volRes', 'Volume resistivity (Ω·cm)', ''], ['moisture', 'Moisture / drying needed', '']]) },
+    'XLPE compound': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 7098 / IEC 60502'], ['xlpeType', 'Type', 'Peroxide / Silane / HFFR'], ['grade', 'Grade / code', ''], ['density', 'Density (g/cm³)', '0.92'], ['mfi', 'Melt flow index', ''], ['tempRating', 'Temperature rating (°C)', '90'], ['hotSet', 'Hot-set elongation (% max)', '175'], ['tensile', 'Tensile strength (MPa min)', '12.5'], ['elongation', 'Elongation at break (% min)', '200'], ['storage', 'Storage / shelf life', '']]) },
+    'Armour wire / strip': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 3975'], ['armourType', 'Type', 'GI round wire / GI strip / Al wire'], ['size', 'Diameter / thickness × width (mm)', ''], ['zinc', 'Zinc coating (g/m²)', ''], ['tensile', 'Tensile strength (MPa)', '']]) },
+    'Tape / filler / other': { unit: 'kg', fields: _std([['material', 'Material', 'Polyester tape / paper / PP filler'], ['size', 'Size / thickness', '']]) },
+  },
+  fabrication: {
+    'Steel plate': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 2062'], ['grade', 'Grade', 'E250 BR / E350 / ASTM A36'], ['thickness', 'Thickness (mm)', ''], ['size', 'Plate size (mm)', '1500 × 6000'], ['yield', 'Yield strength (MPa min)', '250'], ['tensile', 'Tensile strength (MPa)', '410'], ['elongation', 'Elongation (% min)', '23'], ['chem', 'Chemistry (C / Mn / S / P)', ''], ['density', 'Density (kg/m³)', '7850']]) },
+    'Structural section / pipe': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 808 / IS 1161 / IS 1239'], ['section', 'Section & size', 'ISMB 200 / ISA 50×50×6 / 100 NB'], ['grade', 'Grade', 'E250 / E350'], ['length', 'Standard length (m)', '12'], ['wtPerM', 'Weight (kg/m)', ''], ['tensile', 'Tensile strength (MPa)', ''], ['yield', 'Yield strength (MPa)', '']]) },
+    'Welding consumable': { unit: 'kg', fields: _std([['consType', 'Type', 'Electrode / MIG wire / flux-cored / SAW wire / flux'], ['aws', 'Classification', 'E7018 / ER70S-6 / E71T-1'], ['standard', 'Standard', 'AWS A5.1 / A5.18'], ['dia', 'Diameter (mm)', '3.15 / 1.2'], ['brand', 'Brand', ''], ['baking', 'Baking / storage', '350 °C, 1 hr; hold 120 °C'], ['shelf', 'Shelf life', '']]) },
+    'Fastener': { unit: 'pcs', fields: _std([['standard', 'Standard', 'IS 1367 / IS 3757'], ['propClass', 'Property class', '8.8 / 10.9'], ['size', 'Size', 'M16 × 60'], ['coating', 'Coating', 'Hot-dip galvanized / plain']]) },
+    'Paint / coating': { unit: 'litre', fields: _std([['system', 'Coating system', 'Epoxy primer + PU top'], ['product', 'Product / code', ''], ['specDft', 'Specified DFT (µm)', ''], ['volSolids', 'Volume solids (%)', ''], ['potLife', 'Pot life', ''], ['shelf', 'Shelf life', ''], ['coverage', 'Theoretical coverage (m²/L)', '']]) },
+    'Gas / other': { unit: 'pcs', fields: _std([['gas', 'Gas / description', 'Argon / CO₂ / oxygen / acetylene'], ['purity', 'Purity', '']]) },
+  },
+  machining: {
+    'Bar / forging stock': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 2062 / IS 1570'], ['grade', 'Grade', 'EN8 / EN24 / SS304 / C45'], ['shape', 'Shape & size', 'Round 50 mm'], ['hardness', 'Hardness', ''], ['tensile', 'Tensile strength (MPa)', ''], ['heatTreat', 'Heat-treat condition', '']]) },
+    'Casting': { unit: 'pcs', fields: _std([['grade', 'Material grade', 'FG260 / SG500-7'], ['pattern', 'Pattern no.', ''], ['hardness', 'Hardness (BHN)', ''], ['ndt', 'NDT / pressure test', '']]) },
+    'Tooling / inserts': { unit: 'pcs', fields: _std([['toolType', 'Tool type', 'Insert / drill / tap'], ['spec', 'Specification', 'CNMG 120408'], ['life', 'Expected tool life', '']]) },
+    'Coolant / consumable': { unit: 'litre', fields: _std([['spec', 'Specification', '']]) },
+  },
+  plastics: {
+    'Resin': { unit: 'kg', fields: _std([['polymer', 'Polymer', 'PP / ABS / PA6 / HDPE'], ['grade', 'Grade', ''], ['mfi', 'MFI (g/10 min)', ''], ['density', 'Density (g/cm³)', ''], ['dryTemp', 'Drying (°C / hrs)', ''], ['moulding', 'Moulding temp range (°C)', ''], ['colour', 'Colour', '']]) },
+    'Masterbatch / additive': { unit: 'kg', fields: _std([['colourCode', 'Colour code', ''], ['ldr', 'Let-down ratio (%)', ''], ['carrier', 'Carrier resin', '']]) },
+    'Insert / packing': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) },
+  },
+  panels: {
+    'Electrical component': { unit: 'pcs', fields: _std([['make', 'Make', 'Siemens / Schneider / L&T'], ['model', 'Model / catalogue no.', ''], ['rating', 'Rating (A / kA / V)', ''], ['standard', 'Standard', 'IEC 60947']]) },
+    'Busbar': { unit: 'kg', fields: _std([['material', 'Material', 'Cu / Al'], ['grade', 'Grade', 'E91E / E-Cu'], ['size', 'Size (mm)', '50 × 10'], ['currentRating', 'Current rating (A)', '']]) },
+    'Enclosure / sheet metal': { unit: 'pcs', fields: _std([['ip', 'IP rating', 'IP54 / IP65'], ['thickness', 'Sheet thickness (mm)', ''], ['size', 'Size (H × W × D)', ''], ['finish', 'Finish', 'RAL 7035 powder coat']]) },
+    'Cable / wire': { unit: 'm', fields: _std([['size', 'Size (mm²)', ''], ['colour', 'Colour', ''], ['standard', 'Standard', 'IS 694']]) },
+  },
+  general: {
+    'Raw material': { unit: 'kg', fields: _std([['standard', 'Grade / standard', ''], ['spec', 'Specification', '']]) },
+  },
+};
+const PART_DATASHEET_PACK = {
+  wires_cables: [['standard', 'Standard', 'IS 694 / IS 1554-1 / IEC 60502-1'], ['voltage', 'Voltage grade', '1.1 kV / 650-1100 V'], ['cores', 'No. of cores', '3'], ['size', 'Conductor size (mm²)', '2.5'], ['conductorMat', 'Conductor material', 'Cu / Al'], ['conductorClass', 'Conductor class', '2 (stranded) / 5 (flexible)'], ['strands', 'Strands × wire dia (mm)', '7 × 0.67'], ['insulation', 'Insulation type & nominal thickness', 'PVC TI1 — 0.7 mm / XLPE — 0.7 mm'], ['sheath', 'Sheath type & thickness', 'PVC ST1 — 1.8 mm'], ['armour', 'Armour', 'GI round wire 1.4 mm / unarmoured'], ['od', 'Overall diameter (mm)', ''], ['maxRes', 'Max conductor resistance @20 °C (Ω/km)', '7.41'], ['irMin', 'Min insulation resistance (MΩ·km)', ''], ['hvTest', 'HV test voltage / duration', '3.5 kV, 5 min'], ['drumLen', 'Standard length / drum (m)', '100 / 500 / 1000'], ['wtPerKm', 'Approx. weight (kg/km)', ''], ['colour', 'Core / sheath colour', '']],
+  fabrication: [['drawingNo', 'Drawing no. / revision', ''], ['markNo', 'Mark no.', ''], ['grade', 'Material grade', 'IS 2062 E250 BR'], ['section', 'Plate thickness / section', ''], ['unitWt', 'Unit weight (kg)', ''], ['wps', 'WPS no.', ''], ['weldCode', 'Weld code / standard', 'AWS D1.1 / IS 816'], ['ndt', 'NDT requirement', 'UT 10% / MPI 100% / DPT'], ['surfacePrep', 'Surface preparation', 'Sa 2½ (ISO 8501)'], ['coating', 'Coating system & DFT', 'Epoxy 2 × 40 µm + PU 40 µm'], ['galv', 'Galvanizing (µm)', '85'], ['tolClass', 'Tolerance class', 'IS 7215'], ['inspection', 'Inspection level', 'TPI / client / in-house']],
+  machining: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material grade', 'EN8'], ['hardness', 'Hardness required', ''], ['ra', 'Surface finish Ra (µm)', ''], ['critTol', 'Critical tolerances', ''], ['heatTreat', 'Heat treatment', ''], ['routing', 'Operation sequence', 'Turn → mill → drill → grind'], ['gauges', 'Gauges required', ''], ['cycleTime', 'Cycle time (min)', '']],
+  plastics: [['drawingNo', 'Drawing no. / revision', ''], ['resin', 'Resin & grade', 'PP homopolymer'], ['mouldNo', 'Mould no.', ''], ['cavities', 'No. of cavities', ''], ['shotWt', 'Shot weight (g)', ''], ['cycleTime', 'Cycle time (s)', ''], ['shrink', 'Shrinkage (%)', ''], ['colour', 'Colour / code', '']],
+  panels: [['standard', 'Standard', 'IEC 61439'], ['voltage', 'Rated voltage', '415 V'], ['current', 'Rated current (A)', ''], ['faultLevel', 'Fault level (kA, 1 s)', ''], ['ip', 'IP rating', 'IP54'], ['form', 'Form of separation', 'Form 2b'], ['busbar', 'Busbar (material × size)', ''], ['makes', 'Approved makes', '']],
+  general: [['standard', 'Standard / specification', ''], ['testReq', 'Test requirement', '']],
+};
+const _mfgType = () => { try { return (window.__operixBI || {}).mfgType || ''; } catch (e) { return ''; } };
+
+// ── All manufacturing types: process routes + extra packs (merged into the base packs) ──
+const MFG_TYPES_ALL = [
+  { id: 'wires_cables', icon: '🧵', label: 'Wires & Cables', desc: 'Drawing · stranding · extrusion · armouring · drums · IS 694 / 1554' },
+  { id: 'fabrication', icon: '🔩', label: 'Fabrication / Structural', desc: 'Cutting · fit-up · welding · NDT · blasting · painting · mark-wise dispatch' },
+  { id: 'machining', icon: '⚙️', label: 'Machining / Engineering parts', desc: 'Turning · milling · grinding · tool life · first-article inspection' },
+  { id: 'sheetmetal', icon: '📐', label: 'Sheet metal / Press shop', desc: 'Shearing · punching / laser · bending · welding · finishing' },
+  { id: 'foundry', icon: '🔥', label: 'Foundry / Casting / Forging', desc: 'Pattern · melting · moulding · pouring · fettling · NDT' },
+  { id: 'plastics', icon: '🧪', label: 'Plastics / Moulding', desc: 'Drying · moulding · deflashing · assembly · mould life' },
+  { id: 'rubber_pack', icon: '🛞', label: 'Rubber / Packaging', desc: 'Mixing · moulding / converting · curing · printing · packing' },
+  { id: 'panels', icon: '🎛️', label: 'Panels / Electrical assembly', desc: 'Sheet metal · busbar · wiring · IR / HV tests · FAT' },
+  { id: 'electronics_pcb', icon: '🔌', label: 'Electronics / PCB assembly', desc: 'SMT · reflow · AOI · testing · conformal coating' },
+  { id: 'food', icon: '🍲', label: 'Food & Beverage', desc: 'Batch · FIFO / expiry · processing · filling · FSSAI / HACCP' },
+  { id: 'pharma_chem', icon: '💊', label: 'Pharma / Chemicals', desc: 'Dispensing · mixing · reaction · filling · QC release · batch records' },
+  { id: 'textile', icon: '🧶', label: 'Textile / Garment', desc: 'Spinning / weaving · dyeing · cutting · stitching · finishing' },
+  { id: 'wood', icon: '🪵', label: 'Wood / Furniture', desc: 'Cutting · machining · assembly · finishing · packing' },
+  { id: 'building', icon: '🧱', label: 'Building materials (cement / tiles / blocks)', desc: 'Batching · casting / pressing · curing · testing · dispatch' },
+  { id: 'printing', icon: '🖨️', label: 'Printing', desc: 'Pre-press · printing · finishing · binding · packing' },
+  { id: 'general', icon: '🏭', label: 'General manufacturing', desc: 'Common BOM, production, stores and QA modules only' },
+];
+// stage: [name, extra fields [[key,label,placeholder]], QA check points]
+const S = (name, extra, qa) => ({ name, extra: extra || [], qa: qa || [] });
+const MFG_ROUTES = {
+  wires_cables: [
+    S('Rod breakdown / Drawing', [['dieSize', 'Die size (mm)', ''], ['wireDia', 'Wire dia out (mm)', ''], ['lubricant', 'Lubricant / emulsion', '']], ['Wire diameter within tolerance', 'Surface free of scratches / die marks', 'No breaks / joints beyond limit']),
+    S('Annealing', [['temp', 'Temperature (°C)', ''], ['atmosphere', 'Atmosphere / steam', '']], ['Elongation / softness acceptable', 'No oxidation / discolouration']),
+    S('Stranding / Bunching', [['strands', 'No. of strands × dia', '7 × 0.67'], ['lay', 'Lay length (mm)', ''], ['dir', 'Lay direction', 'Left / Right'], ['bobbin', 'Bobbin / drum no.', '']], ['Number of strands correct', 'Lay length within tolerance', 'Conductor diameter and compaction', 'Conductor resistance spot check']),
+    S('Insulation extrusion', [['compound', 'Compound / lot', ''], ['insThk', 'Insulation thickness avg / min (mm)', ''], ['lineSpeed', 'Line speed (m/min)', ''], ['colour', 'Core colour', ''], ['spark', 'Spark test kV', '']], ['Insulation thickness (avg / min)', 'Concentricity', 'Spark test passed', 'Core colour / marking']),
+    S('Laying-up / Cabling', [['cores', 'No. of cores', ''], ['lay', 'Lay length (mm)', ''], ['filler', 'Filler / binder tape', '']], ['Core identification sequence', 'Lay length within tolerance', 'Filler and binder tape applied']),
+    S('Bedding & Armouring', [['armour', 'Armour type & size', 'GI round wire 1.4 mm'], ['coverage', 'Coverage (%)', ''], ['zinc', 'Armour lot', '']], ['Armour wire count & diameter', 'Coverage ≥ spec', 'Bedding thickness']),
+    S('Sheathing', [['sheathCompound', 'Sheath compound / lot', ''], ['sheathThk', 'Sheath thickness avg / min (mm)', ''], ['od', 'Overall diameter (mm)', ''], ['marking', 'Printing / embossing text', '']], ['Sheath thickness', 'Overall diameter', 'Marking legible, length marking correct']),
+    S('Drumming & Final test', [['drumNo', 'Drum no.', ''], ['length', 'Length (m)', ''], ['gross', 'Gross wt (kg)', ''], ['tare', 'Drum tare (kg)', ''], ['res', 'Conductor resistance (Ω/km @20°C)', ''], ['ir', 'Insulation resistance (MΩ·km)', ''], ['hv', 'HV test (kV, time)', '']], ['Conductor resistance within limit', 'Insulation resistance ≥ spec', 'HV withstand passed', 'Length & drum label verified']),
+  ],
+  fabrication: [
+    S('Material receipt & marking', [['heatNo', 'Heat no.', ''], ['mtcNo', 'MTC no.', ''], ['grade', 'Grade', '']], ['MTC matches heat number & grade', 'Thickness / section verified', 'Material traceability marking transferred']),
+    S('Cutting / Profiling', [['method', 'Method', 'Gas / plasma / laser / shear'], ['cutList', 'Cutting list ref', ''], ['offcut', 'Offcut recorded (kg)', '']], ['Dimensions as per cutting list', 'Edge quality / no dross']),
+    S('Fit-up', [['drawing', 'Drawing / revision', ''], ['mark', 'Mark no.', ''], ['wps', 'WPS no.', '']], ['Drawing revision correct', 'Joint gap / root face / alignment', 'Tack welds by qualified welder']),
+    S('Welding', [['welder', 'Welder ID', ''], ['process', 'Process', 'SMAW / GMAW / SAW'], ['consumable', 'Consumable & batch', ''], ['preheat', 'Preheat / interpass (°C)', '']], ['Weld visual — profile, size, no undercut / porosity', 'Spatter and slag removed', 'Welder ID recorded']),
+    S('NDT', [['method', 'Method', 'UT / RT / MPI / DPT'], ['extent', 'Extent (%)', ''], ['report', 'Report no.', '']], ['NDT accepted per code', 'Repairs re-tested']),
+    S('Blasting & Painting / Galvanizing', [['prep', 'Surface prep grade', 'Sa 2½'], ['system', 'Coating system', ''], ['dft', 'DFT avg (µm)', ''], ['batch', 'Paint batch', '']], ['Surface preparation grade', 'DFT average ≥ spec, none < 80%', 'Finish and colour']),
+    S('Final inspection & Dispatch', [['weight', 'Weight (kg)', ''], ['dispatchTo', 'Dispatch / erection site', '']], ['Overall dimensions & squareness', 'Mark no. stencilled', 'Documentation dossier (MTC, WPS, NDT, DFT) complete']),
+  ],
+  machining: [
+    S('Cutting / Sawing', [['stock', 'Bar / blank size', '']], ['Length / blank size']),
+    S('Turning / CNC', [['program', 'Program no. / offset', ''], ['tool', 'Tool / insert', ''], ['cycle', 'Cycle time (min)', '']], ['First-article dimensions', 'Critical dimension at set frequency', 'Surface finish Ra']),
+    S('Milling / Drilling', [['fixture', 'Fixture no.', ''], ['tool', 'Tool', ''], ['cycle', 'Cycle time (min)', '']], ['Hole position and size', 'Burrs removed']),
+    S('Heat treatment', [['process', 'Process', 'Hardening / carburising'], ['temp', 'Temperature (°C)', ''], ['hardness', 'Hardness achieved', '']], ['Hardness within range', 'No distortion / cracks']),
+    S('Grinding / Finishing', [['ra', 'Ra achieved (µm)', '']], ['Final dimensions within tolerance', 'Surface finish']),
+    S('Final inspection & Packing', [['gauge', 'Gauge / CMM report no.', '']], ['Sample inspection per plan', 'Marking and packing']),
+  ],
+  sheetmetal: [
+    S('Shearing / Laser / Punching', [['sheet', 'Sheet thickness & grade', ''], ['program', 'Nesting / program', ''], ['utilisation', 'Sheet utilisation (%)', '']], ['Blank dimensions', 'Burr height']),
+    S('Bending / Forming', [['die', 'Die / punch', ''], ['angle', 'Angle achieved (°)', '']], ['Bend angle and flange length', 'No cracking']),
+    S('Welding / Assembly', [['welder', 'Welder ID', ''], ['process', 'Process', 'MIG / TIG / spot']], ['Weld visual', 'Assembly dimensions']),
+    S('Surface finish / Powder coat', [['pretreat', 'Pre-treatment', ''], ['dft', 'DFT (µm)', ''], ['cure', 'Cure temp / time', '']], ['Coating thickness', 'Adhesion / appearance']),
+    S('Final inspection & Packing', [], ['Dimensions and flatness', 'Packing without damage']),
+  ],
+  foundry: [
+    S('Pattern & Moulding', [['pattern', 'Pattern no.', ''], ['sand', 'Sand properties / mix', '']], ['Mould hardness / permeability', 'Core setting']),
+    S('Melting', [['furnace', 'Furnace / heat no.', ''], ['charge', 'Charge mix', ''], ['spectro', 'Spectro analysis ok?', '']], ['Chemistry within grade', 'Pouring temperature']),
+    S('Pouring', [['pourTemp', 'Pouring temp (°C)', ''], ['castWt', 'Poured weight (kg)', '']], ['Pouring within time', 'Test bar / coupon cast']),
+    S('Knock-out / Fettling', [['yield', 'Casting yield (%)', ''], ['rejected', 'Rejected nos.', '']], ['Visual — no cold shut / porosity', 'Dimensions']),
+    S('Heat treatment / NDT', [['ht', 'Heat treatment', ''], ['ndt', 'NDT method & result', '']], ['Mechanical properties on test bar', 'NDT accepted']),
+    S('Machining & Dispatch', [], ['Machined dimensions', 'Final inspection']),
+  ],
+  plastics: [
+    S('Material drying', [['resin', 'Resin / lot', ''], ['dryTemp', 'Temp (°C) / time (h)', '']], ['Moisture within limit']),
+    S('Moulding', [['mould', 'Mould no. / cavity', ''], ['machine', 'Machine / tonnage', ''], ['cycle', 'Cycle time (s)', ''], ['shots', 'Shots', ''], ['shotWt', 'Shot weight (g)', '']], ['First-off dimensions', 'No flash / short shot / sink marks', 'Colour match']),
+    S('Deflashing / Trimming', [], ['Gate vestige / flash removed']),
+    S('Assembly / Printing', [], ['Fit / function check', 'Print legible']),
+    S('Final inspection & Packing', [['packQty', 'Pack qty', '']], ['Sample per plan', 'Packing count correct']),
+  ],
+  rubber_pack: [
+    S('Mixing / Compounding', [['compound', 'Compound / batch', ''], ['mooney', 'Mooney / rheometer', '']], ['Rheometer within limits']),
+    S('Moulding / Converting / Printing', [['mould', 'Mould / die / plate', ''], ['cycle', 'Cycle time', ''], ['colours', 'Colours / registration', '']], ['Dimensions / print registration', 'Visual defects']),
+    S('Curing / Lamination / Finishing', [['temp', 'Temp / pressure / time', '']], ['Hardness / bond strength', 'Cure complete']),
+    S('Final inspection & Packing', [], ['Sample inspection', 'Labelling and packing']),
+  ],
+  panels: [
+    S('Sheet metal & Powder coat', [['enclosure', 'Enclosure ref', ''], ['dft', 'Coat DFT (µm)', '']], ['Enclosure dimensions', 'Coating thickness / finish']),
+    S('Busbar fabrication', [['material', 'Material & size', ''], ['rating', 'Current rating (A)', '']], ['Busbar size and bend', 'Clearance / creepage']),
+    S('Component mounting & Wiring', [['wiringBy', 'Wired by', ''], ['drawing', 'Schematic / revision', '']], ['Components per BOM (make, rating)', 'Wiring per schematic, ferrules', 'Terminal torque']),
+    S('Routine testing', [['ir', 'IR (MΩ)', ''], ['hv', 'HV test (kV, 1 min)', ''], ['func', 'Functional / interlock ok?', ''], ['earth', 'Earth continuity (Ω)', '']], ['Insulation resistance', 'HV withstand', 'Interlock / function test', 'Earth continuity']),
+    S('FAT & Dispatch', [['fatRef', 'FAT report ref', '']], ['Name-plate and drawings', 'Customer witness sign-off']),
+  ],
+  electronics_pcb: [
+    S('Incoming / Kitting', [['kit', 'Kit / BOM rev', '']], ['Components as per BOM', 'MSL / moisture control']),
+    S('SMT print & placement', [['paste', 'Solder paste lot', ''], ['program', 'Pick & place program', '']], ['Paste print inspection (SPI)', 'Placement accuracy']),
+    S('Reflow', [['profile', 'Reflow profile', '']], ['Profile within window', 'AOI — no bridging / tombstone']),
+    S('THT / Wave / Hand solder', [], ['Joint quality per IPC-A-610']),
+    S('Testing (ICT / FCT)', [['fixture', 'Test fixture', ''], ['result', 'Result / report', '']], ['ICT passed', 'Functional test passed']),
+    S('Conformal coat & Packing', [], ['Coating coverage', 'ESD packing']),
+  ],
+  food: [
+    S('Receiving & Storage', [['supplier', 'Supplier / lot', ''], ['expiry', 'Expiry / best-before', ''], ['temp', 'Receiving temp (°C)', '']], ['Quality / organoleptic check', 'Temperature and packaging intact', 'FIFO label applied']),
+    S('Processing / Cooking', [['batch', 'Batch no.', ''], ['temp', 'Process temp (°C)', ''], ['time', 'Time (min)', '']], ['Critical limit (CCP) met', 'Metal detection / sieve if applicable']),
+    S('Cooling / Holding', [['coolTemp', 'Core temp (°C)', '']], ['Within temperature limit']),
+    S('Filling / Packing', [['lineNo', 'Line', ''], ['netWt', 'Net weight (g)', ''], ['mfgDate', 'Mfg date', ''], ['expiry', 'Expiry', '']], ['Net content / seal integrity', 'Label — FSSAI no., batch, MRP, dates']),
+    S('QC release & Dispatch', [['micro', 'Micro / chemical result', '']], ['Lab result within spec', 'Retention sample kept']),
+  ],
+  pharma_chem: [
+    S('Dispensing', [['material', 'Material / AR no.', ''], ['weighed', 'Weighed qty', ''], ['checkedBy', 'Checked by', '']], ['Material approved by QC', 'Weighing verified (two-person)']),
+    S('Mixing / Reaction / Granulation', [['equipment', 'Equipment ID', ''], ['param', 'Critical parameters', ''], ['time', 'Time', '']], ['In-process parameters in limit', 'Equipment cleaning record']),
+    S('Compression / Filling', [['lineNo', 'Line', ''], ['yield', 'Theoretical vs actual yield', '']], ['In-process checks (weight / volume)', 'Line clearance']),
+    S('Packing & Labelling', [['batch', 'Batch & expiry', '']], ['Label reconciliation', 'Pack integrity']),
+    S('QC release', [['coa', 'COA ref', '']], ['Finished product tests within spec', 'Batch record reviewed — QA release']),
+  ],
+  textile: [
+    S('Yarn / Fabric receipt', [['lot', 'Lot / count / GSM', '']], ['Count / GSM / width', 'Shade / defects']),
+    S('Spinning / Weaving / Knitting', [['machine', 'Machine / loom', ''], ['metres', 'Output metres / kg', '']], ['Fabric defects per 4-point system']),
+    S('Dyeing / Processing', [['recipe', 'Recipe / shade code', ''], ['bath', 'Bath ratio', '']], ['Shade match', 'Colour fastness / shrinkage']),
+    S('Cutting & Stitching', [['style', 'Style / size ratio', ''], ['line', 'Line / operator', '']], ['Measurement per size chart', 'Stitch quality']),
+    S('Finishing & Packing', [['pack', 'Carton / ratio', '']], ['Final audit AQL', 'Labelling and packing']),
+  ],
+  wood: [
+    S('Timber / Board receipt', [['species', 'Species / grade', ''], ['moisture', 'Moisture (%)', '']], ['Moisture content', 'Grade / defects']),
+    S('Cutting & Machining', [['cutList', 'Cutting list', '']], ['Dimensions per cutting list']),
+    S('Assembly', [['jig', 'Jig / drawing', '']], ['Joint fit', 'Squareness']),
+    S('Sanding & Finishing', [['finish', 'Finish system', '']], ['Surface smoothness', 'Finish colour / coats']),
+    S('Packing & Dispatch', [], ['Packing protection', 'Hardware kit complete']),
+  ],
+  building: [
+    S('Batching / Mixing', [['mix', 'Mix design / grade', ''], ['wc', 'W/C ratio', '']], ['Material proportions as per mix design', 'Slump / consistency']),
+    S('Casting / Pressing', [['mould', 'Mould / press', ''], ['qty', 'Units cast', '']], ['Dimensions', 'Surface finish']),
+    S('Curing', [['method', 'Method', 'Water / steam'], ['days', 'Days', '']], ['Curing record complete']),
+    S('Testing', [['strength', 'Compressive strength (N/mm²)', ''], ['absorb', 'Water absorption (%)', '']], ['Strength per IS (7 / 28 day)', 'Water absorption within limit']),
+    S('Stacking & Dispatch', [], ['Stack by batch / date', 'Test certificate issued']),
+  ],
+  printing: [
+    S('Pre-press / Proof', [['job', 'Job / artwork rev', ''], ['proof', 'Proof approved by', '']], ['Artwork approved', 'Colour proof signed']),
+    S('Printing', [['press', 'Press', ''], ['sheets', 'Sheets / impressions', ''], ['wastage', 'Make-ready wastage', '']], ['Colour density / registration', 'No hickies / marks']),
+    S('Finishing', [['finish', 'Lamination / varnish / die-cut', '']], ['Finish quality', 'Die-cut accuracy']),
+    S('Binding & Packing', [], ['Folding / trimming', 'Count verified']),
+  ],
+  general: [
+    S('Material issue', [], ['Material as per BOM']),
+    S('Production', [], ['In-process check']),
+    S('Final inspection', [], ['Final inspection vs specification']),
+    S('Packing & Dispatch', [], ['Marking / packing']),
+  ],
+};
+// Extra QA / raw material / datasheet packs for the new types
+Object.assign(MFG_QA_PACK, {
+  sheetmetal: { templates: [['Incoming sheet / coil', ['Thickness and grade vs MTC', 'Surface free of rust / pits', 'Coil / lot number recorded']], ['In-process: bending & welding', ['Bend angle / flange', 'Weld visual', 'Hole positions']], ['Final inspection', ['Overall dimensions & flatness', 'Coating thickness / finish', 'Packing']]], instruments: ['Vernier caliper', 'Thickness gauge', 'Angle gauge', 'DFT gauge', 'Steel tape'] },
+  foundry: { templates: [['Melt chemistry check', ['Spectro analysis within grade', 'Pouring temperature recorded', 'Test coupon cast']], ['Casting inspection', ['Visual — no cold shut / porosity', 'Dimensional check', 'NDT as required']], ['Mechanical test', ['Tensile / hardness on test bar', 'Report attached to batch']]], instruments: ['Spectrometer', 'Hardness tester', 'UTM', 'Vernier caliper', 'Pyrometer'] },
+  rubber_pack: { templates: [['Compound / material check', ['Rheometer / Mooney within limits', 'Batch recorded']], ['Final inspection', ['Dimensions / print registration', 'Hardness / bond strength', 'Packing count']]], instruments: ['Rheometer', 'Shore hardness tester', 'Vernier caliper', 'Weighing scale'] },
+  electronics_pcb: { templates: [['Incoming components', ['Part no. and make as per BOM', 'MSL / moisture control', 'Counterfeit / label check']], ['Post-reflow inspection', ['AOI passed', 'Joint quality per IPC-A-610']], ['Functional test', ['ICT passed', 'FCT passed', 'Serial number recorded']]], instruments: ['Multimeter', 'LCR meter', 'Oscilloscope', 'ESD tester', 'Reflow profiler'] },
+  food: { templates: [['Receiving inspection', ['Supplier approved, COA available', 'Temperature / packaging intact', 'Expiry date acceptable']], ['CCP monitoring', ['Critical limit met (temp / time)', 'Metal detector check', 'Record signed']], ['Finished product release', ['Net content / seal', 'Label compliance (FSSAI)', 'Micro / chemical result ok']]], instruments: ['Digital thermometer', 'Weighing scale', 'pH meter', 'Refractometer', 'Metal detector'] },
+  pharma_chem: { templates: [['Raw material sampling', ['AR number assigned', 'Identification test passed', 'Released by QC']], ['In-process control', ['Parameters in limit', 'Line clearance done', 'Equipment cleaned & logged']], ['Finished product release', ['Tests within specification', 'Batch record reviewed', 'Label reconciliation']]], instruments: ['Analytical balance', 'pH meter', 'HPLC / UV', 'Dissolution tester', 'Hardness tester'] },
+  textile: { templates: [['Fabric inspection (4-point)', ['Width / GSM verified', 'Shade consistent across roll', 'Defect points within limit']], ['Garment audit (AQL)', ['Measurements per size chart', 'Stitch / seam quality', 'Labels and trims correct']]], instruments: ['GSM cutter', 'Measuring tape', 'Light box', 'Shrinkage tester'] },
+  wood: { templates: [['Timber / board receipt', ['Moisture within limit', 'Grade and defects', 'Dimensions']], ['Final furniture inspection', ['Joint fit and squareness', 'Finish and colour', 'Hardware kit complete']]], instruments: ['Moisture meter', 'Steel tape', 'Try square', 'Vernier caliper'] },
+  building: { templates: [['Mix check', ['Proportions per mix design', 'Slump / consistency', 'Cubes cast for testing']], ['Product test', ['Compressive strength (7 / 28 day)', 'Water absorption', 'Dimensions']]], instruments: ['Compression testing machine', 'Slump cone', 'Vernier caliper', 'Weighing scale'] },
+  printing: { templates: [['Pre-press approval', ['Artwork and proof approved', 'Colour reference available']], ['Press sheet check', ['Colour density and registration', 'No marks / hickies', 'Count verified']]], instruments: ['Densitometer', 'Spectrophotometer', 'Loupe', 'Paper caliper'] },
+});
+Object.assign(RM_SPEC_PACK, {
+  sheetmetal: { 'Sheet / coil': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 513 CR / IS 2062 HR / SS'], ['grade', 'Grade', 'CRCA D / SS304'], ['thickness', 'Thickness (mm)', ''], ['width', 'Width / size (mm)', ''], ['coating', 'Coating', 'GI / Galvalume / plain']]) }, 'Hardware / consumable': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  foundry: { 'Pig iron / scrap / alloy': { unit: 'kg', fields: _std([['grade', 'Grade', ''], ['chem', 'Chemistry (C / Si / Mn / S / P)', ''], ['form', 'Form', 'Pig / returns / ferro-alloy']]) }, 'Moulding sand / binder': { unit: 'kg', fields: _std([['type', 'Type', 'Silica / chromite / resin'], ['afs', 'AFS no.', ''], ['binder', 'Binder %', '']]) } },
+  rubber_pack: { 'Polymer / rubber': { unit: 'kg', fields: _std([['polymer', 'Polymer', 'NR / SBR / EPDM / BOPP / paper'], ['grade', 'Grade / GSM / micron', ''], ['hardness', 'Hardness / spec', '']]) }, 'Chemical / ink / adhesive': { unit: 'kg', fields: _std([['type', 'Type', ''], ['shelf', 'Shelf life', '']]) } },
+  electronics_pcb: { 'Component': { unit: 'pcs', fields: _std([['mpn', 'Manufacturer part no.', ''], ['make', 'Make', ''], ['package', 'Package', '0603 / SOIC-8'], ['msl', 'MSL level', '']]) }, 'PCB / solder / flux': { unit: 'pcs', fields: _std([['spec', 'Specification', 'FR4 1.6 mm / SAC305'], ['layers', 'Layers / finish', '']]) } },
+  food: { 'Ingredient': { unit: 'kg', fields: _std([['expiry', 'Expiry / best-before', ''], ['fssai', 'Supplier FSSAI no.', ''], ['storage', 'Storage condition', ''], ['allergen', 'Allergen', '']]) }, 'Packing material': { unit: 'pcs', fields: _std([['spec', 'Specification', ''], ['foodGrade', 'Food-grade certificate', '']]) } },
+  pharma_chem: { 'Active / Raw chemical': { unit: 'kg', fields: _std([['arNo', 'AR no.', ''], ['pharmacopeia', 'Pharmacopoeia / grade', 'IP / BP / USP / AR'], ['assay', 'Assay (%)', ''], ['retest', 'Retest date', ''], ['storage', 'Storage condition', '']]) }, 'Packing material': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  textile: { 'Yarn': { unit: 'kg', fields: _std([['count', 'Count', '30s'], ['blend', 'Blend', '100% cotton'], ['twist', 'Twist / ply', '']]) }, 'Fabric': { unit: 'm', fields: _std([['gsm', 'GSM', ''], ['width', 'Width (inch)', ''], ['construction', 'Construction', ''], ['shade', 'Shade', '']]) }, 'Trims / dye / chemical': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  wood: { 'Timber / board': { unit: 'm³', fields: _std([['species', 'Species / board type', 'Teak / MDF / ply'], ['grade', 'Grade', ''], ['size', 'Size / thickness', ''], ['moisture', 'Moisture (%)', '']]) }, 'Hardware / finish': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  building: { 'Cement / binder': { unit: 'kg', fields: _std([['grade', 'Grade', 'OPC 53 / PPC'], ['standard', 'Standard', 'IS 269 / IS 1489'], ['strength', 'Strength (28-day)', '']]) }, 'Aggregate / sand / additive': { unit: 'kg', fields: _std([['type', 'Type / size', '20 mm / M-sand'], ['zone', 'Zone / grading', ''], ['moisture', 'Moisture (%)', '']]) } },
+  printing: { 'Paper / board': { unit: 'kg', fields: _std([['gsm', 'GSM', ''], ['size', 'Sheet / reel size', ''], ['finish', 'Finish', 'Matt / gloss']]) }, 'Ink / plate / chemical': { unit: 'kg', fields: _std([['type', 'Type', ''], ['shade', 'Shade / Pantone', '']]) } },
+});
+Object.assign(PART_DATASHEET_PACK, {
+  sheetmetal: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material & thickness', ''], ['blank', 'Blank size', ''], ['bends', 'No. of bends', ''], ['weld', 'Welding', ''], ['finish', 'Finish / coating', ''], ['tol', 'Tolerance class', '']],
+  foundry: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material grade', 'FG260 / SG500-7'], ['pattern', 'Pattern no.', ''], ['castWt', 'Casting weight (kg)', ''], ['ht', 'Heat treatment', ''], ['ndt', 'NDT requirement', ''], ['hardness', 'Hardness (BHN)', '']],
+  rubber_pack: [['drawingNo', 'Drawing / artwork', ''], ['material', 'Material / compound', ''], ['hardness', 'Hardness / GSM', ''], ['size', 'Size', ''], ['colours', 'Colours', ''], ['packQty', 'Pack quantity', '']],
+  electronics_pcb: [['pcbRev', 'PCB / Gerber revision', ''], ['bomRev', 'BOM revision', ''], ['firmware', 'Firmware version', ''], ['testProc', 'Test procedure ref', ''], ['coating', 'Conformal coating', ''], ['standard', 'Standard', 'IPC-A-610 class 2']],
+  food: [['fssai', 'FSSAI category / licence', ''], ['shelfLife', 'Shelf life', ''], ['storage', 'Storage', ''], ['netContent', 'Net content', ''], ['ccp', 'CCP / critical limits', ''], ['allergen', 'Allergen declaration', ''], ['nutrition', 'Nutrition info', '']],
+  pharma_chem: [['strength', 'Strength / grade', ''], ['pharmacopeia', 'Pharmacopoeia / spec', ''], ['batchSize', 'Standard batch size', ''], ['shelfLife', 'Shelf life', ''], ['storage', 'Storage', ''], ['packSize', 'Pack size', ''], ['license', 'Drug licence / CAS no.', '']],
+  textile: [['style', 'Style no.', ''], ['fabric', 'Fabric / GSM / composition', ''], ['sizeRange', 'Size range', ''], ['wash', 'Wash / care', ''], ['aql', 'AQL level', ''], ['trims', 'Trims', '']],
+  wood: [['drawingNo', 'Drawing / model', ''], ['material', 'Wood / board type', ''], ['finish', 'Finish system', ''], ['size', 'Size (L × W × H)', ''], ['hardware', 'Hardware list', ''], ['packType', 'Packing', '']],
+  building: [['standard', 'Standard', 'IS 456 / IS 2185 / IS 15622'], ['grade', 'Grade / strength class', ''], ['size', 'Size', ''], ['mix', 'Mix design ref', ''], ['curing', 'Curing days', ''], ['testFreq', 'Test frequency', '']],
+  printing: [['jobNo', 'Job / artwork no.', ''], ['size', 'Finished size', ''], ['paper', 'Paper & GSM', ''], ['colours', 'Colours / Pantone', ''], ['finishing', 'Finishing (lam / UV / die-cut)', ''], ['binding', 'Binding', ''], ['qty', 'Order qty', '']],
+});
+
+MFG_TYPES.length = 0; MFG_TYPES.push(...MFG_TYPES_ALL);
+
 function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
   const canMulti = isSubscribed || isTestAccount;
   const [selected, setSelected] = React.useState([]);
@@ -2250,7 +2481,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
           <div style={{ background: 'rgba(255,255,255,0.07)', border: '2px solid #C9752A', borderRadius: 18, padding: '18px 20px', marginBottom: 20 }}>
             <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>What do you manufacture?</div>
             <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12.5, marginBottom: 12 }}>This sets the manufacturing and QA options for your industry. You can change it later in Business Insights.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, maxHeight: 340, overflowY: 'auto' }}>
               {MFG_TYPES.map(t => <div key={t.id} onClick={() => { setMfgType(t.id); setError(''); }} style={{ cursor: 'pointer', borderRadius: 12, padding: '10px 14px', background: mfgType === t.id ? '#fff' : 'rgba(255,255,255,0.06)', border: mfgType === t.id ? '2px solid #C9752A' : '1.5px solid rgba(255,255,255,0.15)' }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: mfgType === t.id ? '#1E2A4A' : '#fff' }}>{t.icon} {t.label}</div>
                 <div style={{ fontSize: 11.5, color: mfgType === t.id ? '#666' : 'rgba(255,255,255,0.5)', marginTop: 2 }}>{t.desc}</div></div>)}
@@ -4315,6 +4546,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
               )}
             </div>
 
+            {userRole === 'admin' && ((businessInfo.activeTypes || []).includes('manufacturing') || businessInfo.companyType === 'manufacturing') && (
+              <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #EAE6DB' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#888780', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Manufacturing</div>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Type of manufacturing</div>
+                <div style={{ fontSize: 13, color: '#555', marginBottom: 10 }}>Sets the raw-material categories and datasheet fields (Stores), the product datasheet (Engineering), and the QA checklists and tools for your industry. Existing data is not changed.</div>
+                <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #DDD', fontSize: 14, minWidth: 300 }}>
+                  <option value="">— Choose —</option>
+                  {MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                </select>
+                {businessInfo.mfgType && <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>{(MFG_TYPES.find(t => t.id === businessInfo.mfgType) || {}).desc}</div>}
+              </div>
+            )}
+
             {/* ── Danger Zone — owner only ── */}
             {userRole === 'admin' && isOwner && (
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #FECACA' }}>
@@ -6372,10 +6616,10 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','insights','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','insights','purchasereq','investors','boshortage','fatsat','tds'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','insights','purchasereq'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','insights','purchasereq'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
@@ -6593,6 +6837,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {/* Dashboard — always at top */}
       <div style={{ ...styles.navGroup, marginBottom: 4 }}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
 
       {isMultiBiz ? (
@@ -6642,7 +6887,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
-                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
               {/* ── MANUFACTURING ───────────────────────────────────── */}
@@ -6703,7 +6947,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
-                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
               {/* ── MEP / SERVICE ────────────────────────────────────── */}
@@ -6809,7 +7052,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
-                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
             </BizSection>
@@ -6889,7 +7131,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="projectpnl" label="Project P&amp;L" icon={BarChart2} />
               <NavBtn id="mepreports"     label="MEP Reports"       icon={FileText} />
               <NavBtn id="audit"          label="Financial Reports" icon={BarChart2} />
-              <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               <NavBtn id="evaluation"     label="Management Review" icon={CheckCircle} />
             </Section>
 
@@ -6946,7 +7187,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
             {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
             <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
-            <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
           </Section>
 
           {/* Purchase */}
@@ -7129,6 +7369,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
       <Section sectionKey="sales" label="Sales">
         <NavBtn id="customers" label="Customers"     icon={Users} />
@@ -7165,6 +7406,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
       <Section sectionKey="purchase" label="Purchase">
         <NavBtn id="vendors"   label="Vendors"          icon={Truck} />
@@ -7198,6 +7440,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
       </div>
       {showTrade && (
@@ -7244,6 +7487,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard"     icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="All Documents" icon={FileText} />
       </div>
       <Section sectionKey="sales" label="Parties">
@@ -7278,6 +7522,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
       </div>
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} unreadCount={unreadCount} onShowNotifications={onShowNotifications} />
@@ -17577,6 +17822,11 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
           </div>
         </div>
 
+        {(PART_DATASHEET_PACK[_mfgType()] || null) && (<>
+          <div style={styles.sectionDivider}>Product datasheet — {(MFG_TYPES.find(t => t.id === _mfgType()) || {}).label}</div>
+          <SpecsFields specs={form.datasheet || {}} onChange={(d) => set('datasheet', d)} fields={PART_DATASHEET_PACK[_mfgType()]} />
+        </>)}
+
         <div style={styles.formGroup}>
           <label style={styles.label}>Tolerance / Specs</label>
           <input value={form.tolerance} onChange={e => set('tolerance', e.target.value)} style={styles.input} placeholder="e.g. ±0.05mm" />
@@ -17943,7 +18193,7 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, b
           <div key={m.id} style={styles.recordRow}>
             <div style={{ flex: 1 }}>
               <div style={styles.docRowTitle}>{m.name}</div>
-              <div style={styles.docRowSub}>Unit: {m.unit || '—'} · Rate: {fmt(m.rate || 0)} · Min stock: {m.minStock || 0}</div>
+              <div style={styles.docRowSub}>{m.category ? <b>{m.category} · </b> : null}Unit: {m.unit || '—'} · Rate: {fmt(m.rate || 0)} · Min stock: {m.minStock || 0}{m.specs && (m.specs.grade || m.specs.standard) ? ' · ' + (m.specs.grade || '') + ' ' + (m.specs.standard || '') : ''}</div>
             </div>
             <div style={{ textAlign: 'right', minWidth: 80 }}>
               <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: (m.stock <= m.minStock) ? '#B5453A' : '#1E2A4A' }}>{m.stock}</div>
@@ -17966,6 +18216,9 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, b
 
 function RawMaterialForm({ initial, onSave, ownerUid }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], ...initial });
+  const mt = _mfgType(), pack = RM_SPEC_PACK[mt] || null, cats = pack ? Object.keys(pack) : [];
+  const catDef = pack && form.category ? pack[form.category] : null;
+  const setCat = (c) => setForm((p) => ({ ...p, category: c, unit: p.unit || (pack && pack[c] ? pack[c].unit : p.unit) }));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {[['name','Name'],['unit','Unit (kg/litre/pcs)']].map(([f,l]) => (
@@ -17982,11 +18235,21 @@ function RawMaterialForm({ initial, onSave, ownerUid }) {
           </div>
         ))}
       </div>
-      <div style={styles.sectionDivider}>Material Specifications</div>
+      {pack && (
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Material category ({(MFG_TYPES.find(t => t.id === mt) || {}).label})</label>
+          <select value={form.category || ''} onChange={(e) => setCat(e.target.value)} style={styles.input}>
+            <option value="">— Select category —</option>
+            {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
+      {!pack && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>Tip: choose the Type of manufacturing (Settings) to get industry-specific datasheet fields here.</div>}
+      <div style={styles.sectionDivider}>{catDef ? (form.category + ' — datasheet') : 'Material Specifications'}</div>
       <SpecsFields
         specs={form.specs}
         onChange={(s) => setForm((p) => ({ ...p, specs: s }))}
-        fields={[
+        fields={catDef ? catDef.fields : [
           ['grade', 'Grade / Standard', 'e.g. IS 2062, ASTM A36'],
           ['density', 'Density', 'e.g. 7850 kg/m³'],
           ['hardness', 'Hardness', 'e.g. 150 HRB'],
@@ -18271,10 +18534,102 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
   );
 }
 
+// ─── Process route (stage-wise production tracking, driven by Type of manufacturing) ───
+function routeInit(mt) {
+  const def = MFG_ROUTES[mt] || MFG_ROUTES.general;
+  return def.map(st => ({ name: st.name, status: 'pending', machine: '', operator: '', date: '', inQty: '', outQty: '', scrap: '', fields: {}, qa: {}, remarks: '' }));
+}
+function routeProgress(order) {
+  const st = order && order.route && order.route.stages;
+  if (!st || !st.length) return null;
+  return { done: st.filter(x => x.status === 'done').length, total: st.length, hold: st.some(x => x.status === 'hold') };
+}
+
+function ProcessRouteModal({ order, bom, onSave, onClose }) {
+  const mt = _mfgType();
+  const def = MFG_ROUTES[mt] || MFG_ROUTES.general;
+  const typeLabel = (MFG_TYPES.find(t => t.id === mt) || { label: 'General manufacturing' }).label;
+  const [stages, setStages] = useState(() => (order.route && order.route.type === mt && order.route.stages && order.route.stages.length === def.length) ? order.route.stages : routeInit(mt));
+  const [open, setOpen] = useState(() => { const i = stages.findIndex(s => s.status !== 'done'); return i < 0 ? 0 : i; });
+  const num = v => parseFloat(v) || 0;
+  const upd = (i, patch) => setStages(prev => prev.map((s, j) => j === i ? { ...s, ...patch } : s));
+  const updF = (i, k, v) => setStages(prev => prev.map((s, j) => j === i ? { ...s, fields: { ...s.fields, [k]: v } } : s));
+  const setQa = (i, qi, v) => setStages(prev => prev.map((s, j) => j === i ? { ...s, qa: { ...s.qa, [qi]: v } } : s));
+  const totScrap = stages.reduce((a, s) => a + num(s.scrap), 0);
+  const first = stages.find(s => num(s.inQty) > 0), lastDone = [...stages].reverse().find(s => num(s.outQty) > 0);
+  const yieldPct = first && lastDone ? num(lastDone.outQty) / num(first.inQty) * 100 : null;
+  const doneCount = stages.filter(s => s.status === 'done').length;
+  const col = { pending: '#888', active: '#2255A0', done: '#1A7A3E', hold: '#B5453A' };
+  function complete(i) {
+    const s = stages[i], qaPts = def[i].qa;
+    const unmarked = qaPts.some((_, qi) => !s.qa[qi]);
+    if (unmarked) { alert('Mark every QA check point (Pass / Fail / N/A) before completing this stage.'); return; }
+    const failed = qaPts.filter((_, qi) => s.qa[qi] === 'fail');
+    if (failed.length) { upd(i, { status: 'hold' }); alert('QA failed: ' + failed.join('; ') + '\n\nStage put on HOLD. Rework / raise a CAPA, then re-check and complete.'); return; }
+    if (num(s.outQty) <= 0 && !window.confirm('Output quantity is empty. Complete the stage anyway?')) return;
+    upd(i, { status: 'done', date: s.date || new Date().toISOString().slice(0, 10) });
+    if (i + 1 < stages.length) setOpen(i + 1);
+  }
+  const inp = { padding: '6px 9px', border: '1px solid #DDD', borderRadius: 7, fontSize: 13, width: '100%', boxSizing: 'border-box' };
+  const lab = { fontSize: 11, color: '#777', display: 'block', marginBottom: 2 };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 12, padding: '10px 14px', background: '#F8F6F0', borderRadius: 8 }}>
+        <span><b>{order.number}</b> · {bom ? bom.name : ''} · {order.quantity} units</span>
+        <span>Route: <b>{typeLabel}</b></span>
+        <span>Stages done: <b>{doneCount}/{stages.length}</b></span>
+        <span>Total scrap: <b>{totScrap}</b></span>
+        <span>Overall yield: <b style={{ color: yieldPct === null ? '#999' : yieldPct >= 95 ? '#1A7A3E' : yieldPct >= 85 ? '#E07B00' : '#B5453A' }}>{yieldPct === null ? '—' : yieldPct.toFixed(1) + '%'}</b></span>
+      </div>
+      {!mt && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>Choose the Type of manufacturing in Settings to get the route for your industry. Showing the general route.</div>}
+      {stages.map((s, i) => {
+        const d = def[i], isOpen = open === i, sp = num(s.inQty) > 0 ? num(s.scrap) / num(s.inQty) * 100 : null;
+        return (
+          <div key={i} style={{ border: '1px solid #EAE6DB', borderLeft: '4px solid ' + col[s.status === 'pending' && isOpen ? 'active' : s.status], borderRadius: 8, marginBottom: 8, background: '#fff' }}>
+            <div onClick={() => setOpen(isOpen ? -1 : i)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', cursor: 'pointer' }}>
+              <b style={{ fontSize: 14 }}>{i + 1}. {s.name}</b>
+              <span style={{ fontSize: 12, color: col[s.status], fontWeight: 700 }}>{s.status === 'done' ? '✔ Done' : s.status === 'hold' ? '⚠ QA hold' : 'Pending'}{sp !== null && sp > 0 ? ' · scrap ' + sp.toFixed(1) + '%' : ''}</span>
+            </div>
+            {isOpen && (
+              <div style={{ padding: '4px 14px 14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 10 }}>
+                  <div><label style={lab}>Machine / line</label><input style={inp} value={s.machine} onChange={e => upd(i, { machine: e.target.value })} /></div>
+                  <div><label style={lab}>Operator</label><input style={inp} value={s.operator} onChange={e => upd(i, { operator: e.target.value })} /></div>
+                  <div><label style={lab}>Date</label><input type="date" style={inp} value={s.date} onChange={e => upd(i, { date: e.target.value })} /></div>
+                  <div />
+                  <div><label style={lab}>Input qty</label><input type="number" style={inp} value={s.inQty} onChange={e => upd(i, { inQty: e.target.value })} /></div>
+                  <div><label style={lab}>Good output qty</label><input type="number" style={inp} value={s.outQty} onChange={e => upd(i, { outQty: e.target.value })} /></div>
+                  <div><label style={lab}>Scrap / rejected</label><input type="number" style={inp} value={s.scrap} onChange={e => upd(i, { scrap: e.target.value })} /></div>
+                  <div><label style={lab}>Loss (unaccounted)</label><div style={{ ...inp, background: '#F8F6F0', color: '#555' }}>{num(s.inQty) > 0 ? (num(s.inQty) - num(s.outQty) - num(s.scrap)).toFixed(2) : '—'}</div></div>
+                  {d.extra.map(([k, l, ph]) => <div key={k}><label style={lab}>{l}</label><input style={inp} placeholder={ph || ''} value={s.fields[k] || ''} onChange={e => updF(i, k, e.target.value)} /></div>)}
+                </div>
+                {d.qa.length > 0 && <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>QA check points — {s.name}</div>
+                  {d.qa.map((q, qi) => <div key={qi} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', fontSize: 12.5 }}><span>{q}</span>
+                    <span>{['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setQa(i, qi, v)} style={{ marginLeft: 4, padding: '2px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: s.qa[qi] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: s.qa[qi] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}</span></div>)}
+                </div>}
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <input style={{ ...inp, flex: 1 }} placeholder="Remarks" value={s.remarks} onChange={e => upd(i, { remarks: e.target.value })} />
+                  {s.status !== 'done' ? <button onClick={() => complete(i)} style={styles.primaryBtn}>Complete stage</button> : <button onClick={() => upd(i, { status: 'pending' })} style={styles.ghostBtn}>Re-open</button>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+        <button onClick={onClose} style={styles.ghostBtn}>Close</button>
+        <button onClick={() => onSave({ ...order, route: { type: mt, stages, updatedAt: Date.now() } })} style={styles.primaryBtn}>Save route</button>
+      </div>
+    </div>
+  );
+}
+
 function ProductionOrdersList({ productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
+  const [routeOrder, setRouteOrder] = useState(null);
   const canCreate = userRole === 'admin' || userRole === 'manager' || userRole === 'sales' || userRole === 'purchase';
   const canApprove = userRole === 'admin';
 
@@ -18390,6 +18745,7 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{o.number} — {bom?.name || 'Unknown BOM'}</div>
                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
                   {o.quantity} units · {o.startDate || ''}{o.batchNumber ? ` · Batch: ${o.batchNumber}` : ''}
+                  {(() => { const rp = routeProgress(o); return rp ? <span style={{ marginLeft: 8, fontWeight: 700, color: rp.hold ? '#B5453A' : rp.done === rp.total ? '#1A7A3E' : '#2255A0' }}>· Route {rp.done}/{rp.total}{rp.hold ? ' ⚠ QA hold' : ''}</span> : null; })()}
                 </div>
               </div>
               <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace(/_/g,' ')}</span>
@@ -18409,6 +18765,7 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                     → QA
                   </button>
                 )}
+                <button onClick={() => setRouteOrder(o)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '4px 10px' }} title="Stage-wise process route">🧭 Route</button>
                 <button onClick={() => setPrintOrder(o)} style={styles.iconBtn} title="Print"><Printer size={14} /></button>
                 {o.approvalStatus !== 'submitted' && <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>}
                 {o.approvalStatus !== 'submitted' && <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>}
@@ -18420,6 +18777,11 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
       {(creating || editing) && (
         <Modal title={editing ? 'Edit Production Order' : 'New Production Order'} onClose={() => { setCreating(false); setEditing(null); }} wide>
           <ProductionOrderForm order={editing} boms={boms} items={items} onSave={(o) => { saveOrder(o); setCreating(false); setEditing(null); }} onClose={() => { setCreating(false); setEditing(null); }} />
+        </Modal>
+      )}
+      {routeOrder && (
+        <Modal title={'Process route — ' + routeOrder.number} onClose={() => setRouteOrder(null)} wide>
+          <ProcessRouteModal order={routeOrder} bom={boms.find(b => b.id === routeOrder.bomId)} onSave={(o) => { saveOrder(o); setRouteOrder(null); }} onClose={() => setRouteOrder(null)} />
         </Modal>
       )}
       {printOrder && <ProductionOrderPrint order={printOrder} bom={boms.find(b => b.id === printOrder.bomId)} businessInfo={businessInfo} onClose={() => setPrintOrder(null)} />}
