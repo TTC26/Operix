@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Document verification</title>
+<style>
+body{font-family:Inter,Arial,sans-serif;background:#F1EEE6;margin:0;padding:20px;color:#1E2A4A}
+.card{max-width:460px;margin:20px auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+h1{font-size:18px;margin:0 0 4px}.sub{font-size:12px;color:#777;margin-bottom:14px}
+.ok{background:#E7F6EC;color:#1A7A3E;border-radius:8px;padding:8px 12px;font-weight:600;font-size:13px;margin-bottom:12px}
+.bad{background:#FDECEA;color:#B5453A;border-radius:8px;padding:8px 12px;font-weight:600;font-size:13px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:7px 4px;border-bottom:1px solid #eee;vertical-align:top}td:first-child{color:#777;width:38%}
+.note{font-size:11.5px;color:#888;margin-top:14px;line-height:1.5}
+</style></head><body><div class="card" id="c"></div>
+<script>
+function ck(parts){var s=parts.join('|'),h=2166136261;for(var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h.toString(36).slice(0,7);}
+var p=new URLSearchParams(location.hash.slice(1));
+var f=['c','t','n','d','a','f','to','p'];var vals=f.map(function(k){return p.get(k)||'';});
+var okc=p.get('k')===ck(vals);
+var L={c:'Issued by',t:'Document',n:'Number',d:'Date',a:'Amount',f:'Issuer tax ID',to:'Party / tax ID',p:'Printed on'};
+var rows=f.filter(function(k){return p.get(k);}).map(function(k){var v=p.get(k);if(k==='a')v='₹ '+Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});return '<tr><td>'+L[k]+'</td><td><b>'+v.replace(/[<>&]/g,'')+'</b></td></tr>';}).join('');
+document.getElementById('c').innerHTML=rows?('<h1>Document verification</h1><div class="sub">Scanned from the QR on a printed document</div>'+(okc?'<div class="ok">✓ QR details are intact</div>':'<div class="bad">⚠ QR details do not match their check code</div>')+'<table>'+rows+'</table><div class="note">Compare these details with the printed copy. For confirmation, contact the issuing company directly.</div>'):'<h1>Nothing to verify</h1><div class="sub">This link has no document details.</div>';
+</script></body></html>
