@@ -476,10 +476,18 @@ async function downloadDocPDF(elOrSelector, filename) {
     // html2canvas ignores @media print, so force the print layout via a class during capture
     // (hides editor-only rows/controls, shows the clean columnar print rows).
     el.classList.add('pdf-exporting');
-    let canvas;
+    let canvas, qrEl = null;
     try {
+      // verification QR on downloaded PDFs too
+      try {
+        const txt = (el.innerText || ''); const dm = txt.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
+        const bi0 = (typeof window !== 'undefined' && window.__operixBI) || {};
+        const qh = qrBoxHtml({ c: bi0.name, t: String(filename || 'Document').replace(/\.pdf$/i, '').replace(/[-_]+/g, ' '), n: dm ? dm[0] : '', p: new Date().toISOString().slice(0, 10) }, 100);
+        if (qh) { qrEl = document.createElement('div'); qrEl.style.cssText = 'display:flex;justify-content:flex-end;padding:8px 12px;background:#fff'; qrEl.innerHTML = qh; el.appendChild(qrEl); }
+      } catch (e) {}
       canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
     } finally {
+      if (qrEl && qrEl.parentNode) qrEl.parentNode.removeChild(qrEl);
       el.classList.remove('pdf-exporting');
     }
     const { jsPDF } = window.jspdf;
@@ -1550,10 +1558,12 @@ async function printPaginated(sel, bi, pre, gen) {
     const _plain = blocks.map(b => String(b.h || '')).join(' ').replace(/<[^>]+>/g, ' ');
     const _dm = _plain.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
     const PGFTXT = (pre && pre.pgf) || (gen && gen.pgf) || [bi && bi.name, _dm ? _dm[0] : (typeof window !== 'undefined' && window.__printDocNo) || '', 'Page {p} of {n}'].filter(Boolean).join(' | ');
+    // Generic verification QR: never adds content or a page — it is stamped into free space at the bottom-right of the last page (if any).
+    let QRH = '';
     if (!blocks.some(b => /Scan to verify/.test(String(b.h || '')))) {
       const _t0 = (pre && pre.title) || (gen && gen.title) || (() => { const m = _plain.replace(/\s+/g, ' ').trim(); const h = blocks.map(b => String(b.h || '')).join(' ').match(/<(?:h[1-3]|div class="zh1")[^>]*>([^<]{3,60})</i); return h ? h[1].trim() : ''; })();
       const _n0 = _dm ? _dm[0] : ((typeof window !== 'undefined' && window.__printDocNo) || '');
-      if (_t0 || _n0) { const _qh = qrBoxHtml({ c: bi && bi.name, t: _t0, n: _n0, p: new Date().toISOString().slice(0, 10) }, 112); if (_qh) blocks.push({ t: '', h: '<div style="display:flex;justify-content:flex-end;margin-top:10px;break-inside:avoid">' + _qh + '</div>' }); }
+      QRH = qrBoxHtml({ c: bi && bi.name, t: _t0 || 'Document', n: _n0, p: new Date().toISOString().slice(0, 10) }, 112);
     }
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
@@ -1566,7 +1576,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
       + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
-      + 'var zst=document.createElement("style");document.head.appendChild(zst);function setZ(z){zst.textContent=z<1?".bd>*{zoom:"+z+"}":"";}'
+      + 'var zst=document.createElement("style");document.head.appendChild(zst);var RSV="";function setZ(z){zst.textContent=(z<1?".bd>*{zoom:"+z+"}":"")+RSV;}'
       + 'function LAY(){out.innerHTML="";TAIL.length=0;np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
@@ -1587,6 +1597,9 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
       + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
       + '}setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}}'
+      + 'function qrPlace(){var lb=out.lastElementChild.querySelector(".bd");if(!lb)return false;var le2=lb.lastElementChild;var us2=le2?le2.offsetTop+le2.offsetHeight:0;var fr2=lb.clientHeight-us2;var sz=Math.min(112,fr2-34);if(sz<64)return false;var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}lb.appendChild(qw);return true;}'
+      + 'if(QRH&&out.lastElementChild&&!qrPlace()){var cb=parseFloat(getComputedStyle(out.querySelector(".bd")).bottom)||0;RSV=".bd{bottom:"+(cb+118)+"px !important}";setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zq=0.95;zq>=0.62&&out.children.length>1;zq-=0.03){setZ(zq);LAY();}}'
+      + 'var ls=out.lastElementChild;var qw2=document.createElement("div");qw2.style.cssText="position:absolute;right:5mm;bottom:"+cb+"px;";qw2.innerHTML=QRH;var sv2=qw2.querySelector("svg");if(sv2){sv2.setAttribute("width",104);sv2.setAttribute("height",104);}ls.appendChild(qw2);}'
       + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
@@ -1616,7 +1629,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var QRH=' + JSON.stringify(QRH) + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -8108,7 +8121,7 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1E2A4A' }} className="no-print">
         <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Petty Cash Voucher</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
+          <button onClick={() => printView('.petty-voucher-print', businessInfo)} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
           <button onClick={() => downloadDocPDF('.petty-voucher-print', `petty-voucher-${entry.voucherNo || ''}.pdf`)} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Download size={14}/> PDF</button>
           <button onClick={onClose} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14}/></button>
         </div>
@@ -8598,6 +8611,18 @@ function LetterheadHeader({ bi, style = {} }) {
 }
 
 function printHTML(html){
+  // Route through the common print engine (framed A4 pages, page footer, verification QR). Detached holder → no style leak.
+  try {
+    const sm = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    const bm = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const hold = document.createElement('div');
+    hold.className = 'print-area';
+    hold.innerHTML = (sm ? '<style>' + sm[1].replace(/@page[^{]*\{[^}]*\}/g, '') + '</style>' : '') + (bm ? bm[1] : html);
+    if ((hold.textContent || '').trim()) { printView(hold, (typeof window !== 'undefined' && window.__operixBI) || {}, {}); return; }
+  } catch (e) { console.warn('printHTML via engine failed', e); }
+  printHTMLLegacy(html);
+}
+function printHTMLLegacy(html){
   try {
     const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -9745,7 +9770,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
         </div>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHBin(v => !v)} style={{ ...styles.ghostBtn, ...(useLHBin ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHBin ? 'Letterhead ON' : 'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','bin-card.pdf')} style={styles.ghostBtn}><Download size={15}/> PDF</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}>🖨 Print</button>
+        <button onClick={() => printView('.print-area', useLHBin ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}>🖨 Print</button>
       </div>
 
       {/* Item selector */}
@@ -14709,6 +14734,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);cur=s;bd=b;}'
         + 'np();'
         + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i];var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(node.className&&node.className.indexOf("drow")>-1){var dh=document.createElement("div");dh.innerHTML=DHEADHTML;if(dh.firstElementChild)bd.appendChild(dh.firstElementChild);}bd.appendChild(node);}}'
+        + 'if(typeof QRH==="string"&&QRH){var le=bd.lastElementChild;var us=le?le.offsetTop+le.offsetHeight:0;var fr=bd.clientHeight-us;var sz=Math.min(112,fr-34);if(sz<64){np();sz=104;}var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}bd.appendChild(qw);}'
         + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
         + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
         + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
@@ -14735,7 +14761,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         <div id="out"></div>
         <div id="hdtpl" style="display:none">${headerInner}</div>
         <div id="fttpl" style="display:none">${footerInner}</div>
-        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};${script}</script>
+        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};var QRH=${JSON.stringify(qrBoxHtml({ c: businessInfo.name, t: 'Minutes of Meeting', n: m.number, d: m.date, p: new Date().toISOString().slice(0, 10) }, 112))};${script}</script>
       </body></html>`;
       // Hidden iframe = isolated print context that works inside the desktop app
       // (window.open popups are blocked there). The in-document script paginates & prints.
@@ -15038,13 +15064,13 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
   const pcol = (v) => ({ ...td, fontWeight: 700, color: v >= 0 ? '#1A7A3E' : '#B5453A' });
 
   return (
-    <div style={styles.page}>
+    <div style={styles.page} className="pnl-print-area">
       <div style={styles.pageHeader}>
         <div>
           <h2 className="serif" style={styles.pageTitle}>Project P&amp;L</h2>
           <p style={styles.muted}>Profit &amp; loss per project — billing vs cost</p>
         </div>
-        <button style={styles.secondaryBtn} className="no-print" onClick={() => window.print()}>Print</button>
+        <button style={styles.secondaryBtn} className="no-print" onClick={() => printView('.pnl-print-area', businessInfo)}>Print</button>
       </div>
 
       {rows.length > 0 && (() => {
@@ -15180,18 +15206,28 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
     const vlist = Array.isArray(vouchers) ? vouchers : [];
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
 
-    // Revenue — approved/finalized invoices
-    const invoices = docs.filter(d => d.type === 'invoice' && inRange(d.date || '') && inDiv(d));
-    const revenue  = invoices.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+    // Amounts are computed from line items (documents have no stored "total"); P&L uses the value EXCLUDING GST.
+    const taxableOf = d => computeTotals(d, businessInfo?.state || '', businessInfo?.country || 'india').taxable || 0;
+    const live = d => d.status === 'approved' && inRange(d.date || '') && inDiv(d);
 
-    // COGS — purchase bills
-    const pbills = docs.filter(d => d.type === 'purchasebill' && inRange(d.date || '') && inDiv(d));
-    const cogs   = pbills.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+    // Revenue — approved invoices less approved credit notes (taxable value, ex-GST)
+    const invoices = docs.filter(d => d.type === 'invoice' && live(d));
+    const cnotes   = docs.filter(d => d.type === 'creditnote' && live(d));
+    const revenue  = invoices.reduce((s, d) => s + taxableOf(d), 0) - cnotes.reduce((s, d) => s + taxableOf(d), 0);
 
-    // Operating expenses — voucher payments + petty cash debits
-    const voucherExp = vlist
-      .filter(v => inRange(v.date || '') && inDiv(v) && v.status !== 'rejected')
-      .reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    // Payment vouchers only. Receipts are money IN (collections) — never an expense.
+    // A payment linked to a bill/PO just settles it (already in COGS) → skipped to avoid double counting.
+    const payments = vlist.filter(v => v.type === 'payment' && inRange(v.date || '') && inDiv(v) && v.status !== 'rejected' && v.status !== 'deleted');
+    const settles  = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    const direct   = payments.filter(v => !settles(v));
+
+    // COGS — approved purchase bills (ex-GST) + direct payments booked to "Purchase"
+    const pbills = docs.filter(d => d.type === 'purchasebill' && live(d));
+    const cogs   = pbills.reduce((s, d) => s + taxableOf(d), 0)
+      + direct.filter(v => v.accountHead === 'Purchase').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+
+    // Operating expenses — other direct payment vouchers + petty cash debits
+    const voucherExp = direct.filter(v => v.accountHead !== 'Purchase').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const pcExp = pcEntries
       .filter(e => inRange(e.date || '') && inDiv(e) && e.status !== 'rejected')
       .reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
@@ -15244,8 +15280,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
       const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return n < 0 ? `(${sym}${abs})` : `${sym}${abs}`;
     };
-    const w = window.open('', '_blank');
-    w.document.write(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
+    printHTML(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
     <style>
       body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 40px; }
       h2 { text-align: center; font-size: 16px; margin: 0 0 2px; }
@@ -15289,8 +15324,6 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
     ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
     <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Oryqen</div>
     </body></html>`);
-    w.document.close();
-    setTimeout(() => { w.print(); }, 400);
   }
 
   const cardStyle = { background: '#fff', borderRadius: 10, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' };
@@ -15314,7 +15347,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
           <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({vpl.invoiceCount} invoices)</span><span style={valueStyle(vpl.revenue)}>{fmt(vpl.revenue)}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({vpl.pbillCount} bills)</span><span style={valueStyle(-vpl.cogs)}>{fmt(-vpl.cogs)}</span></div>
           <div style={{ ...rowStyle, fontWeight: 700, borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}><span style={{ fontSize: 13 }}>GROSS PROFIT</span><span style={valueStyle(vpl.grossProfit)}>{fmt(vpl.grossProfit)}</span></div>
-          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Payment Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
           <div style={{ ...rowStyle, fontWeight: 700, fontSize: 15, background: vpl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', borderRadius: 7, padding: '10px 12px', marginTop: 8, border: `1.5px solid ${vpl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
             <span>NET {vpl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
             <span style={{ color: vpl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(vpl.netProfit)}</span>
@@ -15363,7 +15396,8 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
           <span style={{ fontSize: 13 }}>GROSS PROFIT</span>
           <span style={valueStyle(pl.grossProfit)}>{fmt(pl.grossProfit)}</span>
         </div>
-        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Payment Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={{ fontSize: 11, color: '#999', margin: '6px 0 2px', lineHeight: 1.5 }}>Basis: approved invoices / credit notes / purchase bills, excluding GST. Receipt vouchers are collections (not expenses). Payments linked to a bill or PO are not counted again. Payroll is not included.</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderRadius: 8, marginTop: 8, background: pl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', border: `1.5px solid ${pl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
           <span style={{ fontWeight: 700, fontSize: 15 }}>NET {pl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
           <span style={{ fontWeight: 700, fontSize: 15, color: pl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(pl.netProfit)}</span>
@@ -16141,7 +16175,7 @@ function TaxReport({ documents, customers, businessInfo }) {
         </div>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHTax(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHTax?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHTax?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('#tax-report-page','tax-report.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('#tax-report-page', useLHTax ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
       </div>
 
       {useLHTax && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -21318,10 +21352,7 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
       ${lhFooterHtml}
     </body></html>`;
 
-    const w = window.open('', '_blank', 'width=1000,height=700');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => { w.focus(); w.print(); }, 500);
+    printHTML(html);
   }
 
   return (
