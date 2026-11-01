@@ -6750,6 +6750,236 @@ const MFG_NEXT = {
   drumstock: ['Drum Stock & Scrap', 4, 'Finished drums released by QA (drum no., product, length, net weight, order item no., test certificate) plus scrap and offcut stock. Delivery Note and Packing List pick drums from here.', [['stock', 'Stock Position']]],
   machinelog: ['Machine Log & Downtime', 4, 'Shift-wise running hours, output and downtime reasons per machine, linked to the Breakdown Log and used for OEE.', [['productionorders', 'Production Orders'], ['fmworkorders', 'Breakdown Log']]],
 };
+// ─── Cable Design Master (Wires & Cables · Engineering) ───────────────────────────────────────────────
+// Construction → calculated diameters & kg/km → Finished-Good item + master BOM (per 1000 m) + TDS.
+// Densities g/cm³ (mm² × g/cm³ = kg/km). Resistances: IEC 60228 / IS 8130 max DC at 20 °C (Ω/km).
+const CAB_DENS = { Cu: 8.89, Al: 2.703, PVC: 1.45, XLPE: 0.92, HFFR: 1.50, PE: 0.94, GI: 7.85, AlArm: 2.70 };
+const CAB_R = {
+  Cu2: { 0.5: 36, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601, 400: 0.047, 500: 0.0366, 630: 0.0283 },
+  Cu5: { 0.5: 39, 0.75: 26, 1: 19.5, 1.5: 13.3, 2.5: 7.98, 4: 4.95, 6: 3.3, 10: 1.91, 16: 1.21, 25: 0.78, 35: 0.554, 50: 0.386, 70: 0.272, 95: 0.206, 120: 0.161, 150: 0.129, 185: 0.106, 240: 0.0801 },
+  Al2: { 10: 3.08, 16: 1.91, 25: 1.2, 35: 0.868, 50: 0.641, 70: 0.443, 95: 0.32, 120: 0.253, 150: 0.206, 185: 0.164, 240: 0.125, 300: 0.1, 400: 0.0778, 500: 0.0605, 630: 0.0469 },
+};
+const CAB_LAYUP = { 1: 1, 2: 2, 3: 2.155, 4: 2.414, 5: 2.7, 6: 3, 7: 3, 8: 3.31, 10: 4, 12: 4.15, 14: 4.41, 16: 4.7, 19: 5, 24: 6, 27: 6.15, 30: 6.41, 37: 7 };
+const cabLayup = n => CAB_LAYUP[n] || (n <= 1 ? 1 : 1.0 + 0.95 * Math.sqrt(n) * 1.18);
+const CAB_BLANK = {
+  name: '', autoName: true, code: '', standard: 'IS 1554 (Part 1)', voltage: '1.1 kV', cores: 3, size: 2.5, condMat: 'Cu', condClass: '2', strands: '', fill: '',
+  insMat: 'PVC', insT: 0.9, insColour: 'Red, Yellow, Blue', innerType: 'extruded', innerMat: 'PVC', innerT: 0.3,
+  armour: 'none', armMat: 'GI', armDia: 1.4, armT: 0.8, armW: 4, sheathMat: 'PVC', sheathT: 1.8, sheathColour: 'Black', fr: 'FR',
+  wasteCond: 0.5, wasteComp: 3, drumLen: 500, hvTest: '3 kV, 5 min (verify per standard)', mat: {}, notes: '',
+};
+
+function calcCable(d) {
+  const n = Math.max(1, parseInt(d.cores) || 1), S = parseFloat(d.size) || 0, num = v => parseFloat(v) || 0;
+  const cls = String(d.condClass || '2');
+  const fill = num(d.fill) || (cls === '1' ? 1 : cls === '5' ? 0.72 : 0.78);
+  const lay = cls === '1' ? 1 : cls === '5' ? 1.04 : 1.02;
+  const dc = Math.sqrt(4 * S / (Math.PI * fill));
+  const rhoC = d.condMat === 'Al' ? CAB_DENS.Al : CAB_DENS.Cu;
+  const wCond = S * rhoC * lay * n;
+  const ti = num(d.insT), di = dc + 2 * ti;
+  const wIns = n * Math.PI * (di * di - dc * dc) / 4 * (CAB_DENS[d.insMat] || 1.45);
+  const D1 = di * cabLayup(n);
+  const tb = d.innerType === 'none' ? 0 : num(d.innerT);
+  const interstice = n > 1 ? Math.max(0, Math.PI * D1 * D1 / 4 - n * Math.PI * di * di / 4) : 0;
+  const D2 = D1 + 2 * tb;
+  const wBed = (n > 1 || tb > 0) ? ((Math.PI * (D2 * D2 - D1 * D1) / 4) + (d.innerType === 'none' ? 0 : interstice)) * (CAB_DENS[d.innerMat] || 1.45) : 0;
+  let D3 = D2, wArm = 0, nArm = 0;
+  const rhoA = d.armMat === 'Al' ? CAB_DENS.AlArm : CAB_DENS.GI;
+  if (d.armour === 'wire') { const da = num(d.armDia); if (da > 0) { nArm = Math.floor(Math.PI * (D2 + da) / da * 0.95); wArm = nArm * Math.PI * da * da / 4 * rhoA * 1.06; D3 = D2 + 2 * da; } }
+  if (d.armour === 'strip') { const t = num(d.armT), w = num(d.armW); if (t > 0 && w > 0) { nArm = Math.floor(Math.PI * (D2 + t) / w * 0.95); wArm = nArm * w * t * rhoA * 1.06; D3 = D2 + 2 * t; } }
+  const ts = num(d.sheathT), D4 = D3 + 2 * ts;
+  const wSheath = Math.PI * (D4 * D4 - D3 * D3) / 4 * (CAB_DENS[d.sheathMat] || 1.45);
+  const tbl = d.condMat === 'Al' ? CAB_R.Al2 : (cls === '5' ? CAB_R.Cu5 : CAB_R.Cu2);
+  const maxR = tbl[S] || null;
+  const insMin = ti > 0 ? Math.max(0, ti - (0.1 + 0.1 * ti)) : 0;
+  const sheathMin = ts > 0 ? Math.max(0, d.armour === 'none' ? 0.85 * ts - 0.1 : 0.8 * ts - 0.2) : 0;
+  const wTotal = wCond + wIns + wBed + wArm + wSheath;
+  const r2 = v => Math.round(v * 100) / 100;
+  return { n, S, dc: r2(dc), di: r2(di), D1: r2(D1), D2: r2(D2), D3: r2(D3), D4: r2(D4), wCond: r2(wCond), wIns: r2(wIns), wBed: r2(wBed), wArm: r2(wArm), nArm, wSheath: r2(wSheath), wTotal: r2(wTotal), maxR, insMin: r2(insMin), sheathMin: r2(sheathMin) };
+}
+function cableAutoName(d) {
+  const arm = d.armour === 'none' ? 'Unarmoured' : 'Armoured';
+  return (d.cores || 1) + 'C x ' + (d.size || '') + ' sq.mm ' + (d.condMat === 'Al' ? 'Al' : 'Cu') + ' ' + d.insMat + '/' + d.sheathMat + ' ' + arm + (d.fr ? ' ' + d.fr : '') + ' ' + (d.voltage || '');
+}
+
+function CabField({ t, children, w }) { return <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: w || 150 }}>{t}{children}</label>; }
+
+function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms = [], setBoms, tdsSheets = [], setTdsSheets, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const [ed, setEd] = useState(null);
+  const [q, setQ] = useState('');
+  const mats = (items || []).filter(isMaterialItem);
+  const list = (designs || []).filter(x => !x.deleted && (!q || _nm(x.name).includes(_nm(q)) || _nm(x.code).includes(_nm(q))));
+  const set = (k, v) => setEd(p => { const nx = { ...p, [k]: v }; if (nx.autoName && k !== 'name') nx.name = cableAutoName(nx); return nx; });
+  const setMat = (role, id) => setEd(p => ({ ...p, mat: { ...(p.mat || {}), [role]: id } }));
+  const c = ed ? calcCable(ed) : null;
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+
+  function bomLines(d, k) {
+    const wc = 1 + (parseFloat(d.wasteCond) || 0) / 100, wp = 1 + (parseFloat(d.wasteComp) || 0) / 100, r3 = v => Math.round(v * 1000) / 1000;
+    const pick = (role, fallback) => { const it = mats.find(x => x.id === (d.mat || {})[role]); return it ? { materialId: it.id, name: it.name, src: 'item' } : { materialId: '', name: fallback }; };
+    const L = [];
+    if (k.wCond) L.push({ ...pick('cond', (d.condMat === 'Al' ? 'Aluminium' : 'Copper') + ' rod'), unit: 'kg', qty: r3(k.wCond * wc), role: 'Conductor' });
+    if (k.wIns) L.push({ ...pick('ins', d.insMat + ' insulation compound'), unit: 'kg', qty: r3(k.wIns * wp), role: 'Insulation' });
+    if (k.wBed) L.push({ ...pick('inner', d.innerMat + ' inner sheath / filler compound'), unit: 'kg', qty: r3(k.wBed * wp), role: 'Inner sheath' });
+    if (k.wArm) L.push({ ...pick('arm', (d.armMat === 'Al' ? 'Aluminium' : 'GI') + ' armour ' + (d.armour === 'strip' ? 'strip' : 'wire')), unit: 'kg', qty: r3(k.wArm * 1.01), role: 'Armour' });
+    if (k.wSheath) L.push({ ...pick('sheath', d.sheathMat + ' outer sheath compound'), unit: 'kg', qty: r3(k.wSheath * wp), role: 'Outer sheath' });
+    if ((d.mat || {}).drum && parseFloat(d.drumLen) > 0) L.push({ ...pick('drum', 'Drum'), unit: 'pcs', qty: r3(1000 / parseFloat(d.drumLen)), role: 'Packing' });
+    return L;
+  }
+
+  function saveDesign() {
+    const d = { ...ed, name: (ed.name || '').trim() };
+    if (!d.name) { alert('Enter the cable name.'); return; }
+    if (!(parseFloat(d.size) > 0) || !(parseInt(d.cores) > 0)) { alert('Enter cores and conductor size.'); return; }
+    const dup = (designs || []).find(x => !x.deleted && x.id !== d.id && _nm(x.name) === _nm(d.name));
+    if (dup) { alert('A design with this name already exists.'); return; }
+    const k = calcCable(d), id = d.id || 'cd-' + Date.now(), now = new Date().toISOString();
+    const lines = bomLines(d, k);
+    // 1) Finished-good item (one per design, linked by designId)
+    const exist = (items || []).find(x => x.designId === id) || (items || []).find(x => _nm(x.name) === _nm(d.name));
+    const fgId = exist ? exist.id : 'itm-' + id;
+    const fg = { ...(exist || { saleRate: 0, purchaseRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0, hsn: '8544', itemCode: '' }), id: fgId, name: d.name, unit: 'm', category: 'Finished Good', designId: id, bizType: (exist && exist.bizType) || currentBizType, specs: { standard: d.standard, voltage: d.voltage, od: String(k.D4), weight: String(k.wTotal) + ' kg/km' } };
+    setItems(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === fgId) ? a.map(x => x.id === fgId ? fg : x) : [...a, fg]; });
+    // 2) Master BOM per 1000 m (matched by name when a quotation is won)
+    const oldBom = (boms || []).find(b => !b.orderRef && b.designId === id);
+    const bom = { ...(oldBom || {}), id: oldBom ? oldBom.id : 'bom-' + id, name: d.name, outputItem: d.name, outputQty: 1000, unit: 'm', materials: lines.map(({ role, ...m }) => ({ ...m, remarks: role })), designId: id, bizType: currentBizType, needsMaterials: !lines.length, updatedAt: Date.now() };
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === bom.id) ? a.map(x => x.id === bom.id ? bom : x) : [...a, bom]; });
+    // 3) Technical data sheet (existing TDS format)
+    const oldT = (tdsSheets || []).find(t => t.designId === id && !t.deleted);
+    const cnt = (tdsSheets || []).filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1;
+    const v = { ...TDS_BASE, title: d.name.toUpperCase(), cableType: (d.insMat === 'XLPE' ? 'XLPE ' : 'PVC ') + (d.armour === 'none' ? 'UNARMOURED' : 'ARMOURED') + ' CABLE', cores: d.cores + ' CORE X ' + d.size, code: d.code || '', voltage: String(d.voltage || '').replace(/[^0-9.]/g, '') === '1.1' ? '1100' : (d.voltage || ''),
+      condMat: (d.condClass === '1' ? 'SOLID' : d.condClass === '5' ? 'FLEXIBLE' : 'STRANDED') + ' ANNEALED ' + (d.condMat === 'Al' ? 'ALUMINIUM' : 'BARE COPPER'), condShape: d.condClass === '1' ? 'SOLID CIRCULAR' : 'STRANDED CIRCULAR', area: String(d.size), minWires: d.strands || '', dcRes: k.maxR ? String(k.maxR) : '',
+      insMat: d.insMat === 'XLPE' ? 'CROSS LINKED POLY ETHYLENE (XLPE)' : 'POLYVINYL CHLORIDE (PVC)', insColour: (d.insColour || '').toUpperCase(), insNom: String(d.insT), insMin: String(k.insMin),
+      hasInner: d.innerType !== 'none', innerMethod: d.innerType === 'taped' ? 'TAPE WRAPPED' : 'EXTRUDED', innerDia: k.D1 ? String(k.D1) : '', innerMin: String(d.innerT || ''),
+      hasArmour: d.armour !== 'none', armMat: d.armour === 'none' ? '' : (d.armMat === 'Al' ? 'ALUMINIUM' : 'GALVANISED STEEL') + (d.armour === 'strip' ? ' FORMED WIRE (FLAT STRIP)' : ' ROUND WIRE'), armType: d.armour === 'strip' ? 'FLAT STRIP' : d.armour === 'wire' ? 'ROUND WIRE' : '', armDim: d.armour === 'strip' ? (d.armW + ' X ' + d.armT) : d.armour === 'wire' ? String(d.armDia) : '', armDia: d.armour !== 'none' ? String(k.D2) : '',
+      outMat: (d.sheathMat === 'HFFR' ? 'HFFR' : 'PVC TYPE ST-' + (d.insMat === 'XLPE' ? '2' : '1')) + (d.fr ? ' ' + d.fr : ''), outColour: (d.sheathColour || '').toUpperCase(), outNom: String(d.sheathT), outDia: String(k.D3), outMin: String(k.sheathMin), overall: k.D4 + ' ± ' + Math.max(1, Math.round(k.D4 * 0.1)), drum: String(d.drumLen || ''), hasFR: !!d.fr };
+    const tds = { ...(oldT || { id: 'tds-' + id, number: dn('TDS', cnt), docNo: 'TDS/IMS/F01', customer: 'MARKET', customerId: '', refDoc: '', createdAt: now }), date: now.slice(0, 10), designId: id, bizType: currentBizType, updatedAt: now, v: { ...((oldT || {}).v || {}), ...v } };
+    setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === tds.id) ? a.map(x => x.id === tds.id ? tds : x) : [tds, ...a]; });
+    // 4) the design itself
+    const rec = { ...d, id, calc: k, itemId: fgId, bomId: bom.id, tdsId: tds.id, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
+    setDesigns(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === id) ? a.map(x => x.id === id ? rec : x) : [rec, ...a]; });
+    setEd(null);
+    alert('✅ Saved ' + d.name + ' (rev ' + rec.rev + ').\n\nUpdated: Finished-good item · master BOM (' + lines.length + ' materials per 1000 m) · TDS ' + tds.number + (lines.some(l => !l.materialId) ? '\n\nSome BOM lines are not linked to a material item — pick the materials in the design so stock and shortages work.' : ''));
+  }
+
+  const inp = { ...styles.input, margin: 0 };
+  const sel = (k, opts, w) => <select value={ed[k]} onChange={e => set(k, e.target.value)} style={{ ...inp, width: w || '100%' }}>{opts.map(o => Array.isArray(o) ? <option key={o[0]} value={o[0]}>{o[1]}</option> : <option key={o}>{o}</option>)}</select>;
+  const numIn = (k, step) => <input type="number" step={step || 'any'} value={ed[k]} onChange={e => set(k, e.target.value)} style={inp} />;
+  const txt = (k, ph) => <input value={ed[k] || ''} placeholder={ph || ''} onChange={e => set(k, e.target.value)} style={inp} />;
+  const matPick = (role, label) => <CabField t={label} w={220}><select value={(ed.mat || {})[role] || ''} onChange={e => setMat(role, e.target.value)} style={inp}><option value="">— not linked —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}{m.rmCategory ? ' · ' + m.rmCategory : ''}</option>)}</select></CabField>;
+  const sec = t => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4 }}>{t}</div>;
+  const row = ch => <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>{ch}</div>;
+
+  if (ed) return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Back</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Edit cable design' : 'New cable design'}</h1></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 16, alignItems: 'start' }}>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '6px 18px 18px' }}>
+          {sec('Product')}
+          {row(<>
+            <CabField t={'Cable name (quotation items must use this exact name)'} w={460}><input value={ed.name} onChange={e => setEd(p => ({ ...p, name: e.target.value, autoName: false }))} style={inp} /></CabField>
+            <label style={{ fontSize: 12, display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={!!ed.autoName} onChange={e => setEd(p => ({ ...p, autoName: e.target.checked, name: e.target.checked ? cableAutoName(p) : p.name }))} />Auto name</label>
+            <CabField t="Type code (e.g. 2XWY, YWY)" w={140}>{txt('code')}</CabField>
+            <CabField t="Standard" w={170}>{sel('standard', ['IS 694', 'IS 1554 (Part 1)', 'IS 7098 (Part 1)', 'IEC 60502-1', 'BS 6346', 'Customer spec'])}</CabField>
+            <CabField t="Voltage grade" w={120}>{sel('voltage', ['450/750 V', '1.1 kV', '3.3 kV', '6.6 kV', '11 kV'])}</CabField>
+          </>)}
+          {sec('Conductor')}
+          {row(<>
+            <CabField t="No. of cores" w={100}>{numIn('cores', 1)}</CabField>
+            <CabField t="Size (sq.mm)" w={110}>{numIn('size')}</CabField>
+            <CabField t="Material" w={110}>{sel('condMat', [['Cu', 'Copper'], ['Al', 'Aluminium']])}</CabField>
+            <CabField t="Class" w={170}>{sel('condClass', [['1', 'Class 1 — solid'], ['2', 'Class 2 — stranded'], ['5', 'Class 5 — flexible']])}</CabField>
+            <CabField t="Strands × wire dia" w={140}>{txt('strands', '7 × 0.67')}</CabField>
+            <CabField t="Fill factor (optional)" w={130}>{txt('fill', 'auto')}</CabField>
+          </>)}
+          {sec('Insulation')}
+          {row(<>
+            <CabField t="Material" w={110}>{sel('insMat', ['PVC', 'XLPE', 'HFFR', 'PE'])}</CabField>
+            <CabField t="Nominal thickness (mm)" w={150}>{numIn('insT')}</CabField>
+            <CabField t="Core colours" w={220}>{txt('insColour')}</CabField>
+          </>)}
+          {sec('Inner sheath / bedding')}
+          {row(<>
+            <CabField t="Type" w={150}>{sel('innerType', [['extruded', 'Extruded'], ['taped', 'Tape wrapped'], ['none', 'None']])}</CabField>
+            {ed.innerType !== 'none' && <CabField t="Material" w={110}>{sel('innerMat', ['PVC', 'HFFR', 'PE'])}</CabField>}
+            {ed.innerType !== 'none' && <CabField t="Thickness (mm)" w={120}>{numIn('innerT')}</CabField>}
+          </>)}
+          {sec('Armour')}
+          {row(<>
+            <CabField t="Type" w={160}>{sel('armour', [['none', 'Unarmoured'], ['wire', 'Round wire'], ['strip', 'Flat strip / formed wire']])}</CabField>
+            {ed.armour !== 'none' && <CabField t="Material" w={140}>{sel('armMat', [['GI', 'Galvanised steel'], ['Al', 'Aluminium']])}</CabField>}
+            {ed.armour === 'wire' && <CabField t="Wire dia (mm)" w={110}>{numIn('armDia')}</CabField>}
+            {ed.armour === 'strip' && <CabField t="Strip width (mm)" w={120}>{numIn('armW')}</CabField>}
+            {ed.armour === 'strip' && <CabField t="Strip thickness (mm)" w={130}>{numIn('armT')}</CabField>}
+          </>)}
+          {sec('Outer sheath')}
+          {row(<>
+            <CabField t="Material" w={110}>{sel('sheathMat', ['PVC', 'HFFR', 'PE'])}</CabField>
+            <CabField t="Nominal thickness (mm)" w={150}>{numIn('sheathT')}</CabField>
+            <CabField t="Colour" w={120}>{txt('sheathColour')}</CabField>
+            <CabField t="Fire property" w={130}>{sel('fr', [['', 'None'], ['FR', 'FR'], ['FR-LSH', 'FR-LSH'], ['FRLS', 'FRLS'], ['LSZH', 'LSZH']])}</CabField>
+          </>)}
+          {sec('Production & tests')}
+          {row(<>
+            <CabField t="Conductor allowance %" w={150}>{numIn('wasteCond')}</CabField>
+            <CabField t="Compound wastage %" w={150}>{numIn('wasteComp')}</CabField>
+            <CabField t="Standard drum length (m)" w={160}>{numIn('drumLen')}</CabField>
+            <CabField t="HV test" w={240}>{txt('hvTest')}</CabField>
+          </>)}
+          {sec('Link materials (from Raw Materials) — used in the BOM, stock and shortages')}
+          {row(<>
+            {matPick('cond', 'Conductor rod')}{matPick('ins', 'Insulation compound')}
+            {ed.innerType !== 'none' && matPick('inner', 'Inner sheath compound')}
+            {ed.armour !== 'none' && matPick('arm', 'Armour wire / strip')}
+            {matPick('sheath', 'Outer sheath compound')}{matPick('drum', 'Drum (optional)')}
+          </>)}
+          {sec('Notes')}
+          <textarea value={ed.notes || ''} onChange={e => set('notes', e.target.value)} rows={2} style={{ ...inp, width: '100%', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+            <button onClick={() => setEd(null)} style={styles.ghostBtn}>Cancel</button>
+            {canEdit && <button onClick={saveDesign} style={styles.primaryBtn}>Save & generate item · BOM · TDS</button>}
+          </div>
+        </div>
+        <div style={{ position: 'sticky', top: 10, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Calculated (per 1000 m)</div>
+          {[['Conductor dia', c.dc + ' mm'], ['Insulated core dia', c.di + ' mm'], ['Laid-up dia', c.D1 + ' mm'], ['Over inner sheath', c.D2 + ' mm'], ...(ed.armour !== 'none' ? [['Over armour', c.D3 + ' mm'], ['Armour wires / strips', c.nArm]] : []), ['Overall diameter', c.D4 + ' mm']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v}</b></div>)}
+          <div style={{ borderTop: '1px solid #EAE6DB', margin: '8px 0' }} />
+          {[['Conductor', c.wCond], ['Insulation', c.wIns], ['Inner sheath / filler', c.wBed], ['Armour', c.wArm], ['Outer sheath', c.wSheath]].filter(r => r[1] > 0).map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v} kg</b></div>)}
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13.5 }}><span>Approx. cable weight</span><b>{c.wTotal} kg/km</b></div>
+          <div style={{ borderTop: '1px solid #EAE6DB', margin: '8px 0' }} />
+          {[['Max DC resistance @20°C', c.maxR ? c.maxR + ' Ω/km' : 'size not in table'], ['Insulation min thickness', c.insMin + ' mm'], ['Sheath min thickness', c.sheathMin + ' mm']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v}</b></div>)}
+          <div style={{ fontSize: 11, color: '#888', marginTop: 10, lineHeight: 1.5 }}>Estimates from nominal dimensions (stranded fill factor, lay-up factors, standard densities). Resistance per IEC 60228 / IS 8130. Min thickness: insulation t − (0.1 + 10% t); sheath 85% t − 0.1 (unarmoured) or 80% t − 0.2 (armoured) — confirm against your standard and measured samples before issuing to customers.</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Cable Design Master</h1><p style={styles.muted}>One record per cable construction. Saving a design creates / updates its finished-good item, master BOM (per 1000 m) and Technical Data Sheet. A won quotation item with the same name picks this BOM automatically.</p></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        {canEdit && <button onClick={() => setEd({ ...CAB_BLANK, name: cableAutoName(CAB_BLANK) })} style={styles.primaryBtn}><Plus size={15} /> New design</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 240 }} />
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} design(s)</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No cable designs yet. Click “New design”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['Cable', 'Code', 'Standard', 'OD (mm)', 'kg/km', 'Cu/Al kg/km', 'Max R (Ω/km)', 'Rev', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 3 && i <= 7 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+            <tbody>{list.map(x => { const k = x.calc || calcCable(x); return (
+              <tr key={x.id} style={{ borderBottom: '1px solid #F0ECE0' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 600 }}>{x.name}</td><td style={{ padding: '8px 10px' }}>{x.code}</td><td style={{ padding: '8px 10px', fontSize: 12 }}>{x.standard} · {x.voltage}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.D4}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.wTotal}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.wCond}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.maxR || '—'}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{x.rev || 0}</td>
+                <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{canEdit && <button onClick={() => setEd({ ...CAB_BLANK, ...x, mat: { ...(x.mat || {}) } })} style={styles.ghostBtn}>Edit</button>}{canEdit && <button onClick={() => setEd({ ...CAB_BLANK, ...x, id: undefined, rev: 0, createdAt: undefined, name: x.name + ' (copy)', autoName: false, mat: { ...(x.mat || {}) } })} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Copy</button>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </div>}
+    </div>
+  );
+}
+
 function MfgNextStepView({ id, setView }) {
   const d = MFG_NEXT[id] || [id, 0, '', []];
   return (
@@ -30445,6 +30675,7 @@ export default function App() {
   const [investors,        _setInv]        = useState([]);
   const [profitShares,     _setPS]         = useState([]);
   const [boShortages,      _setBOS]        = useState([]);
+  const [cableDesigns,     _setCD]         = useState([]);
   const [fatReports,       _setFAT]        = useState([]);
   const [tdsSheets,        _setTDS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
@@ -30665,6 +30896,7 @@ export default function App() {
       _setInv(data.investors || []);
       _setPS(data.profitShares || []);
       _setBOS(data.boShortages || []);
+      _setCD(data.cableDesigns || []);
       _setFAT(data.fatReports || []);
       _setTDS(data.tdsSheets || []);
     }, (err) => {
@@ -30769,6 +31001,7 @@ export default function App() {
   const setInvestors        = mkSet(_setInv,   'investors');
   const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
+  const setCableDesigns     = mkSet(_setCD,    'cableDesigns');
   const setFatReports       = mkSet(_setFAT,   'fatReports');
   const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
@@ -31008,7 +31241,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -31083,6 +31316,7 @@ export default function App() {
     if (backup.investors)       setInvestors(backup.investors);
     if (backup.profitShares)    setProfitShares(backup.profitShares);
     if (backup.boShortages)     setBoShortages(backup.boShortages);
+    if (backup.cableDesigns)    setCableDesigns(backup.cableDesigns);
     if (backup.fatReports)      setFatReports(backup.fatReports);
     if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
@@ -31116,6 +31350,7 @@ export default function App() {
       ['Investors', investors, setInvestors],
       ['Profit shares', profitShares, setProfitShares],
       ['BO shortages', boShortages, setBoShortages],
+      ['Cable designs', cableDesigns, setCableDesigns],
       ['FAT/SAT reports', fatReports, setFatReports],
       ['Technical data sheets', tdsSheets, setTdsSheets],
     ];
@@ -32289,6 +32524,21 @@ export default function App() {
           />
         );
       case 'cabledesign':
+        return (
+          <CableDesignView
+            designs={sessionContext ? cableDesigns.filter(x => (x.bizType || 'manufacturing') === sessionContext) : cableDesigns}
+            setDesigns={setCableDesigns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            setItems={setItems}
+            boms={boms}
+            setBoms={setBoms}
+            tdsSheets={tdsSheets}
+            setTdsSheets={setTdsSheets}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
       case 'incomingqa':
       case 'wip':
       case 'drumstock':
