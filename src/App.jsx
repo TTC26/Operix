@@ -7206,7 +7206,18 @@ function MetalReconView({ productionOrders = [], boms = [], cableDesigns = [], s
 }
 
 const ML_REASONS = ['Breakdown', 'Setup / changeover', 'Material shortage', 'Power cut', 'Quality hold', 'No operator', 'Planned maintenance', 'Other'];
-function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = [], setFmWorkOrders, userRole }) {
+function machineHealth(machineId, pmSchedules = [], fmWorkOrders = [], days = 90) {
+  const iso = new Date().toISOString().slice(0, 10), soon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const pms = (pmSchedules || []).filter(p => p.assetId === machineId && p.status !== 'inactive' && p.nextDueDate);
+  const pm = pms.some(p => p.nextDueDate < iso) ? 'overdue' : pms.some(p => p.nextDueDate <= soon) ? 'due' : pms.length ? 'ok' : 'none';
+  const from = new Date(Date.now() - days * 86400000);
+  const bd = (fmWorkOrders || []).filter(w => w.assetId === machineId && ['corrective', 'emergency'].includes(w.type) && w.raisedDate && new Date(w.raisedDate) >= from);
+  const rep = bd.filter(w => w.completedDate).map(w => (new Date(w.completedDate) - new Date(w.raisedDate)) / 86400000).filter(x => !isNaN(x) && x >= 0);
+  return { pm, breakdowns: bd.length, mttr: rep.length ? rep.reduce((a, b) => a + b, 0) / rep.length : null, mtbf: bd.length ? days / bd.length : null, open: bd.filter(w => !['completed', 'closed'].includes(String(w.status || '').toLowerCase())).length };
+}
+const PM_LABEL = { overdue: ['PM overdue', '#B5453A'], due: ['PM due ≤ 7 d', '#E07B00'], ok: ['PM ok', '#1A7A3E'], none: ['No PM plan', '#999'] };
+
+function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = [], setFmWorkOrders, pmSchedules = [], fmWorkOrders = [], userRole }) {
   const canEdit = !['sales', 'accounts'].includes(userRole);
   const iso = new Date().toISOString().slice(0, 10);
   const blank = { date: iso, shift: 'A', machineId: '', orderNo: '', plannedHrs: 8, runHrs: '', output: '', unit: 'm', downMin: '', reason: '', operator: '', remarks: '' };
@@ -7239,6 +7250,7 @@ function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = []
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 80 }}>Shift<select value={f.shift} onChange={e => setF(p => ({ ...p, shift: e.target.value }))} style={inp}>{['A', 'B', 'C', 'General'].map(x => <option key={x}>{x}</option>)}</select></label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 200 }}>Machine<select value={f.machineId} onChange={e => setF(p => ({ ...p, machineId: e.target.value }))} style={inp}><option value="">— Select —</option>{machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.assetId ? ' · ' + m.assetId : ''}</option>)}</select></label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 160 }}>Production order<select value={f.orderNo} onChange={e => setF(p => ({ ...p, orderNo: e.target.value }))} style={inp}><option value="">—</option>{(productionOrders || []).filter(o => o.status !== 'completed').map(o => <option key={o.id} value={o.number}>{o.number}</option>)}</select></label>
+        {f.machineId && (() => { const h = machineHealth(f.machineId, pmSchedules, fmWorkOrders); return h.pm === 'overdue' || h.pm === 'due' || h.open ? <span style={{ fontSize: 11.5, fontWeight: 700, color: h.pm === 'overdue' || h.open ? '#B5453A' : '#E07B00', alignSelf: 'center' }}>{h.pm === 'overdue' ? '⚠ PM overdue' : h.pm === 'due' ? 'PM due soon' : ''}{h.open ? ' · ' + h.open + ' open breakdown' : ''}</span> : null; })()}
         {fld('plannedHrs', 'Planned hrs', 90, 'number')}{fld('runHrs', 'Run hrs', 80, 'number')}{fld('output', 'Output', 90, 'number')}{fld('unit', 'Unit', 60)}{fld('downMin', 'Downtime (min)', 110, 'number')}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 170 }}>Reason<select value={f.reason} onChange={e => setF(p => ({ ...p, reason: e.target.value }))} style={inp}><option value="">—</option>{ML_REASONS.map(x => <option key={x}>{x}</option>)}</select></label>
         {fld('operator', 'Operator', 130)}{fld('remarks', 'Remarks', 200)}
@@ -7247,8 +7259,8 @@ function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = []
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}><b style={{ fontSize: 13 }}>Summary</b><select value={days} onChange={e => setDays(parseInt(e.target.value))} style={{ ...inp, width: 150 }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></div>
       {Object.keys(per).length === 0 ? <div style={styles.emptyBox}>No entries in this period.</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr>{['Machine', 'Planned hrs', 'Run hrs', 'Availability', 'Output', 'Downtime', 'Top reason'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>{Object.entries(per).map(([k, p]) => { const av = p.plan ? p.run / p.plan * 100 : null, top = Object.entries(p.reasons).sort((a, b) => b[1] - a[1])[0]; return <tr key={k}><td style={td}><b>{p.name}</b></td><td style={td}>{r3(p.plan)}</td><td style={td}>{r3(p.run)}</td><td style={{ ...td, fontWeight: 700, color: av === null ? '#999' : av >= 85 ? '#1A7A3E' : av >= 70 ? '#E07B00' : '#B5453A' }}>{av === null ? '—' : av.toFixed(1) + '%'}</td><td style={td}>{r3(p.out)} {p.unit || ''}</td><td style={td}>{Math.round(p.down)} min</td><td style={td}>{top ? top[0] + ' (' + Math.round(top[1]) + ' min)' : '—'}</td></tr>; })}</tbody></table></div>}
+          <thead><tr>{['Machine', 'Planned hrs', 'Run hrs', 'Availability', 'Output', 'Downtime', 'Top reason', 'PM', 'Breakdowns (90 d)', 'MTBF / MTTR'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(per).map(([k, p]) => { const av = p.plan ? p.run / p.plan * 100 : null, top = Object.entries(p.reasons).sort((a, b) => b[1] - a[1])[0]; return <tr key={k}><td style={td}><b>{p.name}</b></td><td style={td}>{r3(p.plan)}</td><td style={td}>{r3(p.run)}</td><td style={{ ...td, fontWeight: 700, color: av === null ? '#999' : av >= 85 ? '#1A7A3E' : av >= 70 ? '#E07B00' : '#B5453A' }}>{av === null ? '—' : av.toFixed(1) + '%'}</td><td style={td}>{r3(p.out)} {p.unit || ''}</td><td style={td}>{Math.round(p.down)} min</td><td style={td}>{top ? top[0] + ' (' + Math.round(top[1]) + ' min)' : '—'}</td>{(() => { const h = machineHealth(k, pmSchedules, fmWorkOrders); const pl = PM_LABEL[h.pm]; return <><td style={{ ...td, color: pl[1], fontWeight: 600 }}>{pl[0]}</td><td style={td}>{h.breakdowns}{h.open ? ' (' + h.open + ' open)' : ''}</td><td style={td}>{h.mtbf ? Math.round(h.mtbf) + ' d' : '—'} / {h.mttr !== null ? h.mttr.toFixed(1) + ' d' : '—'}</td></>; })()}</tr>; })}</tbody></table></div>}
       {recent.length > 0 && <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{['Date', 'Shift', 'Machine', 'Order', 'Run / plan hrs', 'Output', 'Downtime', 'Reason', 'Operator', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>{recent.slice(0, 200).map(l => <tr key={l.id}><td style={td}>{l.date}</td><td style={td}>{l.shift}</td><td style={td}>{l.machineName}</td><td style={td}>{l.orderNo || ''}</td><td style={td}>{l.runHrs || 0} / {l.plannedHrs || 0}</td><td style={td}>{l.output || ''} {l.unit || ''}</td><td style={td}>{l.downMin ? l.downMin + ' min' : ''}</td><td style={{ ...td, color: l.reason === 'Breakdown' ? '#B5453A' : '#666' }}>{l.reason || ''}</td><td style={td}>{l.operator || ''}</td><td style={td}>{canEdit && <button onClick={() => { if (window.confirm('Delete this entry?')) setLogs(prev => (prev || []).filter(x => x.id !== l.id)); }} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table></div>}
@@ -8879,7 +8891,7 @@ function DocEditor({ releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertT
             <details style={{ position: 'relative' }}>
               <summary style={{ ...styles.ghostBtn, listStyle: 'none', cursor: 'pointer' }}>🛢 Add released drums ({releasedDrums.length})</summary>
               <div style={{ position: 'absolute', zIndex: 300, top: '110%', left: 0, background: '#fff', border: '1px solid #E2DDD5', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 10, width: 460, maxHeight: 340, overflowY: 'auto' }}>
-                <div style={{ fontSize: 12, color: '#777', marginBottom: 6 }}>Only drums that passed the routine test and are not yet dispatched.</div>
+                <div style={{ fontSize: 12, color: '#777', marginBottom: 6 }}>Drums that passed the routine test and are not dispatched. They are marked dispatched when you save this document.</div>
                 {releasedDrums.map(d => <label key={d.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', fontSize: 12.5, borderBottom: '1px solid #F0ECE0' }}><input type="checkbox" className="drum-pick" value={d.key} /><b>{d.drumNo}</b> · {d.product} · {d.length} m{d.order.orderRef ? <span style={{ color: '#888' }}> · {d.order.orderRef.docNo}/{d.order.orderRef.itemNo}</span> : null}</label>)}
                 <button onClick={(e) => { const box = e.currentTarget.parentElement; const keys = [...box.querySelectorAll('input.drum-pick:checked')].map(x => x.value); if (!keys.length) { alert('Select at least one drum.'); return; } onPickDrums(doc, keys); box.parentElement.removeAttribute('open'); }} style={{ ...styles.primaryBtn, marginTop: 8 }}>Add selected drums</button>
               </div>
@@ -11123,6 +11135,9 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
 
 // ─── Stock ─────────────────────────────────────────────────────
 
+// Ledger direction: explicit type wins; older entries without a type carry a signed qty (+ in, − out).
+const ledgerIn = (e) => (e && e.type) ? e.type === 'in' : (parseFloat(e && e.qty) || 0) > 0;
+const ledgerQty = (e) => Math.abs(parseFloat(e && e.qty) || 0);
 function computeStock(stockLedger, items) {
   // Returns map: itemId → { qty, value, item }
   const map = {};
@@ -11131,9 +11146,9 @@ function computeStock(stockLedger, items) {
   });
   (stockLedger || []).forEach(e => {
     if (!map[e.itemId]) map[e.itemId] = { qty: 0, value: 0, item: { name: e.itemName, unit: '' } };
-    const qty = parseFloat(e.qty) || 0;
+    const qty = ledgerQty(e);
     const rate = parseFloat(e.rate) || 0;
-    if (e.type === 'in') {
+    if (ledgerIn(e)) {
       map[e.itemId].qty += qty;
       map[e.itemId].value += qty * rate;
     } else {
@@ -11232,8 +11247,8 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
             {rows.length === 0 && <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No items found.</td></tr>}
             {rows.map(({ qty, value, item }) => {
               const ledgerRows = (stockLedger || []).filter(e => e.itemId === item.id);
-              const totalIn  = ledgerRows.filter(e => e.type === 'in').reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
-              const totalOut = ledgerRows.filter(e => e.type === 'out').reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
+              const totalIn  = ledgerRows.filter(e => ledgerIn(e)).reduce((s, e) => s + ledgerQty(e), 0);
+              const totalOut = ledgerRows.filter(e => !ledgerIn(e)).reduce((s, e) => s + ledgerQty(e), 0);
               const openingStock = parseFloat(item.openingStock) || 0;
               const minStock = parseFloat(item.minStock) || 0;
               const isLow = minStock > 0 && qty <= minStock;
@@ -11348,9 +11363,9 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
                 <td style={{ ...styles.td, fontWeight: 500 }}>{e.itemName}</td>
                 <td style={styles.td}>
                   <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '2px 8px',
-                    background: e.type === 'in' ? '#D1FAE5' : '#FEE2E2',
-                    color: e.type === 'in' ? '#065F46' : '#B91C1C' }}>
-                    {e.type === 'in' ? '▲ IN' : '▼ OUT'}
+                    background: ledgerIn(e) ? '#D1FAE5' : '#FEE2E2',
+                    color: ledgerIn(e) ? '#065F46' : '#B91C1C' }}>
+                    {ledgerIn(e) ? '▲ IN' : '▼ OUT'}
                   </span>
                 </td>
                 <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{e.qty}</td>
@@ -11990,8 +12005,8 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 
   let running = openingStock;
   const rows = entries.map(e => {
-    const qty = parseFloat(e.qty) || 0;
-    const isIn = e.type === 'in';
+    const qty = ledgerQty(e);
+    const isIn = ledgerIn(e);
     running = isIn ? running + qty : running - qty;
     const siv = e.sourceType === 'siv' ? storeIssues.find(s => s.id === e.sourceId) : null;
     return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running, siv };
@@ -19517,7 +19532,7 @@ function routeProgress(order) {
   return { done: st.filter(x => x.status === 'done').length, total: st.length, hold: st.some(x => x.status === 'hold') };
 }
 
-function ProcessRouteModal({ order, bom, onSave, onClose }) {
+function ProcessRouteModal({ order, bom, onSave, onClose, assets = [], pmSchedules = [], fmWorkOrders = [] }) {
   const mt = _mfgType();
   const def = MFG_ROUTES[mt] || MFG_ROUTES.general;
   const typeLabel = (MFG_TYPES.find(t => t.id === mt) || { label: 'General manufacturing' }).label;
@@ -19565,7 +19580,8 @@ function ProcessRouteModal({ order, bom, onSave, onClose }) {
             {isOpen && (
               <div style={{ padding: '4px 14px 14px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 10 }}>
-                  <div><label style={lab}>Machine / line</label><input style={inp} value={s.machine} onChange={e => upd(i, { machine: e.target.value })} /></div>
+                  <div><label style={lab}>Machine / line</label><input style={inp} list={'mach-list-' + i} value={s.machine} onChange={e => upd(i, { machine: e.target.value })} /><datalist id={'mach-list-' + i}>{(assets || []).map(a => <option key={a.id} value={a.name} />)}</datalist>
+                    {(() => { const a = (assets || []).find(x => _nm(x.name) === _nm(s.machine)); if (!a) return null; const h = machineHealth(a.id, pmSchedules, fmWorkOrders); return (h.pm === 'overdue' || h.open) ? <div style={{ fontSize: 11, color: '#B5453A', fontWeight: 700, marginTop: 2 }}>{h.pm === 'overdue' ? '⚠ PM overdue' : ''}{h.open ? ' · open breakdown' : ''}</div> : h.pm === 'due' ? <div style={{ fontSize: 11, color: '#E07B00', marginTop: 2 }}>PM due soon</div> : null; })()}</div>
                   <div><label style={lab}>Operator</label><input style={inp} value={s.operator} onChange={e => upd(i, { operator: e.target.value })} /></div>
                   <div><label style={lab}>Date</label><input type="date" style={inp} value={s.date} onChange={e => upd(i, { date: e.target.value })} /></div>
                   <div />
@@ -19613,7 +19629,7 @@ function ProcessRouteModal({ order, bom, onSave, onClose }) {
   );
 }
 
-function ProductionOrdersList({ storeIssues = [], productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
+function ProductionOrdersList({ storeIssues = [], assets = [], pmSchedules = [], fmWorkOrders = [], productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
@@ -19779,7 +19795,7 @@ function ProductionOrdersList({ storeIssues = [], productionOrders, setProductio
       )}
       {routeOrder && (
         <Modal title={'Process route — ' + routeOrder.number} onClose={() => setRouteOrder(null)} wide>
-          <ProcessRouteModal order={routeOrder} bom={boms.find(b => b.id === routeOrder.bomId)} onSave={(o) => { saveOrder(o); setRouteOrder(null); }} onClose={() => setRouteOrder(null)} />
+          <ProcessRouteModal order={routeOrder} assets={assets} pmSchedules={pmSchedules} fmWorkOrders={fmWorkOrders} bom={boms.find(b => b.id === routeOrder.bomId)} onSave={(o) => { saveOrder(o); setRouteOrder(null); }} onClose={() => setRouteOrder(null)} />
         </Modal>
       )}
       {printOrder && <ProductionOrderPrint order={printOrder} bom={boms.find(b => b.id === printOrder.bomId)} businessInfo={businessInfo} onClose={() => setPrintOrder(null)} />}
@@ -31535,17 +31551,29 @@ export default function App() {
     alert('✅ Moved: ' + plan.created.length + ' new item(s), ' + plan.merged.length + ' merged. Raw Materials now shows these items.');
   }
 
+  function syncDrumDispatch(saved) {
+    const inDoc = new Set((saved.items || []).filter(it => it.drumKey).map(it => it.drumKey));
+    const stamp = saved.number || saved.id, day = new Date().toISOString().slice(0, 10);
+    setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => {
+      if (!o.route || !(o.route.stages || []).some(st => (st.drums || []).length)) return o;
+      let changed = false;
+      const stages = o.route.stages.map((st, si) => ({ ...st, drums: (st.drums || []).map((x, di) => {
+        const key = o.id + '-' + si + '-' + di;
+        if (inDoc.has(key) && !x.dispatched) { changed = true; return { ...x, dispatched: true, dispatchedDoc: stamp, dispatchedDate: day }; }
+        if (!inDoc.has(key) && x.dispatched && x.dispatchedDoc === stamp) { changed = true; return { ...x, dispatched: false, dispatchedDoc: '', dispatchedDate: '' }; }
+        return x;
+      }) }));
+      return changed ? { ...o, route: { ...o.route, stages } } : o;
+    }));
+  }
+
   function pickDrumsIntoDoc(doc, keys) {
     const drums = allDrums(productionOrders, boms).filter(d => keys.includes(d.key));
     const rows = drums.map(d => {
       const fg = (items || []).find(i => (i.designId && cableDesigns.some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || _nm(i.name) === _nm(d.product));
-      return { ...EMPTY_ITEM_ROW(businessInfo), itemId: fg ? fg.id : '', name: d.product + ' — Drum ' + d.drumNo, hsn: fg ? (fg.hsn || '8544') : '8544', qty: d.length, unit: 'm', rate: fg ? (parseFloat(fg.saleRate ?? fg.rate) || 0) : 0, gst: fg && fg.gst !== undefined ? fg.gst : EMPTY_ITEM_ROW(businessInfo).gst, packages: 1, netWeight: d.net || 0, grossWeight: parseFloat(d.gross) || 0, drumNo: d.drumNo, certNo: d.certNo || '' };
+      return { ...EMPTY_ITEM_ROW(businessInfo), itemId: fg ? fg.id : '', name: d.product + ' — Drum ' + d.drumNo, hsn: fg ? (fg.hsn || '8544') : '8544', qty: d.length, unit: 'm', rate: fg ? (parseFloat(fg.saleRate ?? fg.rate) || 0) : 0, gst: fg && fg.gst !== undefined ? fg.gst : EMPTY_ITEM_ROW(businessInfo).gst, packages: 1, netWeight: d.net || 0, grossWeight: parseFloat(d.gross) || 0, drumNo: d.drumNo, drumKey: d.key, certNo: d.certNo || '' };
     });
     setActiveDoc(a => a ? { ...a, items: [...(a.items || []).filter(it => (it.name || '').trim() || parseFloat(it.rate)), ...rows] } : a);
-    setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => {
-      if (!drums.some(d => d.order.id === o.id)) return o;
-      return { ...o, route: { ...o.route, stages: (o.route.stages || []).map((s, si) => ({ ...s, drums: (s.drums || []).map((x, di) => drums.some(d => d.order.id === o.id && d.stageIdx === si && d.drumIdx === di) ? { ...x, dispatched: true, dispatchedDoc: doc.number || '', dispatchedDate: new Date().toISOString().slice(0, 10) } : x) })) } };
-    }));
   }
 
   function markQuoteOutcome(doc, outcome) {
@@ -31618,20 +31646,25 @@ export default function App() {
     };
     const isNew = !documents.find((d) => d.id === saved.id);
     setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
-    if (isNew && ['invoice', 'delivery'].includes(saved.type)) {
+    if (['delivery', 'packing_list'].includes(saved.type)) syncDrumDispatch(saved);
+    // A delivery made from an invoice must not deduct stock again (the invoice already did).
+    const fromInvoice = saved.type === 'delivery' && saved.linkedFrom && saved.linkedFrom.docType === 'invoice';
+    if (isNew && ['invoice', 'delivery'].includes(saved.type) && !fromInvoice) {
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
-        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
-        qty: -(it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name, type: 'out', sourceType: saved.type, sourceId: saved.id,
+        qty: Math.abs(parseFloat(it.qty) || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
         bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
-    if (isNew && saved.type === 'purchasebill') {
+    // A purchase bill for a PO that already has a GRN must not add stock again (the GRN did).
+    const grnDone = saved.type === 'purchasebill' && saved.linkedFrom && (grns || []).some(g => g.poId && g.poId === saved.linkedFrom.id);
+    if (isNew && saved.type === 'purchasebill' && !grnDone) {
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
-        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
-        qty: (it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name, type: 'in', sourceType: 'purchasebill', sourceId: saved.id,
+        qty: Math.abs(parseFloat(it.qty) || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
         bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
@@ -32038,7 +32071,7 @@ export default function App() {
           progressUpdates={progressUpdates}
           onConvert={convertDoc}
           onQuoteOutcome={markQuoteOutcome}
-          releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && !d.dispatched)}
+          releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
           onPickDrums={pickDrumsIntoDoc}
           onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
@@ -32210,6 +32243,9 @@ export default function App() {
         return (
           <ProductionOrdersList
             storeIssues={storeIssues}
+            assets={scopeList(assets, 'fmamc')}
+            pmSchedules={scopeList(pmSchedules, 'fmamc')}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
             productionOrders={productionOrders}
             setProductionOrders={setProductionOrders}
             boms={boms}
@@ -33036,7 +33072,7 @@ export default function App() {
       case 'metalrecon':
         return <MetalReconView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} storeIssues={storeIssues} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} stockLedger={stockLedger} setView={setView} />;
       case 'machinelog':
-        return <MachineLogView logs={scopeList(machineLogs, 'manufacturing')} setLogs={scopeSet(setMachineLogs, 'manufacturing')} assets={scopeList(assets, 'fmamc')} productionOrders={scopeList(productionOrders, 'manufacturing')} setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')} userRole={userRole} />;
+        return <MachineLogView logs={scopeList(machineLogs, 'manufacturing')} setLogs={scopeSet(setMachineLogs, 'manufacturing')} assets={scopeList(assets, 'fmamc')} productionOrders={scopeList(productionOrders, 'manufacturing')} setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')} pmSchedules={scopeList(pmSchedules, 'fmamc')} fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')} userRole={userRole} />;
       case 'boshortage':
         return (
           <BOShortageView
