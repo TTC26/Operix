@@ -18726,8 +18726,15 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           <button onClick={() => setCreating(true)} style={styles.primaryBtn}><Plus size={15} /> New Order</button>
         )}
       </div>
+      {(() => { const mt = _mfgType(), rt = MFG_ROUTES[mt], tl = MFG_TYPES.find(t => t.id === mt); return (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: '4px solid ' + (rt ? '#C9752A' : '#B5453A'), borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+          {rt ? <>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>Process route — <b>{tl ? tl.label : ''}</b> · open an order and click <b>🧭 Route</b> to record each stage (machine, qty, scrap, QA)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>{rt.map((st, i) => <React.Fragment key={i}><span style={{ background: '#FDF3E7', color: '#8A4B12', border: '1px solid #F0D7B8', borderRadius: 14, padding: '3px 11px', fontSize: 12, fontWeight: 600 }}>{i + 1}. {st.name}</span>{i < rt.length - 1 && <span style={{ color: '#C9752A' }}>→</span>}</React.Fragment>)}</div>
+          </> : <div style={{ fontSize: 13 }}>Type of manufacturing is not set. Go to <b>Settings → Manufacturing → Type of manufacturing</b> to get the process route, raw material datasheets and QA checklists for your industry.</div>}
+        </div>); })()}
       <div style={styles.list}>
-        {productionOrders.length === 0 && <div style={styles.emptyBox}>No production orders yet.</div>}
+        {productionOrders.length === 0 && <div style={styles.emptyBox}>No production orders yet. Click “New Order”, pick a BOM — then use 🧭 Route on the order to track each stage.</div>}
         {productionOrders.map((o) => {
           const bom = boms.find(b => b.id === o.bomId);
           const statusColors = {
