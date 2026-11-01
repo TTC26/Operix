@@ -2108,6 +2108,9 @@ const PART_DATASHEET_PACK = {
   panels: [['standard', 'Standard', 'IEC 61439'], ['voltage', 'Rated voltage', '415 V'], ['current', 'Rated current (A)', ''], ['faultLevel', 'Fault level (kA, 1 s)', ''], ['ip', 'IP rating', 'IP54'], ['form', 'Form of separation', 'Form 2b'], ['busbar', 'Busbar (material × size)', ''], ['makes', 'Approved makes', '']],
   general: [['standard', 'Standard / specification', ''], ['testReq', 'Test requirement', '']],
 };
+Object.keys(RM_SPEC_PACK).forEach(k => {
+  if (k === 'wires_cables' && !RM_SPEC_PACK[k]['Packing / drums']) RM_SPEC_PACK[k]['Packing / drums'] = { unit: 'pcs', fields: _std([['drumSize', 'Drum size / type', 'Wooden 900 mm / steel'], ['returnable', 'Returnable?', 'Yes / No']]) };
+});
 const _mfgType = () => { try { return (window.__operixBI || {}).mfgType || ''; } catch (e) { return ''; } };
 
 // ── All manufacturing types: process routes + extra packs (merged into the base packs) ──
@@ -2289,6 +2292,7 @@ Object.assign(PART_DATASHEET_PACK, {
 });
 
 MFG_TYPES.length = 0; MFG_TYPES.push(...MFG_TYPES_ALL);
+Object.keys(RM_SPEC_PACK).forEach(k => { if (!RM_SPEC_PACK[k]['Misc / consumables']) RM_SPEC_PACK[k]['Misc / consumables'] = { unit: 'pcs', fields: _std([['spec', 'Specification / size', ''], ['usedFor', 'Used for / department', 'Production / maintenance / office']]) }; });
 
 function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
   const canMulti = isSubscribed || isTestAccount;
@@ -3387,12 +3391,12 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 
 // ─── Items ─────────────────────────────────────────────────────
 
-const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Capex / Asset','Other'];
 // 2-digit category code → first two digits of the 10-digit item code (CCTTNNNNNN)
 const ITEM_CATEGORY_CODES = {
   'Raw Material': '01', 'Alloy / Metal': '02', 'Steel / Iron': '03', 'Packing Material': '04',
   'Consumable': '05', 'Spare Part': '06', 'Finished Good': '07', 'Semi-Finished': '08',
-  'Trading Item': '09', 'Service': '10', 'Other': '99',
+  'Trading Item': '09', 'Service': '10', 'Capex / Asset': '11', 'Other': '99',
 };
 // Build a 10-digit item code: CC (category) + TT (material/type) + NNNNNN (running serial).
 // The material→2-digit map is kept in businessInfo.itemTypeCodes so codes stay stable and reusable.
@@ -3418,6 +3422,99 @@ function makeItemCode({ category, materialType, currentId, items = [], businessI
     if (c.length === 10 && c.slice(0, 4) === prefix && it.id !== currentId) { const nn = parseInt(c.slice(4)) || 0; if (nn > mx) mx = nn; }
   });
   return prefix + String(mx + 1).padStart(6, '0');
+}
+
+// ─── ADR-001: one Item Master. Item "category" is the item type; materials are a filtered view ───
+const MAT_CATS = ['Raw Material', 'Alloy / Metal', 'Steel / Iron', 'Packing Material', 'Consumable', 'Spare Part'];
+const isMaterialItem = (it) => !!it && MAT_CATS.includes(it.category);
+const _nm = (s) => String(s || '').trim().toLowerCase();
+
+// Pure: plan moving legacy Raw Materials into the Item Master (merge by name, else create)
+function planRmMigration(rawMaterials = [], items = [], bizType = '', defaultGst = 0) {
+  const pending = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
+  const scoped = (items || []).filter(i => !bizType || (i.bizType || bizType) === bizType);
+  const upd = {}, newItems = [], idMap = {}, merged = [], created = [];
+  pending.forEach(r => {
+    const cat = /pack|drum/i.test(r.category || '') ? 'Packing Material' : /misc|consum/i.test(r.category || '') ? 'Consumable' : 'Raw Material';
+    const hit = scoped.find(i => _nm(i.name) === _nm(r.name)) || newItems.find(i => _nm(i.name) === _nm(r.name));
+    if (hit && !newItems.includes(hit)) {
+      const base = upd[hit.id] || hit;
+      upd[hit.id] = { ...base, category: base.category && base.category !== 'Other' ? base.category : cat, rmCategory: base.rmCategory || r.category || '', specs: { ...(r.specs || {}), ...(base.specs || {}) }, drawings: base.drawings || r.drawings || [], minStock: Number(base.minStock) || Number(r.minStock) || 0, purchaseRate: base.purchaseRate ?? base.rate ?? (Number(r.rate) || 0), unit: base.unit || r.unit || '' };
+      idMap[r.id] = hit.id; merged.push(r.name);
+    } else if (hit) {
+      idMap[r.id] = hit.id; merged.push(r.name);
+    } else {
+      const it = { id: 'itm-' + (r.id || Math.random().toString(36).slice(2)) , name: r.name.trim(), unit: r.unit || '', category: cat, rmCategory: r.category || '', specs: { ...(r.specs || {}) }, drawings: r.drawings || [], purchaseRate: Number(r.rate) || 0, saleRate: 0, gst: defaultGst, hsn: '', itemCode: '', openingStock: Number(r.stock) || 0, minStock: Number(r.minStock) || 0, bizType: bizType || 'manufacturing', fromRawMaterialId: r.id, createdAt: Date.now() };
+      newItems.push(it); idMap[r.id] = it.id; created.push(r.name);
+    }
+  });
+  return { pending: pending.length, updated: Object.values(upd), newItems, idMap, merged, created };
+}
+
+// Stock of a BOM material line: item stock (stock ledger) first, legacy raw material stock as fallback
+function matStock(m, { items = [], stockMap = {}, rawMaterials = [] }) {
+  const id = m.materialId || m.itemId || '';
+  if (stockMap[id]) return { id, qty: stockMap[id].qty || 0, item: (items || []).find(i => i.id === id) || null };
+  const rm = (rawMaterials || []).find(r => r.id === id) || (rawMaterials || []).find(r => _nm(r.name) === _nm(m.name));
+  if (rm && rm.migratedItemId && stockMap[rm.migratedItemId]) return { id: rm.migratedItemId, qty: stockMap[rm.migratedItemId].qty || 0, item: (items || []).find(i => i.id === rm.migratedItemId) || null };
+  const byName = (items || []).find(i => _nm(i.name) === _nm(m.name || (rm && rm.name)));
+  if (byName && stockMap[byName.id]) return { id: byName.id, qty: stockMap[byName.id].qty || 0, item: byName };
+  return { id: rm ? rm.id : id, qty: rm ? (parseFloat(rm.stock) || 0) : 0, item: byName || null, legacy: !!rm };
+}
+
+function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], businessInfo = {}, userRole, setEditingItem, onMigrate, setView }) {
+  const fmt = makeFmt(businessInfo);
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const canEdit = ['admin', 'manager', 'inventory', 'purchase'].includes(userRole);
+  const [q, setQ] = useState('');
+  const [cat, setCat] = useState('');
+  const mats = (items || []).filter(isMaterialItem);
+  const stock = computeStock(stockLedger, items);
+  const pending = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
+  const rmCats = [...new Set(mats.map(m => m.rmCategory).filter(Boolean))];
+  const rows = mats.filter(m => (!cat || m.category === cat || m.rmCategory === cat) && (!q || _nm(m.name).includes(_nm(q)) || _nm(m.itemCode).includes(_nm(q))));
+  const add = () => setEditingItem({ name: '', category: 'Raw Material', unit: 'kg', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0 });
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}>
+        <h1 className="serif" style={styles.h1}>Raw Materials</h1>
+        <p style={styles.muted}>One record per material in the Item Master — PR, PO, GRN, stock, BOM and production all use the same item.</p>
+      </div>
+      {pending.length > 0 && <div style={{ background: '#FFF8E1', border: '1px solid #F2D48A', borderRadius: 10, padding: '12px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13 }}><b>{pending.length}</b> material(s) are still in the old Raw Materials list. Move them into the Item Master so purchase, GRN and stock stay in sync (same names are merged).</span>
+        {canEdit && onMigrate && <button onClick={onMigrate} style={styles.primaryBtn}>Move to Item Master</button>}
+      </div>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        {canEdit && <button onClick={add} style={styles.primaryBtn}><Plus size={15} /> Add material</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 210 }} />
+        <select value={cat} onChange={e => setCat(e.target.value)} style={{ ...styles.input, margin: 0, width: 220 }}>
+          <option value="">All material types</option>
+          {MAT_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+          {rmCats.length > 0 && <optgroup label="Datasheet category">{rmCats.map(c => <option key={c} value={c}>{c}</option>)}</optgroup>}
+        </select>
+        <span style={{ fontSize: 12, color: '#888' }}>{rows.length} material(s)</span>
+        {setView && <button onClick={() => setView('items')} style={{ ...styles.ghostBtn, marginLeft: 'auto' }}>Open full Item Master</button>}
+      </div>
+      {rows.length === 0 ? <div style={styles.emptyBox}>{mats.length ? 'No materials match your filter.' : 'No materials yet. Add copper rod, compounds, armour, packing, consumables and misc items here.'}</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['Code', 'Material', 'Type', 'Unit', 'Stock', 'Min', 'Rate', 'Grade / standard', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 4 && i <= 6 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map(m => { const st = stock[m.id] ? stock[m.id].qty : (Number(m.openingStock) || 0), low = (Number(m.minStock) || 0) > 0 && st <= Number(m.minStock); return (
+              <tr key={m.id} style={{ borderBottom: '1px solid #F0ECE0' }}>
+                <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11.5 }}>{m.itemCode || ''}</td>
+                <td style={{ padding: '8px 10px', fontWeight: 600 }}>{m.name}</td>
+                <td style={{ padding: '8px 10px', fontSize: 12 }}>{m.category}{m.rmCategory ? <span style={{ color: '#888' }}> · {m.rmCategory}</span> : null}</td>
+                <td style={{ padding: '8px 10px' }}>{m.unit || ''}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: low ? '#B5453A' : '#1E2A4A' }}>{+st.toFixed(3)}{low ? ' ⚠' : ''}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{Number(m.minStock) || 0}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(m.purchaseRate ?? m.rate ?? 0)}</td>
+                <td style={{ padding: '8px 10px', fontSize: 12, color: '#666' }}>{m.specs ? [m.specs.grade, m.specs.standard].filter(Boolean).join(' · ') : ''}</td>
+                <td style={{ padding: '8px 10px' }}>{canEdit && <button onClick={() => setEditingItem(m)} style={styles.ghostBtn}>Edit</button>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </div>}
+    </div>
+  );
 }
 
 function ItemsList({ items, setEditing, setItems, businessInfo }) {
@@ -3604,6 +3701,22 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
         <input value={form.materialType||''} onChange={e => set('materialType', e.target.value)} style={styles.input} placeholder="e.g. Copper, Steel, Aluminium" list="item-material-types" />
         <datalist id="item-material-types">{knownTypes.map(t => <option key={t} value={t} />)}</datalist>
       </div>
+      {isMaterialItem(form) && (() => {
+        const pack = RM_SPEC_PACK[_mfgType()] || RM_SPEC_PACK.general;
+        const known = [...new Set([...Object.keys(pack), ...(items || []).map(i => i.rmCategory).filter(Boolean), ...(form.rmCategory ? [form.rmCategory] : [])])];
+        const def = form.rmCategory && pack[form.rmCategory];
+        return (<div style={{ background: '#FAF9F5', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Material datasheet category</label>
+            <select value={form.rmCategory || ''} onChange={e => { const v = e.target.value; if (v === '__new') { const c = (window.prompt('New material category (e.g. Tapes, Lubricants, Safety items):') || '').trim(); if (c) set('rmCategory', c); } else { set('rmCategory', v); if (!form.unit && pack[v]) set('unit', pack[v].unit); } }} style={styles.input}>
+              <option value="">— Select —</option>
+              {known.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__new">+ Add new category…</option>
+            </select>
+          </div>
+          <SpecsFields specs={form.specs || {}} onChange={sp => set('specs', sp)} fields={def ? def.fields : [['grade', 'Grade / standard', ''], ['spec', 'Specification', ''], ['batchNo', 'Lot / batch no.', ''], ['certNo', 'Test certificate no.', ''], ['supplier', 'Approved supplier', '']]} />
+        </div>);
+      })()}
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
         <input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} />
@@ -6570,7 +6683,7 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
 
 // ─── Won quotation → one BOM per item → one production order per item → order shortage → draft PR ───
 // Pure function (no React) so it can be tested. Item no. = quotation line no. (1-based) and is carried everywhere.
-function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], purchaseReqs = [], productionOrders = [], bizType = 'manufacturing', today }) {
+function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stockMap = {}, purchaseReqs = [], productionOrders = [], bizType = 'manufacturing', today }) {
   const dt = today || new Date().toISOString().slice(0, 10);
   const norm = s => String(s || '').trim().toLowerCase();
   const cust = (doc.customerSnapshot && doc.customerSnapshot.name) || '';
@@ -6606,8 +6719,8 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], purchaseReqs = [
     });
     const fac = qty / (bom.outputQty || 1);
     (bom.materials || []).forEach(m => {
-      const rm = rmFor(m), key = rm ? rm.id : norm(m.name);
-      const r = need[key] = need[key] || { materialId: rm ? rm.id : (m.materialId || ''), name: m.name || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', overall: 0, available: rm ? (parseFloat(rm.stock) || 0) : 0, rate: rm ? (parseFloat(rm.rate) || '') : '', itemNos: [] };
+      const ms = matStock(m, { items, stockMap, rawMaterials }), rm = ms.item ? null : rmFor(m), key = ms.id || norm(m.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : '', itemCode: ms.item ? (ms.item.itemCode || '') : '', name: m.name || (ms.item && ms.item.name) || (rm && rm.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || (rm && rm.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : ''), itemNos: [] };
       r.overall += (parseFloat(m.qty) || 0) * fac;
       if (!r.itemNos.includes(itemNo)) r.itemNos.push(itemNo);
     });
@@ -6621,7 +6734,7 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], purchaseReqs = [
     pr = {
       id: 'pr-' + doc.id + '-' + Date.now(), number: (typeof dn === 'function' ? dn('PR', cnt) : 'PR-' + cnt), bizType,
       type: 'manufacturing', linkId: doc.id, linkName: 'Order ' + (doc.number || ''), date: dt, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (won quotation)', priority: 'Normal',
-      items: short.map(r => ({ itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'Order ' + (doc.number || '') + ' · item ' + r.itemNos })),
+      items: short.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'Order ' + (doc.number || '') + ' · item ' + r.itemNos })),
       remarks: 'Auto-raised from won quotation ' + (doc.number || '') + ' — shortage against order BOMs', orderRef: { docId: doc.id, docNo: doc.number },
       approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
     };
@@ -15454,7 +15567,7 @@ function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', 
 }
 
 // ─── BO Shortages (Manufacturing) — material availability vs BOM requirement ──
-function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
+function BOShortageView({ items = [], stockLedger = [], businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
   const canEdit = userRole === 'admin' || userRole === 'manager';
   const today = new Date().toISOString().slice(0, 10);
   const n3 = (x) => Math.round((parseFloat(x) || 0) * 1000) / 1000;
@@ -15465,19 +15578,18 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
   const [result, setResult] = React.useState(null);
   const [printRep, setPrintRep] = React.useState(null);
 
+  const _stockMap = computeStock(stockLedger, items);
   function buildRows(bom, q) {
     // Support both BOM shapes: BOMForm saves `materials` ({materialId,...}); older/other
     // BOMs may use `components` ({itemId,...}). Match stock from Raw Materials by id or name.
     const lines = (bom.materials && bom.materials.length) ? bom.materials : (bom.components || []);
     return lines.map(m => {
-      const mid = m.materialId || m.itemId || '';
       const nm = m.name || '';
-      let rm = rmById[mid];
-      if (!rm && nm) rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === nm.trim().toLowerCase());
+      const ms = matStock(m, { items, stockMap: _stockMap, rawMaterials });
       const perBom = parseFloat(m.qty) || 0;
       const overall = perBom * q;
-      const available = rm ? (parseFloat(rm.stock) || 0) : 0;
-      return { materialId: rm ? rm.id : mid, name: nm || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
+      const available = ms.qty;
+      return { materialId: ms.id, itemId: ms.item ? ms.item.id : '', name: nm || (ms.item && ms.item.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || '', rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', perBom, overall, available, shortage: Math.max(0, overall - available) };
     });
   }
   function compute() {
@@ -15506,7 +15618,8 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
     if (!shortRows.length) { alert('No shortages — nothing to raise a PR for.'); return; }
     const items = shortRows.map(r => {
       const rm = rmById[r.materialId];
-      return { itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: rm ? (parseFloat(rm.rate) || '') : '', hsn: '', purpose: 'BOM shortage — ' + rep.bomName };
+      const it = (items || []).find(x => x.id === (r.itemId || r.materialId));
+      return { itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: r.rate || (it ? (parseFloat(it.purchaseRate ?? it.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : '')), hsn: it ? (it.hsn || '') : '', purpose: 'BOM shortage — ' + rep.bomName };
     });
     const rec = {
       id: Date.now().toString(), number: nextPRNumber(), bizType: currentBizType,
@@ -18396,16 +18509,16 @@ function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, b
       </div>
       {editing && (
         <Modal onClose={() => setEditing(null)} title={editing.id ? 'Edit material' : 'Add raw material'}>
-          <RawMaterialForm initial={editing} onSave={upsert} ownerUid={ownerUid} />
+          <RawMaterialForm initial={editing} onSave={upsert} ownerUid={ownerUid} existingCats={[...new Set((rawMaterials || []).map(r => r.category).filter(Boolean))]} />
         </Modal>
       )}
     </div>
   );
 }
 
-function RawMaterialForm({ initial, onSave, ownerUid }) {
+function RawMaterialForm({ initial, onSave, ownerUid, existingCats = [] }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], ...initial });
-  const mt = _mfgType(), pack = RM_SPEC_PACK[mt] || null, cats = pack ? Object.keys(pack) : [];
+  const mt = _mfgType(), pack = RM_SPEC_PACK[mt] || RM_SPEC_PACK.general, cats = [...new Set([...Object.keys(pack), ...existingCats.filter(Boolean), ...(initial && initial.category ? [initial.category] : [])])];
   const catDef = pack && form.category ? pack[form.category] : null;
   const setCat = (c) => setForm((p) => ({ ...p, category: c, unit: p.unit || (pack && pack[c] ? pack[c].unit : p.unit) }));
   return (
@@ -18426,14 +18539,15 @@ function RawMaterialForm({ initial, onSave, ownerUid }) {
       </div>
       {pack && (
         <div style={styles.formGroup}>
-          <label style={styles.label}>Material category ({(MFG_TYPES.find(t => t.id === mt) || {}).label})</label>
-          <select value={form.category || ''} onChange={(e) => setCat(e.target.value)} style={styles.input}>
+          <label style={styles.label}>Material category{mt ? ' (' + ((MFG_TYPES.find(t => t.id === mt) || {}).label || '') + ')' : ''}</label>
+          <select value={form.category || ''} onChange={(e) => { if (e.target.value === '__new') { const c = (window.prompt('New material category name (e.g. Tapes, Lubricants, Safety items):') || '').trim(); if (c) setCat(c); } else setCat(e.target.value); }} style={styles.input}>
             <option value="">— Select category —</option>
             {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value="__new">+ Add new category…</option>
           </select>
         </div>
       )}
-      {!pack && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>Tip: choose the Type of manufacturing (Settings) to get industry-specific datasheet fields here.</div>}
+      {!mt && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>Tip: choose the Type of manufacturing (Settings) to get industry-specific datasheet fields here.</div>}
       <div style={styles.sectionDivider}>{catDef ? (form.category + ' — datasheet') : 'Material Specifications'}</div>
       <SpecsFields
         specs={form.specs}
@@ -18461,7 +18575,7 @@ function RawMaterialForm({ initial, onSave, ownerUid }) {
 
 // ─── Bill of Materials ────────────────────────────────────────────────────────
 
-function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
+function BOMList({ boms, setBoms, rawMaterials, items = [], userRole, ownerUid, parts }) {
   const [editing, setEditing] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
@@ -18505,14 +18619,14 @@ function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
       </div>
       {editing && (
         <Modal onClose={() => setEditing(null)} title={editing.id ? 'Edit BOM' : 'New Bill of Materials'}>
-          <BOMForm initial={editing} rawMaterials={rawMaterials} onSave={upsert} ownerUid={ownerUid} parts={parts} />
+          <BOMForm initial={editing} rawMaterials={rawMaterials} items={items} onSave={upsert} ownerUid={ownerUid} parts={parts} />
         </Modal>
       )}
     </div>
   );
 }
 
-function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
+function BOMForm({ initial, rawMaterials, items = [], onSave, ownerUid, parts = [] }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], partId: '', ...initial, materials: initial.materials || [] });
 
   function linkPart(partId) {
@@ -18532,8 +18646,10 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
       const mats = [...f.materials];
       mats[i] = { ...mats[i], [field]: value };
       if (field === 'materialId') {
-        const rm = rawMaterials.find((r) => r.id === value);
-        if (rm) { mats[i].name = rm.name; mats[i].unit = rm.unit; }
+        const itm = (items || []).find((x) => x.id === value);
+        const rm = itm ? null : rawMaterials.find((r) => r.id === value);
+        if (itm) { mats[i].name = itm.name; mats[i].unit = itm.unit || ''; mats[i].src = 'item'; }
+        else if (rm) { mats[i].name = rm.name; mats[i].unit = rm.unit; mats[i].src = 'rm'; }
       }
       return { ...f, materials: mats };
     });
@@ -18606,8 +18722,9 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
       {form.materials.map((m, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <select value={m.materialId} onChange={(e) => updateMaterial(i, 'materialId', e.target.value)} style={{ ...styles.input, flex: 2 }}>
-            <option value="">Select material</option>
-            {rawMaterials.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            <option value="">{((items || []).filter(isMaterialItem).length + rawMaterials.filter(r => !r.migratedItemId).length) ? 'Select material' : 'No materials — add them in Raw Materials'}</option>
+            {(items || []).filter(isMaterialItem).length > 0 && <optgroup label="Materials (Item Master)">{(items || []).filter(isMaterialItem).map((it) => <option key={it.id} value={it.id}>{it.name}{it.itemCode ? ' · ' + it.itemCode : ''}{it.unit ? ' (' + it.unit + ')' : ''}</option>)}</optgroup>}
+            {rawMaterials.filter(r => !r.migratedItemId).length > 0 && <optgroup label="Old raw-material list (not moved yet)">{rawMaterials.filter(r => !r.migratedItemId).map((r) => <option key={r.id} value={r.id}>{r.name}{r.unit ? ' (' + r.unit + ')' : ''}</option>)}</optgroup>}
           </select>
           <input type="number" value={m.qty} onChange={(e) => updateMaterial(i, 'qty', Number(e.target.value))} style={{ ...styles.input, width: 70 }} placeholder="Qty" />
           <span style={{ fontSize: 12, color: '#888780', minWidth: 30 }}>{m.unit}</span>
@@ -18879,7 +18996,7 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
         const entries = [];
         (bom.materials || []).forEach(m => {
           const rm = rawMaterials.find(r => r.id === m.materialId);
-          const itm = items.find(i => i.name === (rm ? rm.name : ''));
+          const itm = items.find(i => i.id === m.materialId) || (rm && rm.migratedItemId ? items.find(i => i.id === rm.migratedItemId) : null) || items.find(i => i.name === (rm ? rm.name : (m.name || '')));
           if (!itm) return;
           entries.push({
             id: crypto.randomUUID(), date, itemId: itm.id, itemName: itm.name,
@@ -30713,6 +30830,20 @@ export default function App() {
     return [...others, ...(next || []).map(x => x && !x.bizType ? { ...x, bizType: sessionContext } : x)];
   }));
 
+  function runRmMigration() {
+    const biz = sessionContext || effectiveBizContext || 'manufacturing';
+    const cc0 = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+    const plan = planRmMigration(rawMaterials, items, biz, businessInfo.taxRate ?? cc0.defaultTaxRate);
+    if (!plan.pending) { alert('Nothing to move — all raw materials are already in the Item Master.'); return; }
+    const msg = 'Move ' + plan.pending + ' raw material(s) into the Item Master?\n\n• New items: ' + plan.created.length + (plan.created.length ? '\n   ' + plan.created.slice(0, 12).join(', ') + (plan.created.length > 12 ? ' …' : '') : '') + '\n• Merged with existing item of the same name: ' + plan.merged.length + (plan.merged.length ? '\n   ' + plan.merged.slice(0, 12).join(', ') + (plan.merged.length > 12 ? ' …' : '') : '') + '\n\nCurrent raw-material stock becomes the item opening stock (new items only). BOM lines are re-pointed to the items. The old list is kept as a backup (marked "moved").\n\nTip: take a backup in Settings first.';
+    if (!window.confirm(msg)) return;
+    const upd = {}; plan.updated.forEach(u => { upd[u.id] = u; });
+    setItems(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] || x).concat(plan.newItems));
+    setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(r => plan.idMap[r.id] ? { ...r, migratedItemId: plan.idMap[r.id], migratedAt: new Date().toISOString() } : r));
+    setBoms(prev => (Array.isArray(prev) ? prev : []).map(b => ({ ...b, materials: (b.materials || []).map(m => plan.idMap[m.materialId] ? { ...m, materialId: plan.idMap[m.materialId], src: 'item' } : m) })));
+    alert('✅ Moved: ' + plan.created.length + ' new item(s), ' + plan.merged.length + ' merged. Raw Materials now shows these items.');
+  }
+
   function markQuoteOutcome(doc, outcome) {
     const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
     const patch = d => ({ ...d, outcome: outcome || null, outcomeDate });
@@ -30722,7 +30853,8 @@ export default function App() {
   function convertQuoteToMfg(doc) {
     if (doc.outcome !== 'won') { alert('Only a won quotation can be converted.'); return; }
     if (doc.mfgLink) { alert('This quotation is already converted.'); return; }
-    const res = buildMfgFromQuote({ doc, boms, rawMaterials, purchaseReqs, productionOrders, bizType: 'manufacturing' });
+    const _its = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
+    const res = buildMfgFromQuote({ doc, boms, rawMaterials, items: _its, stockMap: computeStock(stockLedger, _its), purchaseReqs, productionOrders, bizType: 'manufacturing' });
     if (!res.newBoms.length) { alert('No items with a name and quantity to convert.'); return; }
     const msg = 'Create for ' + doc.number + ':\n\n• ' + res.newBoms.length + ' BOM(s) — one per quotation item\n• ' + res.newOrders.length + ' production order(s)\n• Order shortage report' + (res.pr ? '\n• Draft purchase requisition for ' + res.pr.items.length + ' short material(s)' : '\n• No shortage — stock covers all materials') + (res.missingBom.length ? '\n\nNo master BOM found for:\n' + res.missingBom.join('\n') + '\n(These BOMs are created empty — Engineering must add materials.)' : '') + '\n\nContinue?';
     if (!window.confirm(msg)) return;
@@ -31341,12 +31473,15 @@ export default function App() {
         );
       case 'rawmaterials':
         return (
-          <RawMaterialsList
+          <MaterialsView
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
             rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
             businessInfo={businessInfo}
+            userRole={userRole}
+            setEditingItem={setEditingItem}
+            onMigrate={runRmMigration}
+            setView={setView}
           />
         );
       case 'bom':
@@ -31355,6 +31490,7 @@ export default function App() {
             boms={boms}
             setBoms={setBoms}
             rawMaterials={rawMaterials}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             userRole={userRole}
             ownerUid={ownerUid}
             parts={parts}
@@ -32161,6 +32297,8 @@ export default function App() {
       case 'boshortage':
         return (
           <BOShortageView
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
             currentBizType={sessionContext || effectiveBizContext}
