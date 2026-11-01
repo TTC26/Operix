@@ -5015,7 +5015,7 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
   const fmtV = (v) => isAmount ? (v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : Math.round(v)) : v;
 
   // SVG layout
-  const W = 560, H = 170, PL = 4, PR = 4, PT = 14, PB = 24;
+  const W = 560, H = 196, PL = 58, PR = 8, PT = 14, PB = 42;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
   const n = months.length;
@@ -5072,6 +5072,7 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
           const y = PT + chartH * (1 - f);
           return <g key={i}>
             <line x1={PL} y1={y} x2={W - PR} y2={y} stroke={f === 0 ? '#D8D4CC' : '#EDEAE0'} strokeWidth={f === 0 ? 1.5 : 0.8} strokeDasharray={f === 0 ? 'none' : '5 4'} />
+            <text x={PL - 6} y={y + 3} textAnchor="end" fontSize={9} fill="#888" fontFamily="sans-serif">{fmtV(maxVal * f)}</text>
           </g>;
         })}
 
@@ -5104,9 +5105,12 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
           })
         )}
 
+        <line x1={PL} y1={PT} x2={PL} y2={PT + chartH} stroke="#D8D4CC" strokeWidth={1.2} />
         {months.map((m, i) => (
-          <text key={i} x={PL + i * slotW + slotW / 2} y={H - 5} textAnchor="middle" fontSize={10} fill="#999" fontFamily="sans-serif">{m.label}</text>
+          <text key={i} x={PL + i * slotW + slotW / 2} y={PT + chartH + 14} textAnchor="middle" fontSize={10} fill="#777" fontFamily="sans-serif">{m.label}</text>
         ))}
+        <text x={PL + chartW / 2} y={H - 4} textAnchor="middle" fontSize={10} fill="#666" fontFamily="sans-serif" fontWeight="600">Month</text>
+        <text transform={`translate(11 ${PT + chartH / 2}) rotate(-90)`} textAnchor="middle" fontSize={10} fill="#666" fontFamily="sans-serif" fontWeight="600">{isAmount ? `Amount (${String(cur(0)).replace(/[0-9.,\s]/g, '') || '₹'})` : 'No. of orders'}</text>
       </svg>
 
       <div style={{ display: 'flex', gap: 22, marginTop: 8, paddingTop: 10, borderTop: '1px solid #F0EDE4', flexWrap: 'wrap' }}>
@@ -5128,7 +5132,655 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
 }
 
 // ─── Business Insights: Receivables ageing + reminders · Cash forecast · Reorder planner · Month-end check ───────────
-function InsightsView({ documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false }) {
+// ─── Insights add-on tabs. ctx comes from InsightsView. Per-business saved data lives in businessInfo.insightsData[bizKey] ───
+const _iCard = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 14 };
+const _iTh = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', textAlign: 'left', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+const _iTd = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+const _iR = { textAlign: 'right' };
+const _iYM = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+const _iSum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const _iSettles = (v) => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+const _iPcEntries = (ctx) => (Array.isArray(ctx.pettyCash && ctx.pettyCash.entries) ? ctx.pettyCash.entries : []).filter(e => ctx.inDiv(e) && e.status !== 'rejected');
+
+// 2 · Balance sheet + trial balance
+function InsBalanceSheet({ ctx }) {
+  const { fmt, docs, vch, stock, recvRows, payRows, pettyCash, taxOf, taxableOf } = ctx;
+  const pcE = _iPcEntries(ctx);
+  const cash = _iSum(vch.filter(v => v.type === 'receipt'), v => parseFloat(v.amount) || 0) - _iSum(vch.filter(v => v.type === 'payment'), v => parseFloat(v.amount) || 0);
+  const pcb = pcE.reduce((s, e) => s + (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0), 0) + (parseFloat(pettyCash && pettyCash.openingBalance) || 0);
+  const recv = _iSum(recvRows, r => r.bal), pay = _iSum(payRows, r => r.bal);
+  const inv = Object.values(stock).reduce((s, x) => s + (x.qty > 0 ? (x.value > 0 ? x.value : x.qty * (parseFloat((x.item && (x.item.purchaseRate ?? x.item.rate ?? x.item.costPrice)) || 0) || 0)) : 0), 0);
+  const sales = _iSum(docs.filter(d => d.type === 'invoice'), taxableOf) - _iSum(docs.filter(d => d.type === 'creditnote'), taxableOf);
+  const purch = _iSum(docs.filter(d => d.type === 'purchasebill'), taxableOf);
+  const gstNet = _iSum(docs.filter(d => d.type === 'invoice'), taxOf) - _iSum(docs.filter(d => d.type === 'purchasebill'), taxOf);
+  const exp = _iSum(vch.filter(v => v.type === 'payment' && !_iSettles(v)), v => parseFloat(v.amount) || 0) + _iSum(pcE, e => parseFloat(e.debit) || 0);
+  const flow = (h) => _iSum(vch.filter(v => v.accountHead === h), v => (v.type === 'receipt' ? 1 : -1) * (parseFloat(v.amount) || 0));
+  const loan = flow('Loan'), capital = flow('Capital');
+  const assets = Math.max(cash, 0) + Math.max(pcb, 0) + recv + inv + (gstNet < 0 ? -gstNet : 0);
+  const liabs = pay + (gstNet > 0 ? gstNet : 0) + Math.max(loan, 0) + (cash < 0 ? -cash : 0);
+  const profit = sales - purch - exp;
+  const reserves = assets - liabs - capital;
+  const row = (l, v, b) => <tr key={l}><td style={{ ..._iTd, fontWeight: b ? 700 : 400 }}>{l}</td><td style={{ ..._iTd, ..._iR, fontWeight: b ? 700 : 400 }}>{fmt(v)}</td></tr>;
+  const tb = [['Sales (net of credit notes)', 0, sales], ['Purchases', purch, 0], ['Operating expenses', exp, 0], ['Debtors (receivables)', recv, 0], ['Creditors (payables)', 0, pay], ['Cash / bank (vouchers)', Math.max(cash, 0), Math.max(-cash, 0)], ['Petty cash', Math.max(pcb, 0), Math.max(-pcb, 0)], ['Closing stock', inv, 0], ['GST (net)', gstNet < 0 ? -gstNet : 0, gstNet > 0 ? gstNet : 0], ['Loans', Math.max(-loan, 0), Math.max(loan, 0)], ['Capital', Math.max(-capital, 0), Math.max(capital, 0)]];
+  const dr = tb.reduce((s, r) => s + r[1], 0), cr = tb.reduce((s, r) => s + r[2], 0);
+  return (<>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Assets</div><table style={{ width: '100%', borderCollapse: 'collapse' }}><tbody>
+        {row('Cash / bank (receipts − payments)', Math.max(cash, 0))}{row('Petty cash', Math.max(pcb, 0))}{row('Debtors (outstanding invoices)', recv)}{row('Closing stock (purchase rate)', inv)}{gstNet < 0 && row('GST input credit', -gstNet)}{row('TOTAL ASSETS', assets, 1)}</tbody></table></div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Liabilities &amp; Capital</div><table style={{ width: '100%', borderCollapse: 'collapse' }}><tbody>
+        {row('Creditors (outstanding bills)', pay)}{gstNet > 0 && row('GST payable (output − input)', gstNet)}{loan > 0 && row('Loans', loan)}{row('Capital introduced', capital)}{row('Reserves & surplus (balancing)', reserves)}{row('TOTAL', liabs + capital + reserves, 1)}</tbody></table>
+        <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Profit on approved documents: <b style={{ color: profit >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(profit)}</b> (sales − purchases − expenses, ex-GST)</div></div>
+    </div>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Trial balance</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr><th style={_iTh}>Account</th><th style={{ ..._iTh, ..._iR }}>Debit</th><th style={{ ..._iTh, ..._iR }}>Credit</th></tr></thead><tbody>
+        {tb.map(r => <tr key={r[0]}><td style={_iTd}>{r[0]}</td><td style={{ ..._iTd, ..._iR }}>{r[1] ? fmt(r[1]) : ''}</td><td style={{ ..._iTd, ..._iR }}>{r[2] ? fmt(r[2]) : ''}</td></tr>)}
+        {Math.abs(dr - cr) > 1 && <tr><td style={_iTd}>Opening balances / entries not captured (difference)</td><td style={{ ..._iTd, ..._iR }}>{cr > dr ? fmt(cr - dr) : ''}</td><td style={{ ..._iTd, ..._iR }}>{dr > cr ? fmt(dr - cr) : ''}</td></tr>}
+        <tr style={{ background: '#F8F6F0' }}><td style={{ ..._iTd, fontWeight: 700 }}>Total</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(Math.max(dr, cr))}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(Math.max(dr, cr))}</td></tr></tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Management view from approved documents and vouchers — not an audited statement. Opening balances, fixed assets, depreciation and bank reconciliation are outside the app; the difference line shows what is not captured. Share with your CA for final books.</div>
+    </div>
+  </>);
+}
+
+// 3 · Budget vs actual
+function InsBudget({ ctx }) {
+  const { fmt, docs, vch, taxableOf, ins, setIns, canEdit, styles } = ctx;
+  const [month, setMonth] = React.useState(_iYM(new Date()));
+  const budgets = ins.budgets || {}, b = budgets[month] || {};
+  const setB = (k, v) => setIns('budgets', (p = {}) => ({ ...p, [month]: { ...(p[month] || {}), [k]: v } }));
+  const inM = d => String(d || '').slice(0, 7) === month;
+  const act = {
+    sales: _iSum(docs.filter(d => d.type === 'invoice' && inM(d.date)), taxableOf) - _iSum(docs.filter(d => d.type === 'creditnote' && inM(d.date)), taxableOf),
+    purchase: _iSum(docs.filter(d => d.type === 'purchasebill' && inM(d.date)), taxableOf),
+    expenses: _iSum(vch.filter(v => v.type === 'payment' && !_iSettles(v) && inM(v.date)), v => parseFloat(v.amount) || 0) + _iSum(_iPcEntries(ctx).filter(e => inM(e.date)), e => parseFloat(e.debit) || 0),
+  };
+  return (
+    <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <b>Month</b><input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...styles.input, width: 170, margin: 0 }} />
+        {canEdit && <button style={styles.ghostBtn} onClick={() => { const d = new Date(month + '-01'); d.setMonth(d.getMonth() - 1); const pb = budgets[_iYM(d)]; if (!pb) return alert('No budget in the previous month.'); setIns('budgets', (p = {}) => ({ ...p, [month]: { ...pb } })); }}>Copy last month's budget</button>}
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['', 'Budget', 'Actual', 'Variance', '% used'].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {[['sales', 'Sales', 1], ['purchase', 'Purchase', -1], ['expenses', 'Expenses', -1]].map(([k, l, sg]) => { const bud = parseFloat(b[k]) || 0, a = act[k], v = sg > 0 ? a - bud : bud - a, pct = bud > 0 ? Math.round(a / bud * 100) : null; return (
+          <tr key={k}><td style={_iTd}>{l}</td>
+            <td style={{ ..._iTd, ..._iR }}>{canEdit ? <input type="number" value={b[k] ?? ''} onChange={e => setB(k, e.target.value)} placeholder="0" style={{ ...styles.input, width: 130, margin: 0, textAlign: 'right' }} /> : fmt(bud)}</td>
+            <td style={{ ..._iTd, ..._iR }}>{fmt(a)}</td>
+            <td style={{ ..._iTd, ..._iR, color: bud ? (v >= 0 ? '#1A7A3E' : '#B5453A') : '#999', fontWeight: 600 }}>{bud ? (v >= 0 ? '+' : '−') + fmt(Math.abs(v)) : '—'}</td>
+            <td style={{ ..._iTd, ..._iR }}>{pct === null ? '—' : <span style={{ color: (sg > 0 ? pct >= 100 : pct <= 100) ? '#1A7A3E' : '#B5453A', fontWeight: 600 }}>{pct}%</span>}</td></tr>); })}
+      </tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Sales: green when actual ≥ budget. Purchase / expenses: green when actual ≤ budget. Actuals exclude GST and use approved documents.</div>
+    </div>
+  );
+}
+
+// 4 · Vendor payment planner
+function InsPayPlanner({ ctx }) {
+  const { fmt, payRows, today, dayMs, styles } = ctx;
+  const [cash, setCash] = React.useState('');
+  const avail = parseFloat(cash) || 0;
+  const rows = payRows.map(r => ({ ...r, days: r.due ? Math.floor((r.due - today) / dayMs) : 0 })).sort((a, b) => a.days - b.days || a.bal - b.bal);
+  let left = avail; const plan = rows.map(r => { const pay = left >= r.bal; if (pay) left -= r.bal; return { ...r, pay }; });
+  const grp = r => r.days < 0 ? 'Overdue' : r.days <= 7 ? 'Due this week' : r.days <= 14 ? 'Next 2 weeks' : 'Later';
+  const payNow = plan.filter(r => r.pay), hold = plan.filter(r => !r.pay);
+  return (<>
+    <div style={{ ..._iCard, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <b>Cash available to pay vendors</b><input type="number" value={cash} onChange={e => setCash(e.target.value)} placeholder="0" style={{ ...styles.input, width: 180, margin: 0 }} />
+      <span style={{ fontSize: 12, color: '#888' }}>Total payable {fmt(_iSum(rows, r => r.bal))} · pays overdue / earliest first</span>
+    </div>
+    {rows.length === 0 ? <div style={styles.emptyBox}>No outstanding purchase bills.</div> : (
+      <div style={_iCard}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{['Vendor', 'Bill', 'Due', 'When', 'Balance', 'Plan'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i === 4 ? _iR : {}) }}>{h}</th>)}</tr></thead>
+        <tbody>{plan.map(r => <tr key={r.d.id}><td style={_iTd}>{r.party}</td><td style={_iTd}>{r.d.number}</td><td style={_iTd}>{r.d.dueDate || r.d.date}</td>
+          <td style={{ ..._iTd, color: r.days < 0 ? '#B5453A' : r.days <= 7 ? '#E07B00' : '#666', fontWeight: 600 }}>{grp(r)}{r.days < 0 ? ' (' + (-r.days) + ' d)' : ''}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(r.bal)}</td>
+          <td style={_iTd}>{avail > 0 ? (r.pay ? <span style={{ color: '#1A7A3E', fontWeight: 700 }}>✔ Pay now</span> : <span style={{ color: '#B5453A' }}>Hold / part-pay</span>) : '—'}</td></tr>)}</tbody></table>
+        {avail > 0 && <div style={{ fontSize: 12.5, marginTop: 10 }}>Pay now: <b>{fmt(_iSum(payNow, r => r.bal))}</b> ({payNow.length} bills) · Hold: <b>{fmt(_iSum(hold, r => r.bal))}</b> ({hold.length}) · Cash left: <b>{fmt(left)}</b></div>}
+      </div>)}
+  </>);
+}
+
+// 1 · Payroll pre-check
+function InsPayrollCheck({ ctx }) {
+  const { employees, siteAttendance, fmt, styles } = ctx;
+  const [month, setMonth] = React.useState(_iYM(new Date()));
+  const [y, m] = month.split('-').map(Number), dim = new Date(y, m, 0).getDate();
+  const act = employees.filter(e => (e.status || 'active') === 'active');
+  const ids = new Set(employees.map(e => e.id));
+  const cnt = {};
+  (siteAttendance || []).filter(r => String(r.date || '').slice(0, 7) === month).forEach(r => (r.records || []).forEach(x => {
+    if (!ids.has(x.employeeId)) return;
+    const c = cnt[x.employeeId] = cnt[x.employeeId] || { present: 0, absent: 0, od: 0, ot: 0, days: 0 }; c.days++;
+    const s = String(x.status || ''); if (s === 'absent') c.absent++; else if (s === 'od') c.od++; else c.present++;
+    c.ot += parseFloat(x.otHours) || 0;
+  }));
+  const gross = e => (parseFloat(e.basicSalary) || 0) + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0);
+  const sorted = act.map(gross).filter(g => g > 0).sort((a, b) => a - b), med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  const bankCount = {}; act.forEach(e => { const k = String(e.bankAccount || '').trim(); if (k) bankCount[k] = (bankCount[k] || 0) + 1; });
+  const issues = [];
+  act.forEach(e => {
+    const c = cnt[e.id], g = gross(e), add = (lvl, msg) => issues.push({ lvl, who: e, msg });
+    if (!(parseFloat(e.basicSalary) > 0)) add('high', 'No basic salary set — will be paid 0');
+    if (!String(e.bankAccount || '').trim()) add('med', 'No bank account on file');
+    else if (bankCount[String(e.bankAccount).trim()] > 1) add('high', 'Same bank account used by another employee');
+    if (!c) add('med', 'No attendance recorded for ' + month);
+    else {
+      if (c.absent >= 6) add('med', c.absent + ' absent days — check loss of pay');
+      if (c.days > dim) add('high', 'Attendance entries (' + c.days + ') exceed days in month (' + dim + ')');
+      if (c.ot > 60) add('med', c.ot + ' overtime hours — unusually high, verify');
+      if (c.od > 0) add('low', c.od + ' official-duty day(s) — counted as present');
+    }
+    if (e.joiningDate && String(e.joiningDate).slice(0, 7) === month) add('low', 'Joined this month (' + e.joiningDate + ') — pro-rata pay');
+    if (med > 0 && g > med * 2.5) add('med', 'Gross ' + fmt(g) + ' is over 2.5× the median — verify');
+  });
+  employees.filter(e => e.status && e.status !== 'active' && cnt[e.id]).forEach(e => issues.push({ lvl: 'high', who: e, msg: 'Status "' + e.status + '" but has attendance this month' }));
+  const col = { high: '#B5453A', med: '#E07B00', low: '#6B7494' };
+  const nH = issues.filter(i => i.lvl === 'high').length, nM = issues.filter(i => i.lvl === 'med').length;
+  return (
+    <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <b>Payroll month</b><input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...styles.input, width: 170, margin: 0 }} />
+        <span style={{ fontSize: 13 }}>{act.length} active staff · <b style={{ color: nH ? '#B5453A' : '#1A7A3E' }}>{nH} must-fix</b> · <b style={{ color: '#E07B00' }}>{nM} to check</b> · Gross payroll {fmt(_iSum(act, gross))}</span>
+      </div>
+      {issues.length === 0 ? <div style={{ color: '#1A7A3E', fontWeight: 600 }}>✅ No issues found — payroll looks ready.</div> :
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Level', 'Employee', 'Issue'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+          {issues.sort((a, b) => ['high', 'med', 'low'].indexOf(a.lvl) - ['high', 'med', 'low'].indexOf(b.lvl)).map((i, k) => <tr key={k}><td style={{ ..._iTd, color: col[i.lvl], fontWeight: 700, fontSize: 11 }}>{i.lvl === 'high' ? 'MUST FIX' : i.lvl === 'med' ? 'CHECK' : 'INFO'}</td><td style={_iTd}>{i.who.name} <span style={{ color: '#aaa', fontSize: 11 }}>{i.who.empId}</span></td><td style={_iTd}>{i.msg}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Issues are only flagged, never changed automatically. Fix them in Employees / Attendance, then run payroll.</div>
+    </div>
+  );
+}
+
+// 7 · Compliance calendar
+function InsCompliance({ ctx }) {
+  const { ins, setIns, canEdit, today, dayMs, styles, businessInfo } = ctx;
+  const [form, setForm] = React.useState({ title: '', date: '', note: '' });
+  const isIN = (businessInfo.country || 'india') === 'india';
+  const std = [];
+  if (isIN) for (let k = 0; k < 3; k++) {
+    const base = new Date(today.getFullYear(), today.getMonth() + k, 1), y = base.getFullYear(), m = base.getMonth(), last = new Date(y, m + 1, 0).getDate();
+    const iso = (d) => y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    std.push({ id: 's-tds-' + iso(7), title: 'TDS payment (previous month)', date: iso(7) }, { id: 's-g1-' + iso(11), title: 'GSTR-1 filing', date: iso(11) }, { id: 's-pf-' + iso(15), title: 'PF & ESI payment', date: iso(15) }, { id: 's-g3-' + iso(20), title: 'GSTR-3B filing + tax payment', date: iso(20) });
+    if ([5, 8, 11, 2].includes(m)) std.push({ id: 's-at-' + iso(15), title: 'Advance tax instalment', date: iso(15) });
+    if ([0, 3, 6, 9].includes(m)) std.push({ id: 's-tdsr-' + iso(Math.min(31, last)), title: 'TDS return (quarterly) — check quarter', date: iso(Math.min(31, last)) });
+  }
+  const mine = ins.complianceItems || [], done = ins.complianceDone || {};
+  const all = [...std.map(x => ({ ...x, std: true })), ...mine.map(x => ({ ...x, std: false }))].filter(x => x.date).sort((a, b) => a.date.localeCompare(b.date));
+  const dl = x => Math.ceil((new Date(x.date) - today) / dayMs);
+  const isDone = x => x.std ? !!done[x.id] : !!x.done;
+  const toggle = (x) => x.std ? setIns('complianceDone', (p = {}) => ({ ...p, [x.id]: !p[x.id] })) : setIns('complianceItems', (p = []) => p.map(i => i.id === x.id ? { ...i, done: !i.done } : i));
+  const add = () => { if (!form.title.trim() || !form.date) return alert('Enter a title and date'); setIns('complianceItems', (p = []) => [...p, { id: 'c-' + Date.now(), ...form, title: form.title.trim() }]); setForm({ title: '', date: '', note: '' }); };
+  const shown = all.filter(x => dl(x) >= -30);
+  return (<>
+    {canEdit && <div style={{ ..._iCard, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <b>Add your own</b><input placeholder="e.g. Factory licence renewal" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} style={{ ...styles.input, width: 260, margin: 0 }} />
+      <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={{ ...styles.input, width: 160, margin: 0 }} />
+      <input placeholder="Note (optional)" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} style={{ ...styles.input, width: 220, margin: 0 }} />
+      <button style={styles.primaryBtn} onClick={add}>Add</button></div>}
+    <div style={_iCard}>
+      {shown.length === 0 && <div style={{ color: '#999' }}>Nothing due.</div>}
+      {shown.map(x => { const d = dl(x), dn = isDone(x); return (
+        <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F0ECE0', opacity: dn ? 0.5 : 1 }}>
+          <input type="checkbox" checked={dn} onChange={() => toggle(x)} />
+          <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, textDecoration: dn ? 'line-through' : 'none' }}>{x.title} {!x.std && <span style={{ fontSize: 10, background: '#EEF2FF', color: '#3D52A0', borderRadius: 4, padding: '1px 6px' }}>yours</span>}</div>{x.note && <div style={{ fontSize: 11.5, color: '#999' }}>{x.note}</div>}</div>
+          <div style={{ fontSize: 12.5, color: '#666', width: 100 }}>{x.date}</div>
+          <div style={{ width: 100, textAlign: 'right', fontWeight: 700, fontSize: 12.5, color: dn ? '#999' : d < 0 ? '#B5453A' : d <= 5 ? '#E07B00' : '#1A7A3E' }}>{d < 0 ? (-d) + ' d overdue' : d === 0 ? 'Today' : d + ' d left'}</div>
+          {!x.std && canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('complianceItems', (p = []) => p.filter(i => i.id !== x.id))}>✕</button>}
+        </div>); })}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Standard dates are the usual India due dates; they can shift for holidays / notifications and depend on your registrations — confirm with your CA. Tick when filed.</div>
+    </div>
+  </>);
+}
+
+// 8 · Risk register + SOP builder
+function InsRiskSop({ ctx }) {
+  const { ins, setIns, canEdit, styles, businessInfo } = ctx;
+  const blank = { title: '', category: 'Operations', likelihood: 3, impact: 3, owner: '', mitigation: '', status: 'Open' };
+  const [r, setR] = React.useState(blank);
+  const [sop, setSop] = React.useState({ title: '', purpose: '', scope: '', owner: '', steps: '' });
+  const risks = (ins.riskRegister || []).slice().sort((a, b) => (b.likelihood * b.impact) - (a.likelihood * a.impact));
+  const sops = ins.sops || [];
+  const lvl = s => s >= 15 ? ['High', '#B5453A'] : s >= 8 ? ['Medium', '#E07B00'] : ['Low', '#1A7A3E'];
+  const sopText = x => (x.title.toUpperCase() + '\n' + (businessInfo.name || '') + '\n\nPurpose: ' + x.purpose + '\nScope: ' + x.scope + '\nOwner: ' + x.owner + '\n\nProcedure:\n' + String(x.steps).split('\n').filter(Boolean).map((l, i) => (i + 1) + '. ' + l).join('\n'));
+  const num = (k) => <select value={r[k]} onChange={e => setR(p => ({ ...p, [k]: parseInt(e.target.value) }))} style={{ ...styles.input, width: 80, margin: 0 }}>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select>;
+  return (<>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Risk register</div>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <input placeholder="Risk (e.g. Key customer pays late)" value={r.title} onChange={e => setR(p => ({ ...p, title: e.target.value }))} style={{ ...styles.input, width: 250, margin: 0 }} />
+        <select value={r.category} onChange={e => setR(p => ({ ...p, category: e.target.value }))} style={{ ...styles.input, width: 130, margin: 0 }}>{['Operations', 'Finance', 'Safety', 'Quality', 'Legal', 'People', 'Supply chain', 'IT'].map(c => <option key={c}>{c}</option>)}</select>
+        <span style={{ fontSize: 12 }}>Likelihood</span>{num('likelihood')}<span style={{ fontSize: 12 }}>Impact</span>{num('impact')}
+        <input placeholder="Owner" value={r.owner} onChange={e => setR(p => ({ ...p, owner: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }} />
+        <input placeholder="Mitigation / action" value={r.mitigation} onChange={e => setR(p => ({ ...p, mitigation: e.target.value }))} style={{ ...styles.input, width: 240, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!r.title.trim()) return alert('Enter the risk'); setIns('riskRegister', (p = []) => [...p, { ...r, id: 'r-' + Date.now() }]); setR(blank); }}>Add</button></div>}
+      {risks.length === 0 ? <div style={{ color: '#999' }}>No risks logged yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Risk', 'Category', 'L×I', 'Level', 'Owner', 'Mitigation', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {risks.map(x => { const sc = x.likelihood * x.impact, [lv, c] = lvl(sc); return <tr key={x.id}><td style={_iTd}>{x.title}</td><td style={_iTd}>{x.category}</td><td style={_iTd}>{x.likelihood}×{x.impact}={sc}</td><td style={{ ..._iTd, color: c, fontWeight: 700 }}>{lv}</td><td style={_iTd}>{x.owner}</td><td style={_iTd}>{x.mitigation}</td>
+          <td style={_iTd}>{canEdit ? <select value={x.status} onChange={e => setIns('riskRegister', (p = []) => p.map(y => y.id === x.id ? { ...y, status: e.target.value } : y))} style={{ ...styles.input, margin: 0, width: 105 }}>{['Open', 'Mitigating', 'Closed'].map(s => <option key={s}>{s}</option>)}</select> : x.status}</td>
+          <td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('riskRegister', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>; })}</tbody></table>}
+    </div>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>SOP builder</div>
+      {canEdit && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        <input placeholder="SOP title (e.g. Goods receipt & inspection)" value={sop.title} onChange={e => setSop(p => ({ ...p, title: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Owner / department" value={sop.owner} onChange={e => setSop(p => ({ ...p, owner: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Purpose" value={sop.purpose} onChange={e => setSop(p => ({ ...p, purpose: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Scope" value={sop.scope} onChange={e => setSop(p => ({ ...p, scope: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <textarea placeholder={'Steps — one per line'} value={sop.steps} onChange={e => setSop(p => ({ ...p, steps: e.target.value }))} rows={4} style={{ ...styles.input, margin: 0, gridColumn: '1/-1' }} />
+        <div><button style={styles.primaryBtn} onClick={() => { if (!sop.title.trim() || !sop.steps.trim()) return alert('Title and steps are required'); setIns('sops', (p = []) => [...p, { ...sop, id: 's-' + Date.now() }]); setSop({ title: '', purpose: '', scope: '', owner: '', steps: '' }); }}>Save SOP</button></div></div>}
+      {sops.length === 0 ? <div style={{ color: '#999' }}>No SOPs yet.</div> : sops.map(x => (
+        <div key={x.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><b>{x.title}</b><span>
+            <button style={{ ...styles.ghostBtn, padding: '2px 10px', marginRight: 6 }} onClick={() => { try { navigator.clipboard.writeText(sopText(x)); alert('SOP copied'); } catch (e) { window.prompt('Copy:', sopText(x)); } }}>Copy</button>
+            {canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('sops', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</span></div>
+          <div style={{ fontSize: 12, color: '#777', margin: '4px 0' }}>{x.purpose}{x.owner ? ' · Owner: ' + x.owner : ''}</div>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13 }}>{String(x.steps).split('\n').filter(Boolean).map((l, i) => <li key={i}>{l}</li>)}</ol>
+        </div>))}
+    </div>
+  </>);
+}
+
+// 5 · Onboarding checklist + appraisal (stored on the employee record)
+const INS_ONBOARD = ['Offer letter signed', 'ID / address proof collected', 'Bank account details collected', 'PF / ESI enrolment', 'Employee ID & biometric ID created', 'Induction & safety briefing', 'PPE / tools / uniform issued', 'System / email access', 'Reporting manager introduced', 'Probation review date set'];
+const INS_APPR = ['Quality of work', 'Productivity', 'Punctuality & attendance', 'Teamwork', 'Initiative', 'Technical skill'];
+function InsPeople({ ctx }) {
+  const { employees, setEmployees, canEdit, styles } = ctx;
+  const [id, setId] = React.useState('');
+  const emp = employees.find(e => e.id === id);
+  const [ap, setAp] = React.useState({ period: String(new Date().getFullYear()), ratings: {}, comments: '' });
+  const upd = (fn) => setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...fn(e) } : e));
+  const prog = e => { const o = e.onboarding || {}; return Math.round(INS_ONBOARD.filter((_, i) => o[i]).length / INS_ONBOARD.length * 100); };
+  const recent = employees.filter(e => (e.status || 'active') === 'active' && e.joiningDate && (Date.now() - new Date(e.joiningDate)) < 90 * 86400000);
+  const avg = r => { const v = INS_APPR.map(a => r[a]).filter(Boolean); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0; };
+  return (<>
+    {recent.length > 0 && <div style={_iCard}><b>New joiners (last 90 days)</b>{recent.map(e => <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}><span>{e.name} <span style={{ color: '#aaa' }}>· {e.joiningDate}</span></span><span style={{ color: prog(e) === 100 ? '#1A7A3E' : '#E07B00', fontWeight: 600 }}>Onboarding {prog(e)}%</span></div>)}</div>}
+    <div style={{ ..._iCard, display: 'flex', gap: 10, alignItems: 'center' }}><b>Employee</b>
+      <select value={id} onChange={e => setId(e.target.value)} style={{ ...styles.input, width: 320, margin: 0 }}><option value="">— Select —</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.empId})</option>)}</select></div>
+    {emp && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Onboarding checklist — {prog(emp)}%</div>
+        {INS_ONBOARD.map((t, i) => <label key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', fontSize: 13 }}><input type="checkbox" disabled={!canEdit} checked={!!(emp.onboarding || {})[i]} onChange={e => { const v = e.target.checked; upd(x => ({ onboarding: { ...(x.onboarding || {}), [i]: v } })); }} />{t}</label>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Appraisal</div>
+        {canEdit && <div style={{ marginBottom: 10 }}>
+          <input value={ap.period} onChange={e => setAp(p => ({ ...p, period: e.target.value }))} placeholder="Period (e.g. 2026 / H1 2026)" style={{ ...styles.input, margin: '0 0 6px' }} />
+          {INS_APPR.map(a => <div key={a} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '3px 0' }}>{a}<select value={ap.ratings[a] || ''} onChange={e => setAp(p => ({ ...p, ratings: { ...p.ratings, [a]: parseInt(e.target.value) || 0 } }))} style={{ ...styles.input, width: 80, margin: 0 }}><option value="">—</option>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select></div>)}
+          <textarea value={ap.comments} onChange={e => setAp(p => ({ ...p, comments: e.target.value }))} placeholder="Comments / goals for next period" rows={2} style={{ ...styles.input, margin: '6px 0' }} />
+          <button style={styles.primaryBtn} onClick={() => { if (avg(ap.ratings) === 0) return alert('Give at least one rating'); const rec = { ...ap, id: 'ap-' + Date.now(), date: new Date().toISOString().slice(0, 10), score: +avg(ap.ratings).toFixed(2) }; upd(x => ({ appraisals: [...(x.appraisals || []), rec] })); setAp({ period: ap.period, ratings: {}, comments: '' }); }}>Save appraisal</button></div>}
+        {(emp.appraisals || []).slice().reverse().map(a => <div key={a.id} style={{ borderTop: '1px solid #F0ECE0', padding: '6px 0', fontSize: 12.5 }}><b>{a.period}</b> · {a.date} · score <b style={{ color: a.score >= 4 ? '#1A7A3E' : a.score >= 3 ? '#E07B00' : '#B5453A' }}>{a.score}/5</b>{a.comments ? <div style={{ color: '#777' }}>{a.comments}</div> : null}</div>)}
+      </div>
+    </div>}
+  </>);
+}
+
+// 6 · Contract risk check (keyword screening — not legal advice)
+const INS_CRISK = [
+  [/unlimited liabilit|without limit(ation)? of liabilit/i, 'High', 'Unlimited liability', 'Cap liability at contract value / fees paid.'],
+  [/indemnif/i, 'Medium', 'Indemnity clause', 'Make it mutual and limited to third-party claims caused by your breach.'],
+  [/auto(matic(ally)?)?[- ]?renew|evergreen/i, 'Medium', 'Auto-renewal', 'Note the cancellation window; diarise the notice date.'],
+  [/terminat\w+[^.]{0,60}(sole|absolute) discretion|terminat\w+ for convenience|without (any )?(prior )?notice/i, 'High', 'One-sided / no-notice termination', 'Ask for a notice period and payment for work done.'],
+  [/liquidated damages|penalt(y|ies)|late delivery charge/i, 'Medium', 'Penalty / LD clause', 'Check the rate and cap (e.g. 0.5%/week, max 5%).'],
+  [/exclusiv/i, 'Medium', 'Exclusivity', 'Confirm scope, duration and territory.'],
+  [/non[- ]?compete|non[- ]?solicit/i, 'Medium', 'Non-compete / non-solicit', 'Limit duration and geography.'],
+  [/payment[^.]{0,60}(sixty|60|ninety|90|120)\s*days|(sixty|60|ninety|90|120)\s*days[^.]{0,40}(payment|invoice)/i, 'Medium', 'Long payment terms', 'Negotiate 30 days or advance / milestone payments.'],
+  [/pay[- ]when[- ]paid|pay[- ]if[- ]paid|back[- ]to[- ]back payment/i, 'High', 'Pay-when-paid', 'Your payment depends on the customer paying — avoid or add a long-stop date.'],
+  [/retention|security deposit|performance (bank )?guarantee|bank guarantee/i, 'Medium', 'Retention / guarantee', 'Check % held, release date and BG validity.'],
+  [/(three|five|3|5)\s*years?\s*warranty|warranty[^.]{0,60}(36|48|60)\s*months/i, 'Medium', 'Long warranty', 'Standard is 12–24 months from supply / commissioning.'],
+  [/sole discretion|at its discretion/i, 'Medium', 'One-sided discretion', 'Ask for reasonable / objective criteria.'],
+  [/assign(s|ed)? (all )?(intellectual property|ip|rights)|work (made )?for hire/i, 'Medium', 'IP assignment', 'Keep pre-existing IP; assign only deliverables.'],
+  [/laws of (singapore|england|dubai|new york)|jurisdiction[^.]{0,80}(singapore|london|dubai|new york)/i, 'Medium', 'Foreign law / jurisdiction', 'Prefer Indian law / local courts, or neutral arbitration.'],
+  [/consequential|indirect (loss|damage)/i, 'Low', 'Consequential-loss wording', 'Make sure consequential loss is excluded for both sides.'],
+  [/force majeure/i, 'Info', 'Force majeure present', 'Good — check it covers govt orders, pandemics, supply disruption.'],
+];
+function InsContractRisk({ ctx }) {
+  const { contracts, styles } = ctx;
+  const [txt, setTxt] = React.useState('');
+  const scan = (t) => INS_CRISK.filter(r => r[0].test(t)).map(r => ({ lvl: r[1], name: r[2], tip: r[3] }));
+  const col = { High: '#B5453A', Medium: '#E07B00', Low: '#6B7494', Info: '#1A7A3E' };
+  const list = (contracts || []).map(c => ({ c, hits: scan(JSON.stringify(c)) })).filter(x => x.hits.length);
+  const res = txt.trim() ? scan(txt) : null;
+  const Hits = ({ hits }) => hits.length === 0 ? <div style={{ color: '#1A7A3E' }}>No flagged terms found.</div> : <>{hits.slice().sort((a, b) => ['High', 'Medium', 'Low', 'Info'].indexOf(a.lvl) - ['High', 'Medium', 'Low', 'Info'].indexOf(b.lvl)).map((h, i) => <div key={i} style={{ display: 'flex', gap: 10, padding: '5px 0', fontSize: 13 }}><b style={{ color: col[h.lvl], width: 62 }}>{h.lvl}</b><div><b>{h.name}</b><div style={{ color: '#777', fontSize: 12 }}>{h.tip}</div></div></div>)}</>;
+  return (<>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Paste any contract / PO terms to screen</div>
+      <textarea value={txt} onChange={e => setTxt(e.target.value)} rows={6} placeholder="Paste clauses here…" style={{ ...styles.input, margin: 0, width: '100%', boxSizing: 'border-box' }} />
+      {res && <div style={{ marginTop: 10 }}><Hits hits={res} /></div>}</div>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Saved contracts with flagged terms ({list.length})</div>
+      {list.length === 0 ? <div style={{ color: '#999' }}>No saved contract has flagged terms.</div> : list.map(({ c, hits }) => <div key={c.id} style={{ borderTop: '1px solid #F0ECE0', padding: '8px 0' }}><b>{c.number || ''} {c.title || ''}</b><Hits hits={hits} /></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Keyword screening to show what to read closely. It is not legal advice — have important contracts reviewed by a lawyer.</div></div>
+  </>);
+}
+
+// 9 · Customer health + renewal radar
+function InsCustomerHealth({ ctx }) {
+  const { fmt, docs, customers, recvRows, amcContracts, contracts, today, dayMs, totalOf } = ctx;
+  const rows = customers.map(c => {
+    const inv = docs.filter(d => d.type === 'invoice' && d.customerId === c.id);
+    if (!inv.length) return null;
+    const billed12 = _iSum(inv.filter(d => (today - new Date(d.date)) < 365 * dayMs), totalOf);
+    const out = recvRows.filter(r => r.d.customerId === c.id), bal = _iSum(out, r => r.bal), maxLate = Math.max(0, ...out.map(r => r.late));
+    const last = inv.reduce((m, d) => (d.date || '') > m ? d.date : m, ''), rec = last ? Math.floor((today - new Date(last)) / dayMs) : 999;
+    let score = 100 - Math.min(40, maxLate / 3) - (rec > 180 ? 25 : rec > 90 ? 12 : 0) - (billed12 > 0 ? Math.min(25, bal / billed12 * 25) : 0);
+    score = Math.max(0, Math.round(score));
+    return { c, billed12, bal, maxLate, rec, n: inv.length, score, tag: score >= 75 ? ['Healthy', '#1A7A3E'] : score >= 50 ? ['Watch', '#E07B00'] : ['At risk', '#B5453A'] };
+  }).filter(Boolean).sort((a, b) => a.score - b.score);
+  const ren = [...(amcContracts || []).map(a => ({ id: a.id, no: a.contractNo, title: a.title, end: a.endDate, cust: a.customerId, val: a.value, kind: 'AMC' })), ...(contracts || []).filter(c => c.endDate).map(c => ({ id: c.id, no: c.number, title: c.title, end: c.endDate, cust: c.customerId, val: c.value, kind: 'Contract' }))]
+    .filter(x => x.end).map(x => ({ ...x, d: Math.ceil((new Date(x.end) - today) / dayMs) })).filter(x => x.d <= 90 && x.d >= -30).sort((a, b) => a.d - b.d);
+  return (<>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Renewal radar (next 90 days)</div>
+      {ren.length === 0 ? <div style={{ color: '#999' }}>No AMC / contract ending in the next 90 days.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Type', 'No.', 'Title', 'Customer', 'Ends', 'Value', 'Days'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {ren.map(x => <tr key={x.kind + x.id}><td style={_iTd}>{x.kind}</td><td style={_iTd}>{x.no}</td><td style={_iTd}>{x.title}</td><td style={_iTd}>{(customers.find(c => c.id === x.cust) || {}).name || '—'}</td><td style={_iTd}>{x.end}</td><td style={{ ..._iTd, ..._iR }}>{x.val ? fmt(parseFloat(x.val) || 0) : '—'}</td><td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? (-x.d) + ' d over' : x.d + ' d'}</td></tr>)}</tbody></table>}
+    </div>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Customer health</div>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No invoiced customers yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Customer', 'Invoices', 'Billed (12m)', 'Outstanding', 'Max days late', 'Last invoice', 'Score'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 1 && i < 5 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {rows.map(r => <tr key={r.c.id}><td style={_iTd}>{r.c.name}</td><td style={_iTd}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.billed12)}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.bal)}</td><td style={{ ..._iTd, ..._iR }}>{r.maxLate || '—'}</td><td style={_iTd}>{r.rec} d ago</td><td style={{ ..._iTd, color: r.tag[1], fontWeight: 700 }}>{r.score} · {r.tag[0]}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Score starts at 100; reduced for late payments, no recent invoice and a high outstanding-to-billing ratio.</div></div>
+  </>);
+}
+
+// 10 · Enquiry lead scoring
+function InsEnquiryScore({ ctx }) {
+  const { enquiries, customers, docs, today, dayMs } = ctx;
+  const iso = today.toISOString().slice(0, 10);
+  const rows = (enquiries || []).filter(e => !['Won', 'Lost', 'Converted', 'Closed', 'Cancelled'].includes(e.status)).map(e => {
+    const created = e.date || e.enquiryDate || (e.createdAt ? new Date(e.createdAt).toISOString().slice(0, 10) : ''), age = created ? Math.floor((today - new Date(created)) / dayMs) : null;
+    const known = e.customerId && docs.some(d => d.type === 'invoice' && d.customerId === e.customerId);
+    let s = 30; const why = [];
+    if (/quot/i.test(e.status || '')) { s += 20; why.push('quotation sent'); } else if (/contact|progress|follow/i.test(e.status || '')) { s += 10; why.push('in contact'); }
+    if (known) { s += 15; why.push('existing customer'); }
+    if (e.followUpDate) { if (e.followUpDate < iso) { s -= 20; why.push('follow-up overdue'); } else { s += 10; why.push('follow-up planned'); } } else { s -= 5; why.push('no follow-up date'); }
+    if (age !== null) { if (age <= 7) { s += 15; why.push('fresh (≤7d)'); } else if (age <= 30) s += 5; else if (age > 60) { s -= 15; why.push('stale (>60d)'); } }
+    if (/hot|high/i.test(e.interest || '')) { s += 10; why.push('high interest'); } else if (/cold|low/i.test(e.interest || '')) s -= 10;
+    s = Math.max(0, Math.min(100, s));
+    const tag = s >= 70 ? ['Hot', '#B5453A'] : s >= 45 ? ['Warm', '#E07B00'] : ['Cold', '#6B7494'];
+    const next = e.followUpDate && e.followUpDate < iso ? 'Call today — follow-up overdue' : /quot/i.test(e.status || '') ? 'Chase quotation decision' : /contact|progress|follow/i.test(e.status || '') ? 'Send quotation' : 'Make first contact / qualify';
+    return { e, s, tag, why, next, name: (customers.find(c => c.id === e.customerId) || {}).name || e.customerName || e.name || e.company || '—' };
+  }).sort((a, b) => b.s - a.s);
+  return (
+    <div style={_iCard}>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No open enquiries.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Enquiry', 'Customer', 'Interest', 'Status', 'Follow-up', 'Score', 'Why', 'Next action'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {rows.map(r => <tr key={r.e.id}><td style={_iTd}>{r.e.number}</td><td style={_iTd}>{r.name}</td><td style={_iTd}>{r.e.interest || '—'}</td><td style={_iTd}>{r.e.status}</td><td style={_iTd}>{r.e.followUpDate || '—'}</td><td style={{ ..._iTd, color: r.tag[1], fontWeight: 700 }}>{r.s} · {r.tag[0]}</td><td style={{ ..._iTd, fontSize: 11.5, color: '#777' }}>{r.why.join(', ')}</td><td style={{ ..._iTd, fontWeight: 600 }}>{r.next}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Hot ≥ 70, Warm ≥ 45. Based on stage, repeat customer, follow-up date, age and interest.</div>
+    </div>
+  );
+}
+
+// Trading · credit limits, item margin, top / slow sellers
+function InsTrading({ ctx }) {
+  const { fmt, docs, items, customers, recvRows, ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('credit');
+  const limits = ins.creditLimits || {};
+  const inv = docs.filter(d => d.type === 'invoice');
+  const byItem = {};
+  inv.forEach(d => (d.items || []).forEach(l => {
+    const key = l.itemId || l.name; if (!key) return;
+    const it = items.find(x => x.id === l.itemId) || items.find(x => x.name === l.name) || {};
+    const q = parseFloat(l.qty) || 0, rate = parseFloat(l.rate) || 0, rev = q * rate * (1 - (parseFloat(l.discount) || 0) / 100);
+    const cost = q * (parseFloat(it.purchaseRate ?? it.rate) || 0);
+    const r = byItem[key] = byItem[key] || { name: l.name || it.name || key, unit: l.unit || it.unit || '', qty: 0, rev: 0, cost: 0, hasCost: false, last: '' };
+    r.qty += q; r.rev += rev; r.cost += cost; if (it.purchaseRate ?? it.rate) r.hasCost = true; if ((d.date || '') > r.last) r.last = d.date || '';
+  }));
+  const mrows = Object.values(byItem).map(r => ({ ...r, margin: r.rev - r.cost, pct: r.rev > 0 && r.hasCost ? (r.rev - r.cost) / r.rev * 100 : null }));
+  const top = mrows.slice().sort((a, b) => b.rev - a.rev);
+  const soldKeys = new Set(Object.keys(byItem));
+  const slow = items.filter(it => !soldKeys.has(it.id) && !soldKeys.has(it.name));
+  const lowMargin = mrows.filter(r => r.pct !== null && r.pct < 10).sort((a, b) => a.pct - b.pct);
+  const crows = customers.map(c => { const out = recvRows.filter(r => r.d.customerId === c.id), bal = out.reduce((s, r) => s + r.bal, 0), lim = parseFloat(limits[c.id]) || 0; return { c, bal, lim, over: lim > 0 && bal > lim, pct: lim > 0 ? Math.round(bal / lim * 100) : null }; }).filter(r => r.bal > 0 || r.lim > 0).sort((a, b) => (b.over - a.over) || b.bal - a.bal);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('credit', 'Credit limits')}{pill('margin', 'Item margin')}{pill('top', 'Top & slow items')}</div>
+    {sub === 'credit' && <div style={_iCard}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Customer', 'Outstanding', 'Credit limit', 'Used', 'Status'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i === 1 || i === 2 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {crows.length === 0 && <tr><td style={_iTd} colSpan={5}>No outstanding balances.</td></tr>}
+        {crows.map(r => <tr key={r.c.id}><td style={_iTd}>{r.c.name}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.bal)}</td>
+          <td style={{ ..._iTd, ..._iR }}>{canEdit ? <input type="number" value={limits[r.c.id] ?? ''} placeholder="not set" onChange={e => setIns('creditLimits', (p = {}) => ({ ...p, [r.c.id]: e.target.value }))} style={{ ...styles.input, width: 130, margin: 0, textAlign: 'right' }} /> : (r.lim ? fmt(r.lim) : '—')}</td>
+          <td style={_iTd}>{r.pct === null ? '—' : r.pct + '%'}</td><td style={{ ..._iTd, fontWeight: 700, color: r.over ? '#B5453A' : r.pct > 80 ? '#E07B00' : '#1A7A3E' }}>{r.lim ? (r.over ? 'OVER LIMIT — hold new orders' : r.pct > 80 ? 'Near limit' : 'OK') : 'No limit set'}</td></tr>)}</tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Set a limit per customer; outstanding = approved invoices minus linked receipts. Limits are advisory and do not block invoices.</div></div>}
+    {sub === 'margin' && <div style={_iCard}>
+      {lowMargin.length > 0 && <div style={{ fontSize: 12.5, color: '#B5453A', background: '#FDF0EE', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>⚠ {lowMargin.length} item(s) sold at under 10% margin: {lowMargin.slice(0, 5).map(r => r.name).join(', ')}</div>}
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Item', 'Qty sold', 'Revenue', 'Cost (current buy rate)', 'Margin', 'Margin %'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {mrows.sort((a, b) => (a.pct ?? 999) - (b.pct ?? 999)).map(r => <tr key={r.name}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR }}>{r.qty} {r.unit}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.rev)}</td><td style={{ ..._iTd, ..._iR }}>{r.hasCost ? fmt(r.cost) : '—'}</td><td style={{ ..._iTd, ..._iR }}>{r.hasCost ? fmt(r.margin) : '—'}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.pct === null ? '#999' : r.pct < 10 ? '#B5453A' : r.pct < 20 ? '#E07B00' : '#1A7A3E' }}>{r.pct === null ? 'no buy rate' : r.pct.toFixed(1) + '%'}</td></tr>)}</tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Cost uses the item master's current purchase rate, not historical batch cost — treat as an indication.</div></div>}
+    {sub === 'top' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Top 10 by revenue</div>{top.slice(0, 10).map((r, i) => <div key={r.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #F0ECE0' }}><span>{i + 1}. {r.name}</span><b>{fmt(r.rev)}</b></div>)}{top.length === 0 && <div style={{ color: '#999' }}>No invoiced items yet.</div>}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Never sold ({slow.length})</div>{slow.slice(0, 15).map(it => <div key={it.id} style={{ padding: '5px 0', fontSize: 13, borderBottom: '1px solid #F0ECE0' }}>{it.name}</div>)}{slow.length === 0 && <div style={{ color: '#999' }}>Every item has been sold.</div>}{slow.length > 15 && <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>+ {slow.length - 15} more</div>}</div>
+    </div>}
+  </>);
+}
+
+// Manufacturing · MRP shortages, cost per unit, on-time delivery
+function InsMfg({ ctx }) {
+  const { fmt, boms, productionOrders, rawMaterials, items, stock, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('mrp');
+  const itemOf = (rm) => items.find(i => i.name === (rm && rm.name));
+  const rate = (rm) => { const it = itemOf(rm); return parseFloat((it && (it.purchaseRate ?? it.rate)) ?? rm.rate ?? rm.cost) || 0; };
+  const open = (productionOrders || []).filter(o => !['completed', 'cancelled'].includes(o.status));
+  const need = {};
+  open.forEach(o => { const b = boms.find(x => x.id === o.bomId); if (!b) return; const f = (parseFloat(o.quantity) || 1) / (parseFloat(b.outputQty) || 1); (b.materials || []).forEach(m => { const k = m.materialId; const r = need[k] = need[k] || { rm: rawMaterials.find(x => x.id === k) || { name: m.name, unit: m.unit }, qty: 0, orders: [] }; r.qty += (parseFloat(m.qty) || 0) * f; if (!r.orders.includes(o.number)) r.orders.push(o.number); }); });
+  const mrp = Object.values(need).map(r => { const it = itemOf(r.rm), have = it && stock[it.id] ? stock[it.id].qty : null; return { ...r, have, short: have === null ? null : Math.max(0, r.qty - have), tracked: have !== null }; }).sort((a, b) => (b.short || 0) - (a.short || 0));
+  const costRows = boms.map(b => { const mats = (b.materials || []).map(m => { const rm = rawMaterials.find(x => x.id === m.materialId) || { name: m.name }; const r = rate(rm); return { name: m.name || rm.name, qty: parseFloat(m.qty) || 0, unit: m.unit, rate: r, amt: (parseFloat(m.qty) || 0) * r }; }); const tot = mats.reduce((s, x) => s + x.amt, 0), out = parseFloat(b.outputQty) || 1; return { b, mats, tot, unit: tot / out, miss: mats.filter(x => !x.rate).length }; });
+  const done = (productionOrders || []).filter(o => o.status === 'completed' && o.targetDate);
+  const dt = v => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+  const ot = done.map(o => { const c = dt(o.completedAt), t = dt(o.targetDate); if (!c || !t) return null; t.setHours(23, 59, 59); return { o, late: Math.ceil((c - t) / dayMs), ok: c <= t }; }).filter(Boolean);
+  const onTime = ot.length ? Math.round(ot.filter(x => x.ok).length / ot.length * 100) : null;
+  const lateOpen = open.filter(o => o.targetDate && new Date(o.targetDate) < today);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('mrp', 'MRP shortages')}{pill('cost', 'Cost per unit')}{pill('otd', 'On-time delivery')}</div>
+    {sub === 'mrp' && <div style={_iCard}><div style={{ fontSize: 12.5, color: '#666', marginBottom: 8 }}>Raw material needed for {open.length} open production order(s) vs stock on hand (matched by item name).</div>
+      {mrp.length === 0 ? <div style={{ color: '#999' }}>No open production orders.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Material', 'Needed', 'In stock', 'Shortfall', 'For orders'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 4 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {mrp.map((r, i) => <tr key={i}><td style={_iTd}>{r.rm.name}</td><td style={{ ..._iTd, ..._iR }}>{+r.qty.toFixed(2)} {r.rm.unit || ''}</td><td style={{ ..._iTd, ..._iR }}>{r.tracked ? +r.have.toFixed(2) : 'not in item master'}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.short > 0 ? '#B5453A' : '#1A7A3E' }}>{r.tracked ? (r.short > 0 ? +r.short.toFixed(2) : 'OK') : '—'}</td><td style={{ ..._iTd, fontSize: 11.5, color: '#777' }}>{r.orders.join(', ')}</td></tr>)}</tbody></table>}</div>}
+    {sub === 'cost' && <div style={_iCard}>{costRows.length === 0 ? <div style={{ color: '#999' }}>No BOMs yet.</div> : costRows.map(r => <div key={r.b.id} style={{ borderBottom: '1px solid #F0ECE0', padding: '8px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}><b>{r.b.name || r.b.outputItem}</b><span>Material cost / unit: <b>{fmt(r.unit)}</b> <span style={{ color: '#999', fontSize: 11.5 }}>(batch of {r.b.outputQty || 1}: {fmt(r.tot)})</span></span></div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 3 }}>{r.mats.map(m => m.name + ' ' + fmt(m.amt)).join(' · ')}{r.miss > 0 && <span style={{ color: '#B5453A' }}> · {r.miss} material(s) have no rate</span>}</div></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Material cost only at current item rate — labour, power and overhead are not included.</div></div>}
+    {sub === 'otd' && <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 24, marginBottom: 10 }}><div><div style={{ fontSize: 11, color: '#888' }}>On-time delivery</div><div style={{ fontSize: 24, fontWeight: 700, color: onTime === null ? '#999' : onTime >= 90 ? '#1A7A3E' : onTime >= 75 ? '#E07B00' : '#B5453A' }}>{onTime === null ? '—' : onTime + '%'}</div></div><div><div style={{ fontSize: 11, color: '#888' }}>Completed orders measured</div><div style={{ fontSize: 24, fontWeight: 700 }}>{ot.length}</div></div><div><div style={{ fontSize: 11, color: '#888' }}>Open &amp; past target</div><div style={{ fontSize: 24, fontWeight: 700, color: lateOpen.length ? '#B5453A' : '#1A7A3E' }}>{lateOpen.length}</div></div></div>
+      {lateOpen.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Order', 'Batch', 'Target', 'Days late', 'Status'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>{lateOpen.map(o => <tr key={o.id}><td style={_iTd}>{o.number}</td><td style={_iTd}>{o.batchNumber}</td><td style={_iTd}>{o.targetDate}</td><td style={{ ..._iTd, color: '#B5453A', fontWeight: 700 }}>{Math.floor((today - new Date(o.targetDate)) / dayMs)}</td><td style={_iTd}>{o.status}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Only completed orders with a target date are counted.</div></div>}
+  </>);
+}
+
+// FM / AMC · PM overdue, work-order turnaround, spares, AMC value
+function InsFm({ ctx }) {
+  const { fmt, pmSchedules, fmWorkOrders, fmSpareParts, amcContracts, today, dayMs } = ctx;
+  const iso = today.toISOString().slice(0, 10);
+  const pmOver = (pmSchedules || []).filter(x => x.status !== 'inactive' && x.nextDueDate && x.nextDueDate < iso).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
+  const pmSoon = (pmSchedules || []).filter(x => x.status !== 'inactive' && x.nextDueDate && x.nextDueDate >= iso && (new Date(x.nextDueDate) - today) / dayMs <= 14);
+  const wos = fmWorkOrders || [], isDone = w => ['completed', 'closed', 'done'].includes(String(w.status || '').toLowerCase());
+  const doneT = wos.filter(isDone).map(w => { const c = w.completedDate || w.closedDate || w.completedAt, r = w.raisedDate; if (!c || !r) return null; const d = (new Date(c) - new Date(r)) / dayMs; return isNaN(d) ? null : { w, d: Math.max(0, d) }; }).filter(Boolean);
+  const byPri = {}; doneT.forEach(x => { const k = x.w.priority || 'medium'; (byPri[k] = byPri[k] || []).push(x.d); });
+  const openWo = wos.filter(w => !isDone(w) && String(w.status || '').toLowerCase() !== 'cancelled');
+  const woOver = openWo.filter(w => w.dueDate && w.dueDate < iso);
+  const lowSp = (fmSpareParts || []).filter(p => (parseFloat(p.currentStock) || 0) < (parseFloat(p.minStock) || 0));
+  const act = (amcContracts || []).filter(a => !a.endDate || a.endDate >= iso), amcVal = act.reduce((s, a) => s + (parseFloat(a.value) || 0), 0);
+  const kpi = (l, v, c) => <div style={{ ..._iCard, marginBottom: 0, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: c || '#1E2A4A' }}>{v}</div></div>;
+  return (<>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 14 }}>
+      {kpi('PM overdue', pmOver.length, pmOver.length ? '#B5453A' : '#1A7A3E')}{kpi('PM due in 14 days', pmSoon.length, '#E07B00')}{kpi('Open work orders', openWo.length)}{kpi('WO past due date', woOver.length, woOver.length ? '#B5453A' : '#1A7A3E')}{kpi('Active AMC value', fmt(amcVal))}
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Overdue preventive maintenance</div>{pmOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>None overdue.</div> : pmOver.map(x => <div key={x.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{x.title}</span><b style={{ color: '#B5453A' }}>{Math.floor((today - new Date(x.nextDueDate)) / dayMs)} d late</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Work-order turnaround (raised → completed)</div>{Object.keys(byPri).length === 0 ? <div style={{ color: '#999' }}>No completed work orders with dates yet.</div> : Object.entries(byPri).map(([k, a]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span style={{ textTransform: 'capitalize' }}>{k} ({a.length})</span><b>avg {(a.reduce((s, x) => s + x, 0) / a.length).toFixed(1)} days</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Open work orders past due</div>{woOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>None.</div> : woOver.slice(0, 12).map(w => <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{w.woNumber} · {w.title}</span><b style={{ color: '#B5453A' }}>{Math.floor((today - new Date(w.dueDate)) / dayMs)} d</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Spare parts below minimum</div>{lowSp.length === 0 ? <div style={{ color: '#1A7A3E' }}>All spares above minimum.</div> : lowSp.slice(0, 12).map(p => <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{p.name}</span><b style={{ color: '#B5453A' }}>{p.currentStock || 0} / min {p.minStock}</b></div>)}</div>
+    </div>
+    <div style={{ fontSize: 11.5, color: '#888' }}>AMC renewals are under Sales &amp; Legal → Customer health &amp; renewals.</div>
+  </>);
+}
+
+// QA · calibration register, inspection checklists, supplier quality score, CAPA ageing
+function InsQA({ ctx }) {
+  const { grns, capaRecords, ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('calib');
+  const iso = today.toISOString().slice(0, 10);
+  const blankC = { name: '', idNo: '', location: '', lastDate: '', freq: 12, agency: '', certNo: '' };
+  const [c, setC] = React.useState(blankC);
+  const cal = (ins.calibration || []).map(x => { const nd = x.lastDate ? new Date(new Date(x.lastDate).setMonth(new Date(x.lastDate).getMonth() + (parseInt(x.freq) || 12))) : null; return { ...x, next: nd ? nd.toISOString().slice(0, 10) : '', d: nd ? Math.ceil((nd - today) / dayMs) : null }; }).sort((a, b) => (a.d ?? 9999) - (b.d ?? 9999));
+  const tpls = ins.inspTemplates || [], runs = ins.inspections || [];
+  const [tpl, setTpl] = React.useState({ name: '', points: '' });
+  const [runF, setRunF] = React.useState({ tplId: '', ref: '', by: '', results: {}, remarks: '' });
+  const runTpl = tpls.find(t => t.id === runF.tplId);
+  const sup = {};
+  (grns || []).forEach(g => { const k = g.vendorName || '—'; const r = sup[k] = sup[k] || { name: k, recd: 0, rej: 0, n: 0, late: 0, lines: [] }; r.n++; (g.lines || []).forEach(l => { r.recd += parseFloat(l.receivedQty) || 0; r.rej += parseFloat(l.rejectedQty) || 0; }); });
+  const srows = Object.values(sup).map(r => { const pct = r.recd > 0 ? r.rej / r.recd * 100 : 0; return { ...r, pct, score: Math.max(0, Math.round(100 - pct * 5)) }; }).sort((a, b) => a.score - b.score);
+  const capa = (capaRecords || []), open = capa.filter(x => x.status !== 'closed');
+  const ageOf = x => x.date ? Math.floor((today - new Date(x.date)) / dayMs) : 0;
+  const capaOver = open.filter(x => (x.targetDate && x.targetDate < iso) || ageOf(x) > 30);
+  const bySrc = {}; capa.forEach(x => { const k = x.source || 'Other'; bySrc[k] = (bySrc[k] || 0) + 1; });
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>{pill('calib', 'Calibration register')}{pill('insp', 'Inspection checklists')}{pill('sup', 'Supplier quality')}{pill('capa', 'CAPA ageing')}</div>
+    {sub === 'calib' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <input placeholder="Instrument (e.g. Vernier 0-150)" value={c.name} onChange={e => setC(p => ({ ...p, name: e.target.value }))} style={{ ...styles.input, width: 220, margin: 0 }} />
+        <input placeholder="ID no." value={c.idNo} onChange={e => setC(p => ({ ...p, idNo: e.target.value }))} style={{ ...styles.input, width: 110, margin: 0 }} />
+        <input placeholder="Location" value={c.location} onChange={e => setC(p => ({ ...p, location: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }} />
+        <input type="date" title="Last calibrated" value={c.lastDate} onChange={e => setC(p => ({ ...p, lastDate: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} />
+        <input type="number" title="Frequency (months)" value={c.freq} onChange={e => setC(p => ({ ...p, freq: e.target.value }))} style={{ ...styles.input, width: 80, margin: 0 }} />
+        <input placeholder="Agency / cert no." value={c.agency} onChange={e => setC(p => ({ ...p, agency: e.target.value }))} style={{ ...styles.input, width: 160, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!c.name.trim() || !c.lastDate) return alert('Instrument name and last calibration date are required'); setIns('calibration', (p = []) => [...p, { ...c, id: 'cb-' + Date.now() }]); setC(blankC); }}>Add</button></div>}
+      {cal.length === 0 ? <div style={{ color: '#999' }}>No instruments registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Instrument', 'ID', 'Location', 'Last done', 'Every', 'Next due', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {cal.map(x => <tr key={x.id}><td style={_iTd}>{x.name}</td><td style={_iTd}>{x.idNo}</td><td style={_iTd}>{x.location}</td><td style={_iTd}>{x.lastDate}</td><td style={_iTd}>{x.freq} m</td><td style={_iTd}>{x.next}</td>
+          <td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? 'OVERDUE ' + (-x.d) + ' d — do not use' : x.d <= 30 ? 'Due in ' + x.d + ' d' : 'Valid'}</td>
+          <td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px', marginRight: 4 }} onClick={() => setIns('calibration', (p = []) => p.map(y => y.id === x.id ? { ...y, lastDate: iso } : y))}>Done today</button>}{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('calibration', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Next due = last calibration + frequency. "Done today" resets the date; keep the certificate on file.</div></div>}
+    {sub === 'insp' && <>
+      {canEdit && <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>New checklist template</div>
+        <input placeholder="Template name (e.g. Incoming wire inspection)" value={tpl.name} onChange={e => setTpl(p => ({ ...p, name: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
+        <textarea rows={4} placeholder={'Check points — one per line\nConductor diameter within tolerance\nInsulation thickness\nSurface finish / no cuts'} value={tpl.points} onChange={e => setTpl(p => ({ ...p, points: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!tpl.name.trim() || !tpl.points.trim()) return alert('Name and check points are required'); setIns('inspTemplates', (p = []) => [...p, { id: 't-' + Date.now(), name: tpl.name.trim(), points: tpl.points.split('\n').map(x => x.trim()).filter(Boolean) }]); setTpl({ name: '', points: '' }); }}>Save template</button></div>}
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Run an inspection</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <select value={runF.tplId} onChange={e => setRunF({ tplId: e.target.value, ref: runF.ref, by: runF.by, results: {}, remarks: '' })} style={{ ...styles.input, width: 260, margin: 0 }}><option value="">— Select template —</option>{tpls.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+          <input placeholder="Batch / GRN / PO ref" value={runF.ref} onChange={e => setRunF(p => ({ ...p, ref: e.target.value }))} style={{ ...styles.input, width: 180, margin: 0 }} />
+          <input placeholder="Inspected by" value={runF.by} onChange={e => setRunF(p => ({ ...p, by: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} /></div>
+        {runTpl && <>{runTpl.points.map((pt, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{i + 1}. {pt}</span>
+          <span>{['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setRunF(p => ({ ...p, results: { ...p.results, [i]: v } }))} style={{ marginLeft: 4, padding: '3px 10px', borderRadius: 12, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: runF.results[i] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: runF.results[i] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}</span></div>)}
+          <input placeholder="Remarks" value={runF.remarks} onChange={e => setRunF(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, margin: '8px 0' }} />
+          <button style={styles.primaryBtn} onClick={() => { const miss = runTpl.points.some((_, i) => !runF.results[i]); if (miss) return alert('Mark every check point (Pass / Fail / N/A)'); const fails = runTpl.points.filter((_, i) => runF.results[i] === 'fail'); setIns('inspections', (p = []) => [{ id: 'i-' + Date.now(), date: iso, tpl: runTpl.name, ref: runF.ref, by: runF.by, result: fails.length ? 'FAIL' : 'PASS', fails, remarks: runF.remarks }, ...p]); setRunF({ tplId: '', ref: '', by: '', results: {}, remarks: '' }); }}>Save result</button></>}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Recent inspections ({runs.length})</div>{runs.length === 0 ? <div style={{ color: '#999' }}>None yet.</div> : runs.slice(0, 30).map(r => <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{r.date} · {r.tpl}{r.ref ? ' · ' + r.ref : ''}{r.by ? ' · ' + r.by : ''}{r.fails.length > 0 && <span style={{ color: '#B5453A' }}> — failed: {r.fails.join('; ')}</span>}</span><b style={{ color: r.result === 'PASS' ? '#1A7A3E' : '#B5453A' }}>{r.result}</b></div>)}
+        <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>For a failed inspection raise a CAPA / NCR in Quality → CAPA.</div></div>
+    </>}
+    {sub === 'sup' && <div style={_iCard}>{srows.length === 0 ? <div style={{ color: '#999' }}>No GRNs yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Supplier', 'GRNs', 'Received qty', 'Rejected qty', 'Reject %', 'Quality score'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+      {srows.map(r => <tr key={r.name}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR }}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{+r.recd.toFixed(2)}</td><td style={{ ..._iTd, ..._iR }}>{+r.rej.toFixed(2)}</td><td style={{ ..._iTd, ..._iR }}>{r.pct.toFixed(1)}%</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.score >= 90 ? '#1A7A3E' : r.score >= 70 ? '#E07B00' : '#B5453A' }}>{r.score} · {r.score >= 90 ? 'Approved' : r.score >= 70 ? 'Conditional' : 'Review'}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Score = 100 − 5 × reject %. Based on GRN received vs rejected quantities (all time).</div></div>}
+    {sub === 'capa' && <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Total', capa.length, '#1E2A4A'], ['Open', open.length, '#E07B00'], ['Overdue / >30 days', capaOver.length, capaOver.length ? '#B5453A' : '#1A7A3E'], ['Closed', capa.length - open.length, '#1A7A3E']].map(([l, v, col]) => <div key={l} style={{ ..._iCard, marginBottom: 0, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: col }}>{v}</div></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Open items needing attention</div>{capaOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>Nothing overdue.</div> : capaOver.sort((a, b) => ageOf(b) - ageOf(a)).map(x => <div key={x.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{x.number || ''} · {x.title || x.description || x.source || 'CAPA'}</span><b style={{ color: '#B5453A' }}>{ageOf(x)} d open</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>By source</div>{Object.entries(bySrc).length === 0 ? <div style={{ color: '#999' }}>No CAPA records.</div> : Object.entries(bySrc).sort((a, b) => b[1] - a[1]).map(([k, v]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}><span>{k}</span><b>{v}</b></div>)}</div>
+    </>}
+  </>);
+}
+
+// MEP engineering calculators (preliminary sizing — verify against design standards / manufacturer data)
+const INS_CABLES = [[1.5, 24, 29], [2.5, 32, 18], [4, 42, 11], [6, 53, 7.3], [10, 71, 4.4], [16, 91, 2.8], [25, 120, 1.75], [35, 145, 1.25], [50, 170, 0.93], [70, 210, 0.64], [95, 255, 0.46], [120, 290, 0.37], [150, 325, 0.31], [185, 365, 0.25], [240, 420, 0.2], [300, 470, 0.17]]; // mm2, A (Cu XLPE, approx), mV/A/m (3-ph)
+const INS_PIPES = [15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200, 250, 300];
+function InsMepCalc({ ctx }) {
+  const { styles } = ctx;
+  const [sub, setSub] = React.useState('cable');
+  const [v, setV] = React.useState({ kw: 30, volt: 415, ph: 3, pf: 0.85, len: 80, mat: 'Cu', derate: 0.8, vdLim: 3, runs: 1, cfm: 2000, vel: 6, sideA: 500, flow: 20, pvel: 1.5, plen: 100, c: 130, sh: 20, resid: 10, eff: 0.65, area: 100, app: 110, people: 10, equip: 1000, fa: 100, dh: 20, ppl: 100, lpcd: 45 });
+  const n = k => parseFloat(v[k]) || 0, set = (k, x) => setV(p => ({ ...p, [k]: x }));
+  const F = (k, l, w) => <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: w || 130 }}>{l}<input type="number" value={v[k]} onChange={e => set(k, e.target.value)} style={{ ...styles.input, margin: 0 }} /></label>;
+  const Out = ({ rows }) => <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12 }}>{rows.map(([l, x, c]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13 }}><span>{l}</span><b style={{ color: c || '#1E2A4A' }}>{x}</b></div>)}</div>;
+  const note = t => <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>{t}</div>;
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  // cable
+  const volt = n('volt'), ph = n('ph') === 1 ? 1 : 3, pf = Math.min(1, Math.max(0.1, n('pf'))), runs = Math.max(1, Math.round(n('runs')));
+  const I = ph === 3 ? n('kw') * 1000 / (Math.sqrt(3) * volt * pf) : n('kw') * 1000 / (volt * pf);
+  const ik = v.mat === 'Al' ? 0.78 : 1, vk = v.mat === 'Al' ? 1.64 : 1, perRun = I / runs;
+  const vdOf = r => (ph === 3 ? 1 : 2 / Math.sqrt(3)) * r[2] * vk * perRun * n('len') / 1000;
+  const pick = INS_CABLES.find(r => r[1] * ik * n('derate') >= perRun && vdOf(r) / volt * 100 <= n('vdLim'));
+  const byAmp = INS_CABLES.find(r => r[1] * ik * n('derate') >= perRun);
+  // duct
+  const q = n('cfm') * 0.000471947, areaR = q / Math.max(0.1, n('vel')), dR = Math.sqrt(4 * areaR / Math.PI) * 1000;
+  const bSide = n('sideA') > 0 ? areaR * 1e6 / n('sideA') : 0, de = bSide > 0 ? 1.3 * Math.pow(n('sideA') * bSide, 0.625) / Math.pow(n('sideA') + bSide, 0.25) : 0;
+  // pipe
+  const Qp = n('flow') / 1000, dI = Math.sqrt(4 * Qp / (Math.PI * Math.max(0.1, n('pvel')))) * 1000, nom = INS_PIPES.find(d => d >= dI) || INS_PIPES[INS_PIPES.length - 1];
+  const hfm = d => 10.67 * Math.pow(Qp, 1.852) / (Math.pow(Math.max(1, n('c')), 1.852) * Math.pow(d / 1000, 4.87));
+  const actV = Qp / (Math.PI * Math.pow(nom / 2000, 2)), hf = hfm(nom) * n('plen') * 1.3;
+  const H = n('sh') + hf + n('resid'), kw = 9.81 * Qp * H / Math.max(0.1, n('eff'));
+  // HVAC
+  const fa = 4.5 * n('fa') * n('dh'), btu = n('area') * 10.764 * n('app') * 3.412 / 10.764 + n('people') * 450 + n('equip') * 3.412 + fa, tr = btu / 12000;
+  const tank = n('ppl') * n('lpcd');
+  return (<div style={_iCard}>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>{pill('cable', '⚡ Cable & voltage drop')}{pill('duct', '🌬 Duct sizing')}{pill('pipe', '🚰 Pipe & pump head')}{pill('hvac', '❄️ HVAC cooling load')}{pill('tank', '💧 Water demand')}</div>
+    {sub === 'cable' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('kw', 'Load (kW)')}{F('volt', 'Voltage (V)')}{F('ph', 'Phases (1 / 3)', 110)}{F('pf', 'Power factor', 110)}{F('len', 'Length (m)', 110)}{F('derate', 'Derating factor', 110)}{F('vdLim', 'Max V-drop %', 110)}{F('runs', 'Parallel runs', 100)}
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Conductor<select value={v.mat} onChange={e => set('mat', e.target.value)} style={{ ...styles.input, margin: 0 }}><option>Cu</option><option>Al</option></select></label></div>
+      <Out rows={[['Full-load current', I.toFixed(1) + ' A' + (runs > 1 ? ' (' + perRun.toFixed(1) + ' A per run)' : '')], ['Recommended size', pick ? (runs > 1 ? runs + ' × ' : '') + pick[0] + ' mm² ' + v.mat : 'Above table range — use parallel runs / larger', pick ? '#1A7A3E' : '#B5453A'], ...(pick ? [['Rated current (derated)', (pick[1] * ik * n('derate')).toFixed(0) + ' A'], ['Voltage drop', vdOf(pick).toFixed(2) + ' V = ' + (vdOf(pick) / volt * 100).toFixed(2) + ' %']] : []), ...(byAmp && pick && byAmp[0] !== pick[0] ? [['Size by current alone', byAmp[0] + ' mm² (voltage drop governs)', '#E07B00']] : [])]} />
+      {note('Approximate XLPE armoured cable ratings and mV/A/m (3-phase, 90 °C). Actual values depend on laying method, grouping, ambient temperature and manufacturer — confirm with the cable datasheet, IS 1554 / IEC 60364 and check short-circuit withstand and protection coordination.')}</>}
+    {sub === 'duct' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('cfm', 'Airflow (CFM)')}{F('vel', 'Velocity (m/s)')}{F('sideA', 'Rectangular side A (mm)', 150)}</div>
+      <Out rows={[['Airflow', q.toFixed(3) + ' m³/s  (' + (q * 3600).toFixed(0) + ' m³/h)'], ['Required area', (areaR * 1e4).toFixed(0) + ' cm²'], ['Round duct diameter', dR.toFixed(0) + ' mm → use ' + Math.ceil(dR / 25) * 25 + ' mm'], ['Rectangular (side A × B)', n('sideA') + ' × ' + Math.ceil(bSide / 25) * 25 + ' mm'], ['Equivalent round diameter', de.toFixed(0) + ' mm'], ['Velocity check', n('vel') <= 4 ? 'Low-velocity (quiet)' : n('vel') <= 8 ? 'Typical supply main' : 'High — noise / pressure drop risk', n('vel') > 9 ? '#B5453A' : '#1A7A3E']]} />
+      {note('Sized on velocity only. Typical: 4–6 m/s branches, 6–8 m/s mains (commercial). For pressure drop use equal-friction method / SMACNA charts; keep aspect ratio ≤ 4:1.')}</>}
+    {sub === 'pipe' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('flow', 'Flow (L/s)')}{F('pvel', 'Target velocity (m/s)', 150)}{F('plen', 'Pipe length (m)')}{F('c', 'Hazen-Williams C', 140)}{F('sh', 'Static head (m)')}{F('resid', 'Residual head (m)')}{F('eff', 'Pump efficiency', 120)}</div>
+      <Out rows={[['Calculated ID', dI.toFixed(0) + ' mm'], ['Nominal size', nom + ' mm', '#1A7A3E'], ['Actual velocity', actV.toFixed(2) + ' m/s', actV > 2.5 ? '#B5453A' : '#1A7A3E'], ['Friction loss', (hfm(nom) * 100).toFixed(2) + ' m / 100 m'], ['Friction incl. 30% fittings', hf.toFixed(1) + ' m'], ['Total pump head', H.toFixed(1) + ' m'], ['Pump shaft power (estimate)', kw.toFixed(2) + ' kW → select motor ≥ ' + (kw * 1.15).toFixed(2) + ' kW']]} />
+      {note('Treats nominal size as internal diameter and uses Hazen-Williams (water). Real pipe IDs differ by material / schedule; check manufacturer data and pump curve. Typical velocity: 1–2 m/s suction, 1.5–2.5 m/s delivery; fire mains up to 3 m/s per NFPA/NBC.')}</>}
+    {sub === 'hvac' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('area', 'Floor area (m²)')}
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Application (W/m² envelope + lights)<select value={v.app} onChange={e => set('app', e.target.value)} style={{ ...styles.input, margin: 0 }}><option value={90}>Residential — 90</option><option value={110}>Office — 110</option><option value={130}>Retail — 130</option><option value={160}>Restaurant — 160</option><option value={200}>Lab / data room — 200</option></select></label>
+        {F('people', 'Occupants')}{F('equip', 'Equipment (W)')}{F('fa', 'Fresh air (CFM)')}{F('dh', 'Fresh-air Δh (BTU/lb)', 150)}</div>
+      <Out rows={[['Envelope + lighting', (n('area') * n('app')).toFixed(0) + ' W'], ['Occupants', (n('people') * 450 / 3.412).toFixed(0) + ' W'], ['Equipment', n('equip').toFixed(0) + ' W'], ['Fresh-air load', (fa / 3.412).toFixed(0) + ' W'], ['Total cooling load', (btu / 3.412 / 1000).toFixed(1) + ' kW  =  ' + tr.toFixed(1) + ' TR', '#1A7A3E'], ['Suggested equipment (+10%)', (tr * 1.1).toFixed(1) + ' TR']]} />
+      {note('Rule-of-thumb estimate for budgeting only. Detailed design needs a heat-load calculation (ASHRAE / HAP / ISHRAE) with orientation, glazing, wall U-values and diversity.')}</>}
+    {sub === 'tank' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('ppl', 'Persons')}{F('lpcd', 'Litres / person / day', 160)}</div>
+      <Out rows={[['Daily demand', tank.toFixed(0) + ' L'], ['Underground sump (1 day)', (tank / 1000).toFixed(1) + ' m³'], ['Overhead tank (½ day)', (tank / 2000).toFixed(1) + ' m³'], ['Fire reserve', 'as per NBC / local fire authority — add separately']]} />
+      {note('Typical NBC (IS 1172) allowances: office 45, residential 135, hotel 180–200, hospital 340+ L/person/day (flushing included). Confirm with the code for your occupancy.')}</>}
+  </div>);
+}
+
+// Manufacturing technical · conductor resistance check (IEC 60228 class 2 Cu) + material usage variance per production order
+const INS_CU_R = { 0.5: 36, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601 }; // max ohm/km at 20 C
+function InsMfgTech({ ctx }) {
+  const { productionOrders, boms, rawMaterials, sl, styles } = ctx;
+  const [sub, setSub] = React.useState('cond');
+  const [f, setF] = React.useState({ size: '2.5', r: '', len: 100, t: 30, dia: '' });
+  const maxR = INS_CU_R[parseFloat(f.size)] || 0, len = parseFloat(f.len) || 0, rm = parseFloat(f.r) || 0, t = parseFloat(f.t) || 20;
+  const r20 = rm / (1 + 0.00393 * (t - 20)), perKm = len > 0 ? r20 / len * 1000 : 0;
+  const ok = rm > 0 && len > 0 && perKm <= maxR;
+  const kgKm = parseFloat(f.size) * 8.89;
+  const done = (productionOrders || []).filter(o => o.status === 'completed');
+  const rows = done.map(o => {
+    const b = boms.find(x => x.id === o.bomId); if (!b) return null;
+    const fac = (parseFloat(o.quantity) || 1) / (parseFloat(b.outputQty) || 1);
+    const lines = (b.materials || []).map(m => { const rmat = rawMaterials.find(x => x.id === m.materialId) || { name: m.name }; const exp = (parseFloat(m.qty) || 0) * fac; const act = sl.filter(e => e.sourceType === 'production' && e.sourceId === o.id && e.type === 'out' && e.itemName === rmat.name).reduce((s, e) => s + (parseFloat(e.qty) || 0), 0); return { name: rmat.name, unit: m.unit, exp, act, var: exp > 0 ? (act - exp) / exp * 100 : 0, tracked: act > 0 }; }).filter(x => x.tracked);
+    return lines.length ? { o, b, lines, worst: Math.max(...lines.map(x => x.var)) } : null;
+  }).filter(Boolean);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('cond', 'Conductor resistance check')}{pill('var', 'Material usage variance')}</div>
+    {sub === 'cond' && <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Cu conductor size (mm²)<select value={f.size} onChange={e => setF(p => ({ ...p, size: e.target.value }))} style={{ ...styles.input, margin: 0, width: 150 }}>{Object.keys(INS_CU_R).map(k => <option key={k}>{k}</option>)}</select></label>
+        {[['r', 'Measured resistance (Ω)', 170], ['len', 'Sample length (m)', 130], ['t', 'Temperature (°C)', 130]].map(([k, l, w]) => <label key={k} style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: w }}>{l}<input type="number" value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}</div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12 }}>
+        {[['Resistance corrected to 20 °C', rm > 0 ? r20.toFixed(4) + ' Ω' : '—'], ['Per km at 20 °C', perKm > 0 ? perKm.toFixed(3) + ' Ω/km' : '—'], ['Maximum allowed (class 2, plain Cu)', maxR + ' Ω/km'], ['Result', rm > 0 && len > 0 ? (ok ? 'PASS' : 'FAIL — conductor under-size / high resistivity') : 'Enter measured values', ok ? '#1A7A3E' : rm > 0 && len > 0 ? '#B5453A' : '#999'], ['Theoretical copper weight', kgKm.toFixed(1) + ' kg/km (solid-area basis, excl. lay allowance)']].map(([l, x, c]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13 }}><span>{l}</span><b style={{ color: c || '#1E2A4A' }}>{x}</b></div>)}</div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Limits are the IEC 60228 / IS 8130 maximum DC resistance for plain annealed copper conductors (class 2). Correction uses α = 0.00393 /°C for copper. For tinned / aluminium / flexible (class 5) conductors use the respective table. Official test reports should still be raised as FAT records.</div></div>}
+    {sub === 'var' && <div style={_iCard}>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No completed production orders with stock-out entries yet. Variance is calculated from raw material issued to the order vs what the BOM expects.</div> : rows.map(r => <div key={r.o.id} style={{ borderBottom: '1px solid #F0ECE0', padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><b>{r.o.number} · {r.b.name || r.b.outputItem}</b><span style={{ fontSize: 12, color: '#888' }}>qty {r.o.quantity} · batch {r.o.batchNumber || '—'}</span></div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 4 }}><thead><tr>{['Material', 'Expected', 'Actual issued', 'Variance'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>{r.lines.map(l => <tr key={l.name}><td style={_iTd}>{l.name}</td><td style={{ ..._iTd, ..._iR }}>{+l.exp.toFixed(2)} {l.unit}</td><td style={{ ..._iTd, ..._iR }}>{+l.act.toFixed(2)}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: l.var > 5 ? '#B5453A' : l.var > 2 ? '#E07B00' : '#1A7A3E' }}>{l.var >= 0 ? '+' : ''}{l.var.toFixed(1)}%</td></tr>)}</tbody></table></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Positive variance = more material used than the BOM (scrap / wastage). Over +5% needs a reason.</div></div>}
+  </>);
+}
+
+// FM / AMC technical · asset reliability (failures, MTBF, MTTR, availability, repeat breakdowns, cost)
+function InsFmTech({ ctx }) {
+  const { fmWorkOrders, assets, fmt, today, dayMs } = ctx;
+  const [win, setWin] = React.useState(365);
+  const from = new Date(today.getTime() - win * dayMs);
+  const fails = (fmWorkOrders || []).filter(w => ['corrective', 'emergency'].includes(w.type) && w.assetId && w.raisedDate && new Date(w.raisedDate) >= from);
+  const by = {};
+  fails.forEach(w => { const r = by[w.assetId] = by[w.assetId] || { id: w.assetId, name: w.assetName || ((assets || []).find(a => a.id === w.assetId) || {}).name || w.assetId, n: 0, rep: [], cost: 0, last: '' }; r.n++; r.cost += parseFloat(w.cost) || 0; if ((w.raisedDate || '') > r.last) r.last = w.raisedDate; if (w.completedDate) { const d = (new Date(w.completedDate) - new Date(w.raisedDate)) / dayMs; if (!isNaN(d) && d >= 0) r.rep.push(d); } });
+  const rows = Object.values(by).map(r => { const mttr = r.rep.length ? r.rep.reduce((s, x) => s + x, 0) / r.rep.length : null, mtbf = win / r.n, av = mttr === null ? null : mtbf / (mtbf + mttr) * 100; return { ...r, mttr, mtbf, av }; }).sort((a, b) => b.n - a.n);
+  const totF = fails.length, totCost = rows.reduce((s, r) => s + r.cost, 0), rep = rows.filter(r => r.n >= 3);
+  return (<>
+    <div style={{ ..._iCard, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}><b>Period</b>
+      <select value={win} onChange={e => setWin(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #DDD' }}><option value={90}>Last 90 days</option><option value={180}>Last 180 days</option><option value={365}>Last 12 months</option></select>
+      <span style={{ fontSize: 13 }}>{totF} breakdown WO(s) on {rows.length} asset(s) · repair cost <b>{fmt(totCost)}</b> · <b style={{ color: rep.length ? '#B5453A' : '#1A7A3E' }}>{rep.length}</b> repeat-failure asset(s) (≥3)</span></div>
+    <div style={_iCard}>{rows.length === 0 ? <div style={{ color: '#999' }}>No corrective / emergency work orders with an asset in this period.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Asset', 'Failures', 'MTBF (days)', 'MTTR (days)', 'Availability', 'Repair cost', 'Last failure', 'Flag'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 6 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+      {rows.map(r => <tr key={r.id}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{r.mtbf.toFixed(0)}</td><td style={{ ..._iTd, ..._iR }}>{r.mttr === null ? '—' : r.mttr.toFixed(1)}</td><td style={{ ..._iTd, ..._iR }}>{r.av === null ? '—' : r.av.toFixed(1) + '%'}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.cost)}</td><td style={_iTd}>{r.last}</td><td style={{ ..._iTd, fontWeight: 700, color: r.n >= 3 ? '#B5453A' : '#888' }}>{r.n >= 3 ? 'Repeat failure — root-cause / replace?' : ''}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>MTBF = period ÷ number of breakdowns (a lower bound if the asset was not in service for the whole period). MTTR = average raised → completion date in days (needs a completion date on the work order). Availability = MTBF ÷ (MTBF + MTTR). Only corrective and emergency work orders linked to an asset count.</div></div>
+  </>);
+}
+
+function InsightsView({ documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
   const [tab, setTab] = React.useState('recv');
   const [openCash, setOpenCash] = React.useState('');
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
@@ -5221,12 +5873,36 @@ function InsightsView({ documents = [], customers = [], vendors = [], vouchers =
   const pill = (id, label) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{label}</button>;
   const copy = (t) => { try { navigator.clipboard.writeText(t); alert('Copied. Paste it into WhatsApp / email.'); } catch (e) { window.prompt('Copy this text:', t); } };
 
+  const bk = isMultiBiz ? currentBizType : '_all';
+  const ins = ((businessInfo.insightsData || {})[bk]) || {};
+  const setIns = (k, v) => { if (setBusinessInfo) setBusinessInfo(p => { const all = p.insightsData || {}, cur = all[bk] || {}; return { ...p, insightsData: { ...all, [bk]: { ...cur, [k]: typeof v === 'function' ? v(cur[k]) : v } } }; }); };
+  const canEdit = ['admin', 'manager', 'accounts'].includes(userRole);
+  const ctx = { assets, sl, grns, capaRecords, boms, productionOrders, rawMaterials, pmSchedules, fmWorkOrders, fmSpareParts, fmt, docs, vch, items, stock, recvRows, payRows, pettyCash, inDiv, today, dayMs, businessInfo, ins, setIns, canEdit, styles, employees, setEmployees: setEmployees || (() => {}), siteAttendance, enquiries, contracts, amcContracts, customers,
+    totalOf: tot, taxableOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').taxable || 0, taxOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').totalTax || 0 };
+  const _isTr = !isMultiBiz || currentBizType === 'trading';
+  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ['qa', '🔬 Quality (QA)'], ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 MRP, cost & on-time delivery'], ['mfgtech', '🧪 Conductor check & usage variance']]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}><div><h2 className="serif" style={styles.pageTitle}>Business Insights</h2><div style={{ fontSize: 13, color: '#888780' }}>Receivables, cash forecast, reorder planner and month-end checks — from your approved documents</div></div></div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {pill('recv', '💰 Receivables & reminders')}{pill('cash', '📈 Cash forecast')}{pill('reorder', '📦 Reorder planner')}{pill('close', '✅ Month-end check')}
-      </div>
+      {GROUPS.map(([g, tabs]) => <div key={g} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}><span style={{ fontSize: 11, color: '#888780', textTransform: 'uppercase', width: 92 }}>{g}</span>{tabs.map(([id, l]) => pill(id, l))}</div>)}
+      <div style={{ height: 8 }} />
+      {tab === 'trading' && <InsTrading ctx={ctx} />}
+      {tab === 'mepcalc' && <InsMepCalc ctx={ctx} />}
+      {tab === 'qa' && <InsQA ctx={ctx} />}
+      {tab === 'mfg' && <InsMfg ctx={ctx} />}
+      {tab === 'mfgtech' && <InsMfgTech ctx={ctx} />}
+      {tab === 'fm' && <InsFm ctx={ctx} />}
+      {tab === 'fmtech' && <InsFmTech ctx={ctx} />}
+      {tab === 'bs' && <InsBalanceSheet ctx={ctx} />}
+      {tab === 'budget' && <InsBudget ctx={ctx} />}
+      {tab === 'payplan' && <InsPayPlanner ctx={ctx} />}
+      {tab === 'payrollchk' && <InsPayrollCheck ctx={ctx} />}
+      {tab === 'compliance' && <InsCompliance ctx={ctx} />}
+      {tab === 'risk' && <InsRiskSop ctx={ctx} />}
+      {tab === 'people' && <InsPeople ctx={ctx} />}
+      {tab === 'contract' && <InsContractRisk ctx={ctx} />}
+      {tab === 'custhealth' && <InsCustomerHealth ctx={ctx} />}
+      {tab === 'leads' && <InsEnquiryScore ctx={ctx} />}
 
       {tab === 'recv' && (<>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 14 }}>
@@ -30650,6 +31326,22 @@ export default function App() {
             businessInfo={businessInfo}
             currentBizType={sessionContext || effectiveBizContext}
             isMultiBiz={isMultiBiz || !!sessionContext}
+            siteAttendance={siteAttendance}
+            enquiries={sessionContext ? enquiries.filter(x => (x.bizType || bizDefault) === sessionContext) : enquiries}
+            contracts={sessionContext ? contracts.filter(x => (x.bizType || bizDefault) === sessionContext) : contracts}
+            amcContracts={amcContracts}
+            assets={assets}
+            grns={sessionContext ? grns.filter(x => (x.bizType || bizDefault) === sessionContext) : grns}
+            capaRecords={capaRecords}
+            boms={boms}
+            productionOrders={productionOrders}
+            rawMaterials={rawMaterials}
+            pmSchedules={pmSchedules}
+            fmWorkOrders={fmWorkOrders}
+            fmSpareParts={fmSpareParts}
+            setBusinessInfo={setBusinessInfo}
+            setEmployees={setEmployees}
+            userRole={userRole}
           />
         );
       case 'audit':
