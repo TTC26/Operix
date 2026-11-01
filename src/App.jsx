@@ -64,7 +64,7 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn','storeissue','stockledger','verticalrack',
+    'stock','bincard','grn','storeissue','stockledger','verticalrack','insights',
   ],
   trading: [
     'hr','payroll','employees','siteattendance',
@@ -860,12 +860,19 @@ function printView(sel, bi, opts) { return printPaginated(sel, bi, null, opts ||
 // Per-print switch for seal & signature (shown only when a seal/signature is uploaded and enabled in Settings).
 function SealToggle({ businessInfo }) {
   const [on, setOn] = React.useState(typeof window === 'undefined' || window.__sealOn !== false);
-  if (!(businessInfo && (businessInfo.seal || businessInfo.signature)) || businessInfo.printSeal === false) return null;
+  const [fit, setFit] = React.useState(typeof window !== 'undefined' && !!window.__fitOn);
+  const hasSeal = !!(businessInfo && (businessInfo.seal || businessInfo.signature)) && businessInfo.printSeal !== false;
   return (
-    <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
-      style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
-      🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
-    </button>
+    <>
+      {hasSeal && <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
+        style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+        🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+      </button>}
+      <button type="button" className="no-print" title="If the document spills only slightly onto a 2nd page, shrink it neatly to fit one page" onClick={() => { const v = !fit; window.__fitOn = v; setFit(v); }}
+        style={{ ...styles.ghostBtn, ...(fit ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+        📐 {fit ? 'Auto-fit ON' : 'Auto-fit OFF'}
+      </button>
+    </>
   );
 }
 
@@ -1596,7 +1603,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(parts.length-j===1&&j>1)j--;'
       + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
       + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
-      + '}setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}}'
+      + '}setZ(1);LAY();var P0=out.children.length;if(typeof FITONE!=="undefined"&&FITONE&&(!FITSOFT||P0===2)){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}if(FITSOFT&&out.children.length>1){setZ(1);LAY();}}'
       + 'function qrPlace(){var lb=out.lastElementChild.querySelector(".bd");if(!lb)return false;var le2=lb.lastElementChild;var us2=le2?le2.offsetTop+le2.offsetHeight:0;var fr2=lb.clientHeight-us2;var sz=Math.min(112,fr2-34);if(sz<64)return false;var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}lb.appendChild(qw);return true;}'
       + 'if(QRH&&out.lastElementChild&&!qrPlace()){var cb=parseFloat(getComputedStyle(out.querySelector(".bd")).bottom)||0;RSV=".bd{bottom:"+(cb+118)+"px !important}";setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zq=0.95;zq>=0.62&&out.children.length>1;zq-=0.03){setZ(zq);LAY();}}'
       + 'var ls=out.lastElementChild;var qw2=document.createElement("div");qw2.style.cssText="position:absolute;right:5mm;bottom:"+cb+"px;";qw2.innerHTML=QRH;var sv2=qw2.querySelector("svg");if(sv2){sv2.setAttribute("width",104);sv2.setAttribute("height",104);}ls.appendChild(qw2);}'
@@ -1629,7 +1636,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var QRH=' + JSON.stringify(QRH) + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + ((pre && pre.fitOne) || (typeof window !== 'undefined' && window.__fitOn) ? 'true' : 'false') + ';var FITSOFT=' + (pre && pre.fitOne ? 'false' : 'true') + ';var QRH=' + JSON.stringify(QRH) + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -2958,7 +2965,7 @@ const VIEW_TOOLS = {
   isoprinciples: { t: 'ISO Principles', p: 1, x: 1 }, deptprocedures: { t: 'Department Procedures', p: 1, x: 1 }, inprocessqa: { t: 'Inprocess QA', p: 1, x: 1 },
   qatesting: { t: 'QA Testing', x: 1 }, capa: { t: 'CAPA', p: 1, x: 1 }, internalaudit: { t: 'Internal Audit', p: 1, x: 1 }, fatsat: { t: 'FAT-SAT', x: 1 }, tds: { t: 'TDS', x: 1 },
   productionorders: { t: 'Production Orders', x: 1 }, boshortage: { t: 'BO Shortage', x: 1 }, serviceorders: { t: 'Service Orders', x: 1 }, mepbom: { t: 'MEP BOM', x: 1 },
-  bom: { t: 'BOM', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
+  bom: { t: 'BOM', p: 1, x: 1 }, insights: { t: 'Business Insights', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
 };
 
 function tablesToSheets(root) {
@@ -4848,6 +4855,8 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             documents={documents}
             productionOrders={productionOrders}
             serviceOrders={serviceOrders}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             activeTypes={activeTypes}
             cur={cur}
           />
@@ -4900,6 +4909,8 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             documents={documents}
             productionOrders={productionOrders}
             serviceOrders={serviceOrders}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             activeTypes={activeTypes}
             cur={cur}
           />
@@ -4945,13 +4956,14 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
 }
 
 // ─── Department Overview Chart ───────────────────────────────────────────────
-function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], activeTypes = ['trading'], cur = v => v }) {
-  const [tab, setTab] = React.useState('sales');
+function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], vouchers = [], pettyCash = {}, activeTypes = ['trading'], cur = v => v }) {
+  const [tab, setTab] = React.useState('overview');
   const [chartType, setChartType] = React.useState('bar');
+  const [range, setRange] = React.useState(6);
 
   const months = React.useMemo(() => {
     const arr = [];
-    for (let i = 5; i >= 0; i--) {
+    for (let i = range - 1; i >= 0; i--) {
       const d = new Date();
       d.setDate(1);
       d.setMonth(d.getMonth() - i);
@@ -4961,11 +4973,14 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
       });
     }
     return arr;
-  }, []);
+  }, [range]);
 
+  const money = activeTypes.length >= 0;
   const tabs = [
+    { id: 'overview',   label: 'Overview',   emoji: '📊', color: '#1E2A4A', show: true },
     { id: 'sales',      label: 'Sales',      emoji: '💰', color: '#1E2A4A', show: true },
-    { id: 'purchase',   label: 'Purchase',   emoji: '🛒', color: '#6B5BAE', show: activeTypes.some(t => ['trading', 'manufacturing'].includes(t)) },
+    { id: 'purchase',   label: 'Purchase',   emoji: '🛒', color: '#6B5BAE', show: true },
+    { id: 'expenses',   label: 'Expenses',   emoji: '🧾', color: '#C2410C', show: true },
     { id: 'production', label: 'Production', emoji: '🏭', color: '#C9A24B', show: activeTypes.includes('manufacturing') },
     { id: 'service',    label: 'Service',    emoji: '🔧', color: '#1E7A9A', show: activeTypes.some(t => ['service', 'fmamc'].includes(t)) },
   ].filter(t => t.show);
@@ -4975,50 +4990,56 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
 
   function mKey(s) { return (s || '').slice(0, 7); }
   function docAmt(d) { const _f = fcInfo(d); return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) * (_f.on ? _f.fx : 1); }
+  const liveDoc = d => d.status !== 'deleted' && d.status !== 'rejected';
 
-  const data = React.useMemo(() => {
-    switch (safeTab) {
-      case 'sales':
-        return months.map(m => ({ label: m.label, value: documents.filter(d => d.type === 'invoice' && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0) }));
-      case 'purchase':
-        return months.map(m => ({ label: m.label, value: documents.filter(d => d.type === 'purchase' && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0) }));
-      case 'production':
-        return months.map(m => ({ label: m.label, value: productionOrders.filter(p => mKey(p.plannedDate || p.date || '') === m.key).length }));
-      case 'service':
-        return months.map(m => ({ label: m.label, value: serviceOrders.filter(s => mKey(s.date || s.createdAt || '') === m.key).length }));
-      default:
-        return months.map(m => ({ label: m.label, value: 0 }));
-    }
-  }, [safeTab, documents, productionOrders, serviceOrders, months]);
+  const SER = React.useMemo(() => {
+    const docsOf = (types, m) => documents.filter(d => types.includes(d.type) && liveDoc(d) && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0);
+    const inDiv = x => activeTypes.includes(x.bizType || 'trading') || activeTypes.length === 0;
+    // Expenses = payment vouchers (not receipts, not bill settlements) + petty-cash debits
+    const settles = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    const vl = (Array.isArray(vouchers) ? vouchers : []).filter(v => v.type === 'payment' && v.status !== 'rejected' && v.status !== 'deleted' && !settles(v) && inDiv(v));
+    const pc = (Array.isArray(pettyCash && pettyCash.entries) ? pettyCash.entries : []).filter(e => e.status !== 'rejected' && inDiv(e));
+    const exp = m => vl.filter(v => mKey(v.date) === m.key).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0) + pc.filter(e => mKey(e.date) === m.key).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    return {
+      sales:      { label: 'Sales',    color: '#1E2A4A', amount: true,  data: months.map(m => ({ label: m.label, value: docsOf(['invoice'], m) })) },
+      purchase:   { label: 'Purchase', color: '#6B5BAE', amount: true,  data: months.map(m => ({ label: m.label, value: docsOf(['purchasebill'], m) || docsOf(['purchase'], m) })) },
+      expenses:   { label: 'Expenses', color: '#C2410C', amount: true,  data: months.map(m => ({ label: m.label, value: exp(m) })) },
+      production: { label: 'Production orders', color: '#C9A24B', amount: false, data: months.map(m => ({ label: m.label, value: productionOrders.filter(p => mKey(p.plannedDate || p.date || '') === m.key).length })) },
+      service:    { label: 'Service orders',    color: '#1E7A9A', amount: false, data: months.map(m => ({ label: m.label, value: serviceOrders.filter(s => mKey(s.date || s.createdAt || '') === m.key).length })) },
+    };
+  }, [documents, vouchers, pettyCash, productionOrders, serviceOrders, months, activeTypes]);
 
-  const isAmount = safeTab === 'sales' || safeTab === 'purchase';
-  const maxVal = Math.max(...data.map(d => d.value), 1);
-  const total6m = data.reduce((s, d) => s + d.value, 0);
-  const peak = data.reduce((a, b) => b.value > a.value ? b : a, data[0]);
+  const series = safeTab === 'overview' ? [SER.sales, SER.purchase, SER.expenses] : [SER[safeTab]];
+  const isAmount = series[0].amount;
+  const maxVal = Math.max(...series.flatMap(s => s.data.map(d => d.value)), 1);
+  const fmtV = (v) => isAmount ? (v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : Math.round(v)) : v;
 
   // SVG layout
-  const W = 560, H = 160, PL = 4, PR = 4, PT = 12, PB = 24;
+  const W = 560, H = 170, PL = 4, PR = 4, PT = 14, PB = 24;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
-  const n = data.length;
+  const n = months.length;
   const slotW = chartW / n;
-  const barW = slotW * 0.45;
+  const k = series.length;
+  const groupW = slotW * (k > 1 ? 0.78 : 0.45);
+  const barW = groupW / k;
+  const yOf = v => PT + chartH - (maxVal > 0 ? (v / maxVal) * chartH : 0);
+  const showVals = n <= 6 || k === 1;
 
-  const pts = data.map((d, i) => ({
-    x: PL + i * slotW + slotW / 2,
-    y: PT + chartH - (maxVal > 0 ? (d.value / maxVal) * chartH : 0),
-    value: d.value,
-    label: d.label,
-  }));
-
-  const color = activeTab.color;
+  const totalOf = s => s.data.reduce((a, d) => a + d.value, 0);
+  const peakOf = s => s.data.reduce((a, b) => b.value > a.value ? b : a, s.data[0]);
+  const net = safeTab === 'overview' ? totalOf(SER.sales) - totalOf(SER.purchase) - totalOf(SER.expenses) : null;
 
   return (
     <div style={{ background: '#fff', border: '1px solid #EDEAE0', borderRadius: 14, padding: '20px 24px', marginBottom: 24 }}>
-      {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
         <div className="serif" style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>Department Overview</div>
-        <div style={{ display: 'flex', gap: 5 }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {[[6, '6M'], [12, '12M']].map(([r, lbl]) => (
+            <button key={r} onClick={() => setRange(r)}
+              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #DDD', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: range === r ? '#1E2A4A' : '#F8F6F2', color: range === r ? '#fff' : '#666' }}>{lbl}</button>
+          ))}
+          <span style={{ width: 8 }} />
           {[['bar', '▮▮ Bar'], ['line', '〜 Line']].map(([ct, lbl]) => (
             <button key={ct} onClick={() => setChartType(ct)}
               style={{ padding: '4px 11px', borderRadius: 6, border: '1px solid #DDD', fontSize: 11, fontWeight: 600, cursor: 'pointer',
@@ -5029,90 +5050,251 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
         </div>
       </div>
 
-      {/* Tab pills */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ padding: '5px 13px', borderRadius: 20, border: `1.5px solid ${tab === t.id ? t.color : '#DDD'}`,
+            style={{ padding: '5px 13px', borderRadius: 20, border: `1.5px solid ${safeTab === t.id ? t.color : '#DDD'}`,
               fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: tab === t.id ? t.color : '#fff', color: tab === t.id ? '#fff' : '#666' }}>
+              background: safeTab === t.id ? t.color : '#fff', color: safeTab === t.id ? '#fff' : '#666' }}>
             {t.emoji} {t.label}
           </button>
         ))}
       </div>
 
-      {/* SVG Chart */}
+      {k > 1 && (
+        <div style={{ display: 'flex', gap: 14, marginBottom: 6, fontSize: 11.5, color: '#666' }}>
+          {series.map(s => <span key={s.label}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: s.color, marginRight: 5 }} />{s.label}</span>)}
+        </div>
+      )}
+
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
-        {/* Horizontal grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
           const y = PT + chartH * (1 - f);
-          return <line key={i} x1={PL} y1={y} x2={W - PR} y2={y}
-            stroke={f === 0 ? '#D8D4CC' : '#EDEAE0'} strokeWidth={f === 0 ? 1.5 : 0.8}
-            strokeDasharray={f === 0 ? 'none' : '5 4'} />;
+          return <g key={i}>
+            <line x1={PL} y1={y} x2={W - PR} y2={y} stroke={f === 0 ? '#D8D4CC' : '#EDEAE0'} strokeWidth={f === 0 ? 1.5 : 0.8} strokeDasharray={f === 0 ? 'none' : '5 4'} />
+          </g>;
         })}
 
         {chartType === 'bar' ? (
-          pts.map((pt, i) => (
-            <g key={i}>
-              <rect x={pt.x - barW / 2} y={pt.y} width={barW} height={PT + chartH - pt.y}
-                rx={3} fill={color} opacity={0.82} />
-              {pt.value > 0 && (
-                <text x={pt.x} y={pt.y - 4} textAnchor="middle" fontSize={8.5} fill={color} fontFamily="sans-serif" fontWeight="600">
-                  {isAmount ? (pt.value >= 100000 ? `${(pt.value/100000).toFixed(1)}L` : pt.value >= 1000 ? `${(pt.value/1000).toFixed(0)}K` : Math.round(pt.value)) : pt.value}
-                </text>
-              )}
-            </g>
-          ))
-        ) : (
-          <g>
-            {/* Area */}
-            <path d={`M ${pts[0].x},${PT + chartH} ${pts.map(p => `L ${p.x},${p.y}`).join(' ')} L ${pts[pts.length - 1].x},${PT + chartH} Z`}
-              fill={color} opacity={0.07} />
-            {/* Line */}
-            <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')}
-              fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-            {/* Dots + value labels */}
-            {pts.map((pt, i) => (
-              <g key={i}>
-                <circle cx={pt.x} cy={pt.y} r={4} fill={color} stroke="#fff" strokeWidth={2} />
-                {pt.value > 0 && (
-                  <text x={pt.x} y={pt.y - 8} textAnchor="middle" fontSize={8.5} fill={color} fontFamily="sans-serif" fontWeight="600">
-                    {isAmount ? (pt.value >= 100000 ? `${(pt.value/100000).toFixed(1)}L` : pt.value >= 1000 ? `${(pt.value/1000).toFixed(0)}K` : Math.round(pt.value)) : pt.value}
-                  </text>
-                )}
+          series.map((s, si) => s.data.map((d, i) => {
+            const x = PL + i * slotW + (slotW - groupW) / 2 + si * barW;
+            const y = yOf(d.value);
+            return (
+              <g key={si + '-' + i}>
+                <rect x={x + 0.5} y={y} width={Math.max(barW - 1, 1)} height={PT + chartH - y} rx={2} fill={s.color} opacity={0.85}><title>{s.label} {d.label}: {isAmount ? cur(d.value) : d.value}</title></rect>
+                {showVals && d.value > 0 && <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={k > 1 ? 7 : 8.5} fill={s.color} fontFamily="sans-serif" fontWeight="600">{fmtV(d.value)}</text>}
               </g>
-            ))}
-          </g>
+            );
+          }))
+        ) : (
+          series.map((s, si) => {
+            const pts = s.data.map((d, i) => ({ x: PL + i * slotW + slotW / 2, y: yOf(d.value), v: d.value }));
+            return (
+              <g key={si}>
+                {k === 1 && <path d={`M ${pts[0].x},${PT + chartH} ${pts.map(p => `L ${p.x},${p.y}`).join(' ')} L ${pts[pts.length - 1].x},${PT + chartH} Z`} fill={s.color} opacity={0.07} />}
+                <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke={s.color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
+                {pts.map((p, i) => (
+                  <g key={i}>
+                    <circle cx={p.x} cy={p.y} r={3.5} fill={s.color} stroke="#fff" strokeWidth={1.8}><title>{s.label} {s.data[i].label}: {isAmount ? cur(p.v) : p.v}</title></circle>
+                    {showVals && k === 1 && p.v > 0 && <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize={8.5} fill={s.color} fontFamily="sans-serif" fontWeight="600">{fmtV(p.v)}</text>}
+                  </g>
+                ))}
+              </g>
+            );
+          })
         )}
 
-        {/* X-axis month labels */}
-        {pts.map((pt, i) => (
-          <text key={i} x={pt.x} y={H - 5} textAnchor="middle" fontSize={10} fill="#999" fontFamily="sans-serif">
-            {pt.label}
-          </text>
+        {months.map((m, i) => (
+          <text key={i} x={PL + i * slotW + slotW / 2} y={H - 5} textAnchor="middle" fontSize={10} fill="#999" fontFamily="sans-serif">{m.label}</text>
         ))}
       </svg>
 
-      {/* Summary strip */}
-      <div style={{ display: 'flex', gap: 24, marginTop: 8, paddingTop: 10, borderTop: '1px solid #F0EDE4', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, color: '#888' }}>
-          6-month total:{' '}
-          <strong style={{ color: '#1E2A4A' }}>
-            {isAmount ? cur(total6m) : `${total6m} orders`}
-          </strong>
-        </div>
-        {peak && peak.value > 0 && (
-          <div style={{ fontSize: 12, color: '#888' }}>
-            Peak month:{' '}
-            <strong style={{ color: '#1E2A4A' }}>
-              {peak.label} ({isAmount ? cur(peak.value) : peak.value})
-            </strong>
-          </div>
-        )}
-        {total6m === 0 && (
-          <div style={{ fontSize: 12, color: '#BBB', fontStyle: 'italic' }}>No data yet for this period.</div>
-        )}
+      <div style={{ display: 'flex', gap: 22, marginTop: 8, paddingTop: 10, borderTop: '1px solid #F0EDE4', flexWrap: 'wrap' }}>
+        {series.map(s => {
+          const tot = totalOf(s), pk = peakOf(s);
+          return (
+            <div key={s.label} style={{ fontSize: 12, color: '#888' }}>
+              {k > 1 ? <b style={{ color: s.color }}>{s.label}: </b> : `${range}-month total: `}
+              <strong style={{ color: '#1E2A4A' }}>{s.amount ? cur(tot) : `${tot} orders`}</strong>
+              {k === 1 && pk && pk.value > 0 && <> &nbsp;·&nbsp; Peak: <strong style={{ color: '#1E2A4A' }}>{pk.label} ({s.amount ? cur(pk.value) : pk.value})</strong></>}
+            </div>
+          );
+        })}
+        {net !== null && <div style={{ fontSize: 12, color: '#888' }}>Sales − Purchase − Expenses: <strong style={{ color: net >= 0 ? '#1A7A3E' : '#B5453A' }}>{cur(net)}</strong></div>}
+        {series.every(s => totalOf(s) === 0) && <div style={{ fontSize: 12, color: '#BBB', fontStyle: 'italic' }}>No data yet for this period.</div>}
       </div>
+    </div>
+  );
+}
+
+// ─── Business Insights: Receivables ageing + reminders · Cash forecast · Reorder planner · Month-end check ───────────
+function InsightsView({ documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false }) {
+  const [tab, setTab] = React.useState('recv');
+  const [openCash, setOpenCash] = React.useState('');
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const fmt = n => currency(n, cc.currency, cc.locale);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dayMs = 86400000;
+  const inDiv = x => !isMultiBiz || (x.bizType || 'trading') === currentBizType;
+  const tot = d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').grandTotal || 0;
+  const dueOf = d => { const s = d.dueDate || d.date; const t = s ? new Date(s) : null; return t && !isNaN(t) ? t : null; };
+  const nameOf = (d, list) => { const p = list.find(x => x.id === (d.customerId || d.vendorId)); return p ? p.name : (d.customerSnapshot && d.customerSnapshot.name) || '—'; };
+  const docs = (documents || []).filter(d => d.status === 'approved' && inDiv(d));
+  const vch = (vouchers || []).filter(v => v.status !== 'rejected' && v.status !== 'deleted' && inDiv(v));
+
+  // ── Receivables: invoice balance = grand total − receipts linked to that invoice number
+  const paidOn = (no, type) => vch.filter(v => v.type === type && v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim() === String(no || '').trim()).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const recvRows = docs.filter(d => d.type === 'invoice').map(d => {
+    const total = tot(d), paid = paidOn(d.number, 'receipt'), bal = Math.max(0, total - paid), due = dueOf(d);
+    const late = due ? Math.floor((today - due) / dayMs) : 0;
+    return { d, party: nameOf(d, customers), total, paid, bal, due, late };
+  }).filter(r => r.bal > 1).sort((a, b) => b.late - a.late);
+  const bucket = r => r.late <= 0 ? 0 : r.late <= 30 ? 1 : r.late <= 60 ? 2 : r.late <= 90 ? 3 : 4;
+  const BK = ['Not yet due', '1–30 days', '31–60 days', '61–90 days', '90+ days'];
+  const bucketTot = [0, 0, 0, 0, 0]; recvRows.forEach(r => { bucketTot[bucket(r)] += r.bal; });
+  const byParty = {}; recvRows.forEach(r => { (byParty[r.party] = byParty[r.party] || []).push(r); });
+  const unallocated = vch.filter(v => v.type === 'receipt' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const reminderText = (party, rows) => {
+    const od = rows.filter(r => r.late > 0), sum = rows.reduce((s, r) => s + r.bal, 0);
+    const tone = od.some(r => r.late > 60) ? 'This is now significantly overdue; please arrange payment at the earliest and let us know the expected date.' : od.length ? 'Kindly arrange payment at the earliest.' : 'A gentle reminder of the upcoming due date.';
+    return 'Dear ' + party + ',\n\nGreetings from ' + (businessInfo.name || 'us') + '. Our records show ' + fmt(sum) + ' outstanding:\n' +
+      rows.map(r => '• ' + (r.d.number || '') + ' dated ' + (r.d.date || '') + ' — ' + fmt(r.bal) + (r.late > 0 ? ' (' + r.late + ' days overdue)' : '')).join('\n') +
+      '\n\n' + tone + (businessInfo.bankName ? '\nBank: ' + businessInfo.bankName + (businessInfo.bankAccount ? ', A/C ' + businessInfo.bankAccount : '') + (businessInfo.ifsc ? ', IFSC ' + businessInfo.ifsc : '') : '') +
+      '\n\nIf already paid, please share the payment details so we can update our books.\n\nRegards,\n' + (businessInfo.name || '') + (businessInfo.phone ? '\n' + businessInfo.phone : '');
+  };
+  const partyOf = name => customers.find(c => c.name === name) || {};
+
+  // ── Cash forecast (30/60/90 days)
+  const payRows = docs.filter(d => d.type === 'purchasebill').map(d => {
+    const total = tot(d), bal = Math.max(0, total - paidOn(d.number, 'payment')), due = dueOf(d);
+    return { d, party: nameOf(d, vendors), bal, due };
+  }).filter(r => r.bal > 1);
+  const monthly = (n) => { // average of last 3 full months of expenses
+    const m = new Date(today.getFullYear(), today.getMonth() - n, 1), key = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2, '0');
+    const settles = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    return vch.filter(v => v.type === 'payment' && !settles(v) && String(v.date || '').slice(0, 7) === key).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0)
+      + (Array.isArray(pettyCash && pettyCash.entries) ? pettyCash.entries : []).filter(e => inDiv(e) && e.status !== 'rejected' && String(e.date || '').slice(0, 7) === key).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+  };
+  const avgExp = (monthly(1) + monthly(2) + monthly(3)) / 3;
+  const payroll = (employees || []).filter(e => (e.status || 'active') === 'active').reduce((s, e) => s + (parseFloat(e.basicSalary) || 0) + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0), 0);
+  const horizon = (H) => {
+    // overdue receivables are assumed to land within the first 30 days; other items fall on their due date
+    const within = (r, isRecv) => { const days = r.due ? Math.floor((r.due - today) / dayMs) : 0; const eff = isRecv && days < 0 ? 15 : Math.max(days, 0); return eff <= H; };
+    const inflow = recvRows.filter(r => within(r, true)).reduce((s, r) => s + r.bal, 0);
+    const out_bills = payRows.filter(r => within(r, false)).reduce((s, r) => s + r.bal, 0);
+    const months = H / 30;
+    return { H, inflow, out_bills, out_pay: payroll * months, out_exp: avgExp * months, net: inflow - out_bills - payroll * months - avgExp * months };
+  };
+  const hz = [30, 60, 90].map(horizon);
+  const opening = parseFloat(openCash) || 0;
+
+  // ── Reorder planner
+  const sl = (stockLedger || []).filter(inDiv);
+  const stock = computeStock(sl, items);
+  const cut = new Date(today.getTime() - 90 * dayMs);
+  const reorder = (items || []).map(it => {
+    const qty = (stock[it.id] || { qty: 0 }).qty;
+    const used = sl.filter(e => e.itemId === it.id && e.type !== 'in' && e.date && new Date(e.date) >= cut).reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
+    const vel = used / 90, cover = vel > 0 ? qty / vel : null, min = parseFloat(it.minStock) || 0;
+    const need = Math.max(0, Math.ceil(vel * 60 + min - qty));
+    const flag = qty <= 0 ? 'Out of stock' : (min > 0 && qty <= min) ? 'Below minimum' : (cover !== null && cover < 15) ? 'Under 15 days' : '';
+    return { it, qty, vel, cover, min, need, flag };
+  }).filter(r => r.flag || (r.vel > 0 && r.need > 0)).sort((a, b) => (a.cover ?? 9999) - (b.cover ?? 9999));
+  const slow = (items || []).filter(it => { const q = (stock[it.id] || { qty: 0 }).qty; return q > 0 && !sl.some(e => e.itemId === it.id && e.type !== 'in' && e.date && new Date(e.date) >= cut); }).length;
+
+  // ── Month-end check
+  const all = (documents || []).filter(inDiv);
+  const checks = [
+    ['Documents still in draft / awaiting approval', all.filter(d => ['draft', 'submitted', 'verified'].includes(d.status)).length, 'Approve or delete before closing'],
+    ['Approved invoices with no due date', docs.filter(d => d.type === 'invoice' && !d.dueDate).length, 'Ageing assumes the invoice date'],
+    ['Receipts not linked to any invoice', vch.filter(v => v.type === 'receipt' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).length, 'Link them so customer balances are right'],
+    ['Payments not linked to any bill (non-order)', vch.filter(v => v.type === 'payment' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).length, 'Check the account head is correct'],
+    ['Items with negative stock', Object.values(stock).filter(x => x.qty < 0).length, 'Fix GRN / issue entries'],
+    ['Overdue invoices (> 30 days)', recvRows.filter(r => r.late > 30).length, 'Send reminders (Receivables tab)'],
+    ['Employees without bank / basic salary set', (employees || []).filter(e => (e.status || 'active') === 'active' && !(parseFloat(e.basicSalary) > 0)).length, 'Payroll will miss them'],
+  ];
+
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', textAlign: 'left', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const R = { textAlign: 'right' };
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 14 };
+  const pill = (id, label) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{label}</button>;
+  const copy = (t) => { try { navigator.clipboard.writeText(t); alert('Copied. Paste it into WhatsApp / email.'); } catch (e) { window.prompt('Copy this text:', t); } };
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><div><h2 className="serif" style={styles.pageTitle}>Business Insights</h2><div style={{ fontSize: 13, color: '#888780' }}>Receivables, cash forecast, reorder planner and month-end checks — from your approved documents</div></div></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {pill('recv', '💰 Receivables & reminders')}{pill('cash', '📈 Cash forecast')}{pill('reorder', '📦 Reorder planner')}{pill('close', '✅ Month-end check')}
+      </div>
+
+      {tab === 'recv' && (<>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 14 }}>
+          {BK.map((l, i) => <div key={l} style={{ ...card, marginBottom: 0, padding: 12, borderTop: '3px solid ' + ['#1A7A3E', '#C9A24B', '#E07B00', '#C2410C', '#B5453A'][i] }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontWeight: 700, fontSize: 15, marginTop: 3 }}>{fmt(bucketTot[i])}</div></div>)}
+        </div>
+        {unallocated > 0 && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>⚠ {fmt(unallocated)} of receipts are not linked to an invoice, so they are not deducted below. Link them in Vouchers.</div>}
+        {recvRows.length === 0 ? <div style={styles.emptyBox}>No outstanding approved invoices.</div> : Object.entries(byParty).map(([party, rows]) => {
+          const sum = rows.reduce((s, r) => s + r.bal, 0), c = partyOf(party), msg = reminderText(party, rows);
+          const ph = String(c.phone || '').replace(/[^0-9]/g, '');
+          return (
+            <div key={party} style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <div><b style={{ fontSize: 14 }}>{party}</b> <span style={{ color: '#888', fontSize: 12 }}>· {rows.length} invoice(s)</span></div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <b style={{ color: '#B5453A' }}>{fmt(sum)}</b>
+                  <button style={styles.ghostBtn} onClick={() => copy(msg)}>📋 Copy reminder</button>
+                  {ph && <a style={{ ...styles.ghostBtn, textDecoration: 'none' }} target="_blank" rel="noreferrer" href={'https://wa.me/' + (ph.length === 10 ? '91' + ph : ph) + '?text=' + encodeURIComponent(msg)}>WhatsApp</a>}
+                  {c.email && <a style={{ ...styles.ghostBtn, textDecoration: 'none' }} href={'mailto:' + c.email + '?subject=' + encodeURIComponent('Payment reminder — ' + (businessInfo.name || '')) + '&body=' + encodeURIComponent(msg)}>Email</a>}
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Invoice', 'Date', 'Due', 'Total', 'Received', 'Balance', 'Age'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>{rows.map(r => <tr key={r.d.id}><td style={td}>{r.d.number}</td><td style={td}>{r.d.date}</td><td style={td}>{r.d.dueDate || '—'}</td><td style={{ ...td, ...R }}>{fmt(r.total)}</td><td style={{ ...td, ...R }}>{fmt(r.paid)}</td><td style={{ ...td, ...R, fontWeight: 700 }}>{fmt(r.bal)}</td><td style={{ ...td, color: r.late > 60 ? '#B5453A' : r.late > 0 ? '#E07B00' : '#1A7A3E', fontWeight: 600 }}>{r.late > 0 ? r.late + ' d late' : 'not due'}</td></tr>)}</tbody></table>
+            </div>
+          );
+        })}
+      </>)}
+
+      {tab === 'cash' && (<>
+        <div style={{ ...card, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Opening cash + bank balance today</label>
+          <input type="number" value={openCash} onChange={e => setOpenCash(e.target.value)} placeholder="0" style={{ ...styles.input, width: 180, margin: 0 }} />
+          <span style={{ fontSize: 11.5, color: '#888' }}>Not stored — enter to see the closing position.</span>
+        </div>
+        <div style={card}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><th style={th}></th>{hz.map(h => <th key={h.H} style={{ ...th, ...R }}>Next {h.H} days</th>)}</tr></thead>
+            <tbody>
+              {[['Expected collections (invoices)', 'inflow', '#1A7A3E', 1], ['Supplier bills due', 'out_bills', '#C2410C', -1], ['Payroll (gross, active staff)', 'out_pay', '#C2410C', -1], ['Other expenses (3-month average)', 'out_exp', '#C2410C', -1]].map(([l, k, c, sg]) =>
+                <tr key={k}><td style={td}>{l}</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, color: c }}>{sg < 0 ? '− ' : ''}{fmt(h[k])}</td>)}</tr>)}
+              <tr style={{ background: '#F8F6F0' }}><td style={{ ...td, fontWeight: 700 }}>Net movement</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, fontWeight: 700, color: h.net >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(h.net)}</td>)}</tr>
+              {opening !== 0 && <tr><td style={{ ...td, fontWeight: 700 }}>Closing position</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, fontWeight: 700, color: opening + h.net >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(opening + h.net)}</td>)}</tr>}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11.5, color: '#888', marginTop: 10, lineHeight: 1.6 }}>Overdue invoices are assumed to be collected within ~15 days; others on their due date. Payroll uses salary heads from Employees. Expenses use payment vouchers + petty cash (excluding bill settlements). This is an estimate, not a guarantee.</div>
+        </div>
+      </>)}
+
+      {tab === 'reorder' && (<>
+        <div style={{ fontSize: 12.5, color: '#666', marginBottom: 10 }}>Based on issue / usage in the last 90 days. Suggested order = 60 days of usage + minimum stock − stock on hand. {slow > 0 && <span style={{ color: '#856404' }}>· {slow} item(s) have stock but no movement in 90 days (slow movers).</span>}</div>
+        {reorder.length === 0 ? <div style={styles.emptyBox}>Nothing to reorder right now.</div> : (
+          <div style={card}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{['Item', 'On hand', 'Min', 'Use / day', 'Days cover', 'Status', 'Suggested order'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{reorder.map(r => <tr key={r.it.id}><td style={td}>{r.it.name}{r.it.itemCode ? <span style={{ color: '#aaa', fontSize: 11 }}> · {r.it.itemCode}</span> : null}</td><td style={{ ...td, ...R }}>{r.qty} {r.it.unit || ''}</td><td style={{ ...td, ...R }}>{r.min || '—'}</td><td style={{ ...td, ...R }}>{r.vel ? r.vel.toFixed(2) : '—'}</td><td style={{ ...td, ...R }}>{r.cover === null ? '—' : Math.floor(r.cover)}</td><td style={{ ...td, color: r.flag === 'Out of stock' || r.flag === 'Below minimum' ? '#B5453A' : '#E07B00', fontWeight: 600 }}>{r.flag || '—'}</td><td style={{ ...td, ...R, fontWeight: 700 }}>{r.need} {r.it.unit || ''}</td></tr>)}</tbody></table>
+            <div style={{ marginTop: 10 }}><button style={styles.ghostBtn} onClick={() => copy('Reorder list — ' + (businessInfo.name || '') + '\n' + reorder.filter(r => r.need > 0).map(r => '• ' + r.it.name + ': ' + r.need + ' ' + (r.it.unit || '')).join('\n'))}>📋 Copy order list</button></div>
+          </div>)}
+      </>)}
+
+      {tab === 'close' && (
+        <div style={card}>
+          <div style={{ fontSize: 12.5, color: '#666', marginBottom: 10 }}>Clear these before you close the month and run the P&amp;L / GST reports.</div>
+          {checks.map(([l, n, hint]) => (
+            <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid #F0ECE0' }}>
+              <div><div style={{ fontSize: 13.5 }}>{n === 0 ? '✅' : '⚠️'} {l}</div><div style={{ fontSize: 11.5, color: '#999', marginLeft: 22 }}>{hint}</div></div>
+              <b style={{ color: n === 0 ? '#1A7A3E' : '#B5453A' }}>{n}</b>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -5346,10 +5528,10 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
-  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
-  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
+  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','insights','purchasereq'],
+  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','insights','purchasereq','investors','boshortage','fatsat','tds'],
+  service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','insights','purchasereq'],
+  fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','insights','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
   admin:         ['staff','contracts','termslibrary','mom','assetregister','investors'],
 };
@@ -5616,6 +5798,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
               {/* ── MANUFACTURING ───────────────────────────────────── */}
@@ -5676,6 +5859,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
               {/* ── MEP / SERVICE ────────────────────────────────────── */}
@@ -5781,6 +5965,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
                 {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
                 <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+                <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               </>}
 
             </BizSection>
@@ -5860,6 +6045,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="projectpnl" label="Project P&amp;L" icon={BarChart2} />
               <NavBtn id="mepreports"     label="MEP Reports"       icon={FileText} />
               <NavBtn id="audit"          label="Financial Reports" icon={BarChart2} />
+              <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
               <NavBtn id="evaluation"     label="Management Review" icon={CheckCircle} />
             </Section>
 
@@ -5916,6 +6102,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {['uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="vatreport" label="VAT Return" icon={FileText} />}
             {COUNTRY_CONFIG[country]?.hasTax && !['india','uae','saudi','bahrain','oman'].includes(country) && <NavBtn id="taxreport" label="Tax Report" icon={FileText} />}
             <NavBtn id="audit" label="P&L Audit" icon={BarChart2} />
+            <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
           </Section>
 
           {/* Purchase */}
@@ -30447,6 +30634,22 @@ export default function App() {
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
+          />
+        );
+      case 'insights':
+        return (
+          <InsightsView
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
+            vouchers={sessionVouchers}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
+            employees={sessionEmployees}
+            pettyCash={sessionPettyCash}
+            businessInfo={businessInfo}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz || !!sessionContext}
           />
         );
       case 'audit':
