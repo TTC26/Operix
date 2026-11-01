@@ -70,6 +70,7 @@ const PLAN_MODULES = {
     'hr','payroll','employees','siteattendance',
   ],
   manufacturing: [
+    'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
@@ -4956,6 +4957,7 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
+  const isCable = showProduction && _mfgType() === 'wires_cables';
   const showService    = activeTypes.includes('service');
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
@@ -6190,8 +6192,8 @@ function InsFabPack({ ctx }) {
   </>);
 }
 
-function InsightsView({ documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
-  const [tab, setTab] = React.useState('recv');
+function InsightsView({ initialTab, documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
+  const [tab, setTab] = React.useState(initialTab || 'recv');
   const [openCash, setOpenCash] = React.useState('');
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
   const fmt = n => currency(n, cc.currency, cc.locale);
@@ -6566,6 +6568,89 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
   );
 }
 
+// ─── Won quotation → one BOM per item → one production order per item → order shortage → draft PR ───
+// Pure function (no React) so it can be tested. Item no. = quotation line no. (1-based) and is carried everywhere.
+function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], purchaseReqs = [], productionOrders = [], bizType = 'manufacturing', today }) {
+  const dt = today || new Date().toISOString().slice(0, 10);
+  const norm = s => String(s || '').trim().toLowerCase();
+  const cust = (doc.customerSnapshot && doc.customerSnapshot.name) || '';
+  const lines = (doc.items || []).map((it, i) => ({ it, itemNo: i + 1 })).filter(x => (x.it.name || '').trim() && (parseFloat(x.it.qty) || 0) > 0);
+  // master BOMs = BOMs not created for a specific order
+  const masters = (boms || []).filter(b => b && !b.orderRef);
+  const findMaster = name => masters.find(b => norm(b.name) === norm(name) || norm(b.outputItem) === norm(name));
+  const rmById = {}; (rawMaterials || []).forEach(r => { if (r && r.id) rmById[r.id] = r; });
+  const rmFor = m => rmById[m.materialId] || (rawMaterials || []).find(r => norm(r.name) === norm(m.name));
+  let poSeq = (productionOrders || []).length;
+  const newBoms = [], newOrders = [], need = {};
+  lines.forEach(({ it, itemNo }) => {
+    const tpl = findMaster(it.name);
+    const qty = parseFloat(it.qty) || 0;
+    const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust };
+    const bom = {
+      id: 'bom-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
+      name: (it.name || '').trim(), outputItem: (it.name || '').trim(),
+      outputQty: tpl ? (parseFloat(tpl.outputQty) || 1) : 1, unit: it.unit || (tpl && tpl.unit) || 'm',
+      materials: tpl ? (tpl.materials || []).map(m => ({ ...m })) : [],
+      specs: tpl && tpl.specs ? { ...tpl.specs } : {}, partId: tpl ? (tpl.partId || '') : '',
+      templateId: tpl ? tpl.id : '', needsMaterials: !tpl || !(tpl.materials || []).length,
+      orderRef: ref, bizType, createdAt: Date.now(),
+    };
+    newBoms.push(bom);
+    poSeq += 1;
+    newOrders.push({
+      id: 'po-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
+      number: 'PRO/' + (doc.number || 'Q') + '/' + itemNo, batchNumber: (typeof genBatchNumber === 'function' ? genBatchNumber() : 'BN-' + poSeq),
+      bomId: bom.id, quantity: qty, startDate: dt, targetDate: doc.deliveryDate || doc.validUntil || '',
+      status: 'planned', notes: 'Auto from won ' + (doc.number || '') + ' · item ' + itemNo + (cust ? ' · ' + cust : ''),
+      orderRef: ref, bizType, createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '',
+    });
+    const fac = qty / (bom.outputQty || 1);
+    (bom.materials || []).forEach(m => {
+      const rm = rmFor(m), key = rm ? rm.id : norm(m.name);
+      const r = need[key] = need[key] || { materialId: rm ? rm.id : (m.materialId || ''), name: m.name || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', overall: 0, available: rm ? (parseFloat(rm.stock) || 0) : 0, rate: rm ? (parseFloat(rm.rate) || '') : '', itemNos: [] };
+      r.overall += (parseFloat(m.qty) || 0) * fac;
+      if (!r.itemNos.includes(itemNo)) r.itemNos.push(itemNo);
+    });
+  });
+  const rows = Object.values(need).map(r => ({ ...r, overall: Math.round(r.overall * 1000) / 1000, perBom: Math.round(r.overall * 1000) / 1000, shortage: Math.max(0, Math.round((r.overall - r.available) * 1000) / 1000), itemNos: r.itemNos.join(', ') }));
+  const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + (doc.number || '') + (cust ? ' — ' + cust : ''), qty: 1, outputQty: 1, outputUnit: '', date: dt, rows, orderRef: { docId: doc.id, docNo: doc.number }, bizType, createdAt: new Date().toISOString() };
+  const short = rows.filter(r => r.shortage > 0);
+  let pr = null;
+  if (short.length) {
+    const cnt = (purchaseReqs || []).filter(m => (m.number || '').includes('PR/' + (typeof fyNow === 'function' ? fyNow() : '') + '/')).length + 1;
+    pr = {
+      id: 'pr-' + doc.id + '-' + Date.now(), number: (typeof dn === 'function' ? dn('PR', cnt) : 'PR-' + cnt), bizType,
+      type: 'manufacturing', linkId: doc.id, linkName: 'Order ' + (doc.number || ''), date: dt, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (won quotation)', priority: 'Normal',
+      items: short.map(r => ({ itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'Order ' + (doc.number || '') + ' · item ' + r.itemNos })),
+      remarks: 'Auto-raised from won quotation ' + (doc.number || '') + ' — shortage against order BOMs', orderRef: { docId: doc.id, docNo: doc.number },
+      approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
+    };
+  }
+  return { newBoms, newOrders, report, pr, missingBom: newBoms.filter(b => b.needsMaterials).map(b => b.orderRef.itemNo + '. ' + b.name) };
+}
+
+// Placeholder for Wires & Cables menus that are being built step by step
+const MFG_NEXT = {
+  cabledesign: ['Cable Design Master', 2, 'One record per cable construction: conductor (Cu / Al, size, class, strands), insulation, laying-up, armour, sheath and test plan. Copper / compound / armour kg per km are calculated automatically, and the BOM and Technical Data Sheet are generated from it. A won quotation item matches a design by name.', [['bom', 'Bill of Materials'], ['partsmaster', 'Parts Master (old)']]],
+  incomingqa: ['Incoming QA', 3, 'Queue of every GRN lot waiting for inspection (rod, compound, armour). Accept → lot becomes "Approved" and can be issued; reject → returned to supplier and counted in supplier quality.', [['grn', 'Goods Receipt (GRN)']]],
+  wip: ['WIP (Bobbins / Coils)', 4, 'Every bobbin / coil coming out of a stage with its lot numbers, length / weight and the next stage it waits for.', [['storeissue', 'Issue to Production'], ['productionorders', 'Production Orders']]],
+  drumstock: ['Drum Stock & Scrap', 4, 'Finished drums released by QA (drum no., product, length, net weight, order item no., test certificate) plus scrap and offcut stock. Delivery Note and Packing List pick drums from here.', [['stock', 'Stock Position']]],
+  machinelog: ['Machine Log & Downtime', 4, 'Shift-wise running hours, output and downtime reasons per machine, linked to the Breakdown Log and used for OEE.', [['productionorders', 'Production Orders'], ['fmworkorders', 'Breakdown Log']]],
+};
+function MfgNextStepView({ id, setView }) {
+  const d = MFG_NEXT[id] || [id, 0, '', []];
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{d[0]}</h1></div>
+      <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: '4px solid #C9752A', borderRadius: 10, padding: '16px 20px', maxWidth: 760 }}>
+        <div style={{ fontSize: 12, color: '#C9752A', fontWeight: 700, marginBottom: 6 }}>Being built — step {d[1]} of the Wires & Cables rework</div>
+        <div style={{ fontSize: 14, lineHeight: 1.7, color: '#333' }}>{d[2]}</div>
+        {d[3].length > 0 && <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><span style={{ fontSize: 12, color: '#888' }}>Until then use:</span>{d[3].map(([v, l]) => <button key={v} onClick={() => setView && setView(v)} style={styles.ghostBtn}>{l}</button>)}</div>}
+      </div>
+    </div>
+  );
+}
+
 function ConvertDropdown({ doc, onConvert }) {
   const [open, setOpen] = useState(false);
   const targets = CONVERT_TO[doc.type] || [];
@@ -6601,10 +6686,12 @@ const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
-  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
-  engineering: ['partsmaster', 'engdocs', 'tds'],
-  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
-  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock'],
+  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign'],
+  planning:    ['bom', 'boshortage'],
+  maintenance: ['assetregister', 'pmschedules', 'fmworkorders', 'fmspareparts'],
+  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage', 'machinelog', 'metalrecon'],
+  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat', 'incomingqa', 'calibration', 'capa', 'internalaudit', 'mis'],
   hr:          ['employees', 'payroll', 'siteattendance', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   mep_clients: ['customers', 'enquiries', 'items'],
@@ -6617,7 +6704,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  manufacturing: ['assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -6775,6 +6862,7 @@ const COMING_SOON = {};
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
+  const isCable = showProduction && _mfgType() === 'wires_cables';
   const showService    = activeTypes.includes('service');
   const showFMAMC      = activeTypes.includes('fmamc');
   const isMultiBiz     = activeTypes.length > 1;
@@ -6907,6 +6995,52 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <CreateBtn docKey="purchasebill" bizType="manufacturing" />
                 <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
 
+                {isCable ? (<>
+                <SubLabel label="Engineering" />
+                <NavBtn id="cabledesign" label="Cable Design Master"  icon={Wrench} />
+                <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
+                <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
+
+                <SubLabel label="Planning" />
+                <NavBtn id="bom"        label="Order BOMs"          icon={ClipboardList} />
+                <NavBtn id="boshortage" label="BO Shortages → PR"   icon={AlertTriangle} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="items"        label="Item Master"          icon={Package} />
+                <NavBtn id="rawmaterials" label="Raw Material Lots"    icon={Package} />
+                <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
+                <NavBtn id="wip"          label="WIP (Bobbins / Coils)" icon={Layers} />
+                <NavBtn id="drumstock"    label="Drum Stock & Scrap"   icon={Package} />
+                <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
+                <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
+                <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
+                <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
+                <CreateBtn docKey="delivery"     bizType="manufacturing" />
+                <CreateBtn docKey="packing_list" bizType="manufacturing" />
+
+                <SubLabel label="Production" />
+                <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
+                <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
+                <NavBtn id="metalrecon"       label="Metal Reconciliation"   icon={BarChart2} />
+
+                <SubLabel label="Maintenance" />
+                <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
+                <NavBtn id="pmschedules"   label="Preventive Maintenance"       icon={ClipboardList} />
+                <NavBtn id="fmworkorders"  label="Breakdown Log"                icon={Wrench} />
+                <NavBtn id="fmspareparts"  label="Maintenance Spares"           icon={Package} />
+
+                <SubLabel label="Quality" />
+                <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
+                <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
+                <NavBtn id="qatesting"      label="Routine Test & Certificates" icon={CheckCircle} />
+                <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
+                <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
+                <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
+                <NavBtn id="capa"           label="CAPA"                        icon={AlertTriangle} />
+                <NavBtn id="calibration"    label="Calibration"                 icon={CheckCircle} />
+                <NavBtn id="internalaudit"  label="Internal Audit"              icon={ClipboardList} />
+                <NavBtn id="mis"            label="MIS / Mgmt Review"           icon={BarChart2} />
+                </>) : (<>
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Items"                icon={Package} />
                 <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
@@ -6935,6 +7069,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
                 <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
                 <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+                </>)}
 
                 <SubLabel label="Assets" />
                 <NavBtn id="assetregister" label="Asset Register" icon={Package} />
@@ -7200,9 +7335,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           </Section>
 
           {/* Stores — all biz types */}
-          {(showTrade || showService || showFMAMC) && (
+          {(showTrade || showService || showFMAMC || isCable) && (
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
+              {isCable && <NavBtn id="rawmaterials" label="Raw Material Lots"     icon={Package} />}
+              {isCable && <NavBtn id="wip"          label="WIP (Bobbins / Coils)" icon={Layers} />}
+              {isCable && <NavBtn id="drumstock"    label="Drum Stock & Scrap"    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
@@ -7255,8 +7393,44 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
           )}
 
+          {/* Wires & Cables — process-flow menu */}
+          {isCable && (<>
+            <Section sectionKey="engineering" label="Engineering">
+              <NavBtn id="cabledesign" label="Cable Design Master"   icon={Wrench} />
+              <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
+              <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
+            </Section>
+            <Section sectionKey="planning" label="Planning">
+              <NavBtn id="bom"        label="Order BOMs"        icon={ClipboardList} />
+              <NavBtn id="boshortage" label="BO Shortages → PR" icon={AlertTriangle} />
+            </Section>
+            <Section sectionKey="production" label="Production">
+              <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
+              <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
+              <NavBtn id="metalrecon"       label="Metal Reconciliation"   icon={BarChart2} />
+            </Section>
+            <Section sectionKey="maintenance" label="Maintenance">
+              <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
+              <NavBtn id="pmschedules"   label="Preventive Maintenance"       icon={ClipboardList} />
+              <NavBtn id="fmworkorders"  label="Breakdown Log"                icon={Wrench} />
+              <NavBtn id="fmspareparts"  label="Maintenance Spares"           icon={Package} />
+            </Section>
+            <Section sectionKey="quality" label="Quality">
+              <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
+              <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
+              <NavBtn id="qatesting"      label="Routine Test & Certificates" icon={CheckCircle} />
+              <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
+              <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
+              <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
+              <NavBtn id="capa"           label="CAPA"                        icon={AlertTriangle} />
+              <NavBtn id="calibration"    label="Calibration"                 icon={CheckCircle} />
+              <NavBtn id="internalaudit"  label="Internal Audit"              icon={ClipboardList} />
+              <NavBtn id="mis"            label="MIS / Mgmt Review"           icon={BarChart2} />
+            </Section>
+          </>)}
+
           {/* Engineering */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="engineering" label="Engineering">
               <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
               <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
@@ -7265,7 +7439,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           )}
 
           {/* Production */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="production" label="Production">
               <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
               <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
@@ -7275,7 +7449,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           )}
 
           {/* Quality */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="quality" label="Quality">
               <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
               <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
@@ -7751,7 +7925,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -7918,6 +8092,21 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <option value="">📄 View {t.label}s ▾</option>
               {sameDocs.map(d => <option key={d.id} value={d.id}>{d.number} · {d.date}</option>)}
             </select>
+          )}
+          {doc.type === 'quotation' && doc.id && onQuoteOutcome && (
+            doc.outcome ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 700, background: doc.outcome === 'won' ? '#D6F0E0' : '#FBEAE7', color: doc.outcome === 'won' ? '#1A5C35' : '#B5453A' }}>{doc.outcome === 'won' ? '✓ Won' : '✗ Lost'}{doc.outcomeDate ? ' · ' + doc.outcomeDate : ''}</span>
+                {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
+                {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
+                {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} BOM + production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
+              </span>
+            ) : (['draft', 'rejected', 'deleted'].includes(doc.status)
+              ? <span style={{ fontSize: 11.5, color: '#888' }} title="Submit / approve the quotation first">Won / Lost after approval</span>
+              : <span style={{ display: 'inline-flex', gap: 6 }}>
+                  <button onClick={() => onQuoteOutcome(doc, 'won')} style={{ ...styles.ghostBtn, padding: '5px 10px', fontSize: 12, color: '#1A5C35', borderColor: '#9FD3B2' }}>✓ Mark Won</button>
+                  <button onClick={() => onQuoteOutcome(doc, 'lost')} style={{ ...styles.ghostBtn, padding: '5px 10px', fontSize: 12, color: '#B5453A', borderColor: '#F2B8AE' }}>✗ Lost</button>
+                </span>)
           )}
           {/* Convert to → dropdown */}
           {onConvert && CONVERT_TO[doc.type] && doc.id && (
@@ -18299,12 +18488,12 @@ function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
             <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <div style={styles.docRowTitle}>{b.name}</div>
-                <div style={styles.docRowSub}>Output: {b.outputQty} {b.unit} - {b.materials.length} materials</div>
+                <div style={styles.docRowSub}>Output: {b.outputQty} {b.unit} - {(b.materials || []).length} materials{b.orderRef ? <span style={{ marginLeft: 8, color: '#2255A0', fontWeight: 600 }}>· Order {b.orderRef.docNo} / item {b.orderRef.itemNo}{b.orderRef.customer ? ' · ' + b.orderRef.customer : ''}</span> : <span style={{ marginLeft: 8, color: '#888' }}>· Master</span>}{b.needsMaterials && !(b.materials || []).length ? <span style={{ marginLeft: 8, color: '#B5453A', fontWeight: 700 }}>⚠ add materials</span> : null}</div>
               </div>
               {canEdit && <button onClick={() => setEditing(b)} style={styles.ghostBtn}>Edit</button>}
               {canEdit && <button onClick={() => setBoms((list) => list.filter((x) => x.id !== b.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>}
             </div>
-            {b.materials.length > 0 && (
+            {(b.materials || []).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {b.materials.map((m, i) => (
                   <span key={i} style={{ ...styles.badge, background: '#EDE6F9', color: '#5B2DA0' }}>{m.name} - {m.qty} {m.unit}</span>
@@ -30515,6 +30704,39 @@ export default function App() {
     setView('doceditor');
   }
 
+  // Scope a shared list to the current business; new records get tagged with it.
+  const scopeList = (list, def) => sessionContext ? (list || []).filter(x => (x.bizType || def) === sessionContext) : (list || []);
+  const scopeSet = (setter, def) => !sessionContext ? setter : (v => setter(prev => {
+    const all = Array.isArray(prev) ? prev : [];
+    const mine = all.filter(x => (x.bizType || def) === sessionContext), others = all.filter(x => (x.bizType || def) !== sessionContext);
+    const next = typeof v === 'function' ? v(mine) : v;
+    return [...others, ...(next || []).map(x => x && !x.bizType ? { ...x, bizType: sessionContext } : x)];
+  }));
+
+  function markQuoteOutcome(doc, outcome) {
+    const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
+    const patch = d => ({ ...d, outcome: outcome || null, outcomeDate });
+    setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
+  }
+  function convertQuoteToMfg(doc) {
+    if (doc.outcome !== 'won') { alert('Only a won quotation can be converted.'); return; }
+    if (doc.mfgLink) { alert('This quotation is already converted.'); return; }
+    const res = buildMfgFromQuote({ doc, boms, rawMaterials, purchaseReqs, productionOrders, bizType: 'manufacturing' });
+    if (!res.newBoms.length) { alert('No items with a name and quantity to convert.'); return; }
+    const msg = 'Create for ' + doc.number + ':\n\n• ' + res.newBoms.length + ' BOM(s) — one per quotation item\n• ' + res.newOrders.length + ' production order(s)\n• Order shortage report' + (res.pr ? '\n• Draft purchase requisition for ' + res.pr.items.length + ' short material(s)' : '\n• No shortage — stock covers all materials') + (res.missingBom.length ? '\n\nNo master BOM found for:\n' + res.missingBom.join('\n') + '\n(These BOMs are created empty — Engineering must add materials.)' : '') + '\n\nContinue?';
+    if (!window.confirm(msg)) return;
+    setBoms(prev => [...(Array.isArray(prev) ? prev : []), ...res.newBoms]);
+    setProductionOrders(prev => [...res.newOrders, ...(Array.isArray(prev) ? prev : [])]);
+    setBoShortages(prev => [res.report, ...(Array.isArray(prev) ? prev : [])]);
+    if (res.pr) setPurchaseReqs(prev => [res.pr, ...(Array.isArray(prev) ? prev : [])]);
+    const link = { convertedAt: new Date().toISOString(), items: res.newBoms.length, bomIds: res.newBoms.map(b => b.id), orderIds: res.newOrders.map(o => o.id), reportId: res.report.id, prId: res.pr ? res.pr.id : '', prNo: res.pr ? res.pr.number : '' };
+    const patch = d => ({ ...d, mfgLink: link });
+    setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
+    alert('✅ Done. ' + res.newBoms.length + ' BOM(s) and production order(s) created' + (res.pr ? ', ' + res.pr.number + ' raised for shortages (approve it, then convert to PO).' : '.') + (res.missingBom.length ? '\n\nAdd materials to the empty BOMs in Bill of Materials.' : ''));
+  }
+
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
@@ -30975,6 +31197,8 @@ export default function App() {
           siteProjects={siteProjects}
           progressUpdates={progressUpdates}
           onConvert={convertDoc}
+          onQuoteOutcome={markQuoteOutcome}
+          onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
           documents={documents}
           purchaseReqs={purchaseReqs}
@@ -31777,22 +32001,22 @@ export default function App() {
       case 'pmaintenance':
         return (
           <PMScheduleView
-            pmSchedules={pmSchedules}
-            setPmSchedules={setPmSchedules}
-            assets={assets}
-            fmWorkOrders={fmWorkOrders}
-            setFmWorkOrders={setFmWorkOrders}
+            pmSchedules={scopeList(pmSchedules, 'fmamc')}
+            setPmSchedules={scopeSet(setPmSchedules, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
+            setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')}
             userRole={userRole}
           />
         );
       case 'fmworkorders':
         return (
           <FMWorkOrderView
-            fmWorkOrders={fmWorkOrders}
-            setFmWorkOrders={setFmWorkOrders}
-            assets={assets}
-            fmSpareParts={fmSpareParts}
-            setFmSpareParts={setFmSpareParts}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
+            setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
+            fmSpareParts={scopeList(fmSpareParts, 'fmamc')}
+            setFmSpareParts={scopeSet(setFmSpareParts, 'fmamc')}
             userRole={userRole}
           />
         );
@@ -31810,9 +32034,9 @@ export default function App() {
       case 'fmspareparts':
         return (
           <FMSparePartsView
-            fmSpareParts={fmSpareParts}
-            setFmSpareParts={setFmSpareParts}
-            assets={assets}
+            fmSpareParts={scopeList(fmSpareParts, 'fmamc')}
+            setFmSpareParts={scopeSet(setFmSpareParts, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
             userRole={userRole}
           />
         );
@@ -31850,8 +32074,12 @@ export default function App() {
           />
         );
       case 'insights':
+      case 'metalrecon':
+      case 'calibration':
         return (
           <InsightsView
+            key={view}
+            initialTab={view === 'metalrecon' ? 'cablepack' : view === 'calibration' ? 'qa' : undefined}
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
@@ -31924,6 +32152,12 @@ export default function App() {
             payrollRuns={payrollRuns}
           />
         );
+      case 'cabledesign':
+      case 'incomingqa':
+      case 'wip':
+      case 'drumstock':
+      case 'machinelog':
+        return <MfgNextStepView id={view} setView={setView} />;
       case 'boshortage':
         return (
           <BOShortageView
