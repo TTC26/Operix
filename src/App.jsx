@@ -69,7 +69,7 @@ const PLAN_MODULES = {
   trading: [
     'hr','payroll','employees','siteattendance',
   ],
-  manufacturing: ['routinetest',
+  manufacturing: ['productspec','routinetest',
     'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
@@ -6772,7 +6772,7 @@ const CAB_BLANK = {
 function calcCable(d) {
   const n = Math.max(1, parseInt(d.cores) || 1), S = parseFloat(d.size) || 0, num = v => parseFloat(v) || 0;
   const cls = String(d.condClass || '2');
-  const fill = num(d.fill) || (cls === '1' ? 1 : cls === '5' ? 0.72 : 0.78);
+  const fill = num(d.fill) || (cls === '1' ? 1 : cls === '5' ? 0.72 : /sector/i.test(d.condShape || '') ? 0.92 : /compact/i.test(d.condShape || '') ? 0.9 : 0.78);
   const lay = cls === '1' ? 1 : cls === '5' ? 1.04 : 1.02;
   const dc = Math.sqrt(4 * S / (Math.PI * fill));
   const rhoC = d.condMat === 'Al' ? CAB_DENS.Al : CAB_DENS.Cu;
@@ -6798,6 +6798,41 @@ function calcCable(d) {
   const r2 = v => Math.round(v * 100) / 100;
   return { n, S, dc: r2(dc), di: r2(di), D1: r2(D1), D2: r2(D2), D3: r2(D3), D4: r2(D4), wCond: r2(wCond), wIns: r2(wIns), wBed: r2(wBed), wArm: r2(wArm), nArm, wSheath: r2(wSheath), wTotal: r2(wTotal), maxR, insMin: r2(insMin), sheathMin: r2(sheathMin) };
 }
+// ─── Cable electrical parameters (IEC 60287-1-1 simplified, 50 Hz) — every value can be overridden manually ───
+// Indicative current ratings, Cu XLPE 3-core armoured 1.1 kV [in ground, in air] — typical manufacturer tables.
+const CAB_AMP = { 1.5: [27, 24], 2.5: [36, 32], 4: [46, 42], 6: [58, 52], 10: [77, 71], 16: [100, 95], 25: [130, 125], 35: [155, 150], 50: [185, 185], 70: [225, 230], 95: [270, 285], 120: [305, 330], 150: [340, 375], 185: [385, 430], 240: [445, 510], 300: [495, 580], 400: [560, 670] };
+const CAB_K = { Cu: { PVC: 115, XLPE: 143, HFFR: 143, PE: 115 }, Al: { PVC: 76, XLPE: 94, HFFR: 94, PE: 76 } }; // adiabatic SC constant (A·s½/mm²)
+const CAB_EPS = { PVC: 8, XLPE: 2.5, HFFR: 3.5, PE: 2.3 };
+function cableElectrical(d, k) {
+  const f = 50, S = parseFloat(d.size) || 0, n = Math.max(1, parseInt(d.cores) || 1), mat = d.condMat === 'Al' ? 'Al' : 'Cu';
+  const theta = (d.insMat === 'XLPE' || d.insMat === 'HFFR') ? 90 : 70;
+  const alpha = mat === 'Al' ? 0.00403 : 0.00393;
+  const r20 = k.maxR || (S > 0 ? (mat === 'Al' ? 28.264 : 17.241) / S : 0); // Ω/km
+  const rT = r20 * (1 + alpha * (theta - 20));
+  const Rm = rT / 1000; // Ω/m
+  const x4 = Rm > 0 ? Math.pow(8 * Math.PI * f / Rm * 1e-7, 2) : 0;
+  const F = x4 / (192 + 0.8 * x4);
+  const s = n > 1 ? k.di : k.D4; // axial spacing: touching cores / trefoil single cores
+  const ratio = s > 0 ? k.dc / s : 0;
+  const xp4 = x4 * 0.64, Fp = xp4 / (192 + 0.8 * xp4); // kp = 0.8 (stranded / compacted / sector), ks = 1
+  let yp = s > 0 ? Fp * ratio * ratio * (0.312 * ratio * ratio + 1.18 / (Fp + 0.27)) : 0;
+  if (n > 1 && S >= 35 && /sector/i.test(d.condShape || '')) yp *= 2 / 3;
+  const rac = rT * (1 + F + yp);
+  const L = s > 0 && k.dc > 0 ? 0.05 + 0.2 * Math.log(2 * s / k.dc) : 0; // mH/km
+  const x = 2 * Math.PI * f * L / 1000; // Ω/km
+  const c = k.di > k.dc ? (CAB_EPS[d.insMat] || 2.5) / (18 * Math.log(k.di / k.dc)) : 0; // µF/km
+  const sc = (CAB_K[mat][d.insMat] || 115) * S / 1000; // kA for 1 s
+  let amp = CAB_AMP[S] ? CAB_AMP[S].slice() : null;
+  if (amp) {
+    let fct = (d.insMat === 'PVC' || d.insMat === 'PE') ? 0.82 : 1;
+    if (mat === 'Al') fct *= 0.78;
+    if (n === 1) amp = [amp[0] * 1.05, amp[1] * 1.15]; else if (n === 2) amp = [amp[0] * 1.15, amp[1] * 1.15];
+    amp = amp.map(v => Math.round(v * fct));
+  }
+  const r4 = v => Math.round(v * 10000) / 10000, r3 = v => Math.round(v * 1000) / 1000;
+  return { theta, r20: r4(r20), rT: r4(rT), rac: r4(rac), x: r3(x), c: r3(c), sc: r3(sc), ground: amp ? amp[0] : null, air: amp ? amp[1] : null };
+}
+
 function cableAutoName(d) {
   const arm = d.armour === 'none' ? 'Unarmoured' : 'Armoured';
   return (d.cores || 1) + 'C x ' + (d.size || '') + ' sq.mm ' + (d.condMat === 'Al' ? 'Al' : 'Cu') + ' ' + d.insMat + '/' + d.sheathMat + ' ' + arm + (d.fr ? ' ' + d.fr : '') + ' ' + (d.voltage || '');
@@ -6836,6 +6871,7 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
     const dup = (designs || []).find(x => !x.deleted && x.id !== d.id && _nm(x.name) === _nm(d.name));
     if (dup) { alert('A design with this name already exists.'); return; }
     const k = calcCable(d), id = d.id || 'cd-' + Date.now(), now = new Date().toISOString();
+    const E = cableElectrical(d, k), mE = d.elecManual || {}, pick = (kk, v) => (mE[kk] !== undefined && String(mE[kk]).trim() !== '') ? String(mE[kk]).trim() : (v == null ? '' : String(v));
     const lines = bomLines(d, k);
     // 1) Finished-good item (one per design, linked by designId)
     const exist = (items || []).find(x => x.designId === id) || (items || []).find(x => _nm(x.name) === _nm(d.name));
@@ -6850,15 +6886,15 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
     const oldT = (tdsSheets || []).find(t => t.designId === id && !t.deleted);
     const cnt = (tdsSheets || []).filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1;
     const v = { ...TDS_BASE, title: d.name.toUpperCase(), cableType: (d.insMat === 'XLPE' ? 'XLPE ' : 'PVC ') + (d.armour === 'none' ? 'UNARMOURED' : 'ARMOURED') + ' CABLE', cores: d.cores + ' CORE X ' + d.size, code: d.code || '', voltage: String(d.voltage || '').replace(/[^0-9.]/g, '') === '1.1' ? '1100' : (d.voltage || ''),
-      condMat: (d.condClass === '1' ? 'SOLID' : d.condClass === '5' ? 'FLEXIBLE' : 'STRANDED') + ' ANNEALED ' + (d.condMat === 'Al' ? 'ALUMINIUM' : 'BARE COPPER'), condShape: d.condClass === '1' ? 'SOLID CIRCULAR' : 'STRANDED CIRCULAR', area: String(d.size), minWires: d.strands || '', dcRes: k.maxR ? String(k.maxR) : '',
+      condMat: (d.condClass === '1' ? 'SOLID' : d.condClass === '5' ? 'FLEXIBLE' : 'STRANDED') + ' ANNEALED ' + (d.condMat === 'Al' ? 'ALUMINIUM' : 'BARE COPPER'), condShape: d.condClass === '1' ? 'SOLID CIRCULAR' : d.condShape === 'sector' ? 'STRANDED SECTOR SHAPED' : d.condShape === 'compacted' ? 'STRANDED COMPACTED CIRCULAR' : 'STRANDED CIRCULAR', area: String(d.size), minWires: d.strands || '', dcRes: k.maxR ? String(k.maxR) : '',
       insMat: d.insMat === 'XLPE' ? 'CROSS LINKED POLY ETHYLENE (XLPE)' : 'POLYVINYL CHLORIDE (PVC)', insColour: (d.insColour || '').toUpperCase(), insNom: String(d.insT), insMin: String(k.insMin),
       hasInner: d.innerType !== 'none', innerMethod: d.innerType === 'taped' ? 'TAPE WRAPPED' : 'EXTRUDED', innerDia: k.D1 ? String(k.D1) : '', innerMin: String(d.innerT || ''),
       hasArmour: d.armour !== 'none', armMat: d.armour === 'none' ? '' : (d.armMat === 'Al' ? 'ALUMINIUM' : 'GALVANISED STEEL') + (d.armour === 'strip' ? ' FORMED WIRE (FLAT STRIP)' : ' ROUND WIRE'), armType: d.armour === 'strip' ? 'FLAT STRIP' : d.armour === 'wire' ? 'ROUND WIRE' : '', armDim: d.armour === 'strip' ? (d.armW + ' X ' + d.armT) : d.armour === 'wire' ? String(d.armDia) : '', armDia: d.armour !== 'none' ? String(k.D2) : '',
-      outMat: (d.sheathMat === 'HFFR' ? 'HFFR' : 'PVC TYPE ST-' + (d.insMat === 'XLPE' ? '2' : '1')) + (d.fr ? ' ' + d.fr : ''), outColour: (d.sheathColour || '').toUpperCase(), outNom: String(d.sheathT), outDia: String(k.D3), outMin: String(k.sheathMin), overall: k.D4 + ' ± ' + Math.max(1, Math.round(k.D4 * 0.1)), drum: String(d.drumLen || ''), hasFR: !!d.fr };
+      outMat: (d.sheathMat === 'HFFR' ? 'HFFR' : 'PVC TYPE ST-' + (d.insMat === 'XLPE' ? '2' : '1')) + (d.fr ? ' ' + d.fr : ''), outColour: (d.sheathColour || '').toUpperCase(), outNom: String(d.sheathT), outDia: String(k.D3), outMin: String(k.sheathMin), overall: k.D4 + ' ± ' + Math.max(1, Math.round(k.D4 * 0.1)), drum: String(d.drumLen || ''), hasFR: !!d.fr, acRes: pick('acRes', E.rac), react: pick('react', E.x), cap: pick('cap', E.c), scRating: pick('scRating', E.sc), ground: pick('ground', E.ground), air: pick('air', E.air), dcRes: pick('rdc20', k.maxR || E.r20) };
     const tds = { ...(oldT || { id: 'tds-' + id, number: dn('TDS', cnt), docNo: 'TDS/IMS/F01', customer: 'MARKET', customerId: '', refDoc: '', createdAt: now }), date: now.slice(0, 10), designId: id, bizType: currentBizType, updatedAt: now, v: { ...((oldT || {}).v || {}), ...v } };
     setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === tds.id) ? a.map(x => x.id === tds.id ? tds : x) : [tds, ...a]; });
     // 4) the design itself
-    const rec = { ...d, id, calc: k, itemId: fgId, bomId: bom.id, tdsId: tds.id, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
+    const rec = { ...d, id, calc: { ...k, elec: E }, itemId: fgId, bomId: bom.id, tdsId: tds.id, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
     setDesigns(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === id) ? a.map(x => x.id === id ? rec : x) : [rec, ...a]; });
     setEd(null);
     alert('✅ Saved ' + d.name + ' (rev ' + rec.rev + ').\n\nUpdated: Finished-good item · master BOM (' + lines.length + ' materials per 1000 m) · TDS ' + tds.number + (lines.some(l => !l.materialId) ? '\n\nSome BOM lines are not linked to a material item — pick the materials in the design so stock and shortages work.' : ''));
@@ -6891,6 +6927,7 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
             <CabField t="Size (sq.mm)" w={110}>{numIn('size')}</CabField>
             <CabField t="Material" w={110}>{sel('condMat', [['Cu', 'Copper'], ['Al', 'Aluminium']])}</CabField>
             <CabField t="Class" w={170}>{sel('condClass', [['1', 'Class 1 — solid'], ['2', 'Class 2 — stranded'], ['5', 'Class 5 — flexible']])}</CabField>
+            {ed.condClass === '2' && <CabField t="Shape" w={190}>{sel('condShape', [['circular', 'Circular (non-compacted)'], ['compacted', 'Compacted circular'], ['sector', 'Sector shaped']])}</CabField>}
             <CabField t="Strands × wire dia" w={140}>{txt('strands', '7 × 0.67')}</CabField>
             <CabField t="Fill factor (optional)" w={130}>{txt('fill', 'auto')}</CabField>
           </>)}
@@ -6928,6 +6965,12 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
             <CabField t="Standard drum length (m)" w={160}>{numIn('drumLen')}</CabField>
             <CabField t="HV test" w={240}>{txt('hvTest')}</CabField>
           </>)}
+          {sec('Electrical parameters (TDS) — calculated per IEC 60287-1-1; type a value to override')}
+          {(() => { const E = cableElectrical(ed, c), m = ed.elecManual || {}; const setM = (kk, v) => setEd(p => ({ ...p, elecManual: { ...(p.elecManual || {}), [kk]: v } }));
+            const rowsE = [['rdc20', 'DC resistance @20 °C (Ω/km)', E.r20], ['rT', 'DC resistance @' + E.theta + ' °C (Ω/km)', E.rT], ['acRes', 'AC resistance @' + E.theta + ' °C, 50 Hz (Ω/km)', E.rac], ['react', 'Reactance @50 Hz (Ω/km)', E.x], ['cap', 'Capacitance (µF/km)', E.c], ['scRating', 'Short-circuit rating, 1 s (kA)', E.sc], ['ground', 'Current rating in ground (A)', E.ground], ['air', 'Current rating in air (A)', E.air]];
+            return (<table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Parameter', 'Calculated', 'Manual value (TDS uses this if filled)'].map(h => <th key={h} style={{ textAlign: 'left', padding: '4px 6px', fontSize: 11, color: '#777', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+              <tbody>{rowsE.map(([kk, l, v]) => <tr key={kk}><td style={{ padding: '4px 6px' }}>{l}</td><td style={{ padding: '4px 6px', fontWeight: 600 }}>{v == null ? '—' : v}</td><td style={{ padding: '3px 6px' }}><input value={m[kk] ?? ''} placeholder="auto" onChange={e => setM(kk, e.target.value)} style={{ ...inp, width: 160, padding: '4px 8px' }} /></td></tr>)}</tbody></table>); })()}
+          <div style={{ fontSize: 11, color: '#888', margin: '4px 0 0', lineHeight: 1.5 }}>AC resistance includes skin and proximity effect; reactance from conductor spacing; capacitance uses ε (PVC 8, XLPE 2.5). Short-circuit rating = K·S/√t (Cu XLPE 143, Cu PVC 115, Al XLPE 94, Al PVC 76). Current ratings are indicative from typical manufacturer tables (3-core armoured, standard conditions) — apply your standard / derating factors or type the declared value.</div>
           {sec('Link materials (from Raw Materials) — used in the BOM, stock and shortages')}
           {row(<>
             {matPick('cond', 'Conductor rod')}{matPick('ins', 'Insulation compound')}
@@ -7020,7 +7063,7 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
     const fails = f.points.filter((_, i) => f.results[i] === 'fail');
     if (fails.length && acc > 0 && !window.confirm('Failed: ' + fails.join('; ') + '\n\nAccept ' + acc + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' under deviation anyway?')) return;
     const status = acc <= 0 ? 'rejected' : 'accepted';
-    const patch = { qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
+    const patch = { qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, expiry: f.expiry || '', qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
     setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== row.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === row.idx ? { ...l, ...patch } : l) }));
     if (setStockLedger) {
       const posted = (stockLedger || []).filter(e => e.sourceType === 'grn' && e.sourceId === row.g.id && e.itemId === row.l.itemId).reduce((s, e) => s + (e.type === 'in' ? 1 : -1) * (parseFloat(e.qty) || 0), 0);
@@ -7028,7 +7071,7 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
       if (delta !== 0) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), {
         id: crypto.randomUUID(), date: iso, itemId: row.l.itemId, itemName: (row.item && row.item.name) || row.l.itemName,
         type: delta > 0 ? 'in' : 'out', qty: Math.abs(delta), rate: parseFloat(row.l.rate) || 0,
-        sourceType: delta > 0 ? 'grn' : 'qa-reject', sourceId: row.g.id, sourceNumber: row.g.number, lotNo: patch.lotNo, qaStatus: status, createdAt: Date.now(), bizType: currentBizType,
+        sourceType: delta > 0 ? 'grn' : 'qa-reject', sourceId: row.g.id, sourceNumber: row.g.number, lotNo: patch.lotNo, expiry: patch.expiry, qaStatus: status, createdAt: Date.now(), bizType: currentBizType,
       }]);
     }
     setCur(null);
@@ -7050,7 +7093,7 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
             <button onClick={() => setCur(null)} style={styles.ghostBtn}>← Back to queue</button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
-            {[['lotNo', 'Lot / heat / batch no. *'], ['certNo', 'Supplier TC / MTC no.'], ['inspector', 'Inspected by']].map(([k, l]) => <label key={k} style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>{l}<input value={f[k] || ''} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}
+            {[['lotNo', 'Lot / heat / batch no. *'], ['certNo', 'Supplier TC / MTC no.'], ['inspector', 'Inspected by'], ...(mfgCfg().unit.fields.some(x => x[0] === 'expiry') ? [['expiry', 'Expiry / best-before (yyyy-mm-dd)']] : [])].map(([k, l]) => <label key={k} style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>{l}<input value={f[k] || ''} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}
             <label style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>Accepted qty (rest = rejected)<input type="number" value={f.accepted} onChange={e => setF(p => ({ ...p, accepted: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
           </div>
           <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
@@ -7127,6 +7170,7 @@ function WIPView({ productionOrders = [], boms = [], setView }) {
 }
 
 function DrumStockView({ productionOrders = [], boms = [], setView }) {
+  const U = mfgCfg().unit, isCab = mfgCfg().eng === 'cable';
   const [tab, setTab] = useState('drums');
   const [q, setQ] = useState('');
   const drums = allDrums(productionOrders, boms);
@@ -7141,17 +7185,17 @@ function DrumStockView({ productionOrders = [], boms = [], setView }) {
   const pill = (id, l) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Drum Stock & Scrap</h1><p style={styles.muted}>Drums are recorded on the last route stage of each production order. A drum becomes stock only after its routine test passes (Quality → Routine Test).</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{isCab ? 'Drum Stock & Scrap' : 'Finished ' + U.plural + ' & Scrap'}</h1><p style={styles.muted}>{U.plural} are recorded on the last route stage of each production order. They become stock only after the final test / inspection passes ({mfgCfg().test.menu}).</p></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
-        {[['Drums recorded', drums.length], ['Released, in stock', inStock.length + ' · ' + r3(inStock.reduce((s, d) => s + d.length, 0)) + ' m'], ['Awaiting test', drums.filter(d => !d.testStatus || d.testStatus === 'pending').length], ['On QA hold', drums.filter(d => d.testStatus === 'failed').length]].map(([l, v]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div></div>)}
+        {[...(U.fields.some(x => x[0] === 'expiry') ? [['Expired / expiring ≤ 30 d', drums.filter(d => d.expiry && !d.dispatched && (new Date(d.expiry) - new Date()) / 86400000 <= 30).length]] : []), [U.plural + ' recorded', drums.length], ['Released, in stock', inStock.length + ' · ' + r3(inStock.reduce((s, d) => s + d.length, 0)) + ' m'], ['Awaiting test', drums.filter(d => !d.testStatus || d.testStatus === 'pending').length], ['On QA hold', drums.filter(d => d.testStatus === 'failed').length]].map(([l, v]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div></div>)}
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>{pill('drums', 'Drums')}{pill('stock', 'Stock by product')}{pill('scrap', 'Scrap & offcuts')}<input value={q} onChange={e => setQ(e.target.value)} placeholder="Drum no., product, order…" style={{ ...styles.input, margin: '0 0 0 auto', width: 230 }} /></div>
       {tab === 'drums' && (shown.length === 0 ? <div style={styles.emptyBox}>No drums yet. Record drums on the last stage of a production order route (🧭 Route → Drumming).</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr>{['Drum no.', 'Product', 'Order', 'Quote / item', 'Length (m)', 'Net (kg)', 'Date', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{[U.numLabel, 'Product', 'Order', 'Quote / item', U.qtyLabel, U.fields.some(x => x[0] === 'expiry') ? 'Expiry' : 'Net (kg)', 'Date', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{shown.map(d => { const stt = d.dispatched ? 'dispatched' : (d.testStatus || 'pending'), lab = DRUM_STATUS[stt] || DRUM_STATUS.pending; return <tr key={d.key}>
             <td style={td}><b>{d.drumNo || '—'}</b>{dupNo[_nm(d.drumNo)] > 1 ? <span style={{ color: '#B5453A', fontSize: 11 }}> duplicate no.</span> : null}</td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td>
-            <td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td><td style={td}>{d.net || '—'}</td><td style={td}>{d.date || ''}</td>
+            <td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td>{U.fields.some(x => x[0] === 'expiry') ? (() => { const dl = d.expiry ? Math.floor((new Date(d.expiry) - new Date()) / 86400000) : null; return <td style={{ ...td, fontWeight: dl !== null && dl <= 30 ? 700 : 400, color: dl === null ? '#999' : dl < 0 ? '#B5453A' : dl <= 30 ? '#E07B00' : '#1A7A3E' }}>{d.expiry ? d.expiry + (dl < 0 ? ' · expired' : ' · ' + dl + ' d') : '—'}</td>; })() : <td style={td}>{d.net || '—'}</td>}<td style={td}>{d.date || ''}</td>
             <td style={{ ...td, color: lab[1], fontWeight: 700 }}>{lab[0]}</td></tr>; })}</tbody></table></div>)}
       {tab === 'stock' && (Object.keys(byProd).length === 0 ? <div style={styles.emptyBox}>No released drums in stock yet.</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -7300,7 +7344,8 @@ function evalRoutineTest(t, design, drum) {
   return { rows: res, verdict: failed ? 'failed' : missing ? 'incomplete' : 'passed' };
 }
 
-function RoutineTestView({ productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+function RoutineTestView({ setFatReports, productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const cfg = mfgCfg(), generic = cfg.test.evaluator !== 'cable', U = cfg.unit;
   const canTest = !['sales', 'accounts', 'purchase'].includes(userRole);
   const [tab, setTab] = useState('queue');
   const [cur, setCur] = useState(null);
@@ -7314,15 +7359,16 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
   const passed = drums.filter(d => d.testStatus === 'passed').sort((a, b) => String(b.testDate || '').localeCompare(String(a.testDate || '')));
   const patchDrum = (dr, patch, orderPatch) => setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => o.id !== dr.order.id ? o : ({ ...o, ...(orderPatch ? orderPatch(o) : {}), route: { ...o.route, stages: (o.route.stages || []).map((s, si) => si !== dr.stageIdx ? s : ({ ...s, drums: (s.drums || []).map((x, di) => di === dr.drumIdx ? { ...x, ...patch } : x) })) } })));
   function open(dr) {
+    if (generic) { setCur(dr); setT({ vals: {}, lims: {}, testedBy: '', remarks: '' }); return; }
     const { design } = drumDesign(dr.order, boms, cableDesigns);
     setCur(dr);
     setT({ resOhm: '', resLen: dr.length || '', resTemp: '', irMohm: '', irMin: (design && design.irMin) || '', hvKv: (design && /(\d+(\.\d+)?)\s*kv/i.exec(design.hvTest || '') || [])[1] || '', hvMin: (design && /(\d+)\s*min/i.exec(design.hvTest || '') || [])[1] || '', hvOk: '', od: '', insMinMeas: '', sheathMinMeas: '', marking: '', testedBy: '', remarks: '' });
   }
   const ctx = cur ? drumDesign(cur.order, boms, cableDesigns) : {};
-  const ev = cur ? evalRoutineTest(t, ctx.design, cur) : null;
+  const ev = cur ? (generic ? evalGenericTest(t, cfg.test.checks) : evalRoutineTest(t, ctx.design, cur)) : null;
   function save() {
     if (!cur) return;
-    if (ev.verdict === 'incomplete') { alert('Enter at least conductor resistance and the HV test result.'); return; }
+    if (ev.verdict === 'incomplete') { alert(generic ? 'Mark every Conforms / Does not conform check.' : 'Enter at least conductor resistance and the HV test result.'); return; }
     const certCount = drums.filter(d => d.certNo).length + 1;
     const test = { ...t, rows: ev.rows, verdict: ev.verdict, date: iso };
     if (ev.verdict === 'passed') {
@@ -7331,7 +7377,7 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
       const fg = (ctx.design && (items || []).find(i => i.id === ctx.design.itemId)) || (items || []).find(i => ctx.bom && _nm(i.name) === _nm(ctx.bom.name));
       if (fg && setStockLedger) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), { id: crypto.randomUUID(), date: iso, itemId: fg.id, itemName: fg.name, type: 'in', qty: parseFloat(cur.length) || 0, rate: parseFloat(fg.purchaseRate ?? fg.rate) || 0, sourceType: 'drum', sourceId: cur.order.id + ':' + cur.drumNo, sourceNumber: cur.order.number, lotNo: cur.drumNo, createdAt: Date.now(), bizType: currentBizType }]);
       setCur(null);
-      alert('✅ Drum ' + cur.drumNo + ' passed — certificate ' + certNo + '.' + (fg ? '\n' + cur.length + ' m added to finished stock (' + fg.name + ').' : '\n\nNo finished-good item found for this product — save its Cable Design to create one, so the drum is added to stock.'));
+      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.' + (fg ? '\n' + cur.length + ' ' + U.qtyUnit + ' added to finished stock (' + fg.name + ').' : '\n\nNo finished-good item found for this product — save it in ' + (generic ? 'Product Spec Master' : 'Cable Design Master') + ' to create one, so it is added to stock.'));
     } else {
       patchDrum(cur, { testStatus: 'failed', testDate: iso, testedBy: t.testedBy, test });
       setCur(null); setReroute({ ...cur, test });
@@ -7351,7 +7397,7 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
   const k = ctx.design && ctx.design.calc;
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Routine Test & Certificates</h1><p style={styles.muted}>Test every drum before it becomes stock. Limits come from the cable design (IEC 60228 resistance, minimum thickness, OD). Pass → certificate + finished stock. Fail → QA hold and re-route.</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{cfg.test.menu}</h1><p style={styles.muted}>{generic ? 'Inspect every ' + U.name.toLowerCase() + ' before it becomes stock. Pass → certificate + finished stock. Fail → QA hold and re-route.' : 'Test every drum before it becomes stock. Limits come from the cable design (IEC 60228 resistance, minimum thickness, OD). Pass → certificate + finished stock. Fail → QA hold and re-route.'}</p></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
         {[['Drums waiting for test', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Passed', passed.length, '#1A7A3E'], ['On QA hold', failed.length, failed.length ? '#B5453A' : '#1A7A3E'], ['First-pass yield', (passed.length + drums.filter(d => d.testStatus === 'failed').length) ? Math.round(passed.filter(d => !(d.test && d.test.retest)).length / (passed.length + drums.filter(d => d.testStatus === 'failed').length) * 100) + '%' : '—', '#1E2A4A']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
       </div>
@@ -7367,9 +7413,20 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
       {tab === 'queue' && (cur ? (
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, maxWidth: 980 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <div><b style={{ fontSize: 15 }}>Drum {cur.drumNo}</b> · {cur.product} · {cur.length} m<div style={{ fontSize: 12, color: '#777' }}>{cur.order.number}{cur.order.orderRef ? ' · ' + cur.order.orderRef.docNo + ' / item ' + cur.order.orderRef.itemNo + (cur.order.orderRef.customer ? ' · ' + cur.order.orderRef.customer : '') : ''}{ctx.design ? '' : ' · ⚠ no cable design linked — limits not available'}</div></div>
+            <div><b style={{ fontSize: 15 }}>{U.name} {cur.drumNo}</b> · {cur.product} · {cur.length} {U.qtyUnit}<div style={{ fontSize: 12, color: '#777' }}>{cur.order.number}{cur.order.orderRef ? ' · ' + cur.order.orderRef.docNo + ' / item ' + cur.order.orderRef.itemNo + (cur.order.orderRef.customer ? ' · ' + cur.order.orderRef.customer : '') : ''}{generic || ctx.design ? '' : ' · ⚠ no cable design linked — limits not available'}</div></div>
             <button onClick={() => setCur(null)} style={styles.ghostBtn}>← Back</button>
           </div>
+          {generic ? (<div style={{ marginBottom: 10 }}>
+            {(cfg.test.checks || []).map(c => <div key={c.key} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{c.label}</span>
+              {c.kind === 'num' ? <>
+                <input type="number" placeholder={'Value' + (c.unit ? ' (' + c.unit + ')' : '')} value={(t.vals || {})[c.key] || ''} onChange={e => setT(p => ({ ...p, vals: { ...p.vals, [c.key]: e.target.value } }))} style={{ ...styles.input, margin: 0, width: 120 }} />
+                <input type="number" placeholder="min" value={((t.lims || {})[c.key] || {}).min ?? c.min} onChange={e => setT(p => ({ ...p, lims: { ...p.lims, [c.key]: { ...((p.lims || {})[c.key] || {}), min: e.target.value } } }))} style={{ ...styles.input, margin: 0, width: 80 }} />
+                <input type="number" placeholder="max" value={((t.lims || {})[c.key] || {}).max ?? c.max} onChange={e => setT(p => ({ ...p, lims: { ...p.lims, [c.key]: { ...((p.lims || {})[c.key] || {}), max: e.target.value } } }))} style={{ ...styles.input, margin: 0, width: 80 }} />
+              </> : ['yes', 'no'].map(v => <button key={v} onClick={() => setT(p => ({ ...p, vals: { ...p.vals, [c.key]: v } }))} style={{ padding: '3px 12px', borderRadius: 12, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: (t.vals || {})[c.key] === v ? (v === 'yes' ? '#1A7A3E' : '#B5453A') : '#fff', color: (t.vals || {})[c.key] === v ? '#fff' : '#666' }}>{v === 'yes' ? 'Conforms' : 'Does not conform'}</button>)}
+            </div>)}
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>{fld('testedBy', 'Inspected by', 180, 'text')}<label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', flex: 1 }}>Remarks<input value={t.remarks || ''} onChange={e => setT(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label></div>
+          </div>) : (<>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
             {fld('resOhm', 'Conductor resistance measured (Ω) *', 210)}{fld('resLen', 'Measured length (m)', 140)}{fld('resTemp', 'Temperature (°C)', 120)}
             {fld('irMohm', 'Insulation resistance (MΩ)', 170)}{fld('irMin', 'Min IR (MΩ·km)', 130)}
@@ -7377,6 +7434,7 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
             {fld('od', 'Overall dia (mm)' + (k ? ' · design ' + k.D4 : ''), 190)}{fld('insMinMeas', 'Insulation min (mm)' + (k ? ' · ≥ ' + k.insMin : ''), 190)}{fld('sheathMinMeas', 'Sheath min (mm)' + (k ? ' · ≥ ' + k.sheathMin : ''), 180)}
             {yn('marking', 'Marking & length OK?')}{fld('testedBy', 'Tested by', 150, 'text')}
           </div>
+          </>)}
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}><thead><tr>{['Test', 'Requirement', 'Result', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>{ev.rows.map((r, i) => <tr key={i}><td style={td}>{r.test}</td><td style={td}>{r.req}</td><td style={td}>{r.val}</td><td style={{ ...td, fontWeight: 700, color: r.missing ? '#999' : r.ok === null ? '#666' : r.ok ? '#1A7A3E' : '#B5453A' }}>{r.missing ? 'pending' : r.ok === null ? 'recorded' : r.ok ? 'PASS' : 'FAIL'}</td></tr>)}</tbody></table>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -7385,7 +7443,7 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>Resistance is corrected to 20 °C (α = 0.00393 Cu / 0.00403 Al) and scaled to 1 km. Enter the worst core. HV voltage / duration and the IR limit must match your standard.</div>
         </div>
-      ) : (queue.length === 0 ? <div style={styles.emptyBox}>No drums waiting. Drums appear here when they are added on the drumming stage of a production order route.</div> :
+      ) : (queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. Items appear here when they are added on the last stage of a production order route (🧭 Route).</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{['Drum', 'Product', 'Order', 'Quote / item', 'Length (m)', 'Wound on', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{queue.map(d => <tr key={d.key}><td style={td}><b>{d.drumNo || '—'}</b></td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td><td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td><td style={td}>{d.date || ''}</td><td style={td}>{canTest && <button onClick={() => open(d)} style={styles.primaryBtn}>Test</button>}</td></tr>)}</tbody></table></div>))}
@@ -7399,19 +7457,166 @@ function RoutineTestView({ productionOrders = [], setProductionOrders, boms = []
       {tab === 'certs' && (passed.length === 0 ? <div style={styles.emptyBox}>No certificates yet.</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{['Certificate', 'Date', 'Drum', 'Product', 'Length', 'Customer / order', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>{passed.map(d => <tr key={d.key}><td style={td}><b>{d.certNo}</b></td><td style={td}>{d.testDate}</td><td style={td}>{d.drumNo}</td><td style={td}>{d.product}</td><td style={td}>{d.length} m</td><td style={td}>{d.order.orderRef ? (d.order.orderRef.customer || '') + ' · ' + d.order.orderRef.docNo : d.order.number}</td><td style={{ ...td, color: d.dispatched ? '#6B7494' : '#1A7A3E' }}>{d.dispatched ? 'Dispatched ' + (d.dispatchedDoc || '') : 'In stock'}</td><td style={td}><button onClick={() => setCert(d)} style={styles.ghostBtn}>Print</button></td></tr>)}</tbody></table></div>)}
+          <tbody>{passed.map(d => <tr key={d.key}><td style={td}><b>{d.certNo}</b></td><td style={td}>{d.testDate}</td><td style={td}>{d.drumNo}</td><td style={td}>{d.product}</td><td style={td}>{d.length} m</td><td style={td}>{d.order.orderRef ? (d.order.orderRef.customer || '') + ' · ' + d.order.orderRef.docNo : d.order.number}</td><td style={{ ...td, color: d.dispatched ? '#6B7494' : '#1A7A3E' }}>{d.dispatched ? 'Dispatched ' + (d.dispatchedDoc || '') : 'In stock'}</td><td style={td}><button onClick={() => setCert(d)} style={styles.ghostBtn}>Print</button>{_mfgType() === 'panels' && setFatReports && <button onClick={() => {
+              const std = PRODUCT_TEST_STANDARDS['LV Switchgear Panel (PCC/MCC)'] || { iec: '', is: '', tests: [] };
+              const rec = { id: Date.now().toString(), testType: 'FAT', number: dn('FAT', Date.now() % 1000), date: new Date().toISOString().slice(0, 10), product: 'LV Switchgear Panel (PCC/MCC)', iec: std.iec, isCode: std.is, clientId: '', client: (d.order.orderRef && d.order.orderRef.customer) || '', project: d.order.orderRef ? d.order.orderRef.docNo + ' / item ' + d.order.orderRef.itemNo : d.order.number, make: '', rating: '', serialNo: d.drumNo, qty: '1',
+                rows: [...std.tests.map(([name, ref, acc]) => ({ name, ref, acceptance: acc, observed: '', status: '', remarks: '' })), ...((d.test && d.test.rows) || []).map(r => ({ name: r.test, ref: 'Routine test ' + (d.certNo || ''), acceptance: r.req, observed: r.val, status: r.ok === false ? 'Fail' : 'Pass', remarks: '' }))],
+                testedBy: d.testedBy || '', witnessedBy: '', approvedBy: '', overall: 'Pass', remarks: 'Created from ' + (d.certNo || ''), bizType: 'manufacturing', createdAt: new Date().toISOString() };
+              setFatReports(prev => [rec, ...(Array.isArray(prev) ? prev : [])]); alert('FAT report created for panel ' + d.drumNo + ' — open Quality → FAT / SAT / STP to complete witness and print.');
+            }} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Create FAT</button>}</td></tr>)}</tbody></table></div>)}
 
       {cert && (() => { const dz = drumDesign(cert.order, boms, cableDesigns); const des = dz.design || {}; const rows = (cert.test && cert.test.rows) || []; const cellB = { border: '1px solid #999', padding: '5px 8px', fontSize: 12 }; return (
         <DocPrintOverlay onClose={() => setCert(null)} filename={'Test-Certificate-' + (cert.certNo || '').replace(/\//g, '-') + '.pdf'} businessInfo={businessInfo}>
-          <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, letterSpacing: 1, borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', padding: '6px 0', marginBottom: 12 }}>ROUTINE TEST CERTIFICATE</div>
+          <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, letterSpacing: 1, borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', padding: '6px 0', marginBottom: 12 }}>{cfg.test.cert}</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>
-            {[['Certificate no.', cert.certNo, 'Date', cert.testDate], ['Customer', (cert.order.orderRef && cert.order.orderRef.customer) || '—', 'Order / item', cert.order.orderRef ? cert.order.orderRef.docNo + ' / ' + cert.order.orderRef.itemNo : cert.order.number], ['Product', cert.product, 'Standard', (des.standard || '') + (des.voltage ? ' · ' + des.voltage : '')], ['Drum no.', cert.drumNo, 'Length', cert.length + ' m'], ['Production order', cert.order.number, 'Net weight', cert.net ? cert.net + ' kg' : '—']].map((r, i) => <tr key={i}><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[0]}</td><td style={{ ...cellB, width: '32%' }}>{r[1]}</td><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[2]}</td><td style={cellB}>{r[3]}</td></tr>)}
+            {[['Certificate no.', cert.certNo, 'Date', cert.testDate], ['Customer', (cert.order.orderRef && cert.order.orderRef.customer) || '—', 'Order / item', cert.order.orderRef ? cert.order.orderRef.docNo + ' / ' + cert.order.orderRef.itemNo : cert.order.number], ['Product', cert.product, 'Standard', (des.standard || '') + (des.voltage ? ' · ' + des.voltage : '')], [U.numLabel, cert.drumNo, U.qtyLabel, cert.length + ' ' + U.qtyUnit], ['Production order', cert.order.number, 'Net weight', cert.net ? cert.net + ' kg' : '—']].map((r, i) => <tr key={i}><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[0]}</td><td style={{ ...cellB, width: '32%' }}>{r[1]}</td><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[2]}</td><td style={cellB}>{r[3]}</td></tr>)}
           </tbody></table>
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><thead><tr>{['#', 'Test', 'Requirement', 'Observed', 'Result'].map(h => <th key={h} style={{ ...cellB, background: '#1E2A4A', color: '#fff', textAlign: 'left' }}>{h}</th>)}</tr></thead>
             <tbody>{rows.map((r, i) => <tr key={i}><td style={cellB}>{i + 1}</td><td style={cellB}>{r.test}</td><td style={cellB}>{r.req}</td><td style={cellB}>{r.val}</td><td style={{ ...cellB, fontWeight: 700 }}>{r.ok === null ? 'Recorded' : r.ok ? 'Pass' : 'Fail'}</td></tr>)}</tbody></table>
-          <div style={{ fontSize: 12, marginBottom: 30 }}>We certify that the above drum has been tested as per the routine test requirements of the referred standard and found to {rows.some(r => r.ok === false) ? 'NOT ' : ''}comply.{cert.test && cert.test.remarks ? ' Remarks: ' + cert.test.remarks : ''}</div>
+          <div style={{ fontSize: 12, marginBottom: 30 }}>We certify that the above {U.name.toLowerCase()} has been {generic ? 'inspected' : 'tested'} as per the requirements of the referred specification / standard and found to {rows.some(r => r.ok === false) ? 'NOT ' : ''}comply.{cert.test && cert.test.remarks ? ' Remarks: ' + cert.test.remarks : ''}</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><div style={{ textAlign: 'center', minWidth: 160 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Tested by{cert.testedBy ? ' — ' + cert.testedBy : ''}</div></div><div style={{ textAlign: 'center', minWidth: 160 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>QA In-charge</div></div></div>
         </DocPrintOverlay>); })()}
+    </div>
+  );
+}
+
+// ─── Config-driven manufacturing: what differs per type (output unit, final test, engineering master, registers) ───
+// check: [key, label, kind ('num' | 'yn'), min, max, unit]
+const C_ = (key, label, kind, min, max, unit) => ({ key, label, kind: kind || 'yn', min: min ?? '', max: max ?? '', unit: unit || '' });
+const _unit = (name, plural, numLabel, qtyLabel, qtyUnit, fields) => ({ name, plural, numLabel, qtyLabel, qtyUnit, fields: fields || [] });
+const MFG_CONFIG = {
+  wires_cables: { unit: _unit('Drum', 'Drums', 'Drum no.', 'Length (m)', 'm', [['gross', 'Gross kg'], ['tare', 'Tare kg']]), test: { evaluator: 'cable', menu: 'Routine Test & Certificates', title: 'Routine Test', cert: 'ROUTINE TEST CERTIFICATE' }, eng: 'cable', registers: ['metal'], wipLabel: 'WIP (Bobbins / Coils)' },
+  fabrication: { unit: _unit('Mark', 'Marks', 'Mark no.', 'Weight (kg)', 'kg', [['drawingRev', 'Drawing / rev']]), test: { menu: 'Final Inspection & Dossier', title: 'Final Inspection', cert: 'INSPECTION CERTIFICATE', checks: [C_('dim', 'Dimensional check as per drawing'), C_('weld', 'Weld visual inspection'), C_('ndt', 'NDT result (UT / MPI / DPT / RT)'), C_('dft', 'Paint DFT average', 'num', 80, '', 'µm'), C_('galv', 'Galvanizing thickness', 'num', '', '', 'µm'), C_('marking', 'Mark no. stencilled / identification')] }, eng: 'spec' },
+  machining: { unit: _unit('Lot', 'Lots', 'Lot / serial no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Critical dimensions within tolerance'), C_('ra', 'Surface finish Ra', 'num', '', 1.6, 'µm'), C_('hard', 'Hardness', 'num', '', '', 'HRC'), C_('visual', 'Visual — burr / damage free')] }, eng: 'spec' },
+  sheetmetal: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Dimensions & flatness'), C_('dft', 'Coating thickness', 'num', 60, '', 'µm'), C_('adh', 'Coating adhesion'), C_('visual', 'Visual / finish')] }, eng: 'spec' },
+  foundry: { unit: _unit('Heat lot', 'Heat lots', 'Heat / lot no.', 'Quantity', 'pcs', [['castWt', 'Cast weight kg']]), test: { menu: 'Final Inspection & Test', title: 'Casting Inspection', cert: 'TEST CERTIFICATE', checks: [C_('chem', 'Chemistry within grade'), C_('hard', 'Hardness', 'num', '', '', 'BHN'), C_('tensile', 'Tensile strength', 'num', '', '', 'MPa'), C_('ndt', 'NDT accepted'), C_('dims', 'Dimensional check')] }, eng: 'spec' },
+  plastics: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Critical dimensions'), C_('wt', 'Part weight', 'num', '', '', 'g'), C_('visual', 'No flash / short shot / sink'), C_('colour', 'Colour match')] }, eng: 'spec' },
+  rubber_pack: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('hard', 'Hardness / GSM', 'num'), C_('dims', 'Dimensions'), C_('print', 'Print / registration'), C_('bond', 'Bond / seal strength')] }, eng: 'spec' },
+  panels: { unit: _unit('Panel', 'Panels', 'Panel serial no.', 'Quantity', 'nos'), test: { menu: 'Routine Test & FAT', title: 'Routine Test', cert: 'TEST CERTIFICATE', checks: [C_('ir', 'Insulation resistance', 'num', 1, '', 'MΩ'), C_('hv', 'HV withstand test'), C_('func', 'Functional / interlock test'), C_('earth', 'Earth continuity', 'num', '', 0.1, 'Ω'), C_('wiring', 'Wiring as per schematic')] }, eng: 'spec' },
+  electronics_pcb: { unit: _unit('Serial', 'Serials', 'Serial / batch no.', 'Quantity', 'nos'), test: { menu: 'Final Test', title: 'Final Test', cert: 'TEST REPORT', checks: [C_('ict', 'ICT passed'), C_('fct', 'Functional test passed'), C_('visual', 'Visual per IPC-A-610'), C_('fw', 'Firmware version verified')] }, eng: 'spec' },
+  food: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'kg', [['mfgDate', 'Mfg date'], ['expiry', 'Expiry date']]), test: { menu: 'QC Release', title: 'QC Release', cert: 'CERTIFICATE OF ANALYSIS', checks: [C_('micro', 'Microbiology within limits'), C_('moist', 'Moisture', 'num', '', '', '%'), C_('net', 'Net content'), C_('seal', 'Seal integrity'), C_('label', 'Label — FSSAI no., batch, MRP, dates')] }, eng: 'spec' },
+  pharma_chem: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'kg', [['mfgDate', 'Mfg date'], ['expiry', 'Expiry / retest date']]), test: { menu: 'QC Release & COA', title: 'QC Release', cert: 'CERTIFICATE OF ANALYSIS', checks: [C_('assay', 'Assay', 'num', 98, 102, '%'), C_('ident', 'Identification'), C_('appear', 'Appearance / description'), C_('ph', 'pH', 'num'), C_('bmr', 'Batch record reviewed')] }, eng: 'spec' },
+  textile: { unit: _unit('Roll / carton', 'Rolls / cartons', 'Roll / carton no.', 'Quantity', 'm'), test: { menu: 'Final Audit', title: 'Final Audit', cert: 'INSPECTION REPORT', checks: [C_('gsm', 'GSM', 'num'), C_('shade', 'Shade match'), C_('aql', 'AQL audit passed'), C_('shrink', 'Shrinkage', 'num', '', 5, '%')] }, eng: 'spec' },
+  wood: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'nos'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Dimensions & squareness'), C_('finish', 'Finish & colour'), C_('moist', 'Moisture', 'num', '', 12, '%'), C_('hw', 'Hardware complete')] }, eng: 'spec' },
+  building: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'nos', [['castDate', 'Cast date']]), test: { menu: 'Product Testing', title: 'Product Test', cert: 'TEST CERTIFICATE', checks: [C_('strength', 'Compressive strength', 'num', '', '', 'N/mm²'), C_('absorb', 'Water absorption', 'num', '', '', '%'), C_('dims', 'Dimensions')] }, eng: 'spec' },
+  printing: { unit: _unit('Job lot', 'Job lots', 'Job / lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'INSPECTION REPORT', checks: [C_('colour', 'Colour / density'), C_('reg', 'Registration'), C_('finish', 'Finishing'), C_('count', 'Count verified')] }, eng: 'spec' },
+  general: { unit: _unit('Lot', 'Lots', 'Lot / serial no.', 'Quantity', 'nos'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('spec', 'As per specification'), C_('dims', 'Dimensions'), C_('visual', 'Visual')] }, eng: 'spec' },
+};
+const mfgCfg = (mt) => MFG_CONFIG[mt || _mfgType()] || MFG_CONFIG.general;
+
+// Generic final-test evaluator (all types except cable): num checks within min / max, yn checks must be Yes.
+function evalGenericTest(t, checks = []) {
+  const rows = (checks || []).map(c => {
+    const v = (t.vals || {})[c.key], lim = (t.lims || {})[c.key] || {};
+    const min = lim.min !== undefined && lim.min !== '' ? parseFloat(lim.min) : (c.min !== '' ? parseFloat(c.min) : null);
+    const max = lim.max !== undefined && lim.max !== '' ? parseFloat(lim.max) : (c.max !== '' ? parseFloat(c.max) : null);
+    if (c.kind === 'num') {
+      if (v === undefined || v === '') return { test: c.label, req: [min != null ? '≥ ' + min : '', max != null ? '≤ ' + max : ''].filter(Boolean).join(' · ') + (c.unit ? ' ' + c.unit : '') || 'record', val: '—', ok: null, skipped: true };
+      const n = parseFloat(v), ok = (min == null || n >= min) && (max == null || n <= max);
+      return { test: c.label, req: ([min != null ? '≥ ' + min : '', max != null ? '≤ ' + max : ''].filter(Boolean).join(' · ') || 'record') + (c.unit ? ' ' + c.unit : ''), val: n + (c.unit ? ' ' + c.unit : ''), ok: (min == null && max == null) ? null : ok };
+    }
+    if (!v) return { test: c.label, req: 'Conforms', val: 'not checked', ok: false, missing: true };
+    return { test: c.label, req: 'Conforms', val: v === 'yes' ? 'Conforms' : 'Does not conform', ok: v === 'yes' };
+  });
+  const missing = rows.some(r => r.missing), failed = rows.some(r => r.ok === false && !r.missing);
+  return { rows, verdict: failed ? 'failed' : missing ? 'incomplete' : 'passed' };
+}
+
+// ─── Product Spec Master (Engineering, every type except cables) → finished-good item + master BOM ───
+function ProductSpecView({ specs = [], setSpecs, items = [], setItems, boms = [], setBoms, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const mt = _mfgType(), cfg = mfgCfg(mt), fields = PART_DATASHEET_PACK[mt] || PART_DATASHEET_PACK.general;
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const mats = (items || []).filter(isMaterialItem);
+  const [ed, setEd] = useState(null);
+  const [q, setQ] = useState('');
+  const list = (specs || []).filter(x => !x.deleted && !x.calc && (!q || _nm(x.name).includes(_nm(q)) || _nm(x.code).includes(_nm(q))));
+  const blank = { name: '', code: '', unit: cfg.unit.qtyUnit || 'nos', basis: 1, datasheet: {}, lines: [], hsn: '', notes: '' };
+  const set = (k, v) => setEd(p => ({ ...p, [k]: v }));
+  const setLine = (i, k, v) => setEd(p => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, [k]: v } : l) }));
+  function save() {
+    const d = { ...ed, name: (ed.name || '').trim() };
+    if (!d.name) { alert('Enter the product name.'); return; }
+    if ((specs || []).some(x => !x.deleted && x.id !== d.id && _nm(x.name) === _nm(d.name))) { alert('A product with this name already exists.'); return; }
+    const id = d.id || 'ps-' + Date.now(), now = new Date().toISOString();
+    const exist = (items || []).find(x => x.designId === id) || (items || []).find(x => _nm(x.name) === _nm(d.name));
+    const fgId = exist ? exist.id : 'itm-' + id;
+    const fg = { ...(exist || { saleRate: 0, purchaseRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0, itemCode: '' }), id: fgId, name: d.name, unit: d.unit, hsn: d.hsn || (exist && exist.hsn) || '', category: 'Finished Good', designId: id, bizType: (exist && exist.bizType) || currentBizType, specs: { ...(d.datasheet || {}) } };
+    setItems(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === fgId) ? a.map(x => x.id === fgId ? fg : x) : [...a, fg]; });
+    const lines = (d.lines || []).filter(l => (l.materialId || (l.name || '').trim()) && parseFloat(l.qty) > 0).map(l => { const it = mats.find(m => m.id === l.materialId); return { materialId: it ? it.id : '', name: it ? it.name : l.name, unit: it ? (it.unit || '') : (l.unit || ''), qty: parseFloat(l.qty), src: it ? 'item' : '', remarks: l.remarks || '' }; });
+    const oldBom = (boms || []).find(b => !b.orderRef && b.designId === id);
+    const bom = { ...(oldBom || {}), id: oldBom ? oldBom.id : 'bom-' + id, name: d.name, outputItem: d.name, outputQty: parseFloat(d.basis) || 1, unit: d.unit, materials: lines, designId: id, bizType: currentBizType, needsMaterials: !lines.length, updatedAt: Date.now() };
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === bom.id) ? a.map(x => x.id === bom.id ? bom : x) : [...a, bom]; });
+    const rec = { ...d, id, itemId: fgId, bomId: bom.id, kind: mt, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
+    setSpecs(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === id) ? a.map(x => x.id === id ? rec : x) : [rec, ...a]; });
+    setEd(null);
+    alert('✅ Saved ' + d.name + ' (rev ' + rec.rev + ') — finished-good item and master BOM (' + lines.length + ' materials per ' + bom.outputQty + ' ' + d.unit + ') updated.');
+  }
+  const inp = { ...styles.input, margin: 0 };
+  if (ed) return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Back</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Edit product' : 'New product'}</h1></div>
+      <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 18, maxWidth: 980 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <CabField t="Product name (quotation items must use this exact name)" w={420}><input value={ed.name} onChange={e => set('name', e.target.value)} style={inp} /></CabField>
+          <CabField t="Code" w={140}><input value={ed.code || ''} onChange={e => set('code', e.target.value)} style={inp} /></CabField>
+          <CabField t="Unit" w={100}><input value={ed.unit || ''} onChange={e => set('unit', e.target.value)} style={inp} /></CabField>
+          <CabField t="HSN" w={110}><input value={ed.hsn || ''} onChange={e => set('hsn', e.target.value)} style={inp} /></CabField>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4 }}>Product datasheet — {(MFG_TYPES.find(t => t.id === mt) || { label: 'General' }).label}</div>
+        <SpecsFields specs={ed.datasheet || {}} onChange={v => set('datasheet', v)} fields={fields} />
+        {mt === 'fabrication' && (() => {
+          const rows = ed.cutList || [], DEN = 7.85, nn = v => parseFloat(v) || 0;
+          const wOf = r => { const a = nn(r.a), b = nn(r.b), t = nn(r.t), L = nn(r.L), q = nn(r.qty) || 1; let w = 0;
+            if (r.shape === 'plate' || r.shape === 'flat') w = a * t * L * DEN / 1e6; else if (r.shape === 'round') w = Math.PI * a * a / 4 * L * DEN / 1e6; else if (r.shape === 'pipe') w = Math.PI * (a - t) * t * L * DEN / 1e6; else if (r.shape === 'section') w = nn(r.kgm) * L / 1000;
+            return w * q; };
+          const tot = rows.reduce((s2, r) => s2 + wOf(r), 0);
+          const setR = (i, kk, v) => set('cutList', rows.map((r, j) => j === i ? { ...r, [kk]: v } : r));
+          const applySteel = () => { if (!ed.steelItem) { alert('Select the steel material item first.'); return; } const qty = Math.round(tot * (1 + nn(ed.allowance ?? 5) / 100) * 1000) / 1000; const it = mats.find(m => m.id === ed.steelItem); const lines = (ed.lines || []).filter(l => !l.fromCutList); setEd(p => ({ ...p, lines: [{ materialId: ed.steelItem, name: it ? it.name : '', qty, unit: 'kg', remarks: 'Steel — cutting list + ' + (ed.allowance ?? 5) + '% allowance', fromCutList: true }, ...lines], datasheet: { ...(p.datasheet || {}), unitWt: String(Math.round(tot * 100) / 100) } })); };
+          const cell = { padding: '2px 4px' };
+          return (<div style={{ background: '#FAF9F5', border: '1px solid #EAE6DB', borderRadius: 8, padding: '8px 12px', margin: '12px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>Cutting list & steel weight — total {Math.round(tot * 100) / 100} kg per unit</b><button onClick={() => set('cutList', [...rows, { desc: '', shape: 'plate', a: '', t: '', L: '', kgm: '', qty: 1 }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add piece</button></div>
+            {rows.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Piece / mark', 'Shape', 'Width / dia / OD (mm)', 'Thk (mm)', 'kg/m (section)', 'Length (mm)', 'Qty', 'kg', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 4px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((r, i) => <tr key={i}><td style={cell}><input value={r.desc} onChange={e => setR(i, 'desc', e.target.value)} style={{ ...inp, padding: '4px 6px' }} /></td>
+                <td style={cell}><select value={r.shape} onChange={e => setR(i, 'shape', e.target.value)} style={{ ...inp, padding: '4px 6px' }}><option value="plate">Plate</option><option value="flat">Flat</option><option value="round">Round bar</option><option value="pipe">Pipe</option><option value="section">Section (kg/m)</option></select></td>
+                {['a', 't', 'kgm', 'L', 'qty'].map(kk => <td key={kk} style={cell}><input type="number" value={r[kk] ?? ''} disabled={(kk === 'kgm' && r.shape !== 'section') || (kk === 't' && (r.shape === 'round' || r.shape === 'section')) || (kk === 'a' && r.shape === 'section')} onChange={e => setR(i, kk, e.target.value)} style={{ ...inp, padding: '4px 6px', width: 80 }} /></td>)}
+                <td style={{ ...cell, fontWeight: 600 }}>{Math.round(wOf(r) * 100) / 100}</td><td style={cell}><button onClick={() => set('cutList', rows.filter((_, j) => j !== i))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button></td></tr>)}</tbody></table>}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <select value={ed.steelItem || ''} onChange={e => set('steelItem', e.target.value)} style={{ ...inp, width: 260 }}><option value="">— steel material item —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+              <span style={{ fontSize: 12 }}>Allowance %</span><input type="number" value={ed.allowance ?? 5} onChange={e => set('allowance', e.target.value)} style={{ ...inp, width: 70 }} />
+              <button onClick={applySteel} style={styles.ghostBtn}>Set steel line in BOM</button>
+              <span style={{ fontSize: 11, color: '#888' }}>Density 7.85 g/cm³. For rolled sections enter the kg/m from the section table.</span>
+            </div>
+          </div>);
+        })()}
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Bill of materials — quantity per <input type="number" value={ed.basis} onChange={e => set('basis', e.target.value)} style={{ ...inp, width: 80, display: 'inline-block', padding: '3px 6px' }} /> {ed.unit}</span>
+          <button onClick={() => set('lines', [...(ed.lines || []), { materialId: '', name: '', qty: '', unit: '', remarks: '' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add material</button></div>
+        {(ed.lines || []).length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add the materials (from Raw Materials) used to make this product.</div> :
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><tbody>{ed.lines.map((l, i) => <tr key={i}>
+            <td style={{ padding: '3px 4px', width: '45%' }}><select value={l.materialId} onChange={e => setLine(i, 'materialId', e.target.value)} style={inp}><option value="">— select material —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ' (' + m.unit + ')' : ''}</option>)}</select></td>
+            <td style={{ padding: '3px 4px', width: 120 }}><input type="number" placeholder="Qty" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} style={inp} /></td>
+            <td style={{ padding: '3px 4px' }}><input placeholder="Remarks / operation" value={l.remarks || ''} onChange={e => setLine(i, 'remarks', e.target.value)} style={inp} /></td>
+            <td style={{ padding: '3px 4px', width: 40 }}><button onClick={() => set('lines', ed.lines.filter((_, j) => j !== i))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button></td></tr>)}</tbody></table>}
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px' }}>Notes</div>
+        <textarea rows={2} value={ed.notes || ''} onChange={e => set('notes', e.target.value)} style={{ ...inp, width: '100%', boxSizing: 'border-box' }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>Cancel</button>{canEdit && <button onClick={save} style={styles.primaryBtn}>Save & generate item · BOM</button>}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Product Spec Master</h1><p style={styles.muted}>One record per product. Saving creates / updates its finished-good item and master BOM. A won quotation item with the same name uses this BOM automatically.</p></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        {canEdit && <button onClick={() => setEd({ ...blank })} style={styles.primaryBtn}><Plus size={15} /> New product</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 240 }} />
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} product(s)</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No products yet. Click “New product”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Code', 'Unit', 'BOM materials', 'Rev', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+          <tbody>{list.map(x => <tr key={x.id} style={{ borderBottom: '1px solid #F0ECE0' }}><td style={{ padding: '8px 10px', fontWeight: 600 }}>{x.name}</td><td style={{ padding: '8px 10px' }}>{x.code}</td><td style={{ padding: '8px 10px' }}>{x.unit}</td><td style={{ padding: '8px 10px' }}>{(x.lines || []).length}</td><td style={{ padding: '8px 10px' }}>{x.rev || 0}</td>
+            <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{canEdit && <button onClick={() => setEd({ ...blank, ...x, lines: (x.lines || []).map(l => ({ ...l })) })} style={styles.ghostBtn}>Edit</button>}{canEdit && <button onClick={() => setEd({ ...blank, ...x, id: undefined, rev: 0, createdAt: undefined, name: x.name + ' (copy)', lines: (x.lines || []).map(l => ({ ...l })) })} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Copy</button>}</td></tr>)}</tbody></table></div>}
     </div>
   );
 }
@@ -7466,7 +7671,7 @@ const SECTION_VIEWS = {
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock'],
-  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign'],
+  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign', 'productspec'],
   planning:    ['bom', 'boshortage'],
   maintenance: ['assetregister', 'pmschedules', 'fmworkorders', 'fmspareparts'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage', 'machinelog', 'metalrecon'],
@@ -7483,7 +7688,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  manufacturing: ['productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -7641,7 +7846,8 @@ const COMING_SOON = {};
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
-  const isCable = showProduction && _mfgType() === 'wires_cables';
+  const isCable = showProduction && !!_mfgType(); // process-flow menu for every manufacturing type
+  const fc = mfgCfg();
   const showService    = activeTypes.includes('service');
   const showFMAMC      = activeTypes.includes('fmamc');
   const isMultiBiz     = activeTypes.length > 1;
@@ -7776,7 +7982,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
                 {isCable ? (<>
                 <SubLabel label="Engineering" />
-                <NavBtn id="cabledesign" label="Cable Design Master"  icon={Wrench} />
+                {fc.eng === 'cable' ? <NavBtn id="cabledesign" label="Cable Design Master" icon={Wrench} /> : <NavBtn id="productspec" label="Product Spec Master" icon={Wrench} />}
                 <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
                 <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
 
@@ -7788,8 +7994,8 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="items"        label="Item Master"          icon={Package} />
                 <NavBtn id="rawmaterials" label="Raw Material Lots"    icon={Package} />
                 <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
-                <NavBtn id="wip"          label="WIP (Bobbins / Coils)" icon={Layers} />
-                <NavBtn id="drumstock"    label="Drum Stock & Scrap"   icon={Package} />
+                <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />
+                <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}   icon={Package} />
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
@@ -7800,7 +8006,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Production" />
                 <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
                 <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
-                <NavBtn id="metalrecon"       label="Metal Reconciliation"   icon={BarChart2} />
+                {(fc.registers || []).includes('metal') && <NavBtn id="metalrecon" label="Metal Reconciliation" icon={BarChart2} />}
 
                 <SubLabel label="Maintenance" />
                 <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
@@ -7811,7 +8017,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Quality" />
                 <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
                 <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
-                <NavBtn id="routinetest"    label="Routine Test & Certificates" icon={CheckCircle} />
+                <NavBtn id="routinetest"    label={fc.test.menu} icon={CheckCircle} />
                 <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
                 <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
                 <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
@@ -8118,8 +8324,8 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
               {isCable && <NavBtn id="rawmaterials" label="Raw Material Lots"     icon={Package} />}
-              {isCable && <NavBtn id="wip"          label="WIP (Bobbins / Coils)" icon={Layers} />}
-              {isCable && <NavBtn id="drumstock"    label="Drum Stock & Scrap"    icon={Package} />}
+              {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
+              {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
@@ -8175,7 +8381,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* Wires & Cables — process-flow menu */}
           {isCable && (<>
             <Section sectionKey="engineering" label="Engineering">
-              <NavBtn id="cabledesign" label="Cable Design Master"   icon={Wrench} />
+              {fc.eng === 'cable' ? <NavBtn id="cabledesign" label="Cable Design Master" icon={Wrench} /> : <NavBtn id="productspec" label="Product Spec Master" icon={Wrench} />}
               <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
               <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
             </Section>
@@ -8186,7 +8392,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="production" label="Production">
               <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
               <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
-              <NavBtn id="metalrecon"       label="Metal Reconciliation"   icon={BarChart2} />
+              {(fc.registers || []).includes('metal') && <NavBtn id="metalrecon" label="Metal Reconciliation" icon={BarChart2} />}
             </Section>
             <Section sectionKey="maintenance" label="Maintenance">
               <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
@@ -8197,7 +8403,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="quality" label="Quality">
               <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
               <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
-              <NavBtn id="routinetest"    label="Routine Test & Certificates" icon={CheckCircle} />
+              <NavBtn id="routinetest"    label={fc.test.menu} icon={CheckCircle} />
               <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
               <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
               <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
@@ -8889,10 +9095,10 @@ function DocEditor({ releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertT
           )}
           {['delivery', 'packing_list'].includes(doc.type) && onPickDrums && releasedDrums.length > 0 && (
             <details style={{ position: 'relative' }}>
-              <summary style={{ ...styles.ghostBtn, listStyle: 'none', cursor: 'pointer' }}>🛢 Add released drums ({releasedDrums.length})</summary>
+              <summary style={{ ...styles.ghostBtn, listStyle: 'none', cursor: 'pointer' }}>＋ Add released {mfgCfg().unit.plural.toLowerCase()} ({releasedDrums.length})</summary>
               <div style={{ position: 'absolute', zIndex: 300, top: '110%', left: 0, background: '#fff', border: '1px solid #E2DDD5', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 10, width: 460, maxHeight: 340, overflowY: 'auto' }}>
                 <div style={{ fontSize: 12, color: '#777', marginBottom: 6 }}>Drums that passed the routine test and are not dispatched. They are marked dispatched when you save this document.</div>
-                {releasedDrums.map(d => <label key={d.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', fontSize: 12.5, borderBottom: '1px solid #F0ECE0' }}><input type="checkbox" className="drum-pick" value={d.key} /><b>{d.drumNo}</b> · {d.product} · {d.length} m{d.order.orderRef ? <span style={{ color: '#888' }}> · {d.order.orderRef.docNo}/{d.order.orderRef.itemNo}</span> : null}</label>)}
+                {releasedDrums.slice().sort((a, b) => String(a.expiry || '9999').localeCompare(String(b.expiry || '9999'))).map(d => <label key={d.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', fontSize: 12.5, borderBottom: '1px solid #F0ECE0' }}><input type="checkbox" className="drum-pick" value={d.key} /><b>{d.drumNo}</b> · {d.product} · {d.length} {mfgCfg().unit.qtyUnit}{d.expiry ? <span style={{ color: (new Date(d.expiry) - new Date()) / 86400000 <= 30 ? '#B5453A' : '#888' }}> · exp {d.expiry}</span> : null}{d.order.orderRef ? <span style={{ color: '#888' }}> · {d.order.orderRef.docNo}/{d.order.orderRef.itemNo}</span> : null}</label>)}
                 <button onClick={(e) => { const box = e.currentTarget.parentElement; const keys = [...box.querySelectorAll('input.drum-pick:checked')].map(x => x.value); if (!keys.length) { alert('Select at least one drum.'); return; } onPickDrums(doc, keys); box.parentElement.removeAttribute('open'); }} style={{ ...styles.primaryBtn, marginTop: 8 }}>Add selected drums</button>
               </div>
             </details>
@@ -19591,18 +19797,19 @@ function ProcessRouteModal({ order, bom, onSave, onClose, assets = [], pmSchedul
                   <div><label style={lab}>Loss (unaccounted)</label><div style={{ ...inp, background: '#F8F6F0', color: '#555' }}>{num(s.inQty) > 0 ? (num(s.inQty) - num(s.outQty) - num(s.scrap)).toFixed(2) : '—'}</div></div>
                   {d.extra.map(([k, l, ph]) => <div key={k}><label style={lab}>{l}</label><input style={inp} placeholder={ph || ''} value={s.fields[k] || ''} onChange={e => updF(i, k, e.target.value)} /></div>)}
                 </div>
-                {/drum/i.test(s.name) && (() => {
-                  const drums = s.drums || [];
+                {i === stages.length - 1 && (() => {
+                  const U = mfgCfg(mt).unit, drums = s.drums || [], hasGT = U.fields.some(f => f[0] === 'gross') && U.fields.some(f => f[0] === 'tare');
                   const setDrums = (nd) => setStages(prev => prev.map((x, j) => j === i ? { ...x, drums: nd, outQty: String(Math.round(nd.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000) } : x));
                   const upD = (k, f, v) => setDrums(drums.map((dr, z) => z === k ? { ...dr, [f]: v } : dr));
+                  const cols = [['drumNo', U.numLabel, 'text'], ['length', U.qtyLabel, 'number'], ...U.fields.map(f => [f[0], f[1], /date/i.test(f[0] + f[1]) ? 'date' : (/rev|drawing/i.test(f[0]) ? 'text' : 'number')])];
                   return (<div style={{ background: '#F4F8FC', border: '1px solid #DCE6F2', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>Drums from this order ({drums.length}) · {Math.round(drums.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000} m</b>
-                      <button onClick={() => setDrums([...drums, { drumNo: '', length: '', gross: '', tare: '', date: new Date().toISOString().slice(0, 10), testStatus: 'pending' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add drum</button></div>
-                    {drums.length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add each drum wound from this order — drum no., length and weights. Routine test is done per drum in Quality.</div> :
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Drum no.', 'Length (m)', 'Gross kg', 'Tare kg', 'Net kg', 'Test', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 6px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>{U.plural} from this order ({drums.length}) · {Math.round(drums.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000} {U.qtyUnit}</b>
+                      <button onClick={() => setDrums([...drums, { drumNo: '', length: '', date: new Date().toISOString().slice(0, 10), testStatus: 'pending' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add {U.name.toLowerCase()}</button></div>
+                    {drums.length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add each {U.name.toLowerCase()} produced by this order — {U.numLabel.toLowerCase()} and {U.qtyLabel.toLowerCase()}. The final test is done per {U.name.toLowerCase()} in Quality.</div> :
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{[...cols.map(c => c[1]), ...(hasGT ? ['Net kg'] : []), 'Test', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 6px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
                         <tbody>{drums.map((dr, k) => <tr key={k}>
-                          {['drumNo', 'length', 'gross', 'tare'].map(f => <td key={f} style={{ padding: '2px 4px' }}><input value={dr[f] || ''} type={f === 'drumNo' ? 'text' : 'number'} onChange={e => upD(k, f, e.target.value)} disabled={dr.testStatus === 'passed'} style={{ ...inp, padding: '4px 6px' }} /></td>)}
-                          <td style={{ padding: '2px 6px' }}>{Math.round(((parseFloat(dr.gross) || 0) - (parseFloat(dr.tare) || 0)) * 1000) / 1000 || ''}</td>
+                          {cols.map(([f, , ty]) => <td key={f} style={{ padding: '2px 4px' }}><input value={dr[f] || ''} type={ty} onChange={e => upD(k, f, e.target.value)} disabled={dr.testStatus === 'passed'} style={{ ...inp, padding: '4px 6px' }} /></td>)}
+                          {hasGT && <td style={{ padding: '2px 6px' }}>{Math.round(((parseFloat(dr.gross) || 0) - (parseFloat(dr.tare) || 0)) * 1000) / 1000 || ''}</td>}
                           <td style={{ padding: '2px 6px', fontWeight: 600, color: dr.testStatus === 'passed' ? '#1A7A3E' : dr.testStatus === 'failed' ? '#B5453A' : '#E07B00' }}>{dr.testStatus === 'passed' ? 'Passed' : dr.testStatus === 'failed' ? 'Failed' : 'Pending'}</td>
                           <td style={{ padding: '2px 4px' }}>{dr.testStatus !== 'passed' && <button onClick={() => setDrums(drums.filter((_, z) => z !== k))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table>}
                   </div>);
@@ -31571,7 +31778,7 @@ export default function App() {
     const drums = allDrums(productionOrders, boms).filter(d => keys.includes(d.key));
     const rows = drums.map(d => {
       const fg = (items || []).find(i => (i.designId && cableDesigns.some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || _nm(i.name) === _nm(d.product));
-      return { ...EMPTY_ITEM_ROW(businessInfo), itemId: fg ? fg.id : '', name: d.product + ' — Drum ' + d.drumNo, hsn: fg ? (fg.hsn || '8544') : '8544', qty: d.length, unit: 'm', rate: fg ? (parseFloat(fg.saleRate ?? fg.rate) || 0) : 0, gst: fg && fg.gst !== undefined ? fg.gst : EMPTY_ITEM_ROW(businessInfo).gst, packages: 1, netWeight: d.net || 0, grossWeight: parseFloat(d.gross) || 0, drumNo: d.drumNo, drumKey: d.key, certNo: d.certNo || '' };
+      return { ...EMPTY_ITEM_ROW(businessInfo), itemId: fg ? fg.id : '', name: d.product + ' — ' + mfgCfg().unit.name + ' ' + d.drumNo, hsn: fg ? (fg.hsn || (mfgCfg().eng === 'cable' ? '8544' : '')) : (mfgCfg().eng === 'cable' ? '8544' : ''), qty: d.length, unit: mfgCfg().unit.qtyUnit, rate: fg ? (parseFloat(fg.saleRate ?? fg.rate) || 0) : 0, gst: fg && fg.gst !== undefined ? fg.gst : EMPTY_ITEM_ROW(businessInfo).gst, packages: 1, netWeight: d.net || 0, grossWeight: parseFloat(d.gross) || 0, drumNo: d.drumNo, drumKey: d.key, certNo: d.certNo || '' };
     });
     setActiveDoc(a => a ? { ...a, items: [...(a.items || []).filter(it => (it.name || '').trim() || parseFloat(it.rate)), ...rows] } : a);
   }
@@ -33034,6 +33241,20 @@ export default function App() {
             payrollRuns={payrollRuns}
           />
         );
+      case 'productspec':
+        return (
+          <ProductSpecView
+            specs={sessionContext ? cableDesigns.filter(x => (x.bizType || 'manufacturing') === sessionContext) : cableDesigns}
+            setSpecs={setCableDesigns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            setItems={setItems}
+            boms={boms}
+            setBoms={setBoms}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
       case 'cabledesign':
         return (
           <CableDesignView
@@ -33064,7 +33285,7 @@ export default function App() {
           />
         );
       case 'routinetest':
-        return <RoutineTestView productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
+        return <RoutineTestView setFatReports={setFatReports} productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'wip':
         return <WIPView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
       case 'drumstock':
