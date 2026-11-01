@@ -2292,6 +2292,7 @@ Object.assign(PART_DATASHEET_PACK, {
 });
 
 MFG_TYPES.length = 0; MFG_TYPES.push(...MFG_TYPES_ALL);
+MFG_QA_PACK.wires_cables.templates.splice(2, 0, ['Incoming armour wire / strip', ['Wire diameter / strip size within tolerance', 'Zinc coating (mass / uniformity)', 'Tensile strength vs certificate', 'Coil / lot number recorded']], ['Incoming tapes, fillers & other material', ['Material and size as per PO', 'Supplier certificate available', 'Packing / moisture condition', 'Batch number recorded']]);
 Object.keys(RM_SPEC_PACK).forEach(k => { if (!RM_SPEC_PACK[k]['Misc / consumables']) RM_SPEC_PACK[k]['Misc / consumables'] = { unit: 'pcs', fields: _std([['spec', 'Specification / size', ''], ['usedFor', 'Used for / department', 'Production / maintenance / office']]) }; });
 
 function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
@@ -6976,6 +6977,106 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
               </tr>); })}</tbody>
           </table>
         </div>}
+    </div>
+  );
+}
+
+// ─── Incoming QA (Quality) — GRN lots wait here; only accepted qty enters usable stock ───
+const iqaPending = (l) => !!l && !!l.itemId && (l.qaPending || !l.qaStatus || l.qaStatus === 'inprocess') && !l.qaDate;
+function iqaTemplate(item, mt) {
+  const pack = (MFG_QA_PACK[mt] || MFG_QA_PACK.general || { templates: [] }).templates || [];
+  const inc = pack.filter(t => /incoming|receipt|receiving|sampling|component/i.test(t[0]));
+  const key = _nm((item && (item.rmCategory || item.name)) || '');
+  const words = [['armour', 'armour'], ['copper', 'rod'], ['alumin', 'rod'], ['pvc', 'compound'], ['xlpe', 'compound'], ['tape', 'tapes'], ['filler', 'tapes'], ['drum', 'tapes'], ['steel', 'steel'], ['plate', 'steel'], ['resin', 'resin'], ['ingredient', 'receiv'], ['fabric', 'fabric'], ['yarn', 'fabric'], ['component', 'component']];
+  for (const [w, t] of words) if (key.includes(w)) { const hit = inc.find(x => _nm(x[0]).includes(t)); if (hit) return hit; }
+  return inc[0] || pack[0] || ['Incoming material inspection', ['Material as per PO', 'Quantity matches DC / invoice', 'Test certificate available', 'Visual damage check']];
+}
+
+function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const canInspect = ['admin', 'manager', 'qa', 'staff'].includes(userRole) || !['sales', 'purchase', 'accounts'].includes(userRole);
+  const [tab, setTab] = useState('queue');
+  const [cur, setCur] = useState(null); // { grnId, idx }
+  const [f, setF] = useState({});
+  const today = new Date(); const iso = today.toISOString().slice(0, 10);
+  const mt = _mfgType();
+  const live = (grns || []).filter(g => g && g.status !== 'deleted' && g.status !== 'rejected');
+  const queue = [], done = [];
+  live.forEach(g => (g.lines || []).forEach((l, idx) => { const row = { g, l, idx, item: (items || []).find(i => i.id === l.itemId) }; if (iqaPending(l)) queue.push(row); else if (l.qaDate) done.push(row); }));
+  queue.sort((a, b) => String(a.g.date || '').localeCompare(String(b.g.date || '')));
+  done.sort((a, b) => String(b.l.qaDate || '').localeCompare(String(a.l.qaDate || '')));
+  const mon = iso.slice(0, 7), doneMon = done.filter(r => String(r.l.qaDate || '').slice(0, 7) === mon);
+  const recM = doneMon.reduce((s, r) => s + (parseFloat(r.l.receivedQty) || 0), 0), rejM = doneMon.reduce((s, r) => s + (parseFloat(r.l.rejectedQty) || 0), 0);
+  function open(r) {
+    const tpl = iqaTemplate(r.item, mt);
+    setCur({ grnId: r.g.id, idx: r.idx });
+    setF({ tpl: tpl[0], points: tpl[1], results: {}, readings: {}, lotNo: r.l.lotNo || '', certNo: r.l.certNo || '', accepted: parseFloat(r.l.receivedQty) || 0, inspector: '', remarks: '' });
+  }
+  const row = cur ? queue.find(r => r.g.id === cur.grnId && r.idx === cur.idx) : null;
+  function save() {
+    if (!row) return;
+    const rec = parseFloat(row.l.receivedQty) || 0, acc = Math.max(0, Math.min(rec, parseFloat(f.accepted) || 0)), rej = Math.round((rec - acc) * 1000) / 1000;
+    if (f.points.some((_, i) => !f.results[i])) { alert('Mark every check point (Pass / Fail / N/A).'); return; }
+    if (!String(f.lotNo).trim()) { alert('Enter the lot / heat / batch number — it is needed for traceability.'); return; }
+    const fails = f.points.filter((_, i) => f.results[i] === 'fail');
+    if (fails.length && acc > 0 && !window.confirm('Failed: ' + fails.join('; ') + '\n\nAccept ' + acc + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' under deviation anyway?')) return;
+    const status = acc <= 0 ? 'rejected' : 'accepted';
+    const patch = { qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
+    setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== row.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === row.idx ? { ...l, ...patch } : l) }));
+    if (setStockLedger) {
+      const posted = (stockLedger || []).filter(e => e.sourceType === 'grn' && e.sourceId === row.g.id && e.itemId === row.l.itemId).reduce((s, e) => s + (e.type === 'in' ? 1 : -1) * (parseFloat(e.qty) || 0), 0);
+      const delta = Math.round((acc - posted) * 1000) / 1000;
+      if (delta !== 0) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), {
+        id: crypto.randomUUID(), date: iso, itemId: row.l.itemId, itemName: (row.item && row.item.name) || row.l.itemName,
+        type: delta > 0 ? 'in' : 'out', qty: Math.abs(delta), rate: parseFloat(row.l.rate) || 0,
+        sourceType: delta > 0 ? 'grn' : 'qa-reject', sourceId: row.g.id, sourceNumber: row.g.number, lotNo: patch.lotNo, qaStatus: status, createdAt: Date.now(), bizType: currentBizType,
+      }]);
+    }
+    setCur(null);
+  }
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const pill = (id, l) => <button key={id} onClick={() => { setTab(id); setCur(null); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Incoming QA</h1><p style={styles.muted}>Every GRN line waits here. Accepted quantity is added to stock with its lot number; rejected quantity never enters stock.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Waiting for inspection', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Oldest waiting', queue.length ? Math.max(0, Math.floor((today - new Date(queue[0].g.date)) / 86400000)) + ' days' : '—', '#1E2A4A'], ['Inspected this month', doneMon.length, '#1E2A4A'], ['Reject % this month', recM ? (rejM / recM * 100).toFixed(1) + '%' : '—', rejM ? '#B5453A' : '#1A7A3E']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>{pill('queue', 'Waiting (' + queue.length + ')')}{pill('done', 'Inspected')}</div>
+      {tab === 'queue' && (row ? (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, maxWidth: 900 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <div><b style={{ fontSize: 15 }}>{(row.item && row.item.name) || row.l.itemName}</b><div style={{ fontSize: 12, color: '#777' }}>{row.g.number} · {row.g.date} · {row.g.vendorName || ''}{row.g.poNumber ? ' · PO ' + row.g.poNumber : ''} · received {row.l.receivedQty} {row.l.unit || (row.item && row.item.unit) || ''}</div></div>
+            <button onClick={() => setCur(null)} style={styles.ghostBtn}>← Back to queue</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+            {[['lotNo', 'Lot / heat / batch no. *'], ['certNo', 'Supplier TC / MTC no.'], ['inspector', 'Inspected by']].map(([k, l]) => <label key={k} style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>{l}<input value={f[k] || ''} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}
+            <label style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>Accepted qty (rest = rejected)<input type="number" value={f.accepted} onChange={e => setF(p => ({ ...p, accepted: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          </div>
+          <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{f.tpl}</div>
+            {f.points.map((pt, i) => <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #EEE', fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{pt}</span>
+              <input placeholder="Reading / value" value={f.readings[i] || ''} onChange={e => setF(p => ({ ...p, readings: { ...p.readings, [i]: e.target.value } }))} style={{ ...styles.input, margin: 0, width: 150, fontSize: 12 }} />
+              {['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setF(p => ({ ...p, results: { ...p.results, [i]: v } }))} style={{ padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: f.results[i] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: f.results[i] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}
+            </div>)}
+          </div>
+          <input placeholder="Remarks" value={f.remarks} onChange={e => setF(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+            <span style={{ fontSize: 12.5 }}>Accepted <b style={{ color: '#1A7A3E' }}>{Math.max(0, Math.min(parseFloat(row.l.receivedQty) || 0, parseFloat(f.accepted) || 0))}</b> · Rejected <b style={{ color: '#B5453A' }}>{Math.max(0, Math.round(((parseFloat(row.l.receivedQty) || 0) - (parseFloat(f.accepted) || 0)) * 1000) / 1000)}</b></span>
+            {canInspect && <button onClick={save} style={styles.primaryBtn}>Save inspection</button>}
+          </div>
+        </div>
+      ) : (queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. New GRN lines appear here automatically.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['GRN', 'Date', 'Vendor', 'Material', 'Received', 'Waiting', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{queue.map(r => { const age = Math.max(0, Math.floor((today - new Date(r.g.date)) / 86400000)); return <tr key={r.g.id + '-' + r.idx}><td style={td}>{r.g.number}</td><td style={td}>{r.g.date}</td><td style={td}>{r.g.vendorName || ''}</td><td style={td}><b>{(r.item && r.item.name) || r.l.itemName}</b>{r.item && r.item.rmCategory ? <span style={{ color: '#888', fontSize: 11.5 }}> · {r.item.rmCategory}</span> : null}</td><td style={td}>{r.l.receivedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td><td style={{ ...td, color: age > 2 ? '#B5453A' : '#666', fontWeight: age > 2 ? 700 : 400 }}>{age} d</td><td style={td}>{canInspect && <button onClick={() => open(r)} style={styles.primaryBtn}>Inspect</button>}</td></tr>; })}</tbody>
+        </table></div>))}
+      {tab === 'done' && (done.length === 0 ? <div style={styles.emptyBox}>No inspections yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Date', 'GRN', 'Vendor', 'Material', 'Lot', 'Accepted', 'Rejected', 'Result', 'By'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{done.slice(0, 200).map(r => <tr key={r.g.id + '-' + r.idx}><td style={td}>{r.l.qaDate}</td><td style={td}>{r.g.number}</td><td style={td}>{r.g.vendorName || ''}</td><td style={td}>{(r.item && r.item.name) || r.l.itemName}</td><td style={td}>{r.l.lotNo || '—'}</td><td style={td}>{r.l.acceptedQty}</td><td style={td}>{r.l.rejectedQty || 0}</td><td style={{ ...td, fontWeight: 700, color: r.l.qaStatus === 'rejected' ? '#B5453A' : (r.l.qaChecks && r.l.qaChecks.deviation) ? '#E07B00' : '#1A7A3E' }}>{r.l.qaStatus === 'rejected' ? 'Rejected' : (r.l.qaChecks && r.l.qaChecks.deviation) ? 'Accepted (deviation)' : (parseFloat(r.l.rejectedQty) > 0 ? 'Partly accepted' : 'Accepted')}</td><td style={td}>{r.l.qaBy || ''}</td></tr>)}</tbody>
+        </table></div>)}
     </div>
   );
 }
@@ -12090,12 +12191,14 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
     const isNew = !(allGrns || []).find(g => g.id === grn.id);
     let updated;
     if (isNew) {
-      const newGrn = { ...grn, bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
+      const mfgGate = currentBizType === 'manufacturing';
+      const waitsQa = (l) => mfgGate && (!l.qaStatus || l.qaStatus === 'inprocess');
+      const newGrn = { ...grn, lines: (grn.lines || []).map(l => waitsQa(l) ? { ...l, qaPending: true } : l), bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
       updated = [newGrn, ...(allGrns || [])];
       // Only create stock IN entries for QA-accepted / visually OK lines
       if (setStockLedger) {
         const entries = (grn.lines || [])
-          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok')
+          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok' && !waitsQa(l))
           .map(l => {
             const it = items.find(i => i.id === l.itemId);
             const acceptedQty = (l.qaStatus === 'inprocess' || l.qaStatus === 'ok')
@@ -32540,6 +32643,18 @@ export default function App() {
           />
         );
       case 'incomingqa':
+        return (
+          <IncomingQAView
+            grns={sessionContext ? grns.filter(g => (g.bizType || bizDefault) === sessionContext) : grns}
+            setGrns={setGrns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
       case 'wip':
       case 'drumstock':
       case 'machinelog':
