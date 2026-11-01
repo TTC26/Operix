@@ -646,6 +646,20 @@ function buildZohoDocPrintOld(o) {
 }
 
 // ─── Minimal QR code generator (byte mode, ECC level M, versions 1–10) → SVG string ───
+// Verification QR: encodes a link to /verify.html with the document's key details + a check code (fnv1a).
+const _VK = ['c', 't', 'n', 'd', 'a', 'f', 'to', 'p'];
+function _vck(parts) { const s = parts.join('|'); let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36).slice(0, 7); }
+function verifyUrl(o) {
+  const v = {}; _VK.forEach(k => { let x = o[k]; if (x == null) x = ''; x = String(x).replace(/\s+/g, ' ').trim(); if (k === 'a' && x !== '') x = (Number(x) || 0).toFixed(2); v[k] = x.slice(0, 28); });
+  const origin = (typeof window !== 'undefined' && /^https?:/.test(window.location.origin)) ? window.location.origin : 'https://operix-nu.vercel.app';
+  const q = _VK.filter(k => v[k] !== '').map(k => k + '=' + encodeURIComponent(v[k]).replace(/%20/g, '+').replace(/%2F/gi, '/')).join('&');
+  return origin + '/verify.html#' + q + '&k=' + _vck(_VK.map(k => v[k]));
+}
+function qrBoxHtml(o, px) {
+  const svg = qrSvg(verifyUrl(o), px || 108); if (!svg) return '';
+  return '<div style="flex:none;text-align:center;margin-left:10px"><div style="border:1px solid #000;padding:1px;line-height:0;background:#fff">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div>';
+}
+
 function qrSvg(text, size) {
   try {
     const bytes = Array.from(unescape(encodeURIComponent(String(text))), c => c.charCodeAt(0));
@@ -700,12 +714,42 @@ function qrSvg(text, size) {
     if (ver >= 7) { let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25); const b = (ver << 12) | r; for (let i = 0; i < 18; i++) { const c = ((b >>> i) & 1) !== 0, a = N - 11 + i % 3, bb = Math.floor(i / 3); setFn(a, bb, c); setFn(bb, a, c); } }
     let k = 0;
     for (let right = N - 1; right >= 1; right -= 2) { if (right === 6) right = 5; for (let v = 0; v < N; v++) for (let j = 0; j < 2; j++) { const x = right - j, up = ((right + 1) & 2) === 0, y = up ? N - 1 - v : v; if (!F[y][x] && k < all.length * 8) { M[y][x] = ((all[k >>> 3] >>> (7 - (k & 7))) & 1) !== 0; k++; } } }
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!F[y][x] && (x + y) % 2 === 0) M[y][x] = !M[y][x];
-    fmt(0);
+    // choose the best of the 8 masks by the standard penalty score (fixed mask 0 made some payloads unreadable)
+    const maskFn = [(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x, y) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
+      (x, y) => (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0, (x, y) => (x * y) % 2 + (x * y) % 3 === 0,
+      (x, y) => ((x * y) % 2 + (x * y) % 3) % 2 === 0, (x, y) => (((x + y) % 2) + (x * y) % 3) % 2 === 0];
+    const baseM = M.map(r => r.slice());
+    const penalty = (G) => {
+      let p = 0;
+      for (let t = 0; t < 2; t++) for (let i = 0; i < N; i++) {
+        let run = 1, hist = [];
+        for (let j = 1; j <= N; j++) {
+          const cur = j < N ? (t ? G[j][i] : G[i][j]) : null, prv = t ? G[j - 1][i] : G[i][j - 1];
+          if (j < N && cur === prv) run++; else { if (run >= 5) p += 3 + run - 5; run = 1; }
+        }
+        const line = []; for (let j = 0; j < N; j++) line.push(t ? G[j][i] : G[i][j]);
+        for (let j = 0; j + 11 <= N; j++) {
+          const w = line.slice(j, j + 11).map(v => v ? 1 : 0).join('');
+          if (w === '10111010000' || w === '00001011101') p += 40;
+        }
+      }
+      for (let y = 0; y < N - 1; y++) for (let x = 0; x < N - 1; x++) if (G[y][x] === G[y][x + 1] && G[y][x] === G[y + 1][x] && G[y][x] === G[y + 1][x + 1]) p += 3;
+      let dark = 0; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (G[y][x]) dark++;
+      p += Math.floor(Math.abs(dark * 100 / (N * N) - 50) / 5) * 10;
+      return p;
+    };
+    let bestM = null, bestP = Infinity;
+    for (let m = 0; m < 8; m++) {
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) M[y][x] = F[y][x] ? M[y][x] : (baseM[y][x] !== maskFn[m](x, y));
+      fmt(m);
+      const pn = penalty(M);
+      if (pn < bestP) { bestP = pn; bestM = M.map(r => r.slice()); }
+    }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) M[y][x] = bestM[y][x];
     let d = '';
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (M[y][x]) d += 'M' + (x + 2) + ',' + (y + 2) + 'h1v1h-1z';
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (M[y][x]) d += 'M' + (x + 4) + ',' + (y + 4) + 'h1v1h-1z';
     const px = size || 90;
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (N + 4) + ' ' + (N + 4) + '" width="' + px + '" height="' + px + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (N + 8) + ' ' + (N + 8) + '" width="' + px + '" height="' + px + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
   } catch (e) { return ''; }
 }
 
@@ -882,15 +926,20 @@ function buildZohoDocPrint(o) {
     const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
     if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
     if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
+    { const em = [party.email, party.email2].filter(Boolean).join(', '); if (em) pl.push('<div class="zps"><b>Email:</b> ' + esc(em) + '</div>'); }
+    if (party.website) pl.push('<div class="zps"><b>Web:</b> ' + esc(party.website) + '</div>');
   } else pl.push('<div class="zps">' + (isVendorDoc ? 'No vendor selected' : 'No customer selected') + '</div>');
   let right;
   if (doc.shipToName || doc.shipToAddress) {
     right = '<div class="zlbl">Ship To</div>' + (doc.shipToName ? '<div class="zpn">' + esc(doc.shipToName) + '</div>' : '') + (doc.shipToAddress ? '<div class="zps">' + nl(doc.shipToAddress) + '</div>' : '');
   } else {
     right = '<div class="zlbl">' + (isVendorDoc ? 'Deliver To' : 'Supplier') + '</div><div class="zpn">' + esc(bi.name) + '</div>'
+      + (bi.address ? '<div class="zps">' + nl(bi.address) + '</div>' : '')
       + (bi.gstin ? '<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(bi.gstin) + '</div>' : '')
       + (bi.state ? '<div class="zps"><b>State:</b> ' + esc(bi.state) + '</div>' : '')
-      + (bi.phone && !withCompany ? '<div class="zps"><b>Ph:</b> ' + esc(bi.phone) + '</div>' : '');
+      + (bi.phone ? '<div class="zps"><b>Ph:</b> ' + esc(bi.phone) + '</div>' : '')
+      + (bi.email ? '<div class="zps"><b>Email:</b> ' + esc(bi.email) + '</div>' : '')
+      + (bi.website ? '<div class="zps"><b>Web:</b> ' + esc(bi.website) + '</div>' : '');
   }
   B('<div class="zparty"><div><div class="zlbl">' + (isVendorDoc ? 'Vendor' : 'Bill To') + '</div>' + pl.join('') + '</div><div>' + right + '</div></div>');
 
@@ -960,11 +1009,7 @@ function buildZohoDocPrint(o) {
   }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
   let qrBlock = '';
-  if (!isPL) {
-    const qrTxt = ['DOC:' + (t.label || doc.type) + ' ' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.gstin || bi.name || ''), 'TO:' + ((party && (party.gstin || party.taxId)) || (party && party.name) || ''), 'AMT:' + Math.round(totals.grandTotal || 0)].join('|');
-    const svg = qrSvg(qrTxt, 84);
-    if (svg) qrBlock = '<div style="flex:none;text-align:center;margin-left:10px"><div style="border:1px solid #000;padding:2px;line-height:0">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div>';
-  }
+  qrBlock = qrBoxHtml({ c: bi.name, t: t.label || doc.type, n: doc.number, d: doc.date, a: isPL ? '' : totals.grandTotal, to: (party && (party.gstin || party.taxId || party.name)) || '' }, 124);
   TL('<div class="zsum"><div class="zsumL" style="display:flex;justify-content:space-between;align-items:flex-start"><div style="min-width:0;flex:1">' + left + '</div>' + qrBlock + '</div><div class="zsumR">' + rightTot + '</div></div>');
 
   if (!isPL && cc.hasTax && cc.splitTax) {
@@ -1505,6 +1550,11 @@ async function printPaginated(sel, bi, pre, gen) {
     const _plain = blocks.map(b => String(b.h || '')).join(' ').replace(/<[^>]+>/g, ' ');
     const _dm = _plain.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
     const PGFTXT = (pre && pre.pgf) || (gen && gen.pgf) || [bi && bi.name, _dm ? _dm[0] : (typeof window !== 'undefined' && window.__printDocNo) || '', 'Page {p} of {n}'].filter(Boolean).join(' | ');
+    if (!blocks.some(b => /Scan to verify/.test(String(b.h || '')))) {
+      const _t0 = (pre && pre.title) || (gen && gen.title) || (() => { const m = _plain.replace(/\s+/g, ' ').trim(); const h = blocks.map(b => String(b.h || '')).join(' ').match(/<(?:h[1-3]|div class="zh1")[^>]*>([^<]{3,60})</i); return h ? h[1].trim() : ''; })();
+      const _n0 = _dm ? _dm[0] : ((typeof window !== 'undefined' && window.__printDocNo) || '');
+      if (_t0 || _n0) { const _qh = qrBoxHtml({ c: bi && bi.name, t: _t0, n: _n0, p: new Date().toISOString().slice(0, 10) }, 112); if (_qh) blocks.push({ t: '', h: '<div style="display:flex;justify-content:flex-end;margin-top:10px;break-inside:avoid">' + _qh + '</div>' }); }
+    }
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
 
@@ -2700,7 +2750,7 @@ function printCustomerDetail(c, docs, businessInfo) {
   <div class="lbl">Customer Name</div><div class="val">${c.name || '—'}</div>
   ${cc.hasTax && c.gstin ? `<div class="lbl">${cc.taxIdLabel}</div><div class="val">${c.gstin}</div>` : ''}
   <div class="lbl">Phone</div><div class="val">${c.phone || '—'}</div>
-  <div class="lbl">Email</div><div class="val">${c.email || '—'}</div>
+  <div class="lbl">Email</div><div class="val">${[c.email, c.email2].filter(Boolean).join(', ') || '—'}</div>${c.website ? `<div class="lbl">Website</div><div class="val">${c.website}</div>` : ''}
   <div class="lbl">Address</div><div class="val">${c.address || '—'}</div>
   <div class="lbl">${cc.stateLabel || 'State'}</div><div class="val">${c.state || '—'}</div>
 </div>
@@ -2725,7 +2775,7 @@ function printAllCustomers(customers, businessInfo) {
         <td style="font-weight:600">${c.name || '—'}</td>
         ${cc.hasTax ? `<td>${c.gstin || '—'}</td>` : ''}
         <td>${c.phone || '—'}</td>
-        <td>${c.email || '—'}</td>
+        <td>${[c.email, c.email2].filter(Boolean).join(', ') || '—'}</td>
         <td>${c.address || '—'}</td>
         <td>${c.state || '—'}</td>
       </tr>`).join('');
@@ -2860,7 +2910,9 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
     { key: 'address', label: 'Address' },
     { key: 'state',   label: stateLabel },
     { key: 'phone',   label: 'Phone' },
-    { key: 'email',   label: 'Email' },
+    { key: 'email',   label: 'Email 1' },
+    { key: 'email2',  label: 'Email 2 (optional)' },
+    { key: 'website', label: 'Website (optional)' },
   ];
   return (
     <Modal onClose={onClose} title={customer.id ? 'Edit customer' : 'Add customer'}>
@@ -3003,7 +3055,9 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
     { key: 'address', label: 'Address' },
     { key: 'state',   label: stateLabel },
     { key: 'phone',   label: 'Phone' },
-    { key: 'email',   label: 'Email' },
+    { key: 'email',   label: 'Email 1' },
+    { key: 'email2',  label: 'Email 2 (optional)' },
+    { key: 'website', label: 'Website (optional)' },
   ];
   return (
     <Modal onClose={onClose} title={vendor.id ? 'Edit vendor' : 'Add vendor'}>
@@ -7251,7 +7305,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   {/* Buyer + Invoice details */}
                   <div style={{ display: 'flex', borderBottom: bdr }}>
                     <div style={{ flex: 1, padding: '10px 18px', borderRight: bdr }}>
-                      {[['Customer', displayParty?.name],['GSTIN', displayParty?.gstin || displayParty?.taxId],['Address', displayParty?.address],['Mob', displayParty?.phone],['Email', displayParty?.email]].map(([k,v]) => (
+                      {[['Customer', displayParty?.name],['GSTIN', displayParty?.gstin || displayParty?.taxId],['Address', displayParty?.address],['Mob', displayParty?.phone],['Email', [displayParty?.email, displayParty?.email2].filter(Boolean).join(', ')],['Web', displayParty?.website]].map(([k,v]) => (
                         <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 3 }}>
                           <span style={{ fontWeight: 700, minWidth: 72 }}>{k}:</span>
                           <span style={{ color: k === 'Email' && v ? '#1A56DB' : '#222' }}>{v || '—'}</span>
@@ -7418,6 +7472,8 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                   <div style={styles.previewSmall}>{displayParty.address}</div>
                   {(displayParty.gstin || displayParty.taxId) && <div style={styles.previewSmall}>{cc.taxIdLabel}: {displayParty.gstin || displayParty.taxId}</div>}
                   {displayParty.state && <div style={styles.previewSmall}>State: {displayParty.state}</div>}
+                  {(displayParty.email || displayParty.email2) && <div style={styles.previewSmall}>Email: {[displayParty.email, displayParty.email2].filter(Boolean).join(', ')}</div>}
+                  {displayParty.website && <div style={styles.previewSmall}>Web: {displayParty.website}</div>}
                 </>
               ) : (
                 <div style={styles.previewSmall}>{isVendorDoc ? 'No vendor selected' : 'No customer selected'}</div>
