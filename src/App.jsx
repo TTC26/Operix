@@ -10816,6 +10816,26 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   );
 }
 
+// Dropdown + free typing in one field (pick from the list or type a value that is not in it)
+function ComboField({ value, onChange, options = [], placeholder, onPick, invalid }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const q = _nm(value);
+  const shown = (all || !q ? options : options.filter(o => _nm(o.value).includes(q) || _nm(o.label).includes(q) || _nm(o.sub).includes(q))).slice(0, 60);
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ display: 'flex' }}>
+        <input value={value} onChange={e => { onChange(e.target.value); setOpen(true); setAll(false); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder={placeholder} style={{ ...styles.input, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderColor: invalid ? '#B91C1C' : undefined }} />
+        <button type="button" onMouseDown={e => { e.preventDefault(); setAll(true); setOpen(o => !o); }} style={{ ...styles.input, width: 40, borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, cursor: 'pointer', background: '#F8F6F0' }} title="Show list">▾</button>
+      </div>
+      {open && shown.length > 0 && <div style={{ position: 'absolute', zIndex: 400, left: 0, right: 0, top: '100%', background: '#fff', border: '1px solid #DDD', borderRadius: 8, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', maxHeight: 260, overflowY: 'auto' }}>
+        {shown.map(o => <div key={o.value + (o.sub || '')} onMouseDown={e => { e.preventDefault(); onChange(o.value); if (onPick) onPick(o); setOpen(false); }} style={{ padding: '7px 10px', cursor: 'pointer', borderBottom: '1px solid #F2EFE8', fontSize: 13 }} onMouseEnter={e => e.currentTarget.style.background = '#F5F3EF'} onMouseLeave={e => e.currentTarget.style.background = '#fff'}>
+          <b>{o.label || o.value}</b>{o.sub ? <span style={{ color: '#888', fontSize: 11.5 }}> · {o.sub}</span> : null}</div>)}
+      </div>}
+    </div>
+  );
+}
+
 function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onClose }) {
   const [form, setForm] = useState({
     id:           voucher?.id || '',
@@ -10841,8 +10861,13 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   const linkableDocs = documents.filter(d =>
     form.type === 'receipt'
       ? d.type === 'invoice'
-      : d.type === 'purchasebill' || d.type === 'purchaseorder'
-  );
+      : d.type === 'purchasebill' || d.type === 'purchase' || d.type === 'purchaseorder'
+  ).filter(d => d.status !== 'deleted');
+  const partyOfDoc = (d) => { const list = form.type === 'receipt' ? customers : vendors; const p = (list || []).find(x => x.id === (d.customerId || d.vendorId)); return p ? p.name : ((d.customerSnapshot && d.customerSnapshot.name) || d.vendorName || ''); };
+  const docTotal = (d) => { try { return Math.round((computeTotals(d, d.placeOfSupply || '', 'india').grandTotal || 0) * 100) / 100; } catch (e) { return 0; } };
+  const partyList = form.voucherSubtype === 'order' ? (form.type === 'receipt' ? customers : vendors) : [...customers, ...vendors];
+  const docOptions = linkableDocs.filter(d => !form.party.trim() || _nm(partyOfDoc(d)) === _nm(form.party) || !partyList.some(p => _nm(p.name) === _nm(form.party)))
+    .map(d => ({ value: d.number || d.docNumber || d.id, label: d.number || d.docNumber || d.id, sub: [(DOC_TYPES[d.type] || {}).label || d.type, partyOfDoc(d), docTotal(d) ? '₹' + docTotal(d).toLocaleString('en-IN') : '', d.status !== 'approved' ? 'not approved' : ''].filter(Boolean).join(' · '), doc: d }));
   const linkableNos = [...new Set(linkableDocs.map(d => d.number || d.docNumber || d.id).filter(Boolean))];
 
   function validateLink() {
@@ -10854,8 +10879,8 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
       (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()
     );
     if (!linked) {
-      setLinkError('Document not found. Check the invoice/PO number.');
-      return false;
+      setLinkError('');
+      return true; // manual reference (not in the system) — confirmed on save
     }
     if (linked.status !== 'approved') {
       const label = form.type === 'receipt' ? 'Invoice' : 'Purchase bill / PO';
@@ -10869,6 +10894,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   function handleSave() {
     if (!form.date || !form.amount || !form.party) { alert('Date, party and amount are required.'); return; }
     if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !validateLink()) return;
+    if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !linkableDocs.some(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()) && !window.confirm('"' + form.linkedDocNo.trim() + '" is not in the system. Save it as a manual reference?')) return;
     onSave({ ...form, amount: parseFloat(form.amount) || 0 });
   }
 
@@ -10914,8 +10940,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Party Name</label>
-          <input list="voucher-party-list" value={form.party} onChange={e => set('party', e.target.value)} style={styles.input} placeholder="Customer / Vendor / Name" />
-          <datalist id="voucher-party-list">{parties.map(p => <option key={p} value={p} />)}</datalist>
+          <ComboField value={form.party} onChange={v => set('party', v)} placeholder={form.voucherSubtype === 'order' ? (isReceipt ? 'Select customer or type' : 'Select vendor or type') : 'Customer / Vendor / Name'} options={partyList.map(p => ({ value: p.name, label: p.name, sub: [p.gstin || p.gst || '', p.city || ''].filter(Boolean).join(' · ') }))} />
         </div>
 
         {/* Order-linked doc number field — only shown for 'order' subtype */}
@@ -10924,15 +10949,11 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
             <label style={styles.label}>{isReceipt ? 'Invoice No / PO No' : 'Purchase Bill No / PO No'} <span style={{ color: '#B91C1C' }}>*</span></label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
-                <input
-                  list="voucher-doc-list"
-                  value={form.linkedDocNo}
-                  onChange={e => set('linkedDocNo', e.target.value)}
-                  onBlur={validateLink}
-                  style={{ ...styles.input, borderColor: linkError ? '#B91C1C' : undefined }}
-                  placeholder={isReceipt ? 'e.g. INV-001' : 'e.g. PB-001 / PO-001'}
-                />
-                <datalist id="voucher-doc-list">{linkableNos.map(n => <option key={n} value={n} />)}</datalist>
+                <ComboField value={form.linkedDocNo} onChange={v => set('linkedDocNo', v)} invalid={!!linkError}
+                  placeholder={isReceipt ? 'Select invoice or type (e.g. INV-001)' : 'Select purchase bill / PO or type (e.g. PO-001)'}
+                  options={docOptions}
+                  onPick={o => { const d = o.doc; setForm(f => ({ ...f, linkedDocNo: o.value, party: f.party.trim() ? f.party : partyOfDoc(d), amount: (f.amount === '' || f.amount == null) ? (docTotal(d) || '') : f.amount })); setLinkError(d.status !== 'approved' ? ((isReceipt ? 'Invoice' : 'Purchase bill / PO') + ' "' + o.value + '" is not approved yet. Only approved documents can be linked to a voucher.') : ''); }} />
+                {form.linkedDocNo.trim() && !linkableDocs.some(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()) && <div style={{ marginTop: 6, fontSize: 12, color: '#856404' }}>Not found in the system — will be saved as a manual reference.</div>}
                 {linkError && (
                   <div style={{ marginTop: 6, fontSize: 12, color: '#B91C1C', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <AlertTriangle size={13} /> {linkError}
