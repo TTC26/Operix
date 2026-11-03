@@ -7729,6 +7729,26 @@ function MfgNextStepView({ id, setView }) {
   );
 }
 
+function orderShortagePlan({ doc, boms = [], items = [], stockMap = {}, rawMaterials = [], purchaseReqs = [], productionOrders = [] }) {
+  const ref = doc.number, byRef = x => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
+  const oBoms = (boms || []).filter(byRef), need = {};
+  const emptyBoms = oBoms.filter(b => !(b.materials || []).length).map(b => (b.orderRef.itemNo || '') + '. ' + b.name);
+  oBoms.forEach(b => {
+    const po = (productionOrders || []).find(o => o.bomId === b.id), qty = po ? (parseFloat(po.quantity) || 0) : (parseFloat(((doc.items || [])[(b.orderRef.itemNo || 1) - 1] || {}).qty) || 0);
+    const fac = qty / (parseFloat(b.outputQty) || 1);
+    (b.materials || []).forEach(m => {
+      const ms = matStock(m, { items, stockMap, rawMaterials }), key = ms.id || _nm(m.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : '', itemCode: ms.item ? (ms.item.itemCode || '') : '', name: m.name || (ms.item && ms.item.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', itemNos: [] };
+      r.overall += (parseFloat(m.qty) || 0) * fac; if (!r.itemNos.includes(b.orderRef.itemNo)) r.itemNos.push(b.orderRef.itemNo);
+    });
+  });
+  const onPR = {};
+  (purchaseReqs || []).filter(byRef).forEach(pr => (pr.items || []).forEach(it => { const k = it.itemId || _nm(it.name); onPR[k] = (onPR[k] || 0) + (parseFloat(it.qty) || 0); }));
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const rows = Object.values(need).map(r => { const k = r.itemId || _nm(r.name), gross = Math.max(0, r.overall - r.available), req = onPR[k] || 0; return { ...r, overall: r3(r.overall), perBom: r3(r.overall), shortage: r3(gross), alreadyRequested: r3(req), toRequest: r3(Math.max(0, gross - req)), itemNos: r.itemNos.join(', ') }; });
+  return { oBoms, emptyBoms, rows, toRequest: rows.filter(r => r.toRequest > 0) };
+}
+
 function ConvertDropdown({ doc, onConvert }) {
   const [open, setOpen] = useState(false);
   const targets = CONVERT_TO[doc.type] || [];
@@ -9006,7 +9026,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -9180,6 +9200,12 @@ function DocEditor({ onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutco
                 <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 700, background: doc.outcome === 'won' ? '#D6F0E0' : '#FBEAE7', color: doc.outcome === 'won' ? '#1A5C35' : '#B5453A' }}>{doc.outcome === 'won' ? '✓ Won' : '✗ Lost'}{doc.outcomeDate ? ' · ' + doc.outcomeDate : ''}</span>
                 {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
                 {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
+                {doc.mfgLink && onOrderAction && <>
+                  <button onClick={() => onOrderAction('bom', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Open the order BOMs">Order BOMs</button>
+                  <button onClick={() => onOrderAction('recalc', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Recalculate shortage from the order BOMs and raise a PR for what is missing">Shortage → PR</button>
+                  <button onClick={() => onOrderAction('purchasereq', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Approve the PR and convert it to a PO">PR → PO</button>
+                  <button onClick={() => onOrderAction('productionorders', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>Production</button>
+                </>}
                 {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
                 {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} BOM + production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
               </span>
@@ -31915,6 +31941,26 @@ export default function App() {
     setActiveDoc(a => a ? { ...a, orderRef: a.orderRef || (oref ? oref.orderRef : null), items: [...(a.items || []).filter(it => (it.name || '').trim() || parseFloat(it.rate)), ...rows] } : a);
   }
 
+  function recalcOrderShortage(doc) {
+    const _its = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
+    const plan = orderShortagePlan({ doc, boms, items: _its, stockMap: computeStock(stockLedger, _its), rawMaterials, purchaseReqs, productionOrders });
+    if (!plan.oBoms.length) { alert('This order has no BOMs yet — use “Convert to BOM & Production” first.'); return; }
+    if (plan.emptyBoms.length && !plan.rows.length) { alert('The order BOMs have no materials yet:\n' + plan.emptyBoms.join('\n') + '\n\nOpen Order BOMs (or save the product in Cable Design / Product Spec Master), add the materials, then recalculate.'); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + doc.number + ' (recalculated)', qty: 1, outputQty: 1, outputUnit: '', date: today, rows: plan.rows, orderRef: { docId: doc.id, docNo: doc.number }, bizType: 'manufacturing', createdAt: new Date().toISOString() };
+    setBoShortages(prev => [report, ...(Array.isArray(prev) ? prev : [])]);
+    if (!plan.toRequest.length) { alert('✅ Shortage recalculated.' + (plan.rows.some(r => r.shortage > 0) ? '\nAll short materials are already on a PR for this order.' : '\nStock covers every material — no PR needed. Use 📦 Issue materials in Production Orders.') + (plan.emptyBoms.length ? '\n\nStill without materials:\n' + plan.emptyBoms.join('\n') : '')); return; }
+    const cnt = (purchaseReqs || []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    const pr = { id: 'pr-' + doc.id + '-' + Date.now(), number: dn('PR', cnt), bizType: 'manufacturing', type: 'manufacturing', linkId: doc.id, linkName: 'Order ' + doc.number, date: today, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (order shortage)', priority: 'Normal',
+      items: plan.toRequest.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.toRequest, rate: r.rate, hsn: '', purpose: 'Order ' + doc.number + ' · item ' + r.itemNos })),
+      remarks: 'Auto-raised — shortage against order ' + doc.number, orderRef: { docId: doc.id, docNo: doc.number }, approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString() };
+    setPurchaseReqs(prev => [pr, ...(Array.isArray(prev) ? prev : [])]);
+    const link = { ...(doc.mfgLink || {}), prNo: pr.number, prId: pr.id };
+    setDocuments(prev => prev.map(d => d.id === doc.id ? { ...d, mfgLink: link } : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? { ...a, mfgLink: link } : a);
+    if (window.confirm('✅ ' + pr.number + ' raised for ' + plan.toRequest.length + ' short material(s).\n\nOpen Purchase Requisition now to approve it and convert to PO?')) { setActiveDoc(null); setView('purchasereq'); }
+  }
+
   function markQuoteOutcome(doc, outcome) {
     const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
     const patch = d => ({ ...d, outcome: outcome || null, outcomeDate });
@@ -31937,7 +31983,7 @@ export default function App() {
     const patch = d => ({ ...d, mfgLink: link });
     setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
     setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
-    alert('✅ Done. ' + res.newBoms.length + ' BOM(s) and production order(s) created' + (res.pr ? ', ' + res.pr.number + ' raised for shortages (approve it, then convert to PO).' : '.') + (res.missingBom.length ? '\n\nAdd materials to the empty BOMs in Bill of Materials.' : ''));
+    alert('✅ Done. ' + res.newBoms.length + ' BOM(s) and production order(s) created.' + (res.pr ? '\n' + res.pr.number + ' raised for shortages — open Purchase Requisition, approve it, then Convert to PO.' : (res.missingBom.length ? '' : '\nNo PR needed — stock covers all materials.')) + (res.missingBom.length ? '\n\nNo PR yet: these BOMs have no materials (no master BOM / design with the same name):\n' + res.missingBom.join('\n') + '\n\nAdd materials in Order BOMs, then click “Shortage → PR” on this quotation.' : ''));
   }
 
   function convertDoc(srcDoc, newType) {
@@ -32412,6 +32458,7 @@ export default function App() {
           onConvert={convertDoc}
           onQuoteOutcome={markQuoteOutcome}
           onTrackOrder={(no) => { setTrackRef(no); setActiveDoc(null); setView('ordertracker'); }}
+          onOrderAction={(act, d) => { if (act === 'recalc') { recalcOrderShortage(d); return; } setActiveDoc(null); setView(act); }}
           releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
           onPickDrums={pickDrumsIntoDoc}
           onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
