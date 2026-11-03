@@ -69,7 +69,7 @@ const PLAN_MODULES = {
   trading: [
     'hr','payroll','employees','siteattendance',
   ],
-  manufacturing: ['ordertracker','productspec','routinetest',
+  manufacturing: ['stdbom','ordertracker','productspec','routinetest',
     'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
@@ -3518,7 +3518,9 @@ function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], busine
   );
 }
 
-function ItemsList({ items, setEditing, setItems, businessInfo }) {
+function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [] }) {
+  const [openId, setOpenId] = useState('');
+  const _stk = computeStock(stockLedger, items);
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [catFilter, setCatFilter] = useState('');
@@ -3615,8 +3617,8 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
       <div style={{ ...styles.list, marginTop: 0 }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
         {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
-        {filtered.map((it) => (
-          <div key={it.id} style={styles.recordRow}>
+        {filtered.map((it) => (<React.Fragment key={it.id}>
+          <div style={{ ...styles.recordRow, cursor: 'pointer', ...(openId === it.id ? { background: '#F5F2EA', borderColor: '#C9A24B' } : {}) }} onClick={() => setOpenId(o => o === it.id ? '' : it.id)}>
             <div style={{ flex: 1 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
@@ -3629,10 +3631,21 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
               <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
               <div style={{ fontSize: 11, color: '#888780' }}>Sell: <span style={{ color: '#1A7A3E', fontWeight: 600 }}>{fmt(it.saleRate ?? it.rate ?? 0)}</span></div>
             </div>
-            <button onClick={() => setEditing(it)} style={styles.ghostBtn}>Edit</button>
-            <button onClick={() => setItems((is) => is.filter((x) => x.id !== it.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(it); }} style={styles.ghostBtn}>Edit</button>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete ' + it.name + '?')) setItems((is) => is.filter((x) => x.id !== it.id)); }} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
           </div>
-        ))}
+          {openId === it.id && (() => {
+            const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(m => m.materialId === it.id || _nm(m.name) === _nm(it.name)));
+            const ownBom = (boms || []).find(b => !b.orderRef && (b.itemId === it.id || _nm(b.name) === _nm(it.name)));
+            const f = [['Item code', it.itemCode], ['Category / type', it.category], ['Material / type', it.materialType], ['Datasheet category', it.rmCategory], ['Unit', it.unit], ['HSN / SAC', it.hsn], ['Tax %', it.gst], ['Purchase rate', fmt(it.purchaseRate ?? it.rate ?? 0)], ['Sale rate', fmt(it.saleRate ?? it.rate ?? 0)], ['Opening stock', it.openingStock || 0], ['Current stock', _stk[it.id] ? Math.round(_stk[it.id].qty * 1000) / 1000 : (it.openingStock || 0)], ['Min stock', it.minStock || 0]].filter(x => x[1] !== undefined && x[1] !== '');
+            return (<div style={{ margin: '-4px 0 10px', padding: '12px 16px', background: '#FBFAF6', border: '1px solid #EAE6DB', borderTop: 'none', borderRadius: '0 0 10px 10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px 16px', fontSize: 12.5 }}>{f.map(([l, v]) => <div key={l}><div style={{ fontSize: 10.5, color: '#888' }}>{l}</div><div style={{ fontWeight: 600 }}>{String(v)}</div></div>)}</div>
+              {it.specs && Object.keys(it.specs).filter(k => it.specs[k]).length > 0 && <div style={{ marginTop: 10 }}><div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 4 }}>Datasheet</div><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{Object.entries(it.specs).filter(([, v]) => v).map(([k, v]) => <span key={k} style={{ fontSize: 11.5, background: '#fff', border: '1px solid #E5E0D4', borderRadius: 6, padding: '2px 8px' }}><b>{k}</b>: {String(v)}</span>)}</div></div>}
+              {ownBom && <div style={{ marginTop: 10, fontSize: 12.5 }}><b>Standard BOM:</b> Rev {ownBom.rev || 0} · {(ownBom.materials || []).length} lines per {ownBom.outputQty} {ownBom.unit}</div>}
+              {usedIn.length > 0 && <div style={{ marginTop: 6, fontSize: 12.5 }}><b>Used in BOM of:</b> {usedIn.map(b => b.name).join(', ')}</div>}
+            </div>);
+          })()}
+        </React.Fragment>))}
       </div>
 
       {showPrint && (
@@ -6691,13 +6704,13 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
   const lines = (doc.items || []).map((it, i) => ({ it, itemNo: i + 1 })).filter(x => (x.it.name || '').trim() && (parseFloat(x.it.qty) || 0) > 0);
   // master BOMs = BOMs not created for a specific order
   const masters = (boms || []).filter(b => b && !b.orderRef);
-  const findMaster = name => masters.find(b => norm(b.name) === norm(name) || norm(b.outputItem) === norm(name));
+  const findMaster = (name, itemId) => (itemId && masters.find(b => b.itemId === itemId)) || masters.find(b => norm(b.name) === norm(name) || norm(b.outputItem) === norm(name));
   const rmById = {}; (rawMaterials || []).forEach(r => { if (r && r.id) rmById[r.id] = r; });
   const rmFor = m => rmById[m.materialId] || (rawMaterials || []).find(r => norm(r.name) === norm(m.name));
   let poSeq = (productionOrders || []).length;
   const newBoms = [], newOrders = [], need = {};
   lines.forEach(({ it, itemNo }) => {
-    const tpl = findMaster(it.name);
+    const tpl = findMaster(it.name, it.itemId);
     const qty = parseFloat(it.qty) || 0;
     const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust };
     const bom = {
@@ -6706,7 +6719,7 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
       outputQty: tpl ? (parseFloat(tpl.outputQty) || 1) : 1, unit: it.unit || (tpl && tpl.unit) || 'm',
       materials: tpl ? (tpl.materials || []).map(m => ({ ...m })) : [],
       specs: tpl && tpl.specs ? { ...tpl.specs } : {}, partId: tpl ? (tpl.partId || '') : '',
-      templateId: tpl ? tpl.id : '', needsMaterials: !tpl || !(tpl.materials || []).length,
+      templateId: tpl ? tpl.id : '', templateRev: tpl ? (tpl.rev || 0) : '', itemId: it.itemId || (tpl && tpl.itemId) || '', needsMaterials: !tpl || !(tpl.materials || []).length,
       orderRef: ref, bizType, createdAt: Date.now(),
     };
     newBoms.push(bom);
@@ -7715,6 +7728,128 @@ function OrderTrackerView({ data, setView, initialRef = '' }) {
   );
 }
 
+// ─── Products & Standard BOM (Engineering) — spreadsheet-style BOM linked to Item Master by item code ───
+const FG_CATS = ['Finished Good', 'Semi-Finished'];
+function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesigns = [], businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const masters = (boms || []).filter(b => b && !b.orderRef);
+  const products = (items || []).filter(i => FG_CATS.includes(i.category));
+  const comps = (items || []).filter(i => !FG_CATS.includes(i.category) && i.category !== 'Service' && i.category !== 'Capex / Asset');
+  const [q, setQ] = useState('');
+  const [ed, setEd] = useState(null);
+  const blankRow = () => ({ key: Math.random().toString(36).slice(2), itemId: '', code: '', name: '', unit: '', qty: '', wastage: '', remarks: '' });
+  const itemOpt = it => ({ value: it.itemCode || it.name, label: (it.itemCode ? it.itemCode + ' · ' : '') + it.name, sub: [it.category, it.unit].filter(Boolean).join(' · '), it });
+  const fromBom = (b) => (b.materials || []).map(m => { const it = (items || []).find(x => x.id === m.materialId) || (items || []).find(x => _nm(x.name) === _nm(m.name)); return { key: Math.random().toString(36).slice(2), itemId: it ? it.id : '', code: it ? (it.itemCode || '') : '', name: it ? it.name : (m.name || ''), unit: it ? (it.unit || '') : (m.unit || ''), qty: String(m.baseQty ?? m.qty ?? ''), wastage: String(m.wastage ?? ''), remarks: m.remarks || '' }; });
+  const list = masters.filter(b => !q || _nm(b.name).includes(_nm(q)) || _nm(((items || []).find(i => i.id === b.itemId) || {}).itemCode).includes(_nm(q)));
+  function open(b) {
+    const fg = b ? ((items || []).find(i => i.id === b.itemId) || (items || []).find(i => _nm(i.name) === _nm(b.name))) : null;
+    setEd(b ? { id: b.id, itemId: fg ? fg.id : '', product: fg ? (fg.itemCode || fg.name) : b.name, productName: fg ? fg.name : b.name, outputQty: String(b.outputQty || 1), unit: b.unit || (fg && fg.unit) || 'm', lines: [...fromBom(b), blankRow()], rev: b.rev || 0, revHistory: b.revHistory || [], designId: b.designId || '', note: '' }
+      : { id: '', itemId: '', product: '', productName: '', outputQty: '1000', unit: 'm', lines: [blankRow()], rev: 0, revHistory: [], designId: '', note: '' });
+  }
+  const setRow = (k, patch) => setEd(p => { let lines = p.lines.map(r => r.key === k ? { ...r, ...patch } : r); if (lines.length && (lines[lines.length - 1].itemId || lines[lines.length - 1].name)) lines = [...lines, blankRow()]; return { ...p, lines }; });
+  function pickItem(k, it) { setRow(k, { itemId: it.id, code: it.itemCode || '', name: it.name, unit: it.unit || '' }); }
+  function onPaste(e) {
+    const txt = e.clipboardData && e.clipboardData.getData('text'); if (!txt || !/\t|\n/.test(txt)) return;
+    e.preventDefault();
+    const rows = txt.split(/\r?\n/).map(l => l.split('\t')).filter(c => c.some(x => String(x).trim()));
+    const parsed = rows.map(c => { const key = String(c[0] || '').trim(); const it = comps.find(x => _nm(x.itemCode) === _nm(key)) || comps.find(x => _nm(x.name) === _nm(key)); return { key: Math.random().toString(36).slice(2), itemId: it ? it.id : '', code: it ? (it.itemCode || '') : '', name: it ? it.name : key, unit: it ? (it.unit || '') : '', qty: String(c[1] || '').trim(), wastage: String(c[2] || '').trim(), remarks: String(c[3] || '').trim() }; }).filter(r => !/^(item|code|item code|material)$/i.test(r.name));
+    setEd(p => ({ ...p, lines: [...p.lines.filter(r => r.itemId || r.name), ...parsed, blankRow()] }));
+  }
+  function copyFrom(id) { const b = masters.find(x => x.id === id); if (!b) return; if (ed.lines.some(r => r.itemId) && !window.confirm('Replace the current lines with the BOM of ' + b.name + '?')) return; setEd(p => ({ ...p, lines: [...fromBom(b), blankRow()], outputQty: String(b.outputQty || p.outputQty), unit: b.unit || p.unit })); }
+  function fillFromDesign() {
+    const d = (cableDesigns || []).find(x => !x.deleted && ((ed.itemId && x.itemId === ed.itemId) || _nm(x.name) === _nm(ed.productName || ed.product)));
+    if (!d) { alert('No Cable Design with this product name. Save the design in Cable Design Master first.'); return; }
+    const b = masters.find(x => x.designId === d.id); if (!b) { alert('Open the design in Cable Design Master and save it once to generate its calculated quantities.'); return; }
+    setEd(p => ({ ...p, lines: [...fromBom(b), ...p.lines.filter(r => (r.itemId || r.name) && !fromBom(b).some(x => x.itemId && x.itemId === r.itemId)), blankRow()], outputQty: String(b.outputQty || 1000), unit: b.unit || 'm', designId: d.id }));
+  }
+  function save() {
+    const lines = ed.lines.filter(r => r.itemId || (r.name || '').trim());
+    const unlinked = lines.filter(r => !r.itemId);
+    if (!(ed.product || '').trim()) { alert('Select or enter the product.'); return; }
+    if (!lines.length) { alert('Add at least one material line.'); return; }
+    if (unlinked.length) { alert('These lines are not in the Item Master — add them there first so stock, PR and GRN can link:\n\n' + unlinked.map(r => '• ' + r.name).join('\n')); return; }
+    if (lines.some(r => !(parseFloat(r.qty) > 0))) { alert('Every line needs a quantity.'); return; }
+    let fg = (items || []).find(i => i.id === ed.itemId) || products.find(i => _nm(i.itemCode) === _nm(ed.product) || _nm(i.name) === _nm(ed.product));
+    if (!fg) {
+      if (!window.confirm('"' + ed.product + '" is not in the Item Master. Create it as a Finished Good?')) return;
+      fg = { id: 'itm-' + Date.now(), name: ed.product.trim(), unit: ed.unit || 'nos', category: 'Finished Good', itemCode: '', hsn: '', gst: businessInfo.taxRate ?? cc.defaultTaxRate, purchaseRate: 0, saleRate: 0, openingStock: 0, minStock: 0, bizType: currentBizType };
+      setItems(prev => [...(Array.isArray(prev) ? prev : []), fg]);
+    }
+    if (masters.some(b => b.id !== ed.id && (b.itemId === fg.id || _nm(b.name) === _nm(fg.name)))) { alert('A standard BOM already exists for ' + fg.name + '. Open it from the list to revise it.'); return; }
+    const old = masters.find(b => b.id === ed.id);
+    const mats = lines.map(r => { const w = parseFloat(r.wastage) || 0, base = parseFloat(r.qty) || 0; return { materialId: r.itemId, name: r.name, unit: r.unit, baseQty: base, wastage: w, qty: Math.round(base * (1 + w / 100) * 100000) / 100000, remarks: r.remarks || '', src: 'item' }; });
+    const changed = !old || JSON.stringify((old.materials || []).map(m => [m.materialId, m.qty])) !== JSON.stringify(mats.map(m => [m.materialId, m.qty])) || String(old.outputQty) !== String(ed.outputQty);
+    const rev = old ? (changed ? (parseInt(old.rev) || 0) + 1 : (parseInt(old.rev) || 0)) : 0;
+    const hist = [...(ed.revHistory || []), ...(changed ? [{ rev, date: new Date().toISOString().slice(0, 10), note: ed.note || (old ? 'Revised' : 'Created'), lines: mats.length }] : [])];
+    const rec = { ...(old || {}), id: old ? old.id : 'bom-std-' + Date.now(), name: fg.name, outputItem: fg.name, itemId: fg.id, outputQty: parseFloat(ed.outputQty) || 1, unit: ed.unit || fg.unit || 'nos', materials: mats, rev, revHistory: hist, designId: ed.designId || (old && old.designId) || '', bizType: currentBizType, needsMaterials: false, standard: true, updatedAt: Date.now() };
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [...a, rec]; });
+    setEd(null);
+    alert('✅ Standard BOM saved for ' + fg.name + ' — Rev ' + rev + ', ' + mats.length + ' lines per ' + rec.outputQty + ' ' + rec.unit + '.\nWon quotations with this product now create the order BOM, shortage and PR automatically.');
+  }
+  const cell = { padding: '3px 4px', borderBottom: '1px solid #EEE' }, inp = { ...styles.input, margin: 0, padding: '5px 7px', fontSize: 12.5 };
+  if (ed) {
+    const filled = ed.lines.filter(r => r.itemId || r.name);
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Products</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Standard BOM — ' + (ed.productName || ed.product) : 'New product BOM'}</h1>{ed.id ? <span style={{ fontSize: 12, color: '#888' }}>Rev {ed.rev}</span> : null}</div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, marginBottom: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 360 }}>Product (finished good — item code or name)
+            <ComboField value={ed.product} onChange={v => setEd(p => ({ ...p, product: v, itemId: '', productName: v }))} placeholder="Select from Item Master or type a new product" options={products.map(itemOpt)} onPick={o => setEd(p => ({ ...p, itemId: o.it.id, product: o.it.itemCode || o.it.name, productName: o.it.name, unit: p.id ? p.unit : (o.it.unit || p.unit) }))} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 110 }}>Quantities per<input type="number" value={ed.outputQty} onChange={e => setEd(p => ({ ...p, outputQty: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 80 }}>Unit<input value={ed.unit} onChange={e => setEd(p => ({ ...p, unit: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 230 }}>Copy lines from
+            <select value="" onChange={e => copyFrom(e.target.value)} style={{ ...styles.input, margin: 0 }}><option value="">— another product's BOM —</option>{masters.filter(b => b.id !== ed.id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          {_mfgType() === 'wires_cables' && <button onClick={fillFromDesign} style={styles.ghostBtn} title="Copper / compound / armour quantities from the cable design calculation">Fill from Cable Design</button>}
+        </div>
+        <div onPaste={onPaste} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'visible' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['#', 'Item (code / name)', 'Unit', 'Qty', 'Wastage %', 'Net qty', 'Remarks', ''].map((h, i) => <th key={h + i} style={{ padding: '7px 6px', fontSize: 11, color: '#777', textAlign: 'left', borderBottom: '1px solid #EAE6DB', width: [30, '', 70, 100, 90, 100, '', 34][i] || undefined }}>{h}</th>)}</tr></thead>
+            <tbody>{ed.lines.map((r, i) => { const net = (parseFloat(r.qty) || 0) * (1 + (parseFloat(r.wastage) || 0) / 100); return (
+              <tr key={r.key} style={{ background: (r.name && !r.itemId) ? '#FDEEEC' : undefined }}>
+                <td style={{ ...cell, color: '#999', fontSize: 12 }}>{i + 1}</td>
+                <td style={{ ...cell, minWidth: 280 }}><ComboField value={r.itemId ? ((r.code ? r.code + ' · ' : '') + r.name) : r.name} onChange={v => setRow(r.key, { name: v, itemId: '', code: '', unit: '' })} placeholder="Type code or name…" options={comps.map(itemOpt)} onPick={o => pickItem(r.key, o.it)} invalid={!!(r.name && !r.itemId)} /></td>
+                <td style={{ ...cell, fontSize: 12.5, color: '#555' }}>{r.unit}</td>
+                <td style={cell}><input type="number" value={r.qty} onChange={e => setRow(r.key, { qty: e.target.value })} style={inp} /></td>
+                <td style={cell}><input type="number" value={r.wastage} onChange={e => setRow(r.key, { wastage: e.target.value })} style={inp} placeholder="0" /></td>
+                <td style={{ ...cell, fontSize: 12.5, fontWeight: 600 }}>{r.qty ? Math.round(net * 1000) / 1000 : ''}</td>
+                <td style={cell}><input value={r.remarks} onChange={e => setRow(r.key, { remarks: e.target.value })} style={inp} /></td>
+                <td style={cell}>{(r.itemId || r.name) && <button onClick={() => setEd(p => ({ ...p, lines: p.lines.filter(x => x.key !== r.key) }))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 11.5, color: '#888', margin: '6px 0 12px' }}>Pick each item from the Item Master (code or name). A new row opens automatically. You can paste rows from Excel: columns <b>Item code, Qty, Wastage %, Remarks</b>. Red rows are not in the Item Master.</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <input value={ed.note} onChange={e => setEd(p => ({ ...p, note: e.target.value }))} placeholder={ed.id ? 'Revision note (what changed)' : 'Note'} style={{ ...styles.input, margin: 0, flex: 1, minWidth: 260 }} />
+          <span style={{ fontSize: 12.5, color: '#555' }}>{filled.length} line(s)</span>
+          {canEdit && <button onClick={save} style={styles.primaryBtn}>Save standard BOM</button>}
+        </div>
+        {(ed.revHistory || []).length > 0 && <div style={{ marginTop: 14, fontSize: 12, color: '#666' }}><b>Revision history:</b> {(ed.revHistory || []).map(h => 'Rev ' + h.rev + ' · ' + h.date + ' · ' + h.note).join('  |  ')}</div>}
+      </div>
+    );
+  }
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Products & Standard BOM</h1><p style={styles.muted}>One standard BOM per product — every raw material, misc item, fastener and packing, picked from the Item Master. Won quotations use it automatically.</p></div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        {canEdit && <button onClick={() => open(null)} style={styles.primaryBtn}><Plus size={15} /> New product BOM</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product or code…" style={{ ...styles.input, margin: 0, width: 260 }} />
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} product(s) · {products.filter(p => !masters.some(b => b.itemId === p.id || _nm(b.name) === _nm(p.name))).length} finished good(s) without a BOM</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No standard BOMs yet. Click “New product BOM”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Item code', 'Per', 'Lines', 'Rev', 'Updated', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+          <tbody>{list.map(b => { const fg = (items || []).find(i => i.id === b.itemId); return (
+            <tr key={b.id} style={{ borderBottom: '1px solid #F0ECE0', cursor: 'pointer' }} onClick={() => open(b)}>
+              <td style={{ padding: '8px 10px', fontWeight: 600 }}>{b.name}</td><td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 12 }}>{fg ? fg.itemCode || '' : <span style={{ color: '#B5453A', fontFamily: 'inherit' }}>not linked</span>}</td>
+              <td style={{ padding: '8px 10px' }}>{b.outputQty} {b.unit}</td><td style={{ padding: '8px 10px' }}>{(b.materials || []).length}</td><td style={{ padding: '8px 10px' }}>{b.rev || 0}</td>
+              <td style={{ padding: '8px 10px', fontSize: 12, color: '#888' }}>{b.updatedAt ? new Date(b.updatedAt).toISOString().slice(0, 10) : ''}</td>
+              <td style={{ padding: '8px 10px' }}><button onClick={e => { e.stopPropagation(); setEd(null); setTimeout(() => { open(b); setEd(p => ({ ...p, id: '', itemId: '', product: '', productName: '', rev: 0, revHistory: [], note: 'Copied from ' + b.name })); }, 0); }} style={styles.ghostBtn}>Copy as new</button></td>
+            </tr>); })}</tbody></table></div>}
+    </div>
+  );
+}
+
 function MfgNextStepView({ id, setView }) {
   const d = MFG_NEXT[id] || [id, 0, '', []];
   return (
@@ -7785,7 +7920,7 @@ const SECTION_VIEWS = {
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock'],
-  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign', 'productspec'],
+  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign', 'productspec', 'stdbom'],
   planning:    ['ordertracker', 'bom', 'boshortage'],
   maintenance: ['assetregister', 'pmschedules', 'fmworkorders', 'fmspareparts'],
   production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage', 'machinelog', 'metalrecon'],
@@ -7802,7 +7937,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  manufacturing: ['stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -8096,7 +8231,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
                 {isCable ? (<>
                 <SubLabel label="Engineering" />
-                {fc.eng === 'cable' ? <NavBtn id="cabledesign" label="Cable Design Master" icon={Wrench} /> : <NavBtn id="productspec" label="Product Spec Master" icon={Wrench} />}
+                <NavBtn id="stdbom" label="Products & Standard BOM" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
                 <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
                 <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
 
@@ -8496,7 +8631,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* Wires & Cables — process-flow menu */}
           {isCable && (<>
             <Section sectionKey="engineering" label="Engineering">
-              {fc.eng === 'cable' ? <NavBtn id="cabledesign" label="Cable Design Master" icon={Wrench} /> : <NavBtn id="productspec" label="Product Spec Master" icon={Wrench} />}
+              <NavBtn id="stdbom" label="Products & Standard BOM" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
               <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
               <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
             </Section>
@@ -9026,7 +9161,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -9194,18 +9329,13 @@ function DocEditor({ onOrderAction, onTrackOrder, releasedDrums = [], onPickDrum
               {sameDocs.map(d => <option key={d.id} value={d.id}>{d.number} · {d.date}</option>)}
             </select>
           )}
+          {doc.type === 'quotation' && bomMissing.length > 0 && <button onClick={() => onOrderAction && onOrderAction('stdbom', doc)} title={'No standard BOM for: ' + bomMissing.join(', ')} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#FFF4D6', color: '#7A4B00', border: '1px solid #F2D48A', cursor: 'pointer' }}>⚠ Standard BOM missing ({bomMissing.length})</button>}
           {doc.type === 'quotation' && doc.id && onQuoteOutcome && (
             doc.outcome ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 700, background: doc.outcome === 'won' ? '#D6F0E0' : '#FBEAE7', color: doc.outcome === 'won' ? '#1A5C35' : '#B5453A' }}>{doc.outcome === 'won' ? '✓ Won' : '✗ Lost'}{doc.outcomeDate ? ' · ' + doc.outcomeDate : ''}</span>
                 {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
                 {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
-                {doc.mfgLink && onOrderAction && <>
-                  <button onClick={() => onOrderAction('bom', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Open the order BOMs">Order BOMs</button>
-                  <button onClick={() => onOrderAction('recalc', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Recalculate shortage from the order BOMs and raise a PR for what is missing">Shortage → PR</button>
-                  <button onClick={() => onOrderAction('purchasereq', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }} title="Approve the PR and convert it to a PO">PR → PO</button>
-                  <button onClick={() => onOrderAction('productionorders', doc)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>Production</button>
-                </>}
                 {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
                 {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} BOM + production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
               </span>
@@ -15653,7 +15783,7 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
-function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
+function PurchaseRequisitionView({ onAutoPO, purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
   const today = new Date().toISOString().slice(0, 10);
   const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '', make: '', spec: '' });
   const blank = () => ({
@@ -15707,6 +15837,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   function del(id) { if (!window.confirm('Delete this requisition?')) return; setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
   function setStatus(m, status) {
     setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, approvalStatus: status, updatedAt: new Date().toISOString() } : x));
+    if (status === 'approved' && onAutoPO && !m.convertedToPO) onAutoPO(m);
   }
 
   const upd = (patch) => setEditing(e => ({ ...e, ...patch }));
@@ -31961,6 +32092,23 @@ export default function App() {
     if (window.confirm('✅ ' + pr.number + ' raised for ' + plan.toRequest.length + ' short material(s).\n\nOpen Purchase Requisition now to approve it and convert to PO?')) { setActiveDoc(null); setView('purchasereq'); }
   }
 
+  function autoPOfromPR(pr) {
+    const today = new Date().toISOString().slice(0, 10), bType = pr.bizType || sessionContext || 'manufacturing';
+    const lastVendor = (itemId, name) => { const po = [...(documents || [])].filter(d => d.type === 'purchase' && d.customerId && (d.items || []).some(it => (itemId && it.itemId === itemId) || _nm(it.name) === _nm(name))).sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')))[0]; return po ? po.customerId : ''; };
+    const groups = {};
+    (pr.items || []).filter(it => (it.name || '').trim() && parseFloat(it.qty) > 0).forEach(it => { const vid = lastVendor(it.itemId, it.name); (groups[vid] = groups[vid] || []).push(it); });
+    const keys = Object.keys(groups); if (!keys.length) return;
+    if (!window.confirm(pr.number + ' approved. Create ' + keys.length + ' draft PO(s) automatically' + (keys.some(k => !k) ? ' (lines with no previous vendor go into a PO without vendor — select the vendor there)' : ' to the vendors who last supplied these items') + '?')) return;
+    const first = nextDocNumber('purchase', bType, today), bump = (num, k) => num.replace(/(\d+)(?!.*\d)/, m => String(parseInt(m, 10) + k).padStart(m.length, '0'));
+    const docs = keys.map((vid, k) => { const v = (vendors || []).find(x => x.id === vid);
+      return { ...blankDoc('purchase', businessInfo), bizType: bType, number: bump(first, k), date: today, customerId: vid || '', customerSnapshot: v ? { ...v } : null, status: 'draft',
+        items: groups[vid].map(it => { const m = (items || []).find(x => String(x.id) === String(it.itemId)); const base = EMPTY_ITEM_ROW(businessInfo); return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 0, unit: it.uom || (m && m.unit) || '', rate: parseFloat(it.rate) || (m ? (parseFloat(m.purchaseRate ?? m.rate) || 0) : 0), hsn: it.hsn || (m && m.hsn) || '', gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst }; }),
+        orderRef: pr.orderRef || null, linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number }, createdAt: Date.now() }; });
+    setDocuments(prev => [...prev, ...docs]);
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, approvalStatus: 'approved', convertedToPO: true, convertedAt: new Date().toISOString(), poNos: docs.map(d => d.number) } : x));
+    alert('✅ Draft PO(s) created: ' + docs.map(d => d.number + (d.customerSnapshot ? ' (' + d.customerSnapshot.name + ')' : ' (select vendor)')).join(', ') + '\nOpen Documents → Purchase Orders to check rates and approve.');
+  }
+
   function markQuoteOutcome(doc, outcome) {
     const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
     const patch = d => ({ ...d, outcome: outcome || null, outcomeDate });
@@ -32459,6 +32607,7 @@ export default function App() {
           onQuoteOutcome={markQuoteOutcome}
           onTrackOrder={(no) => { setTrackRef(no); setActiveDoc(null); setView('ordertracker'); }}
           onOrderAction={(act, d) => { if (act === 'recalc') { recalcOrderShortage(d); return; } setActiveDoc(null); setView(act); }}
+          bomMissing={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (activeDoc.items || []).filter(it => (it.name || '').trim() && !(boms || []).some(b => !b.orderRef && (b.materials || []).length && ((it.itemId && b.itemId === it.itemId) || _nm(b.name) === _nm(it.name) || _nm(b.outputItem) === _nm(it.name)))).map(it => it.name) : []}
           releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
           onPickDrums={pickDrumsIntoDoc}
           onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
@@ -32809,6 +32958,8 @@ export default function App() {
       case 'items':
         return (
           <ItemsList
+            boms={boms}
+            stockLedger={stockLedger}
             items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
@@ -33424,6 +33575,8 @@ export default function App() {
             payrollRuns={payrollRuns}
           />
         );
+      case 'stdbom':
+        return <StandardBomView boms={boms} setBoms={setBoms} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setItems={setItems} cableDesigns={cableDesigns} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'productspec':
         return (
           <ProductSpecView
@@ -33541,6 +33694,7 @@ export default function App() {
             isMultiBiz={isMultiBiz}
             assets={assets}
             setAssets={setAssets}
+            onAutoPO={autoPOfromPR}
             onConvertToPO={(pr) => {
               const its = (pr.items || []).filter(it => it.name).map(it => {
                 const m = (items || []).find(x => String(x.id) === String(it.itemId));
