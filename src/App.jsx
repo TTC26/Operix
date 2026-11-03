@@ -3518,8 +3518,10 @@ function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], busine
   );
 }
 
-function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [] }) {
-  const [openId, setOpenId] = useState('');
+function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [], onSaveItem, setBusinessInfo }) {
+  const [sel, setSel] = useState(null);
+  const [selKey, setSelKey] = useState(0);
+  const pick = (it) => { setSel(it); setSelKey(k => k + 1); };
   const _stk = computeStock(stockLedger, items);
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
@@ -3603,7 +3605,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
         <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
-        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; const blank = { name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }; if (onSaveItem) pick(blank); else setEditing(blank); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
         <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from an Excel (.xlsx) or CSV file">⬆ Import Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
         {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
         {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
@@ -3614,11 +3616,12 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
         </select>
         <span style={{ fontSize:12, color:'#888' }}>{filtered.length} item{filtered.length!==1?'s':''}</span>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: onSaveItem ? 'minmax(0,1fr) minmax(0,1fr)' : '1fr', gap: 16, alignItems: 'start' }}>
       <div style={{ ...styles.list, marginTop: 0 }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
         {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
         {filtered.map((it) => (<React.Fragment key={it.id}>
-          <div style={{ ...styles.recordRow, cursor: 'pointer', ...(openId === it.id ? { background: '#F5F2EA', borderColor: '#C9A24B' } : {}) }} onClick={() => setOpenId(o => o === it.id ? '' : it.id)}>
+          <div style={{ ...styles.recordRow, cursor: 'pointer', ...(sel && sel.id === it.id ? { background: '#F5F2EA', borderColor: '#C9A24B' } : {}) }} onClick={() => (onSaveItem ? pick(it) : setEditing(it))}>
             <div style={{ flex: 1 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
@@ -3631,21 +3634,26 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
               <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
               <div style={{ fontSize: 11, color: '#888780' }}>Sell: <span style={{ color: '#1A7A3E', fontWeight: 600 }}>{fmt(it.saleRate ?? it.rate ?? 0)}</span></div>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); setEditing(it); }} style={styles.ghostBtn}>Edit</button>
-            <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete ' + it.name + '?')) setItems((is) => is.filter((x) => x.id !== it.id)); }} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onSaveItem ? pick(it) : setEditing(it); }} style={styles.ghostBtn}>Edit</button>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete ' + it.name + '?')) { setItems((is) => is.filter((x) => x.id !== it.id)); if (sel && sel.id === it.id) setSel(null); } }} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
           </div>
-          {openId === it.id && (() => {
-            const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(m => m.materialId === it.id || _nm(m.name) === _nm(it.name)));
-            const ownBom = (boms || []).find(b => !b.orderRef && (b.itemId === it.id || _nm(b.name) === _nm(it.name)));
-            const f = [['Item code', it.itemCode], ['Category / type', it.category], ['Material / type', it.materialType], ['Datasheet category', it.rmCategory], ['Unit', it.unit], ['HSN / SAC', it.hsn], ['Tax %', it.gst], ['Purchase rate', fmt(it.purchaseRate ?? it.rate ?? 0)], ['Sale rate', fmt(it.saleRate ?? it.rate ?? 0)], ['Opening stock', it.openingStock || 0], ['Current stock', _stk[it.id] ? Math.round(_stk[it.id].qty * 1000) / 1000 : (it.openingStock || 0)], ['Min stock', it.minStock || 0]].filter(x => x[1] !== undefined && x[1] !== '');
-            return (<div style={{ margin: '-4px 0 10px', padding: '12px 16px', background: '#FBFAF6', border: '1px solid #EAE6DB', borderTop: 'none', borderRadius: '0 0 10px 10px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px 16px', fontSize: 12.5 }}>{f.map(([l, v]) => <div key={l}><div style={{ fontSize: 10.5, color: '#888' }}>{l}</div><div style={{ fontWeight: 600 }}>{String(v)}</div></div>)}</div>
-              {it.specs && Object.keys(it.specs).filter(k => it.specs[k]).length > 0 && <div style={{ marginTop: 10 }}><div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 4 }}>Datasheet</div><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{Object.entries(it.specs).filter(([, v]) => v).map(([k, v]) => <span key={k} style={{ fontSize: 11.5, background: '#fff', border: '1px solid #E5E0D4', borderRadius: 6, padding: '2px 8px' }}><b>{k}</b>: {String(v)}</span>)}</div></div>}
-              {ownBom && <div style={{ marginTop: 10, fontSize: 12.5 }}><b>Standard BOM:</b> Rev {ownBom.rev || 0} · {(ownBom.materials || []).length} lines per {ownBom.outputQty} {ownBom.unit}</div>}
-              {usedIn.length > 0 && <div style={{ marginTop: 6, fontSize: 12.5 }}><b>Used in BOM of:</b> {usedIn.map(b => b.name).join(', ')}</div>}
+        </React.Fragment>))}
+      </div>
+      {onSaveItem && <div style={{ position: 'sticky', top: 12 }}>
+        {sel ? (<>
+          {sel.id && (() => {
+            const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(m => m.materialId === sel.id || _nm(m.name) === _nm(sel.name)));
+            const ownBom = (boms || []).find(b => !b.orderRef && (b.itemId === sel.id || _nm(b.name) === _nm(sel.name)));
+            const stk = _stk[sel.id] ? Math.round(_stk[sel.id].qty * 1000) / 1000 : (sel.openingStock || 0);
+            return (<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12.5 }}>
+              <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Current stock <b>{stk} {sel.unit || ''}</b></span>
+              {ownBom && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Standard BOM <b>Rev {ownBom.rev || 0}</b> · {(ownBom.materials || []).length} lines</span>}
+              {usedIn.length > 0 && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Used in: <b>{usedIn.map(b => b.name).join(', ')}</b></span>}
             </div>);
           })()}
-        </React.Fragment>))}
+          <ItemModal key={selKey} inline item={sel} businessInfo={businessInfo} items={items} setBusinessInfo={setBusinessInfo} onClose={() => setSel(null)} onSave={(f) => { const saved = onSaveItem(f); setSel(saved || null); setSelKey(k => k + 1); }} />
+        </>) : <div style={{ ...styles.emptyBox, padding: '40px 20px' }}>Select an item on the left to see and edit its details here, or click “Add item”.</div>}
+      </div>}
       </div>
 
       {showPrint && (
@@ -3676,7 +3684,20 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
   );
 }
 
-function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo }) {
+function ItemPanelWrap({ inline, onClose, title, children }) {
+  if (!inline) return <Modal onClose={onClose} title={title}>{children}</Modal>;
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E2DDD5', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: '#1E2A4A', color: '#fff', padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="serif" style={{ fontSize: 18, fontWeight: 700 }}>{title}</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer' }} title="Close">✕</button>
+      </div>
+      <div style={{ padding: '14px 18px', background: '#F8F5EE' }}>{children}</div>
+    </div>
+  );
+}
+
+function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo, inline = false }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', materialType: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -3692,7 +3713,7 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
     set('itemCode', code);
   }
   return (
-    <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
+    <ItemPanelWrap inline={inline} onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
       {/* Item code + category */}
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
@@ -3795,7 +3816,7 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
         </div>
       </div>
       <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save item</button>
-    </Modal>
+    </ItemPanelWrap>
   );
 }
 
@@ -6709,30 +6730,22 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
   const rmFor = m => rmById[m.materialId] || (rawMaterials || []).find(r => norm(r.name) === norm(m.name));
   let poSeq = (productionOrders || []).length;
   const newBoms = [], newOrders = [], need = {};
+  const missing = [];
   lines.forEach(({ it, itemNo }) => {
     const tpl = findMaster(it.name, it.itemId);
     const qty = parseFloat(it.qty) || 0;
     const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust };
-    const bom = {
-      id: 'bom-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
-      name: (it.name || '').trim(), outputItem: (it.name || '').trim(),
-      outputQty: tpl ? (parseFloat(tpl.outputQty) || 1) : 1, unit: it.unit || (tpl && tpl.unit) || 'm',
-      materials: tpl ? (tpl.materials || []).map(m => ({ ...m })) : [],
-      specs: tpl && tpl.specs ? { ...tpl.specs } : {}, partId: tpl ? (tpl.partId || '') : '',
-      templateId: tpl ? tpl.id : '', templateRev: tpl ? (tpl.rev || 0) : '', itemId: it.itemId || (tpl && tpl.itemId) || '', needsMaterials: !tpl || !(tpl.materials || []).length,
-      orderRef: ref, bizType, createdAt: Date.now(),
-    };
-    newBoms.push(bom);
+    if (!tpl || !(tpl.materials || []).length) { missing.push(itemNo + '. ' + (it.name || '').trim()); return; }
     poSeq += 1;
     newOrders.push({
       id: 'po-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
       number: 'PRO/' + (doc.number || 'Q') + '/' + itemNo, batchNumber: (typeof genBatchNumber === 'function' ? genBatchNumber() : 'BN-' + poSeq),
-      bomId: bom.id, quantity: qty, startDate: dt, targetDate: doc.deliveryDate || doc.validUntil || '',
+      bomId: tpl.id, bomRev: tpl.rev || 0, itemId: it.itemId || tpl.itemId || '', quantity: qty, startDate: dt, targetDate: doc.deliveryDate || doc.validUntil || '',
       status: 'planned', notes: 'Auto from won ' + (doc.number || '') + ' · item ' + itemNo + (cust ? ' · ' + cust : ''),
       orderRef: ref, bizType, createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '',
     });
-    const fac = qty / (bom.outputQty || 1);
-    (bom.materials || []).forEach(m => {
+    const fac = qty / (parseFloat(tpl.outputQty) || 1);
+    (tpl.materials || []).forEach(m => {
       const ms = matStock(m, { items, stockMap, rawMaterials }), rm = ms.item ? null : rmFor(m), key = ms.id || norm(m.name);
       const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : '', itemCode: ms.item ? (ms.item.itemCode || '') : '', name: m.name || (ms.item && ms.item.name) || (rm && rm.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || (rm && rm.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : ''), itemNos: [] };
       r.overall += (parseFloat(m.qty) || 0) * fac;
@@ -6753,7 +6766,7 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
       approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
     };
   }
-  return { newBoms, newOrders, report, pr, missingBom: newBoms.filter(b => b.needsMaterials).map(b => b.orderRef.itemNo + '. ' + b.name) };
+  return { newBoms, newOrders, report, pr, missingBom: missing };
 }
 
 // Placeholder for Wires & Cables menus that are being built step by step
@@ -7650,7 +7663,7 @@ function buildOrderStatus(ref, data) {
   const { documents = [], boms = [], productionOrders = [], purchaseReqs = [], grns = [], storeIssues = [], boShortages = [], vouchers = [] } = data;
   const byRef = (x) => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
   const quote = documents.find(d => d.type === 'quotation' && _nm(d.number) === _nm(ref));
-  const oBoms = boms.filter(byRef), orders = productionOrders.filter(byRef), orderNos = orders.map(o => o.number);
+  const orders = productionOrders.filter(byRef), orderNos = orders.map(o => o.number), oBoms = orders.map(o => boms.find(b => b.id === o.bomId)).filter(Boolean);
   const prs = purchaseReqs.filter(byRef);
   const pos = documents.filter(d => d.type === 'purchase' && d.status !== 'deleted' && (byRef(d) || prs.some(p => d.linkedFrom && d.linkedFrom.id === p.id)));
   const g = grns.filter(x => x.status !== 'deleted' && (byRef(x) || pos.some(p => x.poId === p.id)));
@@ -7674,7 +7687,7 @@ function buildOrderStatus(ref, data) {
   const steps = [
     S('quote', 'Sales', 'Quotation', quote ? (quote.status === 'approved' || quote.outcome ? 'done' : 'active') : 'issue', quote ? quote.number + ' · ' + (quote.date || '') + ' · ' + ((quote.customerSnapshot && quote.customerSnapshot.name) || '') + ' · ' + quote.status : 'Quotation not found', 'documents'),
     S('won', 'Sales', 'Contract review · order won', !quote ? 'pending' : quote.outcome === 'won' ? 'done' : quote.outcome === 'lost' ? 'issue' : 'active', !quote ? '' : quote.outcome === 'won' ? 'Won ' + (quote.outcomeDate || '') : quote.outcome === 'lost' ? 'Lost ' + (quote.outcomeDate || '') : 'Waiting for customer decision', 'documents'),
-    S('bom', 'Engineering', 'Design / order BOM', !oBoms.length ? (quote && quote.outcome === 'won' ? 'active' : 'pending') : oBoms.some(b => b.needsMaterials && !(b.materials || []).length) ? 'issue' : 'done', oBoms.length ? oBoms.length + ' BOM(s)' + (oBoms.some(b => b.needsMaterials && !(b.materials || []).length) ? ' · some without materials' : '') : 'Not converted yet', 'bom'),
+    S('bom', 'Engineering', 'Product BOM → production orders', !orders.length ? (quote && quote.outcome === 'won' ? 'active' : 'pending') : 'done', orders.length ? orders.map(o => { const b = boms.find(x => x.id === o.bomId); return (b ? b.name : o.number) + ' (Rev ' + ((b && b.rev) || 0) + ') × ' + o.quantity; }).join(', ') : 'Not converted yet', 'stdbom'),
     S('plan', 'Stores', 'Material planning', !rep ? (oBoms.length ? 'active' : 'pending') : 'done', rep ? (shortLines ? shortLines + ' material(s) short' : 'All materials in stock') : '', 'boshortage'),
     S('pr', 'Purchase', 'Purchase requisition', !shortLines && rep ? 'done' : !prs.length ? (shortLines ? 'active' : 'pending') : prs.every(p => p.convertedToPO) ? 'done' : 'active', prs.length ? prs.map(p => p.number + ' (' + (p.convertedToPO ? 'PO raised' : (p.approvalStatus || 'draft')) + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'purchasereq'),
     S('po', 'Purchase', 'Purchase order', !shortLines && rep ? 'done' : !pos.length ? (prs.length ? 'active' : 'pending') : pos.every(p => p.status === 'approved') ? 'done' : 'active', pos.length ? pos.map(p => p.number + ' (' + p.status + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'documents'),
@@ -7730,7 +7743,26 @@ function OrderTrackerView({ data, setView, initialRef = '' }) {
 
 // ─── Products & Standard BOM (Engineering) — spreadsheet-style BOM linked to Item Master by item code ───
 const FG_CATS = ['Finished Good', 'Semi-Finished'];
-function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesigns = [], businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+// Latest buying rate per item: newest GRN line → newest PO / purchase bill line → item purchase rate
+function latestRates(documents = [], grns = [], items = []) {
+  const map = {}, put = (id, rate, date, src) => { if (!id || !(parseFloat(rate) > 0)) return; const cur = map[id]; if (!cur || String(date || '') > String(cur.date || '')) map[id] = { rate: parseFloat(rate), date: date || '', src }; };
+  (grns || []).forEach(g => (g.lines || []).forEach(l => put(l.itemId, l.rate, g.date, 'GRN ' + (g.number || ''))));
+  (documents || []).filter(d => (d.type === 'purchase' || d.type === 'purchasebill') && d.status !== 'deleted').forEach(d => (d.items || []).forEach(it => { if (!map[it.itemId] || map[it.itemId].src.indexOf('GRN') !== 0) put(it.itemId, it.rate, d.date, (d.type === 'purchase' ? 'PO ' : 'Bill ') + (d.number || '')); }));
+  (items || []).forEach(i => { if (!map[i.id] && parseFloat(i.purchaseRate ?? i.rate) > 0) map[i.id] = { rate: parseFloat(i.purchaseRate ?? i.rate), date: '', src: 'Item Master' }; });
+  return map;
+}
+function bomCosting(b, rates = {}, defaults = {}) {
+  const lines = (b.materials || []).map(m => { const r = rates[m.materialId] || null; const q = parseFloat(m.qty) || 0; return { ...m, rate: r ? r.rate : 0, src: r ? r.src : 'no rate', amount: q * (r ? r.rate : 0) }; });
+  const material = lines.reduce((t, l) => t + l.amount, 0);
+  const convPct = b.convPct !== undefined && b.convPct !== '' ? parseFloat(b.convPct) || 0 : (parseFloat(defaults.convPct) || 15);
+  const marginPct = b.marginPct !== undefined && b.marginPct !== '' ? parseFloat(b.marginPct) || 0 : (parseFloat(defaults.marginPct) || 12);
+  const conv = material * convPct / 100, total = material + conv, per = parseFloat(b.outputQty) || 1;
+  const unitCost = total / per, unitPrice = unitCost * (1 + marginPct / 100), r2 = v => Math.round(v * 100) / 100;
+  return { lines, material: r2(material), convPct, conv: r2(conv), total: r2(total), marginPct, unitCost: r2(unitCost), unitPrice: r2(unitPrice), missingRates: lines.filter(l => !l.rate).map(l => l.name) };
+}
+function StandardBomView({ documents = [], grns = [], boms = [], setBoms, items = [], setItems, cableDesigns = [], businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const rates = latestRates(documents, grns, items), costDef = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct };
+  const fmtR = makeFmt(businessInfo);
   const canEdit = ['admin', 'manager'].includes(userRole);
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
   const masters = (boms || []).filter(b => b && !b.orderRef);
@@ -7744,8 +7776,8 @@ function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesign
   const list = masters.filter(b => !q || _nm(b.name).includes(_nm(q)) || _nm(((items || []).find(i => i.id === b.itemId) || {}).itemCode).includes(_nm(q)));
   function open(b) {
     const fg = b ? ((items || []).find(i => i.id === b.itemId) || (items || []).find(i => _nm(i.name) === _nm(b.name))) : null;
-    setEd(b ? { id: b.id, itemId: fg ? fg.id : '', product: fg ? (fg.itemCode || fg.name) : b.name, productName: fg ? fg.name : b.name, outputQty: String(b.outputQty || 1), unit: b.unit || (fg && fg.unit) || 'm', lines: [...fromBom(b), blankRow()], rev: b.rev || 0, revHistory: b.revHistory || [], designId: b.designId || '', note: '' }
-      : { id: '', itemId: '', product: '', productName: '', outputQty: '1000', unit: 'm', lines: [blankRow()], rev: 0, revHistory: [], designId: '', note: '' });
+    setEd(b ? { id: b.id, itemId: fg ? fg.id : '', product: fg ? (fg.itemCode || fg.name) : b.name, productName: fg ? fg.name : b.name, outputQty: String(b.outputQty || 1), unit: b.unit || (fg && fg.unit) || 'm', lines: [...fromBom(b), blankRow()], rev: b.rev || 0, revHistory: b.revHistory || [], designId: b.designId || '', note: '', convPct: b.convPct ?? '', marginPct: b.marginPct ?? '' }
+      : { id: '', itemId: '', product: '', productName: '', outputQty: '1000', unit: 'm', lines: [blankRow()], rev: 0, revHistory: [], designId: '', note: '', convPct: '', marginPct: '' });
   }
   const setRow = (k, patch) => setEd(p => { let lines = p.lines.map(r => r.key === k ? { ...r, ...patch } : r); if (lines.length && (lines[lines.length - 1].itemId || lines[lines.length - 1].name)) lines = [...lines, blankRow()]; return { ...p, lines }; });
   function pickItem(k, it) { setRow(k, { itemId: it.id, code: it.itemCode || '', name: it.name, unit: it.unit || '' }); }
@@ -7782,17 +7814,20 @@ function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesign
     const changed = !old || JSON.stringify((old.materials || []).map(m => [m.materialId, m.qty])) !== JSON.stringify(mats.map(m => [m.materialId, m.qty])) || String(old.outputQty) !== String(ed.outputQty);
     const rev = old ? (changed ? (parseInt(old.rev) || 0) + 1 : (parseInt(old.rev) || 0)) : 0;
     const hist = [...(ed.revHistory || []), ...(changed ? [{ rev, date: new Date().toISOString().slice(0, 10), note: ed.note || (old ? 'Revised' : 'Created'), lines: mats.length }] : [])];
-    const rec = { ...(old || {}), id: old ? old.id : 'bom-std-' + Date.now(), name: fg.name, outputItem: fg.name, itemId: fg.id, outputQty: parseFloat(ed.outputQty) || 1, unit: ed.unit || fg.unit || 'nos', materials: mats, rev, revHistory: hist, designId: ed.designId || (old && old.designId) || '', bizType: currentBizType, needsMaterials: false, standard: true, updatedAt: Date.now() };
+    const rec0 = { ...(old || {}), id: old ? old.id : 'bom-std-' + Date.now(), name: fg.name, outputItem: fg.name, itemId: fg.id, outputQty: parseFloat(ed.outputQty) || 1, unit: ed.unit || fg.unit || 'nos', materials: mats, rev, revHistory: hist, designId: ed.designId || (old && old.designId) || '', bizType: currentBizType, needsMaterials: false, standard: true, updatedAt: Date.now(), convPct: ed.convPct, marginPct: ed.marginPct };
+    const cost = bomCosting(rec0, rates, costDef);
+    const rec = { ...rec0, costing: { material: cost.material, conv: cost.conv, total: cost.total, unitCost: cost.unitCost, unitPrice: cost.unitPrice, convPct: cost.convPct, marginPct: cost.marginPct, date: new Date().toISOString().slice(0, 10) } };
+    if (cost.unitCost > 0) setItems(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === fg.id ? { ...x, purchaseRate: cost.unitCost, saleRate: cost.unitPrice, marginPct: cost.marginPct, costFromBom: true } : x));
     setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [...a, rec]; });
     setEd(null);
-    alert('✅ Standard BOM saved for ' + fg.name + ' — Rev ' + rev + ', ' + mats.length + ' lines per ' + rec.outputQty + ' ' + rec.unit + '.\nWon quotations with this product now create the order BOM, shortage and PR automatically.');
+    alert('✅ BOM saved for ' + fg.name + (fg.itemCode ? ' (' + fg.itemCode + ')' : '') + ' — Rev ' + rev + ', ' + mats.length + ' lines per ' + rec.outputQty + ' ' + rec.unit + '.\nQuotations with this product code now create production orders, shortage and PR automatically.');
   }
   const cell = { padding: '3px 4px', borderBottom: '1px solid #EEE' }, inp = { ...styles.input, margin: 0, padding: '5px 7px', fontSize: 12.5 };
   if (ed) {
     const filled = ed.lines.filter(r => r.itemId || r.name);
     return (
       <div style={styles.page}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Products</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Standard BOM — ' + (ed.productName || ed.product) : 'New product BOM'}</h1>{ed.id ? <span style={{ fontSize: 12, color: '#888' }}>Rev {ed.rev}</span> : null}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Products</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'BOM — ' + (ed.productName || ed.product) : 'New BOM'}</h1>{ed.id ? <span style={{ fontSize: 12, color: '#888' }}>Rev {ed.rev}</span> : null}</div>
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, marginBottom: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 360 }}>Product (finished good — item code or name)
             <ComboField value={ed.product} onChange={v => setEd(p => ({ ...p, product: v, itemId: '', productName: v }))} placeholder="Select from Item Master or type a new product" options={products.map(itemOpt)} onPick={o => setEd(p => ({ ...p, itemId: o.it.id, product: o.it.itemCode || o.it.name, productName: o.it.name, unit: p.id ? p.unit : (o.it.unit || p.unit) }))} /></label>
@@ -7804,7 +7839,7 @@ function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesign
         </div>
         <div onPaste={onPaste} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'visible' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ background: '#F8F6F0' }}>{['#', 'Item (code / name)', 'Unit', 'Qty', 'Wastage %', 'Net qty', 'Remarks', ''].map((h, i) => <th key={h + i} style={{ padding: '7px 6px', fontSize: 11, color: '#777', textAlign: 'left', borderBottom: '1px solid #EAE6DB', width: [30, '', 70, 100, 90, 100, '', 34][i] || undefined }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['#', 'Item (code / name)', 'Unit', 'Qty', 'Wastage %', 'Net qty', 'Rate', 'Amount', 'Remarks', ''].map((h, i) => <th key={h + i} style={{ padding: '7px 6px', fontSize: 11, color: '#777', textAlign: 'left', borderBottom: '1px solid #EAE6DB', width: [30, '', 60, 90, 80, 90, 90, 100, '', 34][i] || undefined }}>{h}</th>)}</tr></thead>
             <tbody>{ed.lines.map((r, i) => { const net = (parseFloat(r.qty) || 0) * (1 + (parseFloat(r.wastage) || 0) / 100); return (
               <tr key={r.key} style={{ background: (r.name && !r.itemId) ? '#FDEEEC' : undefined }}>
                 <td style={{ ...cell, color: '#999', fontSize: 12 }}>{i + 1}</td>
@@ -7813,11 +7848,24 @@ function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesign
                 <td style={cell}><input type="number" value={r.qty} onChange={e => setRow(r.key, { qty: e.target.value })} style={inp} /></td>
                 <td style={cell}><input type="number" value={r.wastage} onChange={e => setRow(r.key, { wastage: e.target.value })} style={inp} placeholder="0" /></td>
                 <td style={{ ...cell, fontSize: 12.5, fontWeight: 600 }}>{r.qty ? Math.round(net * 1000) / 1000 : ''}</td>
+                <td style={{ ...cell, fontSize: 12, color: rates[r.itemId] ? '#333' : '#B5453A' }} title={rates[r.itemId] ? rates[r.itemId].src + (rates[r.itemId].date ? ' · ' + rates[r.itemId].date : '') : 'No purchase rate yet'}>{r.itemId ? (rates[r.itemId] ? fmtR(rates[r.itemId].rate) : 'no rate') : ''}</td>
+                <td style={{ ...cell, fontSize: 12.5 }}>{r.itemId && r.qty && rates[r.itemId] ? fmtR(net * rates[r.itemId].rate) : ''}</td>
                 <td style={cell}><input value={r.remarks} onChange={e => setRow(r.key, { remarks: e.target.value })} style={inp} /></td>
                 <td style={cell}>{(r.itemId || r.name) && <button onClick={() => setEd(p => ({ ...p, lines: p.lines.filter(x => x.key !== r.key) }))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td>
               </tr>); })}</tbody>
           </table>
         </div>
+        {(() => { const c = bomCosting({ outputQty: ed.outputQty, convPct: ed.convPct, marginPct: ed.marginPct, materials: ed.lines.filter(r => r.itemId && parseFloat(r.qty) > 0).map(r => ({ materialId: r.itemId, name: r.name, qty: (parseFloat(r.qty) || 0) * (1 + (parseFloat(r.wastage) || 0) / 100) })) }, rates, costDef); return (
+          <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 14px', marginTop: 10, display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end', fontSize: 13 }}>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Material cost / {ed.outputQty} {ed.unit}</div><b>{fmtR(c.material)}</b></div>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11, color: '#888', width: 110 }}>Conversion %<input type="number" value={ed.convPct === '' ? '' : ed.convPct} placeholder={String(c.convPct)} onChange={e => setEd(p => ({ ...p, convPct: e.target.value }))} style={{ ...styles.input, margin: 0, padding: '4px 8px' }} /></label>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Total cost</div><b>{fmtR(c.total)}</b></div>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Cost / {ed.unit}</div><b>{fmtR(c.unitCost)}</b></div>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11, color: '#888', width: 100 }}>Margin %<input type="number" value={ed.marginPct === '' ? '' : ed.marginPct} placeholder={String(c.marginPct)} onChange={e => setEd(p => ({ ...p, marginPct: e.target.value }))} style={{ ...styles.input, margin: 0, padding: '4px 8px' }} /></label>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Selling price / {ed.unit}</div><b style={{ color: '#1A7A3E', fontSize: 15 }}>{fmtR(c.unitPrice)}</b></div>
+            {c.missingRates.length > 0 && <div style={{ color: '#B5453A', fontSize: 11.5, flexBasis: '100%' }}>No purchase rate yet for: {c.missingRates.join(', ')} — set it in Item Master or it updates after the first PO / GRN.</div>}
+            <div style={{ color: '#888', fontSize: 11, flexBasis: '100%' }}>Rates = latest GRN / PO / bill rate, else Item Master purchase rate. Saving the BOM updates the product's cost and sale rate — quotations pick this sale rate automatically.</div>
+          </div>); })()}
         <div style={{ fontSize: 11.5, color: '#888', margin: '6px 0 12px' }}>Pick each item from the Item Master (code or name). A new row opens automatically. You can paste rows from Excel: columns <b>Item code, Qty, Wastage %, Remarks</b>. Red rows are not in the Item Master.</div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <input value={ed.note} onChange={e => setEd(p => ({ ...p, note: e.target.value }))} placeholder={ed.id ? 'Revision note (what changed)' : 'Note'} style={{ ...styles.input, margin: 0, flex: 1, minWidth: 260 }} />
@@ -7830,19 +7878,20 @@ function StandardBomView({ boms = [], setBoms, items = [], setItems, cableDesign
   }
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Products & Standard BOM</h1><p style={styles.muted}>One standard BOM per product — every raw material, misc item, fastener and packing, picked from the Item Master. Won quotations use it automatically.</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>BOM</h1><p style={styles.muted}>One BOM per finished product code — every raw material, misc item, fastener and packing, picked from the Item Master. Quotations, production orders, shortage and PR all use this BOM.</p></div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         {canEdit && <button onClick={() => open(null)} style={styles.primaryBtn}><Plus size={15} /> New product BOM</button>}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product or code…" style={{ ...styles.input, margin: 0, width: 260 }} />
+        {canEdit && masters.length > 0 && <button onClick={() => { if (!window.confirm('Recalculate cost and selling price of all ' + masters.length + ' products from the latest purchase rates, and update their sale rate in the Item Master?')) return; const upd = {}; masters.forEach(b => { const c = bomCosting(b, rates, costDef); if (b.itemId && c.unitCost > 0) upd[b.itemId] = c; }); setItems(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] ? { ...x, purchaseRate: upd[x.id].unitCost, saleRate: upd[x.id].unitPrice, marginPct: upd[x.id].marginPct, costFromBom: true } : x)); setBoms(prev => (Array.isArray(prev) ? prev : []).map(b => !b.orderRef && upd[b.itemId] ? { ...b, costing: { material: upd[b.itemId].material, conv: upd[b.itemId].conv, total: upd[b.itemId].total, unitCost: upd[b.itemId].unitCost, unitPrice: upd[b.itemId].unitPrice, convPct: upd[b.itemId].convPct, marginPct: upd[b.itemId].marginPct, date: new Date().toISOString().slice(0, 10) } } : b)); alert('✅ Prices updated for ' + Object.keys(upd).length + ' product(s).'); }} style={styles.ghostBtn}>↻ Update prices from latest rates</button>}
         <span style={{ fontSize: 12, color: '#888' }}>{list.length} product(s) · {products.filter(p => !masters.some(b => b.itemId === p.id || _nm(b.name) === _nm(p.name))).length} finished good(s) without a BOM</span>
       </div>
       {list.length === 0 ? <div style={styles.emptyBox}>No standard BOMs yet. Click “New product BOM”.</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Item code', 'Per', 'Lines', 'Rev', 'Updated', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Item code', 'Per', 'Lines', 'Cost / unit', 'Price / unit', 'Rev', 'Updated', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
           <tbody>{list.map(b => { const fg = (items || []).find(i => i.id === b.itemId); return (
             <tr key={b.id} style={{ borderBottom: '1px solid #F0ECE0', cursor: 'pointer' }} onClick={() => open(b)}>
               <td style={{ padding: '8px 10px', fontWeight: 600 }}>{b.name}</td><td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 12 }}>{fg ? fg.itemCode || '' : <span style={{ color: '#B5453A', fontFamily: 'inherit' }}>not linked</span>}</td>
-              <td style={{ padding: '8px 10px' }}>{b.outputQty} {b.unit}</td><td style={{ padding: '8px 10px' }}>{(b.materials || []).length}</td><td style={{ padding: '8px 10px' }}>{b.rev || 0}</td>
+              <td style={{ padding: '8px 10px' }}>{b.outputQty} {b.unit}</td><td style={{ padding: '8px 10px' }}>{(b.materials || []).length}</td>{(() => { const c = bomCosting(b, rates, costDef); return <><td style={{ padding: '8px 10px' }}>{fmtR(c.unitCost)}{c.missingRates.length ? <span title={'No rate: ' + c.missingRates.join(', ')} style={{ color: '#B5453A' }}> ⚠</span> : null}</td><td style={{ padding: '8px 10px', fontWeight: 600, color: '#1A7A3E' }}>{fmtR(c.unitPrice)}</td></>; })()}<td style={{ padding: '8px 10px' }}>{b.rev || 0}</td>
               <td style={{ padding: '8px 10px', fontSize: 12, color: '#888' }}>{b.updatedAt ? new Date(b.updatedAt).toISOString().slice(0, 10) : ''}</td>
               <td style={{ padding: '8px 10px' }}><button onClick={e => { e.stopPropagation(); setEd(null); setTimeout(() => { open(b); setEd(p => ({ ...p, id: '', itemId: '', product: '', productName: '', rev: 0, revHistory: [], note: 'Copied from ' + b.name })); }, 0); }} style={styles.ghostBtn}>Copy as new</button></td>
             </tr>); })}</tbody></table></div>}
@@ -7866,10 +7915,11 @@ function MfgNextStepView({ id, setView }) {
 
 function orderShortagePlan({ doc, boms = [], items = [], stockMap = {}, rawMaterials = [], purchaseReqs = [], productionOrders = [] }) {
   const ref = doc.number, byRef = x => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
-  const oBoms = (boms || []).filter(byRef), need = {};
+  const oOrders = (productionOrders || []).filter(byRef);
+  const oBoms = oOrders.map(o => { const b = (boms || []).find(x => x.id === o.bomId); return b ? { ...b, orderRef: o.orderRef, _qty: parseFloat(o.quantity) || 0 } : null; }).filter(Boolean), need = {};
   const emptyBoms = oBoms.filter(b => !(b.materials || []).length).map(b => (b.orderRef.itemNo || '') + '. ' + b.name);
   oBoms.forEach(b => {
-    const po = (productionOrders || []).find(o => o.bomId === b.id), qty = po ? (parseFloat(po.quantity) || 0) : (parseFloat(((doc.items || [])[(b.orderRef.itemNo || 1) - 1] || {}).qty) || 0);
+    const qty = b._qty;
     const fac = qty / (parseFloat(b.outputQty) || 1);
     (b.materials || []).forEach(m => {
       const ms = matStock(m, { items, stockMap, rawMaterials }), key = ms.id || _nm(m.name);
@@ -8231,13 +8281,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
                 {isCable ? (<>
                 <SubLabel label="Engineering" />
-                <NavBtn id="stdbom" label="Products & Standard BOM" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
+                <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
                 <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
                 <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
 
                 <SubLabel label="Planning" />
                 <NavBtn id="ordertracker" label="Order Tracker" icon={BarChart2} />
-                <NavBtn id="bom"        label="Order BOMs"          icon={ClipboardList} />
                 <NavBtn id="boshortage" label="BO Shortages → PR"   icon={AlertTriangle} />
 
                 <SubLabel label="Stores" />
@@ -8291,7 +8340,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
 
                 <SubLabel label="Production" />
-                <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+                <NavBtn id="stdbom"           label="BOM (product code)" icon={ClipboardList} />
                 <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
                 <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
 
@@ -8631,13 +8680,12 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* Wires & Cables — process-flow menu */}
           {isCable && (<>
             <Section sectionKey="engineering" label="Engineering">
-              <NavBtn id="stdbom" label="Products & Standard BOM" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
+              <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
               <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
               <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
             </Section>
             <Section sectionKey="planning" label="Planning">
               <NavBtn id="ordertracker" label="Order Tracker" icon={BarChart2} />
-              <NavBtn id="bom"        label="Order BOMs"        icon={ClipboardList} />
               <NavBtn id="boshortage" label="BO Shortages → PR" icon={AlertTriangle} />
             </Section>
             <Section sectionKey="production" label="Production">
@@ -8678,7 +8726,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {showProduction && !isCable && (
             <Section sectionKey="production" label="Production">
               <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
-              <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+              <NavBtn id="stdbom"           label="BOM (product code)" icon={ClipboardList} />
               <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
               <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
             </Section>
@@ -9161,7 +9209,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -9329,7 +9377,16 @@ function DocEditor({ bomMissing = [], onOrderAction, onTrackOrder, releasedDrums
               {sameDocs.map(d => <option key={d.id} value={d.id}>{d.number} · {d.date}</option>)}
             </select>
           )}
-          {doc.type === 'quotation' && bomMissing.length > 0 && <button onClick={() => onOrderAction && onOrderAction('stdbom', doc)} title={'No standard BOM for: ' + bomMissing.join(', ')} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#FFF4D6', color: '#7A4B00', border: '1px solid #F2D48A', cursor: 'pointer' }}>⚠ Standard BOM missing ({bomMissing.length})</button>}
+          {doc.type === 'quotation' && costCheck.length > 0 && (() => { const low = costCheck.filter(c => c.rate < c.cost), minM = Math.min(...costCheck.map(c => c.margin)); return (
+            <details style={{ position: 'relative' }}>
+              <summary style={{ listStyle: 'none', cursor: 'pointer', padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: low.length ? '#FDEEEC' : '#EAF6EE', color: low.length ? '#B5453A' : '#1A7A3E', border: '1px solid ' + (low.length ? '#F2B8AE' : '#B7DFC4') }}>{low.length ? '⚠ ' + low.length + ' below cost' : 'Margin ' + (isFinite(minM) ? minM.toFixed(1) : '—') + '%+'}</summary>
+              <div style={{ position: 'absolute', zIndex: 300, top: '110%', left: 0, background: '#fff', border: '1px solid #E2DDD5', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 10, width: 480 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}><thead><tr>{['Item', 'BOM cost / unit', 'Quoted rate', 'Margin'].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 5px', color: '#888', fontSize: 11 }}>{h}</th>)}</tr></thead>
+                  <tbody>{costCheck.map((c, i) => <tr key={i}><td style={{ padding: '3px 5px' }}>{c.name}</td><td style={{ padding: '3px 5px' }}>{c.cost.toFixed(2)}</td><td style={{ padding: '3px 5px' }}>{c.rate.toFixed(2)}</td><td style={{ padding: '3px 5px', fontWeight: 700, color: c.margin < 0 ? '#B5453A' : c.margin < 8 ? '#E07B00' : '#1A7A3E' }}>{c.margin.toFixed(1)}%</td></tr>)}</tbody></table>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>Cost = BOM materials at latest purchase rates + conversion %. Rate after line discount.</div>
+              </div>
+            </details>); })()}
+          {doc.type === 'quotation' && bomMissing.length > 0 && <button onClick={() => onOrderAction && onOrderAction('stdbom', doc)} title={'No BOM for: ' + bomMissing.join(', ')} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#FFF4D6', color: '#7A4B00', border: '1px solid #F2D48A', cursor: 'pointer' }}>⚠ BOM missing ({bomMissing.length})</button>}
           {doc.type === 'quotation' && doc.id && onQuoteOutcome && (
             doc.outcome ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -9337,7 +9394,7 @@ function DocEditor({ bomMissing = [], onOrderAction, onTrackOrder, releasedDrums
                 {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
                 {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
                 {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
-                {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} BOM + production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
+                {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
               </span>
             ) : (['draft', 'rejected', 'deleted'].includes(doc.status)
               ? <span style={{ fontSize: 11.5, color: '#888' }} title="Submit / approve the quotation first">Won / Lost after approval</span>
@@ -20344,7 +20401,7 @@ function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
         <label style={styles.label}>BOM / Product *</label>
         <select value={form.bomId} onChange={e => set('bomId', e.target.value)} style={styles.input}>
           <option value="">— Select BOM —</option>
-          {boms.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          {boms.filter(b => !b.orderRef || b.id === form.bomId).map(b => <option key={b.id} value={b.id}>{b.name}{b.rev ? ' · Rev ' + b.rev : ''}</option>)}
         </select>
       </div>
       <div style={styles.formGroup}>
@@ -32120,18 +32177,18 @@ export default function App() {
     if (doc.mfgLink) { alert('This quotation is already converted.'); return; }
     const _its = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
     const res = buildMfgFromQuote({ doc, boms, rawMaterials, items: _its, stockMap: computeStock(stockLedger, _its), purchaseReqs, productionOrders, bizType: 'manufacturing' });
-    if (!res.newBoms.length) { alert('No items with a name and quantity to convert.'); return; }
-    const msg = 'Create for ' + doc.number + ':\n\n• ' + res.newBoms.length + ' BOM(s) — one per quotation item\n• ' + res.newOrders.length + ' production order(s)\n• Order shortage report' + (res.pr ? '\n• Draft purchase requisition for ' + res.pr.items.length + ' short material(s)' : '\n• No shortage — stock covers all materials') + (res.missingBom.length ? '\n\nNo master BOM found for:\n' + res.missingBom.join('\n') + '\n(These BOMs are created empty — Engineering must add materials.)' : '') + '\n\nContinue?';
+    if (res.missingBom.length) { alert('BOM not defined for:\n' + res.missingBom.join('\n') + '\n\nOpen BOM, create the BOM for these product codes, then convert again. (Nothing was created.)'); return; }
+    if (!res.newOrders.length) { alert('No items with a product and quantity to convert.'); return; }
+    const msg = 'Convert ' + doc.number + ':\n\n• ' + res.newOrders.length + ' production order(s) — one per quotation item, using its product BOM\n• Material shortage calculated from the BOM' + (res.pr ? '\n• Purchase requisition for ' + res.pr.items.length + ' short material(s)' : '\n• No shortage — stock covers all materials') + '\n\nContinue?';
     if (!window.confirm(msg)) return;
-    setBoms(prev => [...(Array.isArray(prev) ? prev : []), ...res.newBoms]);
     setProductionOrders(prev => [...res.newOrders, ...(Array.isArray(prev) ? prev : [])]);
     setBoShortages(prev => [res.report, ...(Array.isArray(prev) ? prev : [])]);
     if (res.pr) setPurchaseReqs(prev => [res.pr, ...(Array.isArray(prev) ? prev : [])]);
-    const link = { convertedAt: new Date().toISOString(), items: res.newBoms.length, bomIds: res.newBoms.map(b => b.id), orderIds: res.newOrders.map(o => o.id), reportId: res.report.id, prId: res.pr ? res.pr.id : '', prNo: res.pr ? res.pr.number : '' };
+    const link = { convertedAt: new Date().toISOString(), items: res.newOrders.length, bomIds: res.newOrders.map(o => o.bomId), orderIds: res.newOrders.map(o => o.id), reportId: res.report.id, prId: res.pr ? res.pr.id : '', prNo: res.pr ? res.pr.number : '' };
     const patch = d => ({ ...d, mfgLink: link });
     setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
     setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
-    alert('✅ Done. ' + res.newBoms.length + ' BOM(s) and production order(s) created.' + (res.pr ? '\n' + res.pr.number + ' raised for shortages — open Purchase Requisition, approve it, then Convert to PO.' : (res.missingBom.length ? '' : '\nNo PR needed — stock covers all materials.')) + (res.missingBom.length ? '\n\nNo PR yet: these BOMs have no materials (no master BOM / design with the same name):\n' + res.missingBom.join('\n') + '\n\nAdd materials in Order BOMs, then click “Shortage → PR” on this quotation.' : ''));
+    alert('✅ Done. ' + res.newOrders.length + ' production order(s) created from the product BOMs.' + (res.pr ? '\n' + res.pr.number + ' raised for shortages — approve it in Purchase Requisition (draft PO is created automatically).' : '\nNo PR needed — stock covers all materials.'));
   }
 
   function convertDoc(srcDoc, newType) {
@@ -32607,6 +32664,7 @@ export default function App() {
           onQuoteOutcome={markQuoteOutcome}
           onTrackOrder={(no) => { setTrackRef(no); setActiveDoc(null); setView('ordertracker'); }}
           onOrderAction={(act, d) => { if (act === 'recalc') { recalcOrderShortage(d); return; } setActiveDoc(null); setView(act); }}
+          costCheck={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (() => { const rts = latestRates(documents, grns, items), cd = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct }; return (activeDoc.items || []).map(it => { const b = (boms || []).find(x => !x.orderRef && (x.materials || []).length && ((it.itemId && x.itemId === it.itemId) || _nm(x.name) === _nm(it.name))); if (!b) return null; const c = bomCosting(b, rts, cd), rate = (parseFloat(it.rate) || 0) * (1 - (parseFloat(it.discount) || 0) / 100); if (!(c.unitCost > 0)) return null; return { name: it.name, cost: c.unitCost, rate, margin: rate > 0 ? (rate - c.unitCost) / c.unitCost * 100 : -100 }; }).filter(Boolean); })() : []}
           bomMissing={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (activeDoc.items || []).filter(it => (it.name || '').trim() && !(boms || []).some(b => !b.orderRef && (b.materials || []).length && ((it.itemId && b.itemId === it.itemId) || _nm(b.name) === _nm(it.name) || _nm(b.outputItem) === _nm(it.name)))).map(it => it.name) : []}
           releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
           onPickDrums={pickDrumsIntoDoc}
@@ -32764,7 +32822,7 @@ export default function App() {
             setView={setView}
           />
         );
-      case 'bom':
+      case 'bom_legacy':
         return (
           <BOMList
             boms={boms}
@@ -32960,6 +33018,8 @@ export default function App() {
           <ItemsList
             boms={boms}
             stockLedger={stockLedger}
+            setBusinessInfo={setBusinessInfo}
+            onSaveItem={(it) => { const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext }; setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]); return saved; }}
             items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
@@ -33576,7 +33636,8 @@ export default function App() {
           />
         );
       case 'stdbom':
-        return <StandardBomView boms={boms} setBoms={setBoms} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setItems={setItems} cableDesigns={cableDesigns} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
+      case 'bom':
+        return <StandardBomView documents={sessionDocs} grns={grns} boms={boms} setBoms={setBoms} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setItems={setItems} cableDesigns={cableDesigns} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'productspec':
         return (
           <ProductSpecView
