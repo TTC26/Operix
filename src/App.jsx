@@ -70,7 +70,7 @@ const PLAN_MODULES = {
     'hr','payroll','employees','siteattendance',
   ],
   manufacturing: ['stdbom','ordertracker','productspec','routinetest',
-    'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration',
+    'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
@@ -7189,7 +7189,7 @@ function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockL
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
         {[['Waiting for inspection', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Oldest waiting', queue.length ? Math.max(0, Math.floor((today - new Date(queue[0].g.date)) / 86400000)) + ' days' : '—', '#1E2A4A'], ['Inspected this month', doneMon.length, '#1E2A4A'], ['Reject % this month', recM ? (rejM / recM * 100).toFixed(1) + '%' : '—', rejM ? '#B5453A' : '#1A7A3E']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>{pill('queue', 'Waiting (' + queue.length + ')')}{pill('done', 'Inspected')}</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>{pill('queue', 'Waiting (' + queue.length + ')')}{pill('done', 'Inspected')}{pill('rtv', 'Rejections (RTV)' + (rtvOpen ? ' · ' + rtvOpen + ' open' : ''))}</div>
       {tab === 'queue' && (row ? (
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, maxWidth: 900 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -7219,6 +7219,22 @@ function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockL
           <thead><tr>{['GRN', 'Date', 'Vendor', 'Material', 'Received', 'Waiting', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{queue.map(r => { const age = Math.max(0, Math.floor((today - new Date(r.g.date)) / 86400000)); return <tr key={r.g.id + '-' + r.idx}><td style={td}>{r.g.number}</td><td style={td}>{r.g.date}</td><td style={td}>{r.g.vendorName || ''}</td><td style={td}><b>{(r.item && r.item.name) || r.l.itemName}</b>{r.item && r.item.rmCategory ? <span style={{ color: '#888', fontSize: 11.5 }}> · {r.item.rmCategory}</span> : null}</td><td style={td}>{r.l.receivedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td><td style={{ ...td, color: age > 2 ? '#B5453A' : '#666', fontWeight: age > 2 ? 700 : 400 }}>{age} d</td><td style={td}>{canInspect && <button onClick={() => open(r)} style={styles.primaryBtn}>Inspect</button>}</td></tr>; })}</tbody>
         </table></div>))}
+      {tab === 'rtv' && (rtvRows.length === 0 ? <div style={styles.emptyBox}>No rejected material. Rejected quantity from Incoming QA appears here with its return-to-vendor note.</div> :
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['RTV no.', 'GRN / PO', 'Vendor', 'Item', 'Rejected', 'Action', 'Value', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rtvRows.map(r => <tr key={r.g.id + '-' + r.idx}>
+            <td style={td}>{r.l.rtvNo || '—'}</td>
+            <td style={td}>{r.g.number}<div style={{ fontSize: 11, color: '#888' }}>{r.g.poNumber || 'no PO'}{r.g.orderRef && r.g.orderRef.docNo ? ' · ' + r.g.orderRef.docNo : ''}</div></td>
+            <td style={td}>{r.g.vendorName || ''}</td>
+            <td style={td}>{(r.item && r.item.itemCode) ? r.item.itemCode + ' · ' : ''}{(r.item && r.item.name) || r.l.itemName}</td>
+            <td style={td}>{r.l.rejectedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td>
+            <td style={td}>{r.repl ? 'Replacement' : 'Debit note'}</td>
+            <td style={td}>₹{Math.round(r.l.rejValue != null ? r.l.rejValue : (parseFloat(r.l.rejectedQty) || 0) * (parseFloat(r.l.rate) || 0)).toLocaleString('en-IN')}</td>
+            <td style={{ ...td, fontWeight: 700, color: r.closed ? '#1A7A3E' : '#B5453A' }}>{r.closed ? (r.repl ? 'Replaced ✔' : 'Closed ✔') : 'Awaiting replacement' + (r.bal ? ' (' + r.bal.balance + ' open on PO)' : '')}</td>
+            <td style={td}><button onClick={() => setRtvPrint(r)} style={styles.ghostBtn}><Printer size={13} /> RTV</button>
+              {canInspect && !r.closed && r.repl && <button onClick={() => { if (!window.confirm('Vendor will not replace — close with a debit note instead?')) return; setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== r.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === r.idx ? { ...l, rejDisposition: 'debit' } : l) })); }} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Debit note</button>}</td>
+          </tr>)}</tbody>
+        </table></div>)}
       {tab === 'done' && (done.length === 0 ? <div style={styles.emptyBox}>No inspections yet.</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{['Date', 'GRN', 'Vendor', 'Material', 'Lot', 'Accepted', 'Rejected', 'Result', 'By'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
@@ -7243,6 +7259,72 @@ function allDrums(productionOrders = [], boms = []) {
   });
   return out;
 }
+const fgAccepted = d => d && d.testStatus === 'passed' && (!d.awaitStores || d.storesAccepted);
+const fgFor = (d, items = [], boms = [], cableDesigns = []) => {
+  const b = (boms || []).find(x => x.id === d.order.bomId);
+  return (b && b.itemId && (items || []).find(i => i.id === b.itemId)) || (items || []).find(i => i.designId && (cableDesigns || []).some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || (items || []).find(i => _nm(i.name) === _nm(d.product)) || null;
+};
+function StoresAcceptView({ productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, userRole, currentBizType = 'manufacturing', businessInfo = {} }) {
+  const U = mfgCfg().unit;
+  const canAccept = !['sales', 'accounts', 'purchase'].includes(userRole);
+  const iso = new Date().toISOString().slice(0, 10);
+  const drums = allDrums(productionOrders, boms);
+  const queue = drums.filter(d => d.testStatus === 'passed' && d.awaitStores && !d.storesAccepted);
+  const done = drums.filter(d => d.storesAccepted).sort((a, b) => String(b.storesDate || '').localeCompare(String(a.storesDate || '')));
+  const [f, setF] = useState({});
+  const patchDrum = (dr, patch) => setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => o.id !== dr.order.id ? o : ({ ...o, route: { ...o.route, stages: (o.route.stages || []).map((st, si) => si !== dr.stageIdx ? st : ({ ...st, drums: (st.drums || []).map((x, di) => di === dr.drumIdx ? { ...x, ...patch } : x) })) } })));
+  const row = (d) => f[d.key] || { qty: String(d.length || ''), loc: '', by: '' };
+  const setRow = (d, k, v) => setF(p => ({ ...p, [d.key]: { ...row(d), [k]: v } }));
+  function accept(d) {
+    const r = row(d), qty = parseFloat(r.qty) || 0;
+    if (!(qty > 0)) { alert('Enter the quantity physically received.'); return; }
+    if (!String(r.by).trim()) { alert('Enter who received it in stores.'); return; }
+    if (Math.abs(qty - (parseFloat(d.length) || 0)) > 0.001 && !window.confirm('Received ' + qty + ' but QA released ' + d.length + ' ' + U.qtyUnit + '. Accept with this difference? (Use "Back to QA" if the ' + U.name.toLowerCase() + ' must be re-checked.)')) return;
+    const fg = fgFor(d, items, boms, cableDesigns);
+    const fgrnNo = dn('FGRN', drums.filter(x => x.fgrnNo).length + 1);
+    patchDrum(d, { storesAccepted: true, storesDate: iso, storesBy: String(r.by).trim(), storesLoc: r.loc, storesQty: qty, fgrnNo });
+    if (fg && setStockLedger) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), { id: crypto.randomUUID(), date: iso, itemId: fg.id, itemName: fg.name, type: 'in', qty, rate: parseFloat(fg.purchaseRate ?? fg.rate) || 0, sourceType: 'fg-receipt', sourceId: d.order.id + ':' + d.drumNo, sourceNumber: fgrnNo, lotNo: d.drumNo, location: r.loc, note: 'FG receipt ' + fgrnNo + ' · ' + d.order.number + ' · cert ' + (d.certNo || ''), createdAt: Date.now(), bizType: currentBizType }]);
+    alert('✅ ' + fgrnNo + ' — ' + U.name + ' ' + d.drumNo + ' accepted into finished stock' + (fg ? ' (' + fg.name + ', ' + qty + ' ' + U.qtyUnit + ')' : '') + '.' + (fg ? '' : '\n\nNo finished-good item linked — stock not posted. Link the BOM to its product code.') + '\nIt can now be dispatched (after payment clearance).');
+  }
+  function backToQa(d) {
+    const why = window.prompt('Reason for sending ' + U.name.toLowerCase() + ' ' + d.drumNo + ' back to QA (length / damage / marking / label):');
+    if (!why) return;
+    patchDrum(d, { testStatus: 'pending', awaitStores: false, storesReturn: (d.storesReturn || 0) + 1, storesReturnNote: why, storesReturnDate: iso });
+  }
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0', verticalAlign: 'middle' };
+  const inp = { ...styles.input, padding: '5px 8px', fontSize: 12.5, marginBottom: 0 };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Stores acceptance (finished goods)</h1><p style={styles.muted}>QA-passed {U.plural.toLowerCase()} wait here. Stores checks quantity, label and condition, gives a location and accepts — only then it becomes finished stock and can be dispatched. Mismatch → back to QA.</p></div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        {[['Waiting for stores', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Accepted (FG receipts)', done.length, '#1E2A4A'], ['Sent back to QA', drums.filter(d => d.storesReturn).length, '#B5453A']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 16px', minWidth: 150 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: c }}>{v}</div></div>)}
+      </div>
+      {queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. {U.plural} that pass the {mfgCfg().test.title.toLowerCase()} appear here for stores acceptance.</div> :
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, marginBottom: 18 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{[U.name + ' no.', 'Product', 'Order / item', 'QA released', 'Certificate', 'Qty received', 'Location', 'Received by', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{queue.map(d => { const r = row(d); return <tr key={d.key}>
+            <td style={{ ...td, fontWeight: 700 }}>{d.drumNo}</td>
+            <td style={td}>{d.product}</td>
+            <td style={td}>{(d.order.orderRef && d.order.orderRef.docNo) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
+            <td style={td}>{d.length} {U.qtyUnit}<div style={{ fontSize: 11, color: '#888' }}>{d.testDate}</div></td>
+            <td style={td}>{d.certNo || '—'}</td>
+            <td style={td}><input type="number" value={r.qty} onChange={e => setRow(d, 'qty', e.target.value)} style={{ ...inp, width: 90 }} /></td>
+            <td style={td}><input value={r.loc} onChange={e => setRow(d, 'loc', e.target.value)} placeholder="Bay / rack" style={{ ...inp, width: 100 }} /></td>
+            <td style={td}><input value={r.by} onChange={e => setRow(d, 'by', e.target.value)} placeholder="Name" style={{ ...inp, width: 110 }} /></td>
+            <td style={td}>{canAccept && <><button onClick={() => accept(d)} style={styles.primaryBtn}>Accept</button><button onClick={() => backToQa(d)} style={{ ...styles.ghostBtn, marginLeft: 4, color: '#B5453A' }}>Back to QA</button></>}</td>
+          </tr>; })}</tbody>
+        </table></div>}
+      {done.length > 0 && <>
+        <div style={{ fontWeight: 700, color: '#1E2A4A', margin: '6px 0 8px' }}>Finished goods receipts</div>
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['FGRN', 'Date', U.name + ' no.', 'Product', 'Order', 'Qty', 'Location', 'Received by', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{done.slice(0, 200).map(d => <tr key={d.key}><td style={td}>{d.fgrnNo}</td><td style={td}>{d.storesDate}</td><td style={td}>{d.drumNo}</td><td style={td}>{d.product}</td><td style={td}>{(d.order.orderRef && d.order.orderRef.docNo) || d.order.number}</td><td style={td}>{d.storesQty ?? d.length} {U.qtyUnit}</td><td style={td}>{d.storesLoc || '—'}</td><td style={td}>{d.storesBy}</td><td style={td}>{d.dispatched ? 'Dispatched · ' + (d.dispatchedDoc || '') : 'In stock'}</td></tr>)}</tbody>
+        </table></div></>}
+    </div>
+  );
+}
+
 const DRUM_STATUS = { pending: ['Awaiting routine test', '#E07B00'], passed: ['Released (test passed)', '#1A7A3E'], failed: ['Failed — QA hold', '#B5453A'], dispatched: ['Dispatched', '#6B7494'] };
 
 function WIPView({ productionOrders = [], boms = [], setView }) {
@@ -7477,11 +7559,9 @@ function RoutineTestView({ setFatReports, productionOrders = [], setProductionOr
     const test = { ...t, rows: ev.rows, verdict: ev.verdict, date: iso };
     if (ev.verdict === 'passed') {
       const certNo = cur.certNo || dn('TC', certCount);
-      patchDrum(cur, { testStatus: 'passed', testDate: iso, testedBy: t.testedBy, certNo, test });
-      const fg = (ctx.design && (items || []).find(i => i.id === ctx.design.itemId)) || (items || []).find(i => ctx.bom && _nm(i.name) === _nm(ctx.bom.name));
-      if (fg && setStockLedger) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), { id: crypto.randomUUID(), date: iso, itemId: fg.id, itemName: fg.name, type: 'in', qty: parseFloat(cur.length) || 0, rate: parseFloat(fg.purchaseRate ?? fg.rate) || 0, sourceType: 'drum', sourceId: cur.order.id + ':' + cur.drumNo, sourceNumber: cur.order.number, lotNo: cur.drumNo, createdAt: Date.now(), bizType: currentBizType }]);
+      patchDrum(cur, { testStatus: 'passed', testDate: iso, testedBy: t.testedBy, certNo, test, awaitStores: true, storesAccepted: false });
       setCur(null);
-      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.' + (fg ? '\n' + cur.length + ' ' + U.qtyUnit + ' added to finished stock (' + fg.name + ').' : '\n\nNo finished-good item found for this product — save it in ' + (generic ? 'Product Spec Master' : 'Cable Design Master') + ' to create one, so it is added to stock.'));
+      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.\nHanded over to Stores → "Stores acceptance (FG)". It becomes finished stock when Stores accepts it.');
     } else {
       patchDrum(cur, { testStatus: 'failed', testDate: iso, testedBy: t.testedBy, test });
       setCur(null); setReroute({ ...cur, test });
@@ -7777,11 +7857,14 @@ function buildOrderStatus(ref, data) {
   const g = grns.filter(x => x.status !== 'deleted' && (byRef(x) || pos.some(p => x.poId === p.id)));
   const lines = []; g.forEach(x => (x.lines || []).forEach(l => lines.push(l)));
   const qaPend = lines.filter(l => typeof iqaPending === 'function' ? iqaPending(l) : (!l.qaStatus || l.qaStatus === 'inprocess')).length;
-  const qaRej = lines.filter(l => l.qaStatus === 'rejected' || parseFloat(l.rejectedQty) > 0).length;
+  const openBal = pos.reduce((n, p) => n + poBalance(p, grns).filter(b => b.balance > 0).length, 0);
+  const qaRejOpen = lines.filter(l => parseFloat(l.rejectedQty) > 0 && l.rejDisposition !== 'debit').length && openBal;
+  const qaRej = lines.filter(l => parseFloat(l.rejectedQty) > 0).length;
   const sivs = storeIssues.filter(s => s.productionRef && orderNos.includes(s.productionRef));
   const rep = boShortages.find(byRef), shortLines = rep ? (rep.rows || []).filter(r => r.shortage > 0).length : 0;
   const stg = orders.reduce((a, o) => { const st = (o.route && o.route.stages) || []; a.total += st.length; a.done += st.filter(s => s.status === 'done').length; a.hold += st.filter(s => s.status === 'hold').length; return a; }, { total: 0, done: 0, hold: 0 });
   const units = typeof allDrums === 'function' ? allDrums(orders, boms) : [];
+  const awaitSt = units.filter(u => u.testStatus === 'passed' && u.awaitStores && !u.storesAccepted), accSt = units.filter(u => fgAccepted(u));
   const passed = units.filter(u => u.testStatus === 'passed'), failed = units.filter(u => u.testStatus === 'failed' && !u.reworked), pendT = units.filter(u => !u.testStatus || u.testStatus === 'pending');
   const unitKeys = new Set(units.map(u => u.key));
   const deliveries = documents.filter(d => ['delivery', 'packing_list'].includes(d.type) && d.status !== 'deleted' && (byRef(d) || (d.items || []).some(it => unitKeys.has(it.drumKey))));
@@ -7799,11 +7882,12 @@ function buildOrderStatus(ref, data) {
     S('plan', 'Stores', 'Material planning', !rep ? (oBoms.length ? 'active' : 'pending') : 'done', rep ? (shortLines ? shortLines + ' material(s) short' : 'All materials in stock') : '', 'boshortage'),
     S('pr', 'Purchase', 'Purchase requisition', !shortLines && rep ? 'done' : !prs.length ? (shortLines ? 'active' : 'pending') : prs.every(p => p.convertedToPO) ? 'done' : 'active', prs.length ? prs.map(p => p.number + ' (' + (p.convertedToPO ? 'PO raised' : (p.approvalStatus || 'draft')) + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'purchasereq'),
     S('po', 'Purchase', 'Purchase order', !shortLines && rep ? 'done' : !pos.length ? (prs.length ? 'active' : 'pending') : pos.every(p => p.status === 'approved') ? 'done' : 'active', pos.length ? pos.map(p => p.number + ' (' + p.status + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'documents'),
-    S('grn', 'Stores', 'Goods receipt (GRN)', !pos.length ? (rep && !shortLines ? 'done' : 'pending') : !g.length ? 'active' : 'done', g.length ? g.map(x => x.number).join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'grn'),
-    S('iqa', 'Quality', 'Incoming QA', !g.length ? (rep && !shortLines ? 'done' : 'pending') : qaPend ? 'active' : qaRej ? 'issue' : 'done', g.length ? (qaPend ? qaPend + ' line(s) waiting' : 'All inspected') + (qaRej ? ' · ' + qaRej + ' rejected' : '') : '', 'incomingqa'),
+    S('grn', 'Stores', 'Goods receipt (GRN)', !pos.length ? (rep && !shortLines ? 'done' : 'pending') : !g.length ? 'active' : openBal ? 'active' : 'done', g.length ? g.map(x => x.number).join(', ') + (openBal ? ' · ' + openBal + ' PO line(s) still open' + (qaRejOpen ? ' (replacement awaited)' : '') : '') : (rep && !shortLines ? 'Not needed' : ''), 'grn'),
+    S('iqa', 'Quality', 'Incoming QA', !g.length ? (rep && !shortLines ? 'done' : 'pending') : qaPend ? 'active' : qaRejOpen ? 'issue' : 'done', g.length ? (qaPend ? qaPend + ' line(s) waiting' : 'All inspected') + (qaRej ? ' · ' + qaRej + ' rejected → ' + (qaRejOpen ? 'returned, replacement awaited (resumes at GRN)' : 'closed') : '') : '', 'incomingqa'),
     S('issue', 'Stores', 'Issue to production', !orders.length ? 'pending' : sivs.length ? 'done' : 'active', sivs.length ? sivs.map(s => s.sivNumber).join(', ') : 'Not issued yet', 'storeissue'),
     S('prod', 'Production', 'Production (route stages)', !orders.length ? 'pending' : stg.hold ? 'issue' : stg.total && stg.done === stg.total ? 'done' : (stg.done || units.length) ? 'active' : 'pending', orders.length ? orders.length + ' order(s) · stages ' + stg.done + '/' + stg.total + (stg.hold ? ' · ' + stg.hold + ' on hold' : '') : '', 'productionorders'),
     S('test', 'Quality', mfgCfg().test.title + ' & certificate', !units.length ? 'pending' : failed.length ? 'issue' : pendT.length ? 'active' : 'done', units.length ? passed.length + ' passed · ' + pendT.length + ' waiting' + (failed.length ? ' · ' + failed.length + ' failed' : '') + ' (' + U.plural.toLowerCase() + ')' : '', 'routinetest'),
+    S('stacc', 'Stores', 'Stores acceptance (FG receipt)', !passed.length ? 'pending' : awaitSt.length ? 'active' : 'done', passed.length ? accSt.length + ' accepted' + (awaitSt.length ? ' · ' + awaitSt.length + ' waiting for stores' : '') + (units.some(u => u.storesReturn) ? ' · ' + units.filter(u => u.storesReturn).length + ' sent back to QA' : '') : '', 'fgaccept'),
     S('payclr', 'Accounts', 'Payment received → dispatch clearance', !passed.length ? 'pending' : deliveries.some(d => d.dispatchHold && !d.dispatchCleared) ? 'issue' : deliveries.some(d => d.dispatchCleared) ? 'done' : 'active', (() => { const adv = vouchers.filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && _nm(v.linkedDocNo) === _nm(ref)).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0); const held = deliveries.filter(d => d.dispatchHold && !d.dispatchCleared); return (adv ? 'Advance ₹' + Math.round(adv).toLocaleString('en-IN') : 'No advance received') + (held.length ? ' · on hold: ' + held.map(d => d.number + ' (short ₹' + Math.round((d.clearance && d.clearance.short) || 0).toLocaleString('en-IN') + ')').join(', ') : ''); })(), 'vouchers'),
     S('disp', 'Stores', 'Finished goods & dispatch', !passed.length ? 'pending' : dispatched.length >= passed.length && passed.length === units.length ? 'done' : dispatched.length ? 'active' : 'active', passed.length ? dispatched.length + '/' + passed.length + ' dispatched' + (deliveries.length ? ' · ' + deliveries.map(d => d.number).join(', ') : '') : '', 'drumstock'),
     S('inv', 'Accounts', 'Invoice', !invoices.length ? (dispatched.length ? 'active' : 'pending') : 'done', invoices.length ? invoices.map(d => d.number + ' (' + d.status + ')').join(', ') + ' · ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'documents'),
@@ -8078,7 +8162,7 @@ const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
-  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock', 'fgaccept'],
   engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign', 'productspec', 'stdbom'],
   planning:    ['ordertracker', 'bom', 'boshortage'],
   maintenance: ['assetregister', 'pmschedules', 'fmworkorders', 'fmspareparts'],
@@ -8096,7 +8180,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  manufacturing: ['stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -8403,6 +8487,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="rawmaterials" label="Raw Material Lots"    icon={Package} />
                 <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
                 <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />
+                <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />
                 <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}   icon={Package} />
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
@@ -8733,6 +8818,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               <NavBtn id="items" label="Item Master" icon={Package} />
               {isCable && <NavBtn id="rawmaterials" label="Raw Material Lots"     icon={Package} />}
               {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
+              {isCable && <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />}
               {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
@@ -32839,7 +32925,7 @@ export default function App() {
           dispatchCheck={activeDoc && ['delivery', 'packing_list'].includes(activeDoc.type) && (activeDoc.bizType || effectiveBizContext) === 'manufacturing' ? dispatchClearance(activeDoc, { documents, vouchers }) : null}
           costCheck={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (() => { const rts = latestRates(documents, grns, items), cd = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct }; return (activeDoc.items || []).map(it => { const b = (boms || []).find(x => !x.orderRef && (x.materials || []).length && ((it.itemId && x.itemId === it.itemId) || _nm(x.name) === _nm(it.name))); if (!b) return null; const c = bomCosting(b, rts, cd), rate = (parseFloat(it.rate) || 0) * (1 - (parseFloat(it.discount) || 0) / 100); if (!(c.unitCost > 0)) return null; return { name: it.name, cost: c.unitCost, rate, margin: rate > 0 ? (rate - c.unitCost) / c.unitCost * 100 : -100 }; }).filter(Boolean); })() : []}
           bomMissing={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (activeDoc.items || []).filter(it => (it.name || '').trim() && !(boms || []).some(b => !b.orderRef && (b.materials || []).length && ((it.itemId && b.itemId === it.itemId) || _nm(b.name) === _nm(it.name) || _nm(b.outputItem) === _nm(it.name)))).map(it => it.name) : []}
-          releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
+          releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => fgAccepted(d) && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
           onPickDrums={pickDrumsIntoDoc}
           onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
@@ -33844,6 +33930,7 @@ export default function App() {
       case 'incomingqa':
         return (
           <IncomingQAView
+            documents={documents}
             grns={sessionContext ? grns.filter(g => (g.bizType || bizDefault) === sessionContext) : grns}
             setGrns={setGrns}
             items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
@@ -33860,6 +33947,8 @@ export default function App() {
         return <RoutineTestView setFatReports={setFatReports} productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'wip':
         return <WIPView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
+      case 'fgaccept':
+        return <StoresAcceptView productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'drumstock':
         return <DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
       case 'metalrecon':
