@@ -64,12 +64,13 @@ const PLAN_MODULES = {
     'dashboard','documents','customers','vendors','items','staff','settings','notifications',
     'pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport',
     'enquiries','channelpartners','contracts','termslibrary',
-    'stock','bincard','grn','storeissue','stockledger','verticalrack',
+    'stock','bincard','grn','storeissue','stockledger','verticalrack','insights',
   ],
   trading: [
     'hr','payroll','employees','siteattendance',
   ],
-  manufacturing: [
+  manufacturing: ['stdbom','ordertracker','productspec','routinetest',
+    'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
@@ -476,10 +477,18 @@ async function downloadDocPDF(elOrSelector, filename) {
     // html2canvas ignores @media print, so force the print layout via a class during capture
     // (hides editor-only rows/controls, shows the clean columnar print rows).
     el.classList.add('pdf-exporting');
-    let canvas;
+    let canvas, qrEl = null;
     try {
+      // verification QR on downloaded PDFs too
+      try {
+        const txt = (el.innerText || ''); const dm = txt.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
+        const bi0 = (typeof window !== 'undefined' && window.__operixBI) || {};
+        const qh = qrBoxHtml({ c: bi0.name, t: String(filename || 'Document').replace(/\.pdf$/i, '').replace(/[-_]+/g, ' '), n: dm ? dm[0] : '', p: new Date().toISOString().slice(0, 10) }, 100);
+        if (qh) { qrEl = document.createElement('div'); qrEl.style.cssText = 'display:flex;justify-content:flex-end;padding:8px 12px;background:#fff'; qrEl.innerHTML = qh; el.appendChild(qrEl); }
+      } catch (e) {}
       canvas = await window.html2canvas(el, { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
     } finally {
+      if (qrEl && qrEl.parentNode) qrEl.parentNode.removeChild(qrEl);
       el.classList.remove('pdf-exporting');
     }
     const { jsPDF } = window.jspdf;
@@ -852,12 +861,19 @@ function printView(sel, bi, opts) { return printPaginated(sel, bi, null, opts ||
 // Per-print switch for seal & signature (shown only when a seal/signature is uploaded and enabled in Settings).
 function SealToggle({ businessInfo }) {
   const [on, setOn] = React.useState(typeof window === 'undefined' || window.__sealOn !== false);
-  if (!(businessInfo && (businessInfo.seal || businessInfo.signature)) || businessInfo.printSeal === false) return null;
+  const [fit, setFit] = React.useState(typeof window !== 'undefined' && !!window.__fitOn);
+  const hasSeal = !!(businessInfo && (businessInfo.seal || businessInfo.signature)) && businessInfo.printSeal !== false;
   return (
-    <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
-      style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
-      🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
-    </button>
+    <>
+      {hasSeal && <button type="button" className="no-print" onClick={() => { const v = !on; window.__sealOn = v; setOn(v); }}
+        style={{ ...styles.ghostBtn, ...(on ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+        🖋 {on ? 'Seal & Sign ON' : 'Seal & Sign OFF'}
+      </button>}
+      <button type="button" className="no-print" title="If the document spills only slightly onto a 2nd page, shrink it neatly to fit one page" onClick={() => { const v = !fit; window.__fitOn = v; setFit(v); }}
+        style={{ ...styles.ghostBtn, ...(fit ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>
+        📐 {fit ? 'Auto-fit ON' : 'Auto-fit OFF'}
+      </button>
+    </>
   );
 }
 
@@ -1550,10 +1566,12 @@ async function printPaginated(sel, bi, pre, gen) {
     const _plain = blocks.map(b => String(b.h || '')).join(' ').replace(/<[^>]+>/g, ' ');
     const _dm = _plain.match(/\b[A-Z][A-Z0-9]{1,9}(?:\/[A-Z0-9-]{1,14}){2,4}\/\d{1,6}\b/);
     const PGFTXT = (pre && pre.pgf) || (gen && gen.pgf) || [bi && bi.name, _dm ? _dm[0] : (typeof window !== 'undefined' && window.__printDocNo) || '', 'Page {p} of {n}'].filter(Boolean).join(' | ');
+    // Generic verification QR: never adds content or a page — it is stamped into free space at the bottom-right of the last page (if any).
+    let QRH = '';
     if (!blocks.some(b => /Scan to verify/.test(String(b.h || '')))) {
       const _t0 = (pre && pre.title) || (gen && gen.title) || (() => { const m = _plain.replace(/\s+/g, ' ').trim(); const h = blocks.map(b => String(b.h || '')).join(' ').match(/<(?:h[1-3]|div class="zh1")[^>]*>([^<]{3,60})</i); return h ? h[1].trim() : ''; })();
       const _n0 = _dm ? _dm[0] : ((typeof window !== 'undefined' && window.__printDocNo) || '');
-      if (_t0 || _n0) { const _qh = qrBoxHtml({ c: bi && bi.name, t: _t0, n: _n0, p: new Date().toISOString().slice(0, 10) }, 112); if (_qh) blocks.push({ t: '', h: '<div style="display:flex;justify-content:flex-end;margin-top:10px;break-inside:avoid">' + _qh + '</div>' }); }
+      QRH = qrBoxHtml({ c: bi && bi.name, t: _t0 || 'Document', n: _n0, p: new Date().toISOString().slice(0, 10) }, 112);
     }
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
@@ -1566,7 +1584,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
       + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
-      + 'var zst=document.createElement("style");document.head.appendChild(zst);function setZ(z){zst.textContent=z<1?".bd>*{zoom:"+z+"}":"";}'
+      + 'var zst=document.createElement("style");document.head.appendChild(zst);var RSV="";function setZ(z){zst.textContent=(z<1?".bd>*{zoom:"+z+"}":"")+RSV;}'
       + 'function LAY(){out.innerHTML="";TAIL.length=0;np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
@@ -1586,7 +1604,10 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(parts.length-j===1&&j>1)j--;'
       + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
       + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
-      + '}setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}}'
+      + '}setZ(1);LAY();var P0=out.children.length;if(typeof FITONE!=="undefined"&&FITONE&&(!FITSOFT||P0===2)){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}if(FITSOFT&&out.children.length>1){setZ(1);LAY();}}'
+      + 'function qrPlace(){var lb=out.lastElementChild.querySelector(".bd");if(!lb)return false;var le2=lb.lastElementChild;var us2=le2?le2.offsetTop+le2.offsetHeight:0;var fr2=lb.clientHeight-us2;var sz=Math.min(112,fr2-34);if(sz<64)return false;var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}lb.appendChild(qw);return true;}'
+      + 'if(QRH&&out.lastElementChild&&!qrPlace()){var cb=parseFloat(getComputedStyle(out.querySelector(".bd")).bottom)||0;RSV=".bd{bottom:"+(cb+118)+"px !important}";setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zq=0.95;zq>=0.62&&out.children.length>1;zq-=0.03){setZ(zq);LAY();}}'
+      + 'var ls=out.lastElementChild;var qw2=document.createElement("div");qw2.style.cssText="position:absolute;right:5mm;bottom:"+cb+"px;";qw2.innerHTML=QRH;var sv2=qw2.querySelector("svg");if(sv2){sv2.setAttribute("width",104);sv2.setAttribute("height",104);}ls.appendChild(qw2);}'
       + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
       + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
@@ -1616,7 +1637,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
-      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + (pre && pre.fitOne ? 'true' : 'false') + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
+      + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + ((pre && pre.fitOne) || (typeof window !== 'undefined' && window.__fitOn) ? 'true' : 'false') + ';var FITSOFT=' + (pre && pre.fitOne ? 'false' : 'true') + ';var QRH=' + JSON.stringify(QRH) + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
     const ifr = document.createElement('iframe');
@@ -1775,9 +1796,43 @@ const styles = {
 
 // ─── Modal ─────────────────────────────────────────────────────
 
-function Modal({ children, onClose, title, wide }) {
+function DockOverlay({ children, onClose, dock = true, overlayStyle }) {
+  const isWide = typeof window !== 'undefined' && window.innerWidth >= 900;
+  const [left, setLeft] = useState(() => { try { const m = document.querySelector('.app-main'); return m ? Math.max(0, m.getBoundingClientRect().left) : 0; } catch (e) { return 0; } });
+  const dirty = React.useRef(false);
+  const shield = React.useRef(null);
+  const on = dock && isWide;
+  useEffect(() => {
+    if (!on) return;
+    const measure = () => { try { const m = document.querySelector('.app-main'); setLeft(m ? Math.max(0, m.getBoundingClientRect().left) : 0); } catch (e) {} };
+    measure(); window.addEventListener('resize', measure);
+    const prev = document.body.style.paddingBottom; document.body.style.paddingBottom = '52vh';
+    return () => { window.removeEventListener('resize', measure); document.body.style.paddingBottom = prev; };
+  }, [on]);
+  if (!on) return <div style={overlayStyle || styles.modalOverlay} className="no-print" onClick={overlayStyle ? undefined : undefined}>{children}</div>;
+  // Clicking the list above closes this record and opens what was clicked (asks first if there are unsaved edits).
+  const passClick = (e) => {
+    if (!onClose) return;
+    if (dirty.current && !window.confirm('Discard the unsaved changes in the details panel?')) return;
+    const sh = shield.current, x = e.clientX, y = e.clientY;
+    if (sh) sh.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(x, y);
+    if (sh) sh.style.pointerEvents = '';
+    onClose();
+    if (el) setTimeout(() => { try { if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) el.focus(); el.click(); } catch (err) {} }, 40);
+  };
+  return (<>
+    <div ref={shield} onClick={passClick} className="no-print" style={{ position: 'fixed', top: 0, left, right: 0, bottom: '50vh', zIndex: 99, background: 'transparent', cursor: 'default' }} />
+    <div className="dock-panel no-print" onInputCapture={() => { dirty.current = true; }} onChangeCapture={() => { dirty.current = true; }}
+      style={{ position: 'fixed', left, right: 0, bottom: 0, height: '50vh', zIndex: 100, overflowY: 'auto', overscrollBehavior: 'contain', background: '#F7F4EE', borderTop: '3px solid #C9A24B', boxShadow: '0 -8px 28px rgba(18,28,58,0.18)' }}>
+      {children}
+    </div>
+  </>);
+}
+
+function Modal({ children, onClose, title, wide, dock = true }) {
   return (
-    <div style={styles.modalOverlay} className="no-print">
+    <DockOverlay onClose={onClose} dock={dock}>
       <div style={{ ...styles.modal, width: wide ? 680 : 460 }}>
         <div style={styles.modalHeader}>
           <span className="serif" style={{ fontSize: 17, fontWeight: 600, color: '#fff' }}>{title}</span>
@@ -1785,7 +1840,7 @@ function Modal({ children, onClose, title, wide }) {
         </div>
         <div style={{ padding: '20px 24px 24px' }}>{children}</div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -1923,7 +1978,7 @@ function ScanBillModal({ onApply, onClose }) {
   }
 
   return (
-    <Modal title="📷 Scan Bill / Invoice" onClose={onClose} wide>
+    <Modal dock={false} title="📷 Scan Bill / Invoice" onClose={onClose} wide>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         {/* Left: upload */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1992,12 +2047,295 @@ function ScanBillModal({ onApply, onClose }) {
 }
 
 // ─── Activity Select Screen (shown after sign-in if no business type chosen) ───
+// Manufacturing sub-types: each one switches the manufacturing + QA options (Insights) to suit that industry.
+const MFG_TYPES = [
+  { id: 'wires_cables', icon: '🧵', label: 'Wires & Cables', desc: 'Drawing · extrusion · drums · copper reconciliation · IS 694 / 1554 tests' },
+  { id: 'fabrication', icon: '🔩', label: 'Fabrication / Structural', desc: 'Weight · weld & welder qualification · NDT · painting DFT' },
+  { id: 'machining', icon: '⚙️', label: 'Machining / Engineering parts', desc: 'Routing · job work · tool life · first-article & in-process inspection' },
+  { id: 'plastics', icon: '🧪', label: 'Plastics / Moulding', desc: 'Moulds · cycle time · regrind · dimensional & visual checks' },
+  { id: 'panels', icon: '🎛️', label: 'Panels / Electrical assembly', desc: 'BOM with make & rating · wiring check · IR / HV tests · FAT' },
+  { id: 'general', icon: '🏭', label: 'General manufacturing', desc: 'Common BOM, production, stores and QA modules only' },
+];
+const MFG_QA_PACK = {
+  wires_cables: { templates: [
+    ['Incoming copper rod / aluminium rod', ['Rod diameter within tolerance', 'Surface free of cracks / scale', 'Conductivity / resistivity certificate checked', 'Lot and heat number recorded']],
+    ['Incoming PVC / XLPE compound', ['Supplier test certificate available', 'Colour and grade as per order', 'Moisture / packing intact', 'Batch number recorded']],
+    ['In-process: drawing & stranding', ['Wire diameter within tolerance', 'Number of strands and lay length correct', 'Surface finish — no scratches / die marks', 'Conductor resistance spot check']],
+    ['In-process: insulation extrusion', ['Insulation thickness (avg / min)', 'Concentricity', 'Spark test passed', 'Core colour / marking correct']],
+    ['Final routine test — drum wise', ['Conductor resistance at 20 °C', 'Insulation resistance', 'High voltage withstand test', 'Overall diameter and sheath thickness', 'Length marking and drum length verified']],
+  ], instruments: ['Micrometer 0–25 mm', 'Vernier caliper 0–150 mm', 'Resistance bridge', 'Megger 1 kV / 5 kV', 'HV tester (AC)', 'Spark tester', 'Length counter / meter-marking', 'Weighing scale'] },
+  fabrication: { templates: [
+    ['Incoming steel plate / section', ['Mill test certificate (MTC) matched to heat number', 'Grade and thickness verified', 'Surface free of laminations / heavy rust', 'Dimensions and straightness']],
+    ['Fit-up inspection (before welding)', ['Drawing revision correct', 'Joint preparation, gap and root face', 'Alignment / hi-lo within limit', 'Weld consumables and WPS available']],
+    ['Weld visual inspection', ['Weld profile and size as per drawing', 'No undercut / porosity / cracks', 'Spatter and slag cleaned', 'Welder ID stamped / recorded']],
+    ['Dimensional & final inspection', ['Overall dimensions within tolerance', 'Squareness / flatness', 'Hole position and size', 'Mark number and weight recorded']],
+    ['Painting / galvanizing', ['Surface preparation grade (Sa 2½)', 'DFT measured at specified points', 'Colour and finish', 'Adhesion / holiday test where required']],
+  ], instruments: ['Vernier caliper 0–300 mm', 'Steel tape 30 m', 'Weld gauge', 'DFT gauge', 'Ultrasonic thickness gauge', 'Torque wrench', 'Welding machine ammeter / voltmeter'] },
+  machining: { templates: [
+    ['First-article inspection', ['All dimensions vs drawing recorded', 'Surface finish Ra', 'Material certificate / hardness', 'Drawing revision confirmed']],
+    ['In-process inspection', ['Critical dimension checked at set frequency', 'Tool wear / offset checked', 'Burrs removed', 'Operator ID recorded']],
+    ['Final inspection', ['Sample dimensions per sampling plan', 'Visual — no damage / rust', 'Marking and packing correct']],
+  ], instruments: ['Micrometer set', 'Vernier caliper', 'Height gauge', 'Dial gauge', 'Bore gauge', 'Surface roughness tester', 'Hardness tester'] },
+  plastics: { templates: [
+    ['Incoming resin / masterbatch', ['Grade and batch number', 'Moisture / drying done', 'Colour matches approved standard']],
+    ['First-off / mould setup', ['Critical dimensions vs drawing', 'Weight of shot', 'No flash / short shot / sink marks', 'Mould and cavity ID recorded']],
+    ['Final inspection', ['Sample dimensions per sampling plan', 'Visual and colour check', 'Fit / assembly check', 'Packing count correct']],
+  ], instruments: ['Vernier caliper', 'Weighing scale 0.01 g', 'Go / No-go gauges', 'Colour matching booth'] },
+  panels: { templates: [
+    ['Incoming components', ['Make, rating and type as per BOM', 'Test certificate / datasheet', 'Visual damage check']],
+    ['Wiring & assembly check', ['Wiring as per schematic', 'Ferrule / cable marking', 'Torque on terminals', 'Busbar clearance and creepage']],
+    ['Routine tests before dispatch', ['Insulation resistance', 'High voltage test', 'Functional / interlock test', 'Earth continuity', 'Name-plate and drawing handed over']],
+  ], instruments: ['Megger 1 kV / 5 kV', 'HV tester', 'Multimeter', 'Torque screwdriver', 'Clamp meter', 'Earth tester'] },
+  general: { templates: [
+    ['Incoming material inspection', ['Material as per PO', 'Quantity matches DC / invoice', 'Test certificate available', 'Visual damage check']],
+    ['In-process inspection', ['Operation as per work instruction', 'Critical dimension / parameter in limit', 'Operator ID recorded']],
+    ['Final inspection', ['Finished product vs specification', 'Marking and labelling', 'Packing and quantity']],
+  ], instruments: ['Vernier caliper', 'Weighing scale', 'Measuring tape'] },
+};
+
+// Type-wise datasheet fields. Raw material categories (stores / production / QA) and product datasheet (engineering).
+// field = [key, label, placeholder]
+const _std = (extra) => [...extra, ['batchNo', 'Lot / batch / heat no.', ''], ['certNo', 'Test certificate no.', 'Supplier TC / MTC'], ['supplier', 'Approved supplier', '']];
+const RM_SPEC_PACK = {
+  wires_cables: {
+    'Copper rod': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 191 / ASTM B49'], ['grade', 'Grade', 'ETP / Cu-ETP'], ['rodDia', 'Rod diameter (mm)', '8.0'], ['purity', 'Copper purity (% min)', '99.90'], ['conductivity', 'Conductivity (% IACS min)', '100'], ['tensile', 'Tensile strength (MPa)', '220–260'], ['elongation', 'Elongation (% min)', '30'], ['oxygen', 'Oxygen content (ppm)', '≤ 400']]) },
+    'Aluminium rod': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 5484 / ASTM B233'], ['grade', 'Grade', 'EC grade 1350 / 1370'], ['rodDia', 'Rod diameter (mm)', '9.5'], ['conductivity', 'Conductivity (% IACS min)', '61.0'], ['tensile', 'Tensile strength (MPa)', ''], ['elongation', 'Elongation (% min)', ''], ['temper', 'Temper', 'H12 / O']]) },
+    'PVC compound': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 5831'], ['pvcType', 'Type', 'TI1 / TI2 (insulation), ST1 / ST2 (sheath)'], ['grade', 'Grade / code', ''], ['colour', 'Colour', ''], ['density', 'Density (g/cm³)', '1.35–1.45'], ['hardness', 'Hardness (Shore A / D)', ''], ['tempRating', 'Temperature rating (°C)', '70 / 85'], ['tensile', 'Tensile strength (MPa min)', '12.5'], ['elongation', 'Elongation at break (% min)', '125'], ['volRes', 'Volume resistivity (Ω·cm)', ''], ['moisture', 'Moisture / drying needed', '']]) },
+    'XLPE compound': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 7098 / IEC 60502'], ['xlpeType', 'Type', 'Peroxide / Silane / HFFR'], ['grade', 'Grade / code', ''], ['density', 'Density (g/cm³)', '0.92'], ['mfi', 'Melt flow index', ''], ['tempRating', 'Temperature rating (°C)', '90'], ['hotSet', 'Hot-set elongation (% max)', '175'], ['tensile', 'Tensile strength (MPa min)', '12.5'], ['elongation', 'Elongation at break (% min)', '200'], ['storage', 'Storage / shelf life', '']]) },
+    'Armour wire / strip': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 3975'], ['armourType', 'Type', 'GI round wire / GI strip / Al wire'], ['size', 'Diameter / thickness × width (mm)', ''], ['zinc', 'Zinc coating (g/m²)', ''], ['tensile', 'Tensile strength (MPa)', '']]) },
+    'Tape / filler / other': { unit: 'kg', fields: _std([['material', 'Material', 'Polyester tape / paper / PP filler'], ['size', 'Size / thickness', '']]) },
+  },
+  fabrication: {
+    'Steel plate': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 2062'], ['grade', 'Grade', 'E250 BR / E350 / ASTM A36'], ['thickness', 'Thickness (mm)', ''], ['size', 'Plate size (mm)', '1500 × 6000'], ['yield', 'Yield strength (MPa min)', '250'], ['tensile', 'Tensile strength (MPa)', '410'], ['elongation', 'Elongation (% min)', '23'], ['chem', 'Chemistry (C / Mn / S / P)', ''], ['density', 'Density (kg/m³)', '7850']]) },
+    'Structural section / pipe': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 808 / IS 1161 / IS 1239'], ['section', 'Section & size', 'ISMB 200 / ISA 50×50×6 / 100 NB'], ['grade', 'Grade', 'E250 / E350'], ['length', 'Standard length (m)', '12'], ['wtPerM', 'Weight (kg/m)', ''], ['tensile', 'Tensile strength (MPa)', ''], ['yield', 'Yield strength (MPa)', '']]) },
+    'Welding consumable': { unit: 'kg', fields: _std([['consType', 'Type', 'Electrode / MIG wire / flux-cored / SAW wire / flux'], ['aws', 'Classification', 'E7018 / ER70S-6 / E71T-1'], ['standard', 'Standard', 'AWS A5.1 / A5.18'], ['dia', 'Diameter (mm)', '3.15 / 1.2'], ['brand', 'Brand', ''], ['baking', 'Baking / storage', '350 °C, 1 hr; hold 120 °C'], ['shelf', 'Shelf life', '']]) },
+    'Fastener': { unit: 'pcs', fields: _std([['standard', 'Standard', 'IS 1367 / IS 3757'], ['propClass', 'Property class', '8.8 / 10.9'], ['size', 'Size', 'M16 × 60'], ['coating', 'Coating', 'Hot-dip galvanized / plain']]) },
+    'Paint / coating': { unit: 'litre', fields: _std([['system', 'Coating system', 'Epoxy primer + PU top'], ['product', 'Product / code', ''], ['specDft', 'Specified DFT (µm)', ''], ['volSolids', 'Volume solids (%)', ''], ['potLife', 'Pot life', ''], ['shelf', 'Shelf life', ''], ['coverage', 'Theoretical coverage (m²/L)', '']]) },
+    'Gas / other': { unit: 'pcs', fields: _std([['gas', 'Gas / description', 'Argon / CO₂ / oxygen / acetylene'], ['purity', 'Purity', '']]) },
+  },
+  machining: {
+    'Bar / forging stock': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 2062 / IS 1570'], ['grade', 'Grade', 'EN8 / EN24 / SS304 / C45'], ['shape', 'Shape & size', 'Round 50 mm'], ['hardness', 'Hardness', ''], ['tensile', 'Tensile strength (MPa)', ''], ['heatTreat', 'Heat-treat condition', '']]) },
+    'Casting': { unit: 'pcs', fields: _std([['grade', 'Material grade', 'FG260 / SG500-7'], ['pattern', 'Pattern no.', ''], ['hardness', 'Hardness (BHN)', ''], ['ndt', 'NDT / pressure test', '']]) },
+    'Tooling / inserts': { unit: 'pcs', fields: _std([['toolType', 'Tool type', 'Insert / drill / tap'], ['spec', 'Specification', 'CNMG 120408'], ['life', 'Expected tool life', '']]) },
+    'Coolant / consumable': { unit: 'litre', fields: _std([['spec', 'Specification', '']]) },
+  },
+  plastics: {
+    'Resin': { unit: 'kg', fields: _std([['polymer', 'Polymer', 'PP / ABS / PA6 / HDPE'], ['grade', 'Grade', ''], ['mfi', 'MFI (g/10 min)', ''], ['density', 'Density (g/cm³)', ''], ['dryTemp', 'Drying (°C / hrs)', ''], ['moulding', 'Moulding temp range (°C)', ''], ['colour', 'Colour', '']]) },
+    'Masterbatch / additive': { unit: 'kg', fields: _std([['colourCode', 'Colour code', ''], ['ldr', 'Let-down ratio (%)', ''], ['carrier', 'Carrier resin', '']]) },
+    'Insert / packing': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) },
+  },
+  panels: {
+    'Electrical component': { unit: 'pcs', fields: _std([['make', 'Make', 'Siemens / Schneider / L&T'], ['model', 'Model / catalogue no.', ''], ['rating', 'Rating (A / kA / V)', ''], ['standard', 'Standard', 'IEC 60947']]) },
+    'Busbar': { unit: 'kg', fields: _std([['material', 'Material', 'Cu / Al'], ['grade', 'Grade', 'E91E / E-Cu'], ['size', 'Size (mm)', '50 × 10'], ['currentRating', 'Current rating (A)', '']]) },
+    'Enclosure / sheet metal': { unit: 'pcs', fields: _std([['ip', 'IP rating', 'IP54 / IP65'], ['thickness', 'Sheet thickness (mm)', ''], ['size', 'Size (H × W × D)', ''], ['finish', 'Finish', 'RAL 7035 powder coat']]) },
+    'Cable / wire': { unit: 'm', fields: _std([['size', 'Size (mm²)', ''], ['colour', 'Colour', ''], ['standard', 'Standard', 'IS 694']]) },
+  },
+  general: {
+    'Raw material': { unit: 'kg', fields: _std([['standard', 'Grade / standard', ''], ['spec', 'Specification', '']]) },
+  },
+};
+const PART_DATASHEET_PACK = {
+  wires_cables: [['standard', 'Standard', 'IS 694 / IS 1554-1 / IEC 60502-1'], ['voltage', 'Voltage grade', '1.1 kV / 650-1100 V'], ['cores', 'No. of cores', '3'], ['size', 'Conductor size (mm²)', '2.5'], ['conductorMat', 'Conductor material', 'Cu / Al'], ['conductorClass', 'Conductor class', '2 (stranded) / 5 (flexible)'], ['strands', 'Strands × wire dia (mm)', '7 × 0.67'], ['insulation', 'Insulation type & nominal thickness', 'PVC TI1 — 0.7 mm / XLPE — 0.7 mm'], ['sheath', 'Sheath type & thickness', 'PVC ST1 — 1.8 mm'], ['armour', 'Armour', 'GI round wire 1.4 mm / unarmoured'], ['od', 'Overall diameter (mm)', ''], ['maxRes', 'Max conductor resistance @20 °C (Ω/km)', '7.41'], ['irMin', 'Min insulation resistance (MΩ·km)', ''], ['hvTest', 'HV test voltage / duration', '3.5 kV, 5 min'], ['drumLen', 'Standard length / drum (m)', '100 / 500 / 1000'], ['wtPerKm', 'Approx. weight (kg/km)', ''], ['colour', 'Core / sheath colour', '']],
+  fabrication: [['drawingNo', 'Drawing no. / revision', ''], ['markNo', 'Mark no.', ''], ['grade', 'Material grade', 'IS 2062 E250 BR'], ['section', 'Plate thickness / section', ''], ['unitWt', 'Unit weight (kg)', ''], ['wps', 'WPS no.', ''], ['weldCode', 'Weld code / standard', 'AWS D1.1 / IS 816'], ['ndt', 'NDT requirement', 'UT 10% / MPI 100% / DPT'], ['surfacePrep', 'Surface preparation', 'Sa 2½ (ISO 8501)'], ['coating', 'Coating system & DFT', 'Epoxy 2 × 40 µm + PU 40 µm'], ['galv', 'Galvanizing (µm)', '85'], ['tolClass', 'Tolerance class', 'IS 7215'], ['inspection', 'Inspection level', 'TPI / client / in-house']],
+  machining: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material grade', 'EN8'], ['hardness', 'Hardness required', ''], ['ra', 'Surface finish Ra (µm)', ''], ['critTol', 'Critical tolerances', ''], ['heatTreat', 'Heat treatment', ''], ['routing', 'Operation sequence', 'Turn → mill → drill → grind'], ['gauges', 'Gauges required', ''], ['cycleTime', 'Cycle time (min)', '']],
+  plastics: [['drawingNo', 'Drawing no. / revision', ''], ['resin', 'Resin & grade', 'PP homopolymer'], ['mouldNo', 'Mould no.', ''], ['cavities', 'No. of cavities', ''], ['shotWt', 'Shot weight (g)', ''], ['cycleTime', 'Cycle time (s)', ''], ['shrink', 'Shrinkage (%)', ''], ['colour', 'Colour / code', '']],
+  panels: [['standard', 'Standard', 'IEC 61439'], ['voltage', 'Rated voltage', '415 V'], ['current', 'Rated current (A)', ''], ['faultLevel', 'Fault level (kA, 1 s)', ''], ['ip', 'IP rating', 'IP54'], ['form', 'Form of separation', 'Form 2b'], ['busbar', 'Busbar (material × size)', ''], ['makes', 'Approved makes', '']],
+  general: [['standard', 'Standard / specification', ''], ['testReq', 'Test requirement', '']],
+};
+Object.keys(RM_SPEC_PACK).forEach(k => {
+  if (k === 'wires_cables' && !RM_SPEC_PACK[k]['Packing / drums']) RM_SPEC_PACK[k]['Packing / drums'] = { unit: 'pcs', fields: _std([['drumSize', 'Drum size / type', 'Wooden 900 mm / steel'], ['returnable', 'Returnable?', 'Yes / No']]) };
+});
+const _mfgType = () => { try { return (window.__operixBI || {}).mfgType || ''; } catch (e) { return ''; } };
+
+// ── All manufacturing types: process routes + extra packs (merged into the base packs) ──
+const MFG_TYPES_ALL = [
+  { id: 'wires_cables', icon: '🧵', label: 'Wires & Cables', desc: 'Drawing · stranding · extrusion · armouring · drums · IS 694 / 1554' },
+  { id: 'fabrication', icon: '🔩', label: 'Fabrication / Structural', desc: 'Cutting · fit-up · welding · NDT · blasting · painting · mark-wise dispatch' },
+  { id: 'machining', icon: '⚙️', label: 'Machining / Engineering parts', desc: 'Turning · milling · grinding · tool life · first-article inspection' },
+  { id: 'sheetmetal', icon: '📐', label: 'Sheet metal / Press shop', desc: 'Shearing · punching / laser · bending · welding · finishing' },
+  { id: 'foundry', icon: '🔥', label: 'Foundry / Casting / Forging', desc: 'Pattern · melting · moulding · pouring · fettling · NDT' },
+  { id: 'plastics', icon: '🧪', label: 'Plastics / Moulding', desc: 'Drying · moulding · deflashing · assembly · mould life' },
+  { id: 'rubber_pack', icon: '🛞', label: 'Rubber / Packaging', desc: 'Mixing · moulding / converting · curing · printing · packing' },
+  { id: 'panels', icon: '🎛️', label: 'Panels / Electrical assembly', desc: 'Sheet metal · busbar · wiring · IR / HV tests · FAT' },
+  { id: 'electronics_pcb', icon: '🔌', label: 'Electronics / PCB assembly', desc: 'SMT · reflow · AOI · testing · conformal coating' },
+  { id: 'food', icon: '🍲', label: 'Food & Beverage', desc: 'Batch · FIFO / expiry · processing · filling · FSSAI / HACCP' },
+  { id: 'pharma_chem', icon: '💊', label: 'Pharma / Chemicals', desc: 'Dispensing · mixing · reaction · filling · QC release · batch records' },
+  { id: 'textile', icon: '🧶', label: 'Textile / Garment', desc: 'Spinning / weaving · dyeing · cutting · stitching · finishing' },
+  { id: 'wood', icon: '🪵', label: 'Wood / Furniture', desc: 'Cutting · machining · assembly · finishing · packing' },
+  { id: 'building', icon: '🧱', label: 'Building materials (cement / tiles / blocks)', desc: 'Batching · casting / pressing · curing · testing · dispatch' },
+  { id: 'printing', icon: '🖨️', label: 'Printing', desc: 'Pre-press · printing · finishing · binding · packing' },
+  { id: 'general', icon: '🏭', label: 'General manufacturing', desc: 'Common BOM, production, stores and QA modules only' },
+];
+// stage: [name, extra fields [[key,label,placeholder]], QA check points]
+const S = (name, extra, qa) => ({ name, extra: extra || [], qa: qa || [] });
+const MFG_ROUTES = {
+  wires_cables: [
+    S('Rod breakdown / Drawing', [['dieSize', 'Die size (mm)', ''], ['wireDia', 'Wire dia out (mm)', ''], ['lubricant', 'Lubricant / emulsion', '']], ['Wire diameter within tolerance', 'Surface free of scratches / die marks', 'No breaks / joints beyond limit']),
+    S('Annealing', [['temp', 'Temperature (°C)', ''], ['atmosphere', 'Atmosphere / steam', '']], ['Elongation / softness acceptable', 'No oxidation / discolouration']),
+    S('Stranding / Bunching', [['strands', 'No. of strands × dia', '7 × 0.67'], ['lay', 'Lay length (mm)', ''], ['dir', 'Lay direction', 'Left / Right'], ['bobbin', 'Bobbin / drum no.', '']], ['Number of strands correct', 'Lay length within tolerance', 'Conductor diameter and compaction', 'Conductor resistance spot check']),
+    S('Insulation extrusion', [['compound', 'Compound / lot', ''], ['insThk', 'Insulation thickness avg / min (mm)', ''], ['lineSpeed', 'Line speed (m/min)', ''], ['colour', 'Core colour', ''], ['spark', 'Spark test kV', '']], ['Insulation thickness (avg / min)', 'Concentricity', 'Spark test passed', 'Core colour / marking']),
+    S('Laying-up / Cabling', [['cores', 'No. of cores', ''], ['lay', 'Lay length (mm)', ''], ['filler', 'Filler / binder tape', '']], ['Core identification sequence', 'Lay length within tolerance', 'Filler and binder tape applied']),
+    S('Bedding & Armouring', [['armour', 'Armour type & size', 'GI round wire 1.4 mm'], ['coverage', 'Coverage (%)', ''], ['zinc', 'Armour lot', '']], ['Armour wire count & diameter', 'Coverage ≥ spec', 'Bedding thickness']),
+    S('Sheathing', [['sheathCompound', 'Sheath compound / lot', ''], ['sheathThk', 'Sheath thickness avg / min (mm)', ''], ['od', 'Overall diameter (mm)', ''], ['marking', 'Printing / embossing text', '']], ['Sheath thickness', 'Overall diameter', 'Marking legible, length marking correct']),
+    S('Drumming & Final test', [['drumNo', 'Drum no.', ''], ['length', 'Length (m)', ''], ['gross', 'Gross wt (kg)', ''], ['tare', 'Drum tare (kg)', ''], ['res', 'Conductor resistance (Ω/km @20°C)', ''], ['ir', 'Insulation resistance (MΩ·km)', ''], ['hv', 'HV test (kV, time)', '']], ['Conductor resistance within limit', 'Insulation resistance ≥ spec', 'HV withstand passed', 'Length & drum label verified']),
+  ],
+  fabrication: [
+    S('Material receipt & marking', [['heatNo', 'Heat no.', ''], ['mtcNo', 'MTC no.', ''], ['grade', 'Grade', '']], ['MTC matches heat number & grade', 'Thickness / section verified', 'Material traceability marking transferred']),
+    S('Cutting / Profiling', [['method', 'Method', 'Gas / plasma / laser / shear'], ['cutList', 'Cutting list ref', ''], ['offcut', 'Offcut recorded (kg)', '']], ['Dimensions as per cutting list', 'Edge quality / no dross']),
+    S('Fit-up', [['drawing', 'Drawing / revision', ''], ['mark', 'Mark no.', ''], ['wps', 'WPS no.', '']], ['Drawing revision correct', 'Joint gap / root face / alignment', 'Tack welds by qualified welder']),
+    S('Welding', [['welder', 'Welder ID', ''], ['process', 'Process', 'SMAW / GMAW / SAW'], ['consumable', 'Consumable & batch', ''], ['preheat', 'Preheat / interpass (°C)', '']], ['Weld visual — profile, size, no undercut / porosity', 'Spatter and slag removed', 'Welder ID recorded']),
+    S('NDT', [['method', 'Method', 'UT / RT / MPI / DPT'], ['extent', 'Extent (%)', ''], ['report', 'Report no.', '']], ['NDT accepted per code', 'Repairs re-tested']),
+    S('Blasting & Painting / Galvanizing', [['prep', 'Surface prep grade', 'Sa 2½'], ['system', 'Coating system', ''], ['dft', 'DFT avg (µm)', ''], ['batch', 'Paint batch', '']], ['Surface preparation grade', 'DFT average ≥ spec, none < 80%', 'Finish and colour']),
+    S('Final inspection & Dispatch', [['weight', 'Weight (kg)', ''], ['dispatchTo', 'Dispatch / erection site', '']], ['Overall dimensions & squareness', 'Mark no. stencilled', 'Documentation dossier (MTC, WPS, NDT, DFT) complete']),
+  ],
+  machining: [
+    S('Cutting / Sawing', [['stock', 'Bar / blank size', '']], ['Length / blank size']),
+    S('Turning / CNC', [['program', 'Program no. / offset', ''], ['tool', 'Tool / insert', ''], ['cycle', 'Cycle time (min)', '']], ['First-article dimensions', 'Critical dimension at set frequency', 'Surface finish Ra']),
+    S('Milling / Drilling', [['fixture', 'Fixture no.', ''], ['tool', 'Tool', ''], ['cycle', 'Cycle time (min)', '']], ['Hole position and size', 'Burrs removed']),
+    S('Heat treatment', [['process', 'Process', 'Hardening / carburising'], ['temp', 'Temperature (°C)', ''], ['hardness', 'Hardness achieved', '']], ['Hardness within range', 'No distortion / cracks']),
+    S('Grinding / Finishing', [['ra', 'Ra achieved (µm)', '']], ['Final dimensions within tolerance', 'Surface finish']),
+    S('Final inspection & Packing', [['gauge', 'Gauge / CMM report no.', '']], ['Sample inspection per plan', 'Marking and packing']),
+  ],
+  sheetmetal: [
+    S('Shearing / Laser / Punching', [['sheet', 'Sheet thickness & grade', ''], ['program', 'Nesting / program', ''], ['utilisation', 'Sheet utilisation (%)', '']], ['Blank dimensions', 'Burr height']),
+    S('Bending / Forming', [['die', 'Die / punch', ''], ['angle', 'Angle achieved (°)', '']], ['Bend angle and flange length', 'No cracking']),
+    S('Welding / Assembly', [['welder', 'Welder ID', ''], ['process', 'Process', 'MIG / TIG / spot']], ['Weld visual', 'Assembly dimensions']),
+    S('Surface finish / Powder coat', [['pretreat', 'Pre-treatment', ''], ['dft', 'DFT (µm)', ''], ['cure', 'Cure temp / time', '']], ['Coating thickness', 'Adhesion / appearance']),
+    S('Final inspection & Packing', [], ['Dimensions and flatness', 'Packing without damage']),
+  ],
+  foundry: [
+    S('Pattern & Moulding', [['pattern', 'Pattern no.', ''], ['sand', 'Sand properties / mix', '']], ['Mould hardness / permeability', 'Core setting']),
+    S('Melting', [['furnace', 'Furnace / heat no.', ''], ['charge', 'Charge mix', ''], ['spectro', 'Spectro analysis ok?', '']], ['Chemistry within grade', 'Pouring temperature']),
+    S('Pouring', [['pourTemp', 'Pouring temp (°C)', ''], ['castWt', 'Poured weight (kg)', '']], ['Pouring within time', 'Test bar / coupon cast']),
+    S('Knock-out / Fettling', [['yield', 'Casting yield (%)', ''], ['rejected', 'Rejected nos.', '']], ['Visual — no cold shut / porosity', 'Dimensions']),
+    S('Heat treatment / NDT', [['ht', 'Heat treatment', ''], ['ndt', 'NDT method & result', '']], ['Mechanical properties on test bar', 'NDT accepted']),
+    S('Machining & Dispatch', [], ['Machined dimensions', 'Final inspection']),
+  ],
+  plastics: [
+    S('Material drying', [['resin', 'Resin / lot', ''], ['dryTemp', 'Temp (°C) / time (h)', '']], ['Moisture within limit']),
+    S('Moulding', [['mould', 'Mould no. / cavity', ''], ['machine', 'Machine / tonnage', ''], ['cycle', 'Cycle time (s)', ''], ['shots', 'Shots', ''], ['shotWt', 'Shot weight (g)', '']], ['First-off dimensions', 'No flash / short shot / sink marks', 'Colour match']),
+    S('Deflashing / Trimming', [], ['Gate vestige / flash removed']),
+    S('Assembly / Printing', [], ['Fit / function check', 'Print legible']),
+    S('Final inspection & Packing', [['packQty', 'Pack qty', '']], ['Sample per plan', 'Packing count correct']),
+  ],
+  rubber_pack: [
+    S('Mixing / Compounding', [['compound', 'Compound / batch', ''], ['mooney', 'Mooney / rheometer', '']], ['Rheometer within limits']),
+    S('Moulding / Converting / Printing', [['mould', 'Mould / die / plate', ''], ['cycle', 'Cycle time', ''], ['colours', 'Colours / registration', '']], ['Dimensions / print registration', 'Visual defects']),
+    S('Curing / Lamination / Finishing', [['temp', 'Temp / pressure / time', '']], ['Hardness / bond strength', 'Cure complete']),
+    S('Final inspection & Packing', [], ['Sample inspection', 'Labelling and packing']),
+  ],
+  panels: [
+    S('Sheet metal & Powder coat', [['enclosure', 'Enclosure ref', ''], ['dft', 'Coat DFT (µm)', '']], ['Enclosure dimensions', 'Coating thickness / finish']),
+    S('Busbar fabrication', [['material', 'Material & size', ''], ['rating', 'Current rating (A)', '']], ['Busbar size and bend', 'Clearance / creepage']),
+    S('Component mounting & Wiring', [['wiringBy', 'Wired by', ''], ['drawing', 'Schematic / revision', '']], ['Components per BOM (make, rating)', 'Wiring per schematic, ferrules', 'Terminal torque']),
+    S('Routine testing', [['ir', 'IR (MΩ)', ''], ['hv', 'HV test (kV, 1 min)', ''], ['func', 'Functional / interlock ok?', ''], ['earth', 'Earth continuity (Ω)', '']], ['Insulation resistance', 'HV withstand', 'Interlock / function test', 'Earth continuity']),
+    S('FAT & Dispatch', [['fatRef', 'FAT report ref', '']], ['Name-plate and drawings', 'Customer witness sign-off']),
+  ],
+  electronics_pcb: [
+    S('Incoming / Kitting', [['kit', 'Kit / BOM rev', '']], ['Components as per BOM', 'MSL / moisture control']),
+    S('SMT print & placement', [['paste', 'Solder paste lot', ''], ['program', 'Pick & place program', '']], ['Paste print inspection (SPI)', 'Placement accuracy']),
+    S('Reflow', [['profile', 'Reflow profile', '']], ['Profile within window', 'AOI — no bridging / tombstone']),
+    S('THT / Wave / Hand solder', [], ['Joint quality per IPC-A-610']),
+    S('Testing (ICT / FCT)', [['fixture', 'Test fixture', ''], ['result', 'Result / report', '']], ['ICT passed', 'Functional test passed']),
+    S('Conformal coat & Packing', [], ['Coating coverage', 'ESD packing']),
+  ],
+  food: [
+    S('Receiving & Storage', [['supplier', 'Supplier / lot', ''], ['expiry', 'Expiry / best-before', ''], ['temp', 'Receiving temp (°C)', '']], ['Quality / organoleptic check', 'Temperature and packaging intact', 'FIFO label applied']),
+    S('Processing / Cooking', [['batch', 'Batch no.', ''], ['temp', 'Process temp (°C)', ''], ['time', 'Time (min)', '']], ['Critical limit (CCP) met', 'Metal detection / sieve if applicable']),
+    S('Cooling / Holding', [['coolTemp', 'Core temp (°C)', '']], ['Within temperature limit']),
+    S('Filling / Packing', [['lineNo', 'Line', ''], ['netWt', 'Net weight (g)', ''], ['mfgDate', 'Mfg date', ''], ['expiry', 'Expiry', '']], ['Net content / seal integrity', 'Label — FSSAI no., batch, MRP, dates']),
+    S('QC release & Dispatch', [['micro', 'Micro / chemical result', '']], ['Lab result within spec', 'Retention sample kept']),
+  ],
+  pharma_chem: [
+    S('Dispensing', [['material', 'Material / AR no.', ''], ['weighed', 'Weighed qty', ''], ['checkedBy', 'Checked by', '']], ['Material approved by QC', 'Weighing verified (two-person)']),
+    S('Mixing / Reaction / Granulation', [['equipment', 'Equipment ID', ''], ['param', 'Critical parameters', ''], ['time', 'Time', '']], ['In-process parameters in limit', 'Equipment cleaning record']),
+    S('Compression / Filling', [['lineNo', 'Line', ''], ['yield', 'Theoretical vs actual yield', '']], ['In-process checks (weight / volume)', 'Line clearance']),
+    S('Packing & Labelling', [['batch', 'Batch & expiry', '']], ['Label reconciliation', 'Pack integrity']),
+    S('QC release', [['coa', 'COA ref', '']], ['Finished product tests within spec', 'Batch record reviewed — QA release']),
+  ],
+  textile: [
+    S('Yarn / Fabric receipt', [['lot', 'Lot / count / GSM', '']], ['Count / GSM / width', 'Shade / defects']),
+    S('Spinning / Weaving / Knitting', [['machine', 'Machine / loom', ''], ['metres', 'Output metres / kg', '']], ['Fabric defects per 4-point system']),
+    S('Dyeing / Processing', [['recipe', 'Recipe / shade code', ''], ['bath', 'Bath ratio', '']], ['Shade match', 'Colour fastness / shrinkage']),
+    S('Cutting & Stitching', [['style', 'Style / size ratio', ''], ['line', 'Line / operator', '']], ['Measurement per size chart', 'Stitch quality']),
+    S('Finishing & Packing', [['pack', 'Carton / ratio', '']], ['Final audit AQL', 'Labelling and packing']),
+  ],
+  wood: [
+    S('Timber / Board receipt', [['species', 'Species / grade', ''], ['moisture', 'Moisture (%)', '']], ['Moisture content', 'Grade / defects']),
+    S('Cutting & Machining', [['cutList', 'Cutting list', '']], ['Dimensions per cutting list']),
+    S('Assembly', [['jig', 'Jig / drawing', '']], ['Joint fit', 'Squareness']),
+    S('Sanding & Finishing', [['finish', 'Finish system', '']], ['Surface smoothness', 'Finish colour / coats']),
+    S('Packing & Dispatch', [], ['Packing protection', 'Hardware kit complete']),
+  ],
+  building: [
+    S('Batching / Mixing', [['mix', 'Mix design / grade', ''], ['wc', 'W/C ratio', '']], ['Material proportions as per mix design', 'Slump / consistency']),
+    S('Casting / Pressing', [['mould', 'Mould / press', ''], ['qty', 'Units cast', '']], ['Dimensions', 'Surface finish']),
+    S('Curing', [['method', 'Method', 'Water / steam'], ['days', 'Days', '']], ['Curing record complete']),
+    S('Testing', [['strength', 'Compressive strength (N/mm²)', ''], ['absorb', 'Water absorption (%)', '']], ['Strength per IS (7 / 28 day)', 'Water absorption within limit']),
+    S('Stacking & Dispatch', [], ['Stack by batch / date', 'Test certificate issued']),
+  ],
+  printing: [
+    S('Pre-press / Proof', [['job', 'Job / artwork rev', ''], ['proof', 'Proof approved by', '']], ['Artwork approved', 'Colour proof signed']),
+    S('Printing', [['press', 'Press', ''], ['sheets', 'Sheets / impressions', ''], ['wastage', 'Make-ready wastage', '']], ['Colour density / registration', 'No hickies / marks']),
+    S('Finishing', [['finish', 'Lamination / varnish / die-cut', '']], ['Finish quality', 'Die-cut accuracy']),
+    S('Binding & Packing', [], ['Folding / trimming', 'Count verified']),
+  ],
+  general: [
+    S('Material issue', [], ['Material as per BOM']),
+    S('Production', [], ['In-process check']),
+    S('Final inspection', [], ['Final inspection vs specification']),
+    S('Packing & Dispatch', [], ['Marking / packing']),
+  ],
+};
+// Extra QA / raw material / datasheet packs for the new types
+Object.assign(MFG_QA_PACK, {
+  sheetmetal: { templates: [['Incoming sheet / coil', ['Thickness and grade vs MTC', 'Surface free of rust / pits', 'Coil / lot number recorded']], ['In-process: bending & welding', ['Bend angle / flange', 'Weld visual', 'Hole positions']], ['Final inspection', ['Overall dimensions & flatness', 'Coating thickness / finish', 'Packing']]], instruments: ['Vernier caliper', 'Thickness gauge', 'Angle gauge', 'DFT gauge', 'Steel tape'] },
+  foundry: { templates: [['Melt chemistry check', ['Spectro analysis within grade', 'Pouring temperature recorded', 'Test coupon cast']], ['Casting inspection', ['Visual — no cold shut / porosity', 'Dimensional check', 'NDT as required']], ['Mechanical test', ['Tensile / hardness on test bar', 'Report attached to batch']]], instruments: ['Spectrometer', 'Hardness tester', 'UTM', 'Vernier caliper', 'Pyrometer'] },
+  rubber_pack: { templates: [['Compound / material check', ['Rheometer / Mooney within limits', 'Batch recorded']], ['Final inspection', ['Dimensions / print registration', 'Hardness / bond strength', 'Packing count']]], instruments: ['Rheometer', 'Shore hardness tester', 'Vernier caliper', 'Weighing scale'] },
+  electronics_pcb: { templates: [['Incoming components', ['Part no. and make as per BOM', 'MSL / moisture control', 'Counterfeit / label check']], ['Post-reflow inspection', ['AOI passed', 'Joint quality per IPC-A-610']], ['Functional test', ['ICT passed', 'FCT passed', 'Serial number recorded']]], instruments: ['Multimeter', 'LCR meter', 'Oscilloscope', 'ESD tester', 'Reflow profiler'] },
+  food: { templates: [['Receiving inspection', ['Supplier approved, COA available', 'Temperature / packaging intact', 'Expiry date acceptable']], ['CCP monitoring', ['Critical limit met (temp / time)', 'Metal detector check', 'Record signed']], ['Finished product release', ['Net content / seal', 'Label compliance (FSSAI)', 'Micro / chemical result ok']]], instruments: ['Digital thermometer', 'Weighing scale', 'pH meter', 'Refractometer', 'Metal detector'] },
+  pharma_chem: { templates: [['Raw material sampling', ['AR number assigned', 'Identification test passed', 'Released by QC']], ['In-process control', ['Parameters in limit', 'Line clearance done', 'Equipment cleaned & logged']], ['Finished product release', ['Tests within specification', 'Batch record reviewed', 'Label reconciliation']]], instruments: ['Analytical balance', 'pH meter', 'HPLC / UV', 'Dissolution tester', 'Hardness tester'] },
+  textile: { templates: [['Fabric inspection (4-point)', ['Width / GSM verified', 'Shade consistent across roll', 'Defect points within limit']], ['Garment audit (AQL)', ['Measurements per size chart', 'Stitch / seam quality', 'Labels and trims correct']]], instruments: ['GSM cutter', 'Measuring tape', 'Light box', 'Shrinkage tester'] },
+  wood: { templates: [['Timber / board receipt', ['Moisture within limit', 'Grade and defects', 'Dimensions']], ['Final furniture inspection', ['Joint fit and squareness', 'Finish and colour', 'Hardware kit complete']]], instruments: ['Moisture meter', 'Steel tape', 'Try square', 'Vernier caliper'] },
+  building: { templates: [['Mix check', ['Proportions per mix design', 'Slump / consistency', 'Cubes cast for testing']], ['Product test', ['Compressive strength (7 / 28 day)', 'Water absorption', 'Dimensions']]], instruments: ['Compression testing machine', 'Slump cone', 'Vernier caliper', 'Weighing scale'] },
+  printing: { templates: [['Pre-press approval', ['Artwork and proof approved', 'Colour reference available']], ['Press sheet check', ['Colour density and registration', 'No marks / hickies', 'Count verified']]], instruments: ['Densitometer', 'Spectrophotometer', 'Loupe', 'Paper caliper'] },
+});
+Object.assign(RM_SPEC_PACK, {
+  sheetmetal: { 'Sheet / coil': { unit: 'kg', fields: _std([['standard', 'Standard', 'IS 513 CR / IS 2062 HR / SS'], ['grade', 'Grade', 'CRCA D / SS304'], ['thickness', 'Thickness (mm)', ''], ['width', 'Width / size (mm)', ''], ['coating', 'Coating', 'GI / Galvalume / plain']]) }, 'Hardware / consumable': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  foundry: { 'Pig iron / scrap / alloy': { unit: 'kg', fields: _std([['grade', 'Grade', ''], ['chem', 'Chemistry (C / Si / Mn / S / P)', ''], ['form', 'Form', 'Pig / returns / ferro-alloy']]) }, 'Moulding sand / binder': { unit: 'kg', fields: _std([['type', 'Type', 'Silica / chromite / resin'], ['afs', 'AFS no.', ''], ['binder', 'Binder %', '']]) } },
+  rubber_pack: { 'Polymer / rubber': { unit: 'kg', fields: _std([['polymer', 'Polymer', 'NR / SBR / EPDM / BOPP / paper'], ['grade', 'Grade / GSM / micron', ''], ['hardness', 'Hardness / spec', '']]) }, 'Chemical / ink / adhesive': { unit: 'kg', fields: _std([['type', 'Type', ''], ['shelf', 'Shelf life', '']]) } },
+  electronics_pcb: { 'Component': { unit: 'pcs', fields: _std([['mpn', 'Manufacturer part no.', ''], ['make', 'Make', ''], ['package', 'Package', '0603 / SOIC-8'], ['msl', 'MSL level', '']]) }, 'PCB / solder / flux': { unit: 'pcs', fields: _std([['spec', 'Specification', 'FR4 1.6 mm / SAC305'], ['layers', 'Layers / finish', '']]) } },
+  food: { 'Ingredient': { unit: 'kg', fields: _std([['expiry', 'Expiry / best-before', ''], ['fssai', 'Supplier FSSAI no.', ''], ['storage', 'Storage condition', ''], ['allergen', 'Allergen', '']]) }, 'Packing material': { unit: 'pcs', fields: _std([['spec', 'Specification', ''], ['foodGrade', 'Food-grade certificate', '']]) } },
+  pharma_chem: { 'Active / Raw chemical': { unit: 'kg', fields: _std([['arNo', 'AR no.', ''], ['pharmacopeia', 'Pharmacopoeia / grade', 'IP / BP / USP / AR'], ['assay', 'Assay (%)', ''], ['retest', 'Retest date', ''], ['storage', 'Storage condition', '']]) }, 'Packing material': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  textile: { 'Yarn': { unit: 'kg', fields: _std([['count', 'Count', '30s'], ['blend', 'Blend', '100% cotton'], ['twist', 'Twist / ply', '']]) }, 'Fabric': { unit: 'm', fields: _std([['gsm', 'GSM', ''], ['width', 'Width (inch)', ''], ['construction', 'Construction', ''], ['shade', 'Shade', '']]) }, 'Trims / dye / chemical': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  wood: { 'Timber / board': { unit: 'm³', fields: _std([['species', 'Species / board type', 'Teak / MDF / ply'], ['grade', 'Grade', ''], ['size', 'Size / thickness', ''], ['moisture', 'Moisture (%)', '']]) }, 'Hardware / finish': { unit: 'pcs', fields: _std([['spec', 'Specification', '']]) } },
+  building: { 'Cement / binder': { unit: 'kg', fields: _std([['grade', 'Grade', 'OPC 53 / PPC'], ['standard', 'Standard', 'IS 269 / IS 1489'], ['strength', 'Strength (28-day)', '']]) }, 'Aggregate / sand / additive': { unit: 'kg', fields: _std([['type', 'Type / size', '20 mm / M-sand'], ['zone', 'Zone / grading', ''], ['moisture', 'Moisture (%)', '']]) } },
+  printing: { 'Paper / board': { unit: 'kg', fields: _std([['gsm', 'GSM', ''], ['size', 'Sheet / reel size', ''], ['finish', 'Finish', 'Matt / gloss']]) }, 'Ink / plate / chemical': { unit: 'kg', fields: _std([['type', 'Type', ''], ['shade', 'Shade / Pantone', '']]) } },
+});
+Object.assign(PART_DATASHEET_PACK, {
+  sheetmetal: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material & thickness', ''], ['blank', 'Blank size', ''], ['bends', 'No. of bends', ''], ['weld', 'Welding', ''], ['finish', 'Finish / coating', ''], ['tol', 'Tolerance class', '']],
+  foundry: [['drawingNo', 'Drawing no. / revision', ''], ['grade', 'Material grade', 'FG260 / SG500-7'], ['pattern', 'Pattern no.', ''], ['castWt', 'Casting weight (kg)', ''], ['ht', 'Heat treatment', ''], ['ndt', 'NDT requirement', ''], ['hardness', 'Hardness (BHN)', '']],
+  rubber_pack: [['drawingNo', 'Drawing / artwork', ''], ['material', 'Material / compound', ''], ['hardness', 'Hardness / GSM', ''], ['size', 'Size', ''], ['colours', 'Colours', ''], ['packQty', 'Pack quantity', '']],
+  electronics_pcb: [['pcbRev', 'PCB / Gerber revision', ''], ['bomRev', 'BOM revision', ''], ['firmware', 'Firmware version', ''], ['testProc', 'Test procedure ref', ''], ['coating', 'Conformal coating', ''], ['standard', 'Standard', 'IPC-A-610 class 2']],
+  food: [['fssai', 'FSSAI category / licence', ''], ['shelfLife', 'Shelf life', ''], ['storage', 'Storage', ''], ['netContent', 'Net content', ''], ['ccp', 'CCP / critical limits', ''], ['allergen', 'Allergen declaration', ''], ['nutrition', 'Nutrition info', '']],
+  pharma_chem: [['strength', 'Strength / grade', ''], ['pharmacopeia', 'Pharmacopoeia / spec', ''], ['batchSize', 'Standard batch size', ''], ['shelfLife', 'Shelf life', ''], ['storage', 'Storage', ''], ['packSize', 'Pack size', ''], ['license', 'Drug licence / CAS no.', '']],
+  textile: [['style', 'Style no.', ''], ['fabric', 'Fabric / GSM / composition', ''], ['sizeRange', 'Size range', ''], ['wash', 'Wash / care', ''], ['aql', 'AQL level', ''], ['trims', 'Trims', '']],
+  wood: [['drawingNo', 'Drawing / model', ''], ['material', 'Wood / board type', ''], ['finish', 'Finish system', ''], ['size', 'Size (L × W × H)', ''], ['hardware', 'Hardware list', ''], ['packType', 'Packing', '']],
+  building: [['standard', 'Standard', 'IS 456 / IS 2185 / IS 15622'], ['grade', 'Grade / strength class', ''], ['size', 'Size', ''], ['mix', 'Mix design ref', ''], ['curing', 'Curing days', ''], ['testFreq', 'Test frequency', '']],
+  printing: [['jobNo', 'Job / artwork no.', ''], ['size', 'Finished size', ''], ['paper', 'Paper & GSM', ''], ['colours', 'Colours / Pantone', ''], ['finishing', 'Finishing (lam / UV / die-cut)', ''], ['binding', 'Binding', ''], ['qty', 'Order qty', '']],
+});
+
+MFG_TYPES.length = 0; MFG_TYPES.push(...MFG_TYPES_ALL);
+MFG_QA_PACK.wires_cables.templates.splice(2, 0, ['Incoming armour wire / strip', ['Wire diameter / strip size within tolerance', 'Zinc coating (mass / uniformity)', 'Tensile strength vs certificate', 'Coil / lot number recorded']], ['Incoming tapes, fillers & other material', ['Material and size as per PO', 'Supplier certificate available', 'Packing / moisture condition', 'Batch number recorded']]);
+Object.keys(RM_SPEC_PACK).forEach(k => { if (!RM_SPEC_PACK[k]['Misc / consumables']) RM_SPEC_PACK[k]['Misc / consumables'] = { unit: 'pcs', fields: _std([['spec', 'Specification / size', ''], ['usedFor', 'Used for / department', 'Production / maintenance / office']]) }; });
+
 function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) {
   const canMulti = isSubscribed || isTestAccount;
   const [selected, setSelected] = React.useState([]);
   const [companyName, setCompanyName] = React.useState('');
   const [country, setCountry] = React.useState('india');
   const [error, setError] = React.useState('');
+  const [mfgType, setMfgType] = React.useState('');
 
   const BIZ_TYPES = [
     {
@@ -2013,7 +2351,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
       icon: '🏭',
       label: 'Manufacturing',
       sub: 'Production & Quality',
-      desc: 'BOM · Raw Materials · Production Orders · QA Testing · Internal Audit',
+      desc: 'BOM · Item Master · Production Orders · QA Testing · Internal Audit',
       color: '#C9752A',
     },
     {
@@ -2046,6 +2384,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
   function handleStart() {
     if (!selected.length) { setError('Please select at least one activity to continue.'); return; }
     if (!companyName.trim()) { setError('Please enter your company name.'); return; }
+    if (selected.includes('manufacturing') && !mfgType) { setError('Please choose your type of manufacturing.'); return; }
     const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
     setBusinessInfo(p => ({
       ...p,
@@ -2054,6 +2393,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
       taxRate: (p && p.taxRate != null) ? p.taxRate : cc.defaultTaxRate,
       activeTypes: selected,
       companyType: selected[0],
+      ...(selected.includes('manufacturing') ? { mfgType } : {}),
       trialStartDate: (p && p.trialStartDate) ? p.trialStartDate : new Date().toISOString(),
     }));
   }
@@ -2088,6 +2428,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
         </div>
 
         {/* 2×2 Activity Cards */}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
           {BIZ_TYPES.map(t => {
             const on = selected.includes(t.id);
@@ -2176,6 +2517,16 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
         </div>
 
         {/* Error */}
+        {selected.includes('manufacturing') && (
+          <div style={{ background: 'rgba(255,255,255,0.07)', border: '2px solid #C9752A', borderRadius: 18, padding: '18px 20px', marginBottom: 20 }}>
+            <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>What do you manufacture?</div>
+            <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12.5, marginBottom: 12 }}>This sets the manufacturing and QA options for your industry. You can change it later in Business Insights.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, maxHeight: 340, overflowY: 'auto' }}>
+              {MFG_TYPES.map(t => <div key={t.id} onClick={() => { setMfgType(t.id); setError(''); }} style={{ cursor: 'pointer', borderRadius: 12, padding: '10px 14px', background: mfgType === t.id ? '#fff' : 'rgba(255,255,255,0.06)', border: mfgType === t.id ? '2px solid #C9752A' : '1.5px solid rgba(255,255,255,0.15)' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: mfgType === t.id ? '#1E2A4A' : '#fff' }}>{t.icon} {t.label}</div>
+                <div style={{ fontSize: 11.5, color: mfgType === t.id ? '#666' : 'rgba(255,255,255,0.5)', marginTop: 2 }}>{t.desc}</div></div>)}
+            </div></div>)}
+
         {error && (
           <div style={{ color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginBottom: 10 }}>
             {error}
@@ -2939,13 +3290,13 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
 // p = print, x = export (all tables on the view → Excel sheets), i = import (master data only; handler supplied by App)
 // Data shown is already scoped to the active business, so print/export are isolated per business automatically.
 const VIEW_TOOLS = {
-  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Raw Materials', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
+  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Item Master (materials)', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
   storeissue: { t: 'Store Issue', x: 1 }, verticalrack: { t: 'Vertical Rack', p: 1, x: 1 }, vendors: { t: 'Vendors', p: 1, x: 1, i: 1 },
   vendoreval: { t: 'Vendor Evaluation', p: 1, x: 1 }, clientmaterials: { t: 'Client Materials', p: 1, x: 1 }, fmspareparts: { t: 'FM Spare Parts', p: 1, x: 1 },
   isoprinciples: { t: 'ISO Principles', p: 1, x: 1 }, deptprocedures: { t: 'Department Procedures', p: 1, x: 1 }, inprocessqa: { t: 'Inprocess QA', p: 1, x: 1 },
   qatesting: { t: 'QA Testing', x: 1 }, capa: { t: 'CAPA', p: 1, x: 1 }, internalaudit: { t: 'Internal Audit', p: 1, x: 1 }, fatsat: { t: 'FAT-SAT', x: 1 }, tds: { t: 'TDS', x: 1 },
   productionorders: { t: 'Production Orders', x: 1 }, boshortage: { t: 'BO Shortage', x: 1 }, serviceorders: { t: 'Service Orders', x: 1 }, mepbom: { t: 'MEP BOM', x: 1 },
-  bom: { t: 'BOM', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
+  bom: { t: 'BOM', p: 1, x: 1 }, insights: { t: 'Business Insights', p: 1, x: 1 }, mis: { t: 'MIS', p: 1, x: 1 }, partsmaster: { t: 'Parts Master', p: 1 }, engdocs: { t: 'Engineering Docs', p: 1, x: 1 },
 };
 
 function tablesToSheets(root) {
@@ -3075,12 +3426,12 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
 
 // ─── Items ─────────────────────────────────────────────────────
 
-const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Other'];
+const ITEM_CATEGORIES = ['Raw Material','Alloy / Metal','Steel / Iron','Packing Material','Consumable','Spare Part','Finished Good','Semi-Finished','Trading Item','Service','Capex / Asset','Other'];
 // 2-digit category code → first two digits of the 10-digit item code (CCTTNNNNNN)
 const ITEM_CATEGORY_CODES = {
   'Raw Material': '01', 'Alloy / Metal': '02', 'Steel / Iron': '03', 'Packing Material': '04',
   'Consumable': '05', 'Spare Part': '06', 'Finished Good': '07', 'Semi-Finished': '08',
-  'Trading Item': '09', 'Service': '10', 'Other': '99',
+  'Trading Item': '09', 'Service': '10', 'Capex / Asset': '11', 'Other': '99',
 };
 // Build a 10-digit item code: CC (category) + TT (material/type) + NNNNNN (running serial).
 // The material→2-digit map is kept in businessInfo.itemTypeCodes so codes stay stable and reusable.
@@ -3108,22 +3459,92 @@ function makeItemCode({ category, materialType, currentId, items = [], businessI
   return prefix + String(mx + 1).padStart(6, '0');
 }
 
-function ItemsList({ items, setEditing, setItems, businessInfo }) {
+// ─── ADR-001: one Item Master. Item "category" is the item type; materials are a filtered view ───
+const MAT_CATS = ['Raw Material', 'Alloy / Metal', 'Steel / Iron', 'Packing Material', 'Consumable', 'Spare Part'];
+const isMaterialItem = (it) => !!it && MAT_CATS.includes(it.category);
+const _nm = (s) => String(s || '').trim().toLowerCase();
+
+// Pure: plan moving legacy Raw Materials into the Item Master (merge by name, else create)
+function planRmMigration(rawMaterials = [], items = [], bizType = '', defaultGst = 0) {
+  const pending = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
+  const scoped = (items || []).filter(i => !bizType || (i.bizType || bizType) === bizType);
+  const upd = {}, newItems = [], idMap = {}, merged = [], created = [];
+  pending.forEach(r => {
+    const cat = /pack|drum/i.test(r.category || '') ? 'Packing Material' : /misc|consum/i.test(r.category || '') ? 'Consumable' : 'Raw Material';
+    const hit = scoped.find(i => _nm(i.name) === _nm(r.name)) || newItems.find(i => _nm(i.name) === _nm(r.name));
+    if (hit && !newItems.includes(hit)) {
+      const base = upd[hit.id] || hit;
+      upd[hit.id] = { ...base, category: base.category && base.category !== 'Other' ? base.category : cat, rmCategory: base.rmCategory || r.category || '', specs: { ...(r.specs || {}), ...(base.specs || {}) }, drawings: base.drawings || r.drawings || [], minStock: Number(base.minStock) || Number(r.minStock) || 0, purchaseRate: base.purchaseRate ?? base.rate ?? (Number(r.rate) || 0), unit: base.unit || r.unit || '' };
+      idMap[r.id] = hit.id; merged.push(r.name);
+    } else if (hit) {
+      idMap[r.id] = hit.id; merged.push(r.name);
+    } else {
+      const it = { id: 'itm-' + (r.id || Math.random().toString(36).slice(2)) , name: r.name.trim(), unit: r.unit || '', category: cat, rmCategory: r.category || '', specs: { ...(r.specs || {}) }, drawings: r.drawings || [], purchaseRate: Number(r.rate) || 0, saleRate: 0, gst: defaultGst, hsn: '', itemCode: '', openingStock: Number(r.stock) || 0, minStock: Number(r.minStock) || 0, bizType: bizType || 'manufacturing', fromRawMaterialId: r.id, createdAt: Date.now() };
+      newItems.push(it); idMap[r.id] = it.id; created.push(r.name);
+    }
+  });
+  return { pending: pending.length, updated: Object.values(upd), newItems, idMap, merged, created };
+}
+
+// Stock of a BOM material line: item stock (stock ledger) first, legacy raw material stock as fallback
+function matStock(m, { items = [], stockMap = {}, rawMaterials = [] }) {
+  const id = m.materialId || m.itemId || '';
+  if (stockMap[id]) return { id, qty: stockMap[id].qty || 0, item: (items || []).find(i => i.id === id) || null };
+  const rm = (rawMaterials || []).find(r => r.id === id) || (rawMaterials || []).find(r => _nm(r.name) === _nm(m.name));
+  if (rm && rm.migratedItemId && stockMap[rm.migratedItemId]) return { id: rm.migratedItemId, qty: stockMap[rm.migratedItemId].qty || 0, item: (items || []).find(i => i.id === rm.migratedItemId) || null };
+  const byId = id ? (items || []).find(i => i.id === id) : null;
+  if (byId) return { id: byId.id, qty: 0, item: byId };
+  const byCode = (m.itemCode || m.code) ? (items || []).find(i => i.itemCode && _nm(i.itemCode) === _nm(m.itemCode || m.code)) : null;
+  if (byCode) return { id: byCode.id, qty: stockMap[byCode.id] ? (stockMap[byCode.id].qty || 0) : 0, item: byCode };
+  const byName = (m.name || (rm && rm.name)) ? (items || []).find(i => _nm(i.name) === _nm(m.name || (rm && rm.name))) : null;
+  if (byName && stockMap[byName.id]) return { id: byName.id, qty: stockMap[byName.id].qty || 0, item: byName };
+  if (byName && !rm) return { id: byName.id, qty: 0, item: byName };
+  return { id: rm ? rm.id : id, qty: rm ? (parseFloat(rm.stock) || 0) : 0, item: byName || null, legacy: !!rm };
+}
+
+// Item code + description for a BOM / PR line — from the Item Master first, never blank.
+function resolveMatItem(m, items = [], rawMaterials = []) {
+  const id = m.materialId || m.itemId || '';
+  let it = id ? (items || []).find(i => i.id === id) : null;
+  const rm = !it ? ((rawMaterials || []).find(r => r.id === id) || null) : null;
+  if (!it && rm && rm.migratedItemId) it = (items || []).find(i => i.id === rm.migratedItemId) || null;
+  const code = m.itemCode || m.code || '';
+  if (!it && code) it = (items || []).find(i => i.itemCode && _nm(i.itemCode) === _nm(code)) || null;
+  const nm = (m.name && m.name !== '—') ? m.name : '';
+  if (!it && nm) it = (items || []).find(i => _nm(i.name) === _nm(nm)) || null;
+  return { item: it, itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : code, name: (it && it.name) || nm || (rm && rm.name) || (it && it.itemCode) || code || '', unit: m.unit || m.uom || (it && it.unit) || (rm && rm.unit) || '' };
+}
+
+
+function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [], onSaveItem, setBusinessInfo, initialGroup = '', rawMaterials = [], onMigrate }) {
+  const [group, setGroup] = useState(initialGroup);
+  const ITEM_GROUPS = [['', 'All'], ['mat', 'Raw materials & misc'], ['fg', 'Finished goods'], ['capex', 'Capex / assets'], ['svc', 'Services & others']];
+  const inGroup = (it, g) => !g ? true : g === 'mat' ? isMaterialItem(it) : g === 'fg' ? FG_CATS.includes(it.category) : g === 'capex' ? it.category === 'Capex / Asset' : !isMaterialItem(it) && !FG_CATS.includes(it.category) && it.category !== 'Capex / Asset';
+  const legacyRm = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
+  const [sel, setSel] = useState(null);
+  const [selKey, setSelKey] = useState(0);
+  const pick = (it) => { setSel(it); setSelKey(k => k + 1); };
+  const _stk = computeStock(stockLedger, items);
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [catFilter, setCatFilter] = useState('');
   const [search, setSearch] = useState('');
   const [showPrint, setShowPrint] = useState(false);
+  const [picked, setPicked] = useState({});
+  const togglePick = (id) => setPicked(p => { const n = { ...p }; if (n[id]) delete n[id]; else n[id] = true; return n; });
   const filtered = items.filter(it => {
-    const matchCat = !catFilter || it.category === catFilter;
+    const matchCat = (!catFilter || it.category === catFilter) && inGroup(it, group);
     const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  const pickedList = items.filter(it => picked[it.id]);
+  const printList = pickedList.length ? pickedList : filtered;
+  const printLabel = pickedList.length ? pickedList.length + ' selected item' + (pickedList.length > 1 ? 's' : '') : [((ITEM_GROUPS.find(g => g[0] === group) || [])[1] || 'All'), catFilter].filter(Boolean).join(' · ');
   const splitTax = cc.splitTax;
   async function exportItemsXlsx() {
     const head = ['Item Code', 'Name', 'Category', ...(splitTax ? ['HSN/SAC'] : []), 'Unit', 'Opening Stock', 'Min Stock', 'Purchase Rate', 'Sale Rate', ...(cc.hasTax ? [cc.taxLabel + ' %'] : [])];
-    const aoa = [head, ...filtered.map(it => [
+    const aoa = [head, ...printList.map(it => [
       it.itemCode || '', it.name || '', it.category || '', ...(splitTax ? [it.hsn || ''] : []),
       it.unit || '', Number(it.openingStock) || 0, Number(it.minStock) || 0,
       Number(it.purchaseRate ?? it.rate) || 0, Number(it.saleRate ?? it.rate) || 0, ...(cc.hasTax ? [Number(it.gst) || 0] : []),
@@ -3188,13 +3609,22 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Items & services</h1>
-        <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
+        <p style={styles.muted}>One list for every item — raw materials, misc / fasteners / packing, finished goods, capex and services. PR, PO, GRN, stock, BOM, quotation and invoice all use this same item code.</p>
+      </div>
+      {legacyRm.length > 0 && <div style={{ background: '#FFF8E1', border: '1px solid #F2D48A', borderRadius: 10, padding: '10px 14px', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13 }}><b>{legacyRm.length}</b> material(s) are still in the old Raw Materials list. Move them here so purchase, GRN and stock stay in sync (same names are merged).</span>
+        {onMigrate && <button onClick={onMigrate} style={styles.primaryBtn}>Move into Item Master</button>}
+      </div>}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {ITEM_GROUPS.map(([g, l]) => { const n = items.filter(it => inGroup(it, g)).length; return <button key={g || 'all'} onClick={() => { setGroup(g); setCatFilter(''); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (group === g ? '#1E2A4A' : '#DDD'), background: group === g ? '#1E2A4A' : '#fff', color: group === g ? '#fff' : '#666' }}>{l} ({n})</button>; })}
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
-        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; setEditing({ name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; const blank = { name: '', hsn: '', itemCode:'', category: group === 'mat' ? 'Raw Material' : group === 'fg' ? 'Finished Good' : group === 'capex' ? 'Capex / Asset' : '', unit: group === 'mat' ? 'kg' : '', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }; if (onSaveItem) pick(blank); else setEditing(blank); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
         <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from an Excel (.xlsx) or CSV file">⬆ Import Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
-        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
-        {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
+        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title={'Export ' + printLabel + ' to Excel'}>⭳ Excel</button>}
+        {items.length > 0 && <button onClick={() => { if (!printList.length) { alert('Nothing to print — choose a tab / category with items, or tick items.'); return; } setShowPrint(true); }} style={styles.ghostBtn} title="Prints the ticked items; if none ticked, the current tab / category"><Printer size={14} /> Print {pickedList.length ? '(' + pickedList.length + ' selected)' : '— ' + printLabel}</button>}
+        {filtered.length > 0 && <button onClick={() => setPicked(p => { const all = filtered.every(it => p[it.id]); const n = { ...p }; filtered.forEach(it => { if (all) delete n[it.id]; else n[it.id] = true; }); return n; })} style={{ ...styles.ghostBtn, fontSize: 12 }}>{filtered.every(it => picked[it.id]) ? '☐ Untick shown' : '☑ Tick all shown'}</button>}
+        {pickedList.length > 0 && <button onClick={() => setPicked({})} style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }}>Clear selection</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -3202,11 +3632,13 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
         </select>
         <span style={{ fontSize:12, color:'#888' }}>{filtered.length} item{filtered.length!==1?'s':''}</span>
       </div>
-      <div style={{ ...styles.list, marginTop: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ ...styles.list, marginTop: 0, ...(onSaveItem ? { maxHeight: '42vh', overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 10, padding: 8, background: '#FCFBF8' } : {}) }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
         {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
-        {filtered.map((it) => (
-          <div key={it.id} style={styles.recordRow}>
+        {filtered.map((it) => (<React.Fragment key={it.id}>
+          <div style={{ ...styles.recordRow, cursor: 'pointer', ...(sel && sel.id === it.id ? { background: '#F5F2EA', borderColor: '#C9A24B' } : {}) }} onClick={() => (onSaveItem ? pick(it) : setEditing(it))}>
+            <input type="checkbox" checked={!!picked[it.id]} onClick={e => e.stopPropagation()} onChange={() => togglePick(it.id)} title="Select for print / Excel" style={{ width: 16, height: 16, marginRight: 10, cursor: 'pointer', flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
@@ -3219,20 +3651,36 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
               <div style={{ fontSize: 11, color: '#888780' }}>Buy: <span style={{ color: '#B5453A', fontWeight: 600 }}>{fmt(it.purchaseRate ?? it.rate ?? 0)}</span></div>
               <div style={{ fontSize: 11, color: '#888780' }}>Sell: <span style={{ color: '#1A7A3E', fontWeight: 600 }}>{fmt(it.saleRate ?? it.rate ?? 0)}</span></div>
             </div>
-            <button onClick={() => setEditing(it)} style={styles.ghostBtn}>Edit</button>
-            <button onClick={() => setItems((is) => is.filter((x) => x.id !== it.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onSaveItem ? pick(it) : setEditing(it); }} style={styles.ghostBtn}>Edit</button>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete ' + it.name + '?')) { setItems((is) => is.filter((x) => x.id !== it.id)); if (sel && sel.id === it.id) setSel(null); } }} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>
           </div>
-        ))}
+        </React.Fragment>))}
+      </div>
+      {onSaveItem && <div>
+        {sel ? (<>
+          {sel.id && (() => {
+            const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(m => m.materialId === sel.id || _nm(m.name) === _nm(sel.name)));
+            const ownBom = (boms || []).find(b => !b.orderRef && (b.itemId === sel.id || _nm(b.name) === _nm(sel.name)));
+            const stk = _stk[sel.id] ? Math.round(_stk[sel.id].qty * 1000) / 1000 : (sel.openingStock || 0);
+            return (<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12.5 }}>
+              <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Current stock <b>{stk} {sel.unit || ''}</b></span>
+              {ownBom && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Standard BOM <b>Rev {ownBom.rev || 0}</b> · {(ownBom.materials || []).length} lines</span>}
+              {usedIn.length > 0 && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Used in: <b>{usedIn.map(b => b.name).join(', ')}</b></span>}
+            </div>);
+          })()}
+          <ItemModal key={selKey} inline item={sel} businessInfo={businessInfo} items={items} setBusinessInfo={setBusinessInfo} onClose={() => setSel(null)} onSave={(f) => { const saved = onSaveItem(f); setSel(saved || null); setSelKey(k => k + 1); }} />
+        </>) : <div style={{ ...styles.emptyBox, padding: '40px 20px' }}>Select an item above to see and edit its details here, or click “Add item”.</div>}
+      </div>}
       </div>
 
       {showPrint && (
         <DocPrintOverlay onClose={() => setShowPrint(false)} filename="Item-Master.pdf" businessInfo={businessInfo}>
           <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>ITEM MASTER</div>
-          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}{catFilter ? ' · ' + catFilter : ''} · {new Date().toLocaleDateString('en-IN')}</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{printLabel} · {printList.length} item{printList.length !== 1 ? 's' : ''} · {new Date().toLocaleDateString('en-IN')}</div>
           <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
             <thead><tr style={{ background: '#F1EFE9' }}>{['Code', 'Name', 'Category', ...(cc.splitTax ? ['HSN'] : []), 'Unit', 'Op.Stock', 'Buy', 'Sell', ...(cc.hasTax ? [cc.taxLabel + '%'] : [])].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: h === 'Name' || h === 'Category' ? 'left' : 'right', borderBottom: '1px solid #CCC', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
             <tbody>
-              {filtered.map(it => (
+              {printList.map(it => (
                 <tr key={it.id}>
                   <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontFamily: 'monospace' }}>{it.itemCode || ''}</td>
                   <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{it.name}</td>
@@ -3253,7 +3701,20 @@ function ItemsList({ items, setEditing, setItems, businessInfo }) {
   );
 }
 
-function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo }) {
+function ItemPanelWrap({ inline, onClose, title, children }) {
+  if (!inline) return <Modal onClose={onClose} title={title}>{children}</Modal>;
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E2DDD5', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: '#1E2A4A', color: '#fff', padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="serif" style={{ fontSize: 18, fontWeight: 700 }}>{title}</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer' }} title="Close">✕</button>
+      </div>
+      <div style={{ padding: '14px 18px', background: '#F8F5EE', maxHeight: '48vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>{children}</div>
+    </div>
+  );
+}
+
+function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBusinessInfo, inline = false }) {
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'] || COUNTRY_CONFIG.india;
   const [form, setForm] = useState({ openingStock: 0, minStock: 0, unit: '', itemCode: '', category: '', materialType: '', ...item });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -3269,7 +3730,7 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
     set('itemCode', code);
   }
   return (
-    <Modal onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
+    <ItemPanelWrap inline={inline} onClose={onClose} title={item.id ? 'Edit item' : 'Add item'}>
       {/* Item code + category */}
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ ...styles.formGroup, flex: 1 }}>
@@ -3292,6 +3753,22 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
         <input value={form.materialType||''} onChange={e => set('materialType', e.target.value)} style={styles.input} placeholder="e.g. Copper, Steel, Aluminium" list="item-material-types" />
         <datalist id="item-material-types">{knownTypes.map(t => <option key={t} value={t} />)}</datalist>
       </div>
+      {isMaterialItem(form) && (() => {
+        const pack = RM_SPEC_PACK[_mfgType()] || RM_SPEC_PACK.general;
+        const known = [...new Set([...Object.keys(pack), ...(items || []).map(i => i.rmCategory).filter(Boolean), ...(form.rmCategory ? [form.rmCategory] : [])])];
+        const def = form.rmCategory && pack[form.rmCategory];
+        return (<div style={{ background: '#FAF9F5', border: '1px solid #EAE6DB', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Material datasheet category</label>
+            <select value={form.rmCategory || ''} onChange={e => { const v = e.target.value; if (v === '__new') { const c = (window.prompt('New material category (e.g. Tapes, Lubricants, Safety items):') || '').trim(); if (c) set('rmCategory', c); } else { set('rmCategory', v); if (!form.unit && pack[v]) set('unit', pack[v].unit); } }} style={styles.input}>
+              <option value="">— Select —</option>
+              {known.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__new">+ Add new category…</option>
+            </select>
+          </div>
+          <SpecsFields specs={form.specs || {}} onChange={sp => set('specs', sp)} fields={def ? def.fields : [['grade', 'Grade / standard', ''], ['spec', 'Specification', ''], ['batchNo', 'Lot / batch no.', ''], ['certNo', 'Test certificate no.', ''], ['supplier', 'Approved supplier', '']]} />
+        </div>);
+      })()}
       <div style={styles.formGroup}>
         <label style={styles.label}>Item / service name</label>
         <input value={form.name} onChange={e => set('name', e.target.value)} style={styles.input} />
@@ -3356,7 +3833,7 @@ function ItemModal({ item, onSave, onClose, businessInfo = {}, items = [], setBu
         </div>
       </div>
       <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save item</button>
-    </Modal>
+    </ItemPanelWrap>
   );
 }
 
@@ -3544,7 +4021,7 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
   );
 
   return (
-    <Modal onClose={step < 4 ? onClose : undefined} title={step < 4 ? 'Delete Account' : ''}>
+    <Modal dock={false} onClose={step < 4 ? onClose : undefined} title={step < 4 ? 'Delete Account' : ''}>
       {step === 1 && (
         <>
           <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:16, marginBottom:16 }}>
@@ -4235,6 +4712,19 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
               )}
             </div>
 
+            {userRole === 'admin' && ((businessInfo.activeTypes || []).includes('manufacturing') || businessInfo.companyType === 'manufacturing') && (
+              <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #EAE6DB' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#888780', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Manufacturing</div>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Type of manufacturing</div>
+                <div style={{ fontSize: 13, color: '#555', marginBottom: 10 }}>Sets the raw-material categories and datasheet fields (Stores), the product datasheet (Engineering), and the QA checklists and tools for your industry. Existing data is not changed.</div>
+                <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #DDD', fontSize: 14, minWidth: 300 }}>
+                  <option value="">— Choose —</option>
+                  {MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                </select>
+                {businessInfo.mfgType && <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>{(MFG_TYPES.find(t => t.id === businessInfo.mfgType) || {}).desc}</div>}
+              </div>
+            )}
+
             {/* ── Danger Zone — owner only ── */}
             {userRole === 'admin' && isOwner && (
               <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #FECACA' }}>
@@ -4632,6 +5122,7 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
   const allowedTypes = DASHBOARD_DOC_TYPES[companyType] || Object.keys(DOC_TYPES);
   const recent = [...documents].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const showProduction = activeTypes.includes('manufacturing');
+  const isCable = showProduction && _mfgType() === 'wires_cables';
   const showService    = activeTypes.includes('service');
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const cc = COUNTRY_CONFIG[businessInfo?.country || 'india'];
@@ -4835,6 +5326,8 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             documents={documents}
             productionOrders={productionOrders}
             serviceOrders={serviceOrders}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             activeTypes={activeTypes}
             cur={cur}
           />
@@ -4887,6 +5380,8 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
             documents={documents}
             productionOrders={productionOrders}
             serviceOrders={serviceOrders}
+            vouchers={vouchers}
+            pettyCash={pettyCash}
             activeTypes={activeTypes}
             cur={cur}
           />
@@ -4932,13 +5427,14 @@ function Dashboard({ stats, documents, customers, vendors, businessInfo, startNe
 }
 
 // ─── Department Overview Chart ───────────────────────────────────────────────
-function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], activeTypes = ['trading'], cur = v => v }) {
-  const [tab, setTab] = React.useState('sales');
+function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], vouchers = [], pettyCash = {}, activeTypes = ['trading'], cur = v => v }) {
+  const [tab, setTab] = React.useState('overview');
   const [chartType, setChartType] = React.useState('bar');
+  const [range, setRange] = React.useState(6);
 
   const months = React.useMemo(() => {
     const arr = [];
-    for (let i = 5; i >= 0; i--) {
+    for (let i = range - 1; i >= 0; i--) {
       const d = new Date();
       d.setDate(1);
       d.setMonth(d.getMonth() - i);
@@ -4948,11 +5444,14 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
       });
     }
     return arr;
-  }, []);
+  }, [range]);
 
+  const money = activeTypes.length >= 0;
   const tabs = [
+    { id: 'overview',   label: 'Overview',   emoji: '📊', color: '#1E2A4A', show: true },
     { id: 'sales',      label: 'Sales',      emoji: '💰', color: '#1E2A4A', show: true },
-    { id: 'purchase',   label: 'Purchase',   emoji: '🛒', color: '#6B5BAE', show: activeTypes.some(t => ['trading', 'manufacturing'].includes(t)) },
+    { id: 'purchase',   label: 'Purchase',   emoji: '🛒', color: '#6B5BAE', show: true },
+    { id: 'expenses',   label: 'Expenses',   emoji: '🧾', color: '#C2410C', show: true },
     { id: 'production', label: 'Production', emoji: '🏭', color: '#C9A24B', show: activeTypes.includes('manufacturing') },
     { id: 'service',    label: 'Service',    emoji: '🔧', color: '#1E7A9A', show: activeTypes.some(t => ['service', 'fmamc'].includes(t)) },
   ].filter(t => t.show);
@@ -4962,50 +5461,56 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
 
   function mKey(s) { return (s || '').slice(0, 7); }
   function docAmt(d) { const _f = fcInfo(d); return (d.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) * (_f.on ? _f.fx : 1); }
+  const liveDoc = d => d.status !== 'deleted' && d.status !== 'rejected';
 
-  const data = React.useMemo(() => {
-    switch (safeTab) {
-      case 'sales':
-        return months.map(m => ({ label: m.label, value: documents.filter(d => d.type === 'invoice' && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0) }));
-      case 'purchase':
-        return months.map(m => ({ label: m.label, value: documents.filter(d => d.type === 'purchase' && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0) }));
-      case 'production':
-        return months.map(m => ({ label: m.label, value: productionOrders.filter(p => mKey(p.plannedDate || p.date || '') === m.key).length }));
-      case 'service':
-        return months.map(m => ({ label: m.label, value: serviceOrders.filter(s => mKey(s.date || s.createdAt || '') === m.key).length }));
-      default:
-        return months.map(m => ({ label: m.label, value: 0 }));
-    }
-  }, [safeTab, documents, productionOrders, serviceOrders, months]);
+  const SER = React.useMemo(() => {
+    const docsOf = (types, m) => documents.filter(d => types.includes(d.type) && liveDoc(d) && mKey(d.date) === m.key).reduce((s, d) => s + docAmt(d), 0);
+    const inDiv = x => activeTypes.includes(x.bizType || 'trading') || activeTypes.length === 0;
+    // Expenses = payment vouchers (not receipts, not bill settlements) + petty-cash debits
+    const settles = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    const vl = (Array.isArray(vouchers) ? vouchers : []).filter(v => v.type === 'payment' && v.status !== 'rejected' && v.status !== 'deleted' && !settles(v) && inDiv(v));
+    const pc = (Array.isArray(pettyCash && pettyCash.entries) ? pettyCash.entries : []).filter(e => e.status !== 'rejected' && inDiv(e));
+    const exp = m => vl.filter(v => mKey(v.date) === m.key).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0) + pc.filter(e => mKey(e.date) === m.key).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+    return {
+      sales:      { label: 'Sales',    color: '#1E2A4A', amount: true,  data: months.map(m => ({ label: m.label, value: docsOf(['invoice'], m) })) },
+      purchase:   { label: 'Purchase', color: '#6B5BAE', amount: true,  data: months.map(m => ({ label: m.label, value: docsOf(['purchasebill'], m) || docsOf(['purchase'], m) })) },
+      expenses:   { label: 'Expenses', color: '#C2410C', amount: true,  data: months.map(m => ({ label: m.label, value: exp(m) })) },
+      production: { label: 'Production orders', color: '#C9A24B', amount: false, data: months.map(m => ({ label: m.label, value: productionOrders.filter(p => mKey(p.plannedDate || p.date || '') === m.key).length })) },
+      service:    { label: 'Service orders',    color: '#1E7A9A', amount: false, data: months.map(m => ({ label: m.label, value: serviceOrders.filter(s => mKey(s.date || s.createdAt || '') === m.key).length })) },
+    };
+  }, [documents, vouchers, pettyCash, productionOrders, serviceOrders, months, activeTypes]);
 
-  const isAmount = safeTab === 'sales' || safeTab === 'purchase';
-  const maxVal = Math.max(...data.map(d => d.value), 1);
-  const total6m = data.reduce((s, d) => s + d.value, 0);
-  const peak = data.reduce((a, b) => b.value > a.value ? b : a, data[0]);
+  const series = safeTab === 'overview' ? [SER.sales, SER.purchase, SER.expenses] : [SER[safeTab]];
+  const isAmount = series[0].amount;
+  const maxVal = Math.max(...series.flatMap(s => s.data.map(d => d.value)), 1);
+  const fmtV = (v) => isAmount ? (v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : Math.round(v)) : v;
 
   // SVG layout
-  const W = 560, H = 160, PL = 4, PR = 4, PT = 12, PB = 24;
+  const W = 560, H = 196, PL = 58, PR = 8, PT = 14, PB = 42;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
-  const n = data.length;
+  const n = months.length;
   const slotW = chartW / n;
-  const barW = slotW * 0.45;
+  const k = series.length;
+  const groupW = slotW * (k > 1 ? 0.78 : 0.45);
+  const barW = groupW / k;
+  const yOf = v => PT + chartH - (maxVal > 0 ? (v / maxVal) * chartH : 0);
+  const showVals = n <= 6 || k === 1;
 
-  const pts = data.map((d, i) => ({
-    x: PL + i * slotW + slotW / 2,
-    y: PT + chartH - (maxVal > 0 ? (d.value / maxVal) * chartH : 0),
-    value: d.value,
-    label: d.label,
-  }));
-
-  const color = activeTab.color;
+  const totalOf = s => s.data.reduce((a, d) => a + d.value, 0);
+  const peakOf = s => s.data.reduce((a, b) => b.value > a.value ? b : a, s.data[0]);
+  const net = safeTab === 'overview' ? totalOf(SER.sales) - totalOf(SER.purchase) - totalOf(SER.expenses) : null;
 
   return (
     <div style={{ background: '#fff', border: '1px solid #EDEAE0', borderRadius: 14, padding: '20px 24px', marginBottom: 24 }}>
-      {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
         <div className="serif" style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>Department Overview</div>
-        <div style={{ display: 'flex', gap: 5 }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {[[6, '6M'], [12, '12M']].map(([r, lbl]) => (
+            <button key={r} onClick={() => setRange(r)}
+              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #DDD', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: range === r ? '#1E2A4A' : '#F8F6F2', color: range === r ? '#fff' : '#666' }}>{lbl}</button>
+          ))}
+          <span style={{ width: 8 }} />
           {[['bar', '▮▮ Bar'], ['line', '〜 Line']].map(([ct, lbl]) => (
             <button key={ct} onClick={() => setChartType(ct)}
               style={{ padding: '4px 11px', borderRadius: 6, border: '1px solid #DDD', fontSize: 11, fontWeight: 600, cursor: 'pointer',
@@ -5016,90 +5521,1035 @@ function DeptChart({ documents = [], productionOrders = [], serviceOrders = [], 
         </div>
       </div>
 
-      {/* Tab pills */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ padding: '5px 13px', borderRadius: 20, border: `1.5px solid ${tab === t.id ? t.color : '#DDD'}`,
+            style={{ padding: '5px 13px', borderRadius: 20, border: `1.5px solid ${safeTab === t.id ? t.color : '#DDD'}`,
               fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: tab === t.id ? t.color : '#fff', color: tab === t.id ? '#fff' : '#666' }}>
+              background: safeTab === t.id ? t.color : '#fff', color: safeTab === t.id ? '#fff' : '#666' }}>
             {t.emoji} {t.label}
           </button>
         ))}
       </div>
 
-      {/* SVG Chart */}
+      {k > 1 && (
+        <div style={{ display: 'flex', gap: 14, marginBottom: 6, fontSize: 11.5, color: '#666' }}>
+          {series.map(s => <span key={s.label}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: s.color, marginRight: 5 }} />{s.label}</span>)}
+        </div>
+      )}
+
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
-        {/* Horizontal grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
           const y = PT + chartH * (1 - f);
-          return <line key={i} x1={PL} y1={y} x2={W - PR} y2={y}
-            stroke={f === 0 ? '#D8D4CC' : '#EDEAE0'} strokeWidth={f === 0 ? 1.5 : 0.8}
-            strokeDasharray={f === 0 ? 'none' : '5 4'} />;
+          return <g key={i}>
+            <line x1={PL} y1={y} x2={W - PR} y2={y} stroke={f === 0 ? '#D8D4CC' : '#EDEAE0'} strokeWidth={f === 0 ? 1.5 : 0.8} strokeDasharray={f === 0 ? 'none' : '5 4'} />
+            <text x={PL - 6} y={y + 3} textAnchor="end" fontSize={9} fill="#888" fontFamily="sans-serif">{fmtV(maxVal * f)}</text>
+          </g>;
         })}
 
         {chartType === 'bar' ? (
-          pts.map((pt, i) => (
-            <g key={i}>
-              <rect x={pt.x - barW / 2} y={pt.y} width={barW} height={PT + chartH - pt.y}
-                rx={3} fill={color} opacity={0.82} />
-              {pt.value > 0 && (
-                <text x={pt.x} y={pt.y - 4} textAnchor="middle" fontSize={8.5} fill={color} fontFamily="sans-serif" fontWeight="600">
-                  {isAmount ? (pt.value >= 100000 ? `${(pt.value/100000).toFixed(1)}L` : pt.value >= 1000 ? `${(pt.value/1000).toFixed(0)}K` : Math.round(pt.value)) : pt.value}
-                </text>
-              )}
-            </g>
-          ))
-        ) : (
-          <g>
-            {/* Area */}
-            <path d={`M ${pts[0].x},${PT + chartH} ${pts.map(p => `L ${p.x},${p.y}`).join(' ')} L ${pts[pts.length - 1].x},${PT + chartH} Z`}
-              fill={color} opacity={0.07} />
-            {/* Line */}
-            <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')}
-              fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-            {/* Dots + value labels */}
-            {pts.map((pt, i) => (
-              <g key={i}>
-                <circle cx={pt.x} cy={pt.y} r={4} fill={color} stroke="#fff" strokeWidth={2} />
-                {pt.value > 0 && (
-                  <text x={pt.x} y={pt.y - 8} textAnchor="middle" fontSize={8.5} fill={color} fontFamily="sans-serif" fontWeight="600">
-                    {isAmount ? (pt.value >= 100000 ? `${(pt.value/100000).toFixed(1)}L` : pt.value >= 1000 ? `${(pt.value/1000).toFixed(0)}K` : Math.round(pt.value)) : pt.value}
-                  </text>
-                )}
+          series.map((s, si) => s.data.map((d, i) => {
+            const x = PL + i * slotW + (slotW - groupW) / 2 + si * barW;
+            const y = yOf(d.value);
+            return (
+              <g key={si + '-' + i}>
+                <rect x={x + 0.5} y={y} width={Math.max(barW - 1, 1)} height={PT + chartH - y} rx={2} fill={s.color} opacity={0.85}><title>{s.label} {d.label}: {isAmount ? cur(d.value) : d.value}</title></rect>
+                {showVals && d.value > 0 && <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={k > 1 ? 7 : 8.5} fill={s.color} fontFamily="sans-serif" fontWeight="600">{fmtV(d.value)}</text>}
               </g>
-            ))}
-          </g>
+            );
+          }))
+        ) : (
+          series.map((s, si) => {
+            const pts = s.data.map((d, i) => ({ x: PL + i * slotW + slotW / 2, y: yOf(d.value), v: d.value }));
+            return (
+              <g key={si}>
+                {k === 1 && <path d={`M ${pts[0].x},${PT + chartH} ${pts.map(p => `L ${p.x},${p.y}`).join(' ')} L ${pts[pts.length - 1].x},${PT + chartH} Z`} fill={s.color} opacity={0.07} />}
+                <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke={s.color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
+                {pts.map((p, i) => (
+                  <g key={i}>
+                    <circle cx={p.x} cy={p.y} r={3.5} fill={s.color} stroke="#fff" strokeWidth={1.8}><title>{s.label} {s.data[i].label}: {isAmount ? cur(p.v) : p.v}</title></circle>
+                    {showVals && k === 1 && p.v > 0 && <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize={8.5} fill={s.color} fontFamily="sans-serif" fontWeight="600">{fmtV(p.v)}</text>}
+                  </g>
+                ))}
+              </g>
+            );
+          })
         )}
 
-        {/* X-axis month labels */}
-        {pts.map((pt, i) => (
-          <text key={i} x={pt.x} y={H - 5} textAnchor="middle" fontSize={10} fill="#999" fontFamily="sans-serif">
-            {pt.label}
-          </text>
+        <line x1={PL} y1={PT} x2={PL} y2={PT + chartH} stroke="#D8D4CC" strokeWidth={1.2} />
+        {months.map((m, i) => (
+          <text key={i} x={PL + i * slotW + slotW / 2} y={PT + chartH + 14} textAnchor="middle" fontSize={10} fill="#777" fontFamily="sans-serif">{m.label}</text>
         ))}
+        <text x={PL + chartW / 2} y={H - 4} textAnchor="middle" fontSize={10} fill="#666" fontFamily="sans-serif" fontWeight="600">Month</text>
+        <text transform={`translate(11 ${PT + chartH / 2}) rotate(-90)`} textAnchor="middle" fontSize={10} fill="#666" fontFamily="sans-serif" fontWeight="600">{isAmount ? `Amount (${String(cur(0)).replace(/[0-9.,\s]/g, '') || '₹'})` : 'No. of orders'}</text>
       </svg>
 
-      {/* Summary strip */}
-      <div style={{ display: 'flex', gap: 24, marginTop: 8, paddingTop: 10, borderTop: '1px solid #F0EDE4', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, color: '#888' }}>
-          6-month total:{' '}
-          <strong style={{ color: '#1E2A4A' }}>
-            {isAmount ? cur(total6m) : `${total6m} orders`}
-          </strong>
-        </div>
-        {peak && peak.value > 0 && (
-          <div style={{ fontSize: 12, color: '#888' }}>
-            Peak month:{' '}
-            <strong style={{ color: '#1E2A4A' }}>
-              {peak.label} ({isAmount ? cur(peak.value) : peak.value})
-            </strong>
-          </div>
-        )}
-        {total6m === 0 && (
-          <div style={{ fontSize: 12, color: '#BBB', fontStyle: 'italic' }}>No data yet for this period.</div>
-        )}
+      <div style={{ display: 'flex', gap: 22, marginTop: 8, paddingTop: 10, borderTop: '1px solid #F0EDE4', flexWrap: 'wrap' }}>
+        {series.map(s => {
+          const tot = totalOf(s), pk = peakOf(s);
+          return (
+            <div key={s.label} style={{ fontSize: 12, color: '#888' }}>
+              {k > 1 ? <b style={{ color: s.color }}>{s.label}: </b> : `${range}-month total: `}
+              <strong style={{ color: '#1E2A4A' }}>{s.amount ? cur(tot) : `${tot} orders`}</strong>
+              {k === 1 && pk && pk.value > 0 && <> &nbsp;·&nbsp; Peak: <strong style={{ color: '#1E2A4A' }}>{pk.label} ({s.amount ? cur(pk.value) : pk.value})</strong></>}
+            </div>
+          );
+        })}
+        {net !== null && <div style={{ fontSize: 12, color: '#888' }}>Sales − Purchase − Expenses: <strong style={{ color: net >= 0 ? '#1A7A3E' : '#B5453A' }}>{cur(net)}</strong></div>}
+        {series.every(s => totalOf(s) === 0) && <div style={{ fontSize: 12, color: '#BBB', fontStyle: 'italic' }}>No data yet for this period.</div>}
       </div>
+    </div>
+  );
+}
+
+// ─── Business Insights: Receivables ageing + reminders · Cash forecast · Reorder planner · Month-end check ───────────
+// ─── Insights add-on tabs. ctx comes from InsightsView. Per-business saved data lives in businessInfo.insightsData[bizKey] ───
+const _iCard = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 14 };
+const _iTh = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', textAlign: 'left', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+const _iTd = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+const _iR = { textAlign: 'right' };
+const _iYM = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+const _iSum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const _iSettles = (v) => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+const _iPcEntries = (ctx) => (Array.isArray(ctx.pettyCash && ctx.pettyCash.entries) ? ctx.pettyCash.entries : []).filter(e => ctx.inDiv(e) && e.status !== 'rejected');
+
+// 2 · Balance sheet + trial balance
+function InsBalanceSheet({ ctx }) {
+  const { fmt, docs, vch, stock, recvRows, payRows, pettyCash, taxOf, taxableOf } = ctx;
+  const pcE = _iPcEntries(ctx);
+  const cash = _iSum(vch.filter(v => v.type === 'receipt'), v => parseFloat(v.amount) || 0) - _iSum(vch.filter(v => v.type === 'payment'), v => parseFloat(v.amount) || 0);
+  const pcb = pcE.reduce((s, e) => s + (parseFloat(e.credit) || 0) - (parseFloat(e.debit) || 0), 0) + (parseFloat(pettyCash && pettyCash.openingBalance) || 0);
+  const recv = _iSum(recvRows, r => r.bal), pay = _iSum(payRows, r => r.bal);
+  const inv = Object.values(stock).reduce((s, x) => s + (x.qty > 0 ? (x.value > 0 ? x.value : x.qty * (parseFloat((x.item && (x.item.purchaseRate ?? x.item.rate ?? x.item.costPrice)) || 0) || 0)) : 0), 0);
+  const sales = _iSum(docs.filter(d => d.type === 'invoice'), taxableOf) - _iSum(docs.filter(d => d.type === 'creditnote'), taxableOf);
+  const purch = _iSum(docs.filter(d => d.type === 'purchasebill'), taxableOf);
+  const gstNet = _iSum(docs.filter(d => d.type === 'invoice'), taxOf) - _iSum(docs.filter(d => d.type === 'purchasebill'), taxOf);
+  const exp = _iSum(vch.filter(v => v.type === 'payment' && !_iSettles(v)), v => parseFloat(v.amount) || 0) + _iSum(pcE, e => parseFloat(e.debit) || 0);
+  const flow = (h) => _iSum(vch.filter(v => v.accountHead === h), v => (v.type === 'receipt' ? 1 : -1) * (parseFloat(v.amount) || 0));
+  const loan = flow('Loan'), capital = flow('Capital');
+  const assets = Math.max(cash, 0) + Math.max(pcb, 0) + recv + inv + (gstNet < 0 ? -gstNet : 0);
+  const liabs = pay + (gstNet > 0 ? gstNet : 0) + Math.max(loan, 0) + (cash < 0 ? -cash : 0);
+  const profit = sales - purch - exp;
+  const reserves = assets - liabs - capital;
+  const row = (l, v, b) => <tr key={l}><td style={{ ..._iTd, fontWeight: b ? 700 : 400 }}>{l}</td><td style={{ ..._iTd, ..._iR, fontWeight: b ? 700 : 400 }}>{fmt(v)}</td></tr>;
+  const tb = [['Sales (net of credit notes)', 0, sales], ['Purchases', purch, 0], ['Operating expenses', exp, 0], ['Debtors (receivables)', recv, 0], ['Creditors (payables)', 0, pay], ['Cash / bank (vouchers)', Math.max(cash, 0), Math.max(-cash, 0)], ['Petty cash', Math.max(pcb, 0), Math.max(-pcb, 0)], ['Closing stock', inv, 0], ['GST (net)', gstNet < 0 ? -gstNet : 0, gstNet > 0 ? gstNet : 0], ['Loans', Math.max(-loan, 0), Math.max(loan, 0)], ['Capital', Math.max(-capital, 0), Math.max(capital, 0)]];
+  const dr = tb.reduce((s, r) => s + r[1], 0), cr = tb.reduce((s, r) => s + r[2], 0);
+  return (<>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Assets</div><table style={{ width: '100%', borderCollapse: 'collapse' }}><tbody>
+        {row('Cash / bank (receipts − payments)', Math.max(cash, 0))}{row('Petty cash', Math.max(pcb, 0))}{row('Debtors (outstanding invoices)', recv)}{row('Closing stock (purchase rate)', inv)}{gstNet < 0 && row('GST input credit', -gstNet)}{row('TOTAL ASSETS', assets, 1)}</tbody></table></div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Liabilities &amp; Capital</div><table style={{ width: '100%', borderCollapse: 'collapse' }}><tbody>
+        {row('Creditors (outstanding bills)', pay)}{gstNet > 0 && row('GST payable (output − input)', gstNet)}{loan > 0 && row('Loans', loan)}{row('Capital introduced', capital)}{row('Reserves & surplus (balancing)', reserves)}{row('TOTAL', liabs + capital + reserves, 1)}</tbody></table>
+        <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Profit on approved documents: <b style={{ color: profit >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(profit)}</b> (sales − purchases − expenses, ex-GST)</div></div>
+    </div>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Trial balance</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr><th style={_iTh}>Account</th><th style={{ ..._iTh, ..._iR }}>Debit</th><th style={{ ..._iTh, ..._iR }}>Credit</th></tr></thead><tbody>
+        {tb.map(r => <tr key={r[0]}><td style={_iTd}>{r[0]}</td><td style={{ ..._iTd, ..._iR }}>{r[1] ? fmt(r[1]) : ''}</td><td style={{ ..._iTd, ..._iR }}>{r[2] ? fmt(r[2]) : ''}</td></tr>)}
+        {Math.abs(dr - cr) > 1 && <tr><td style={_iTd}>Opening balances / entries not captured (difference)</td><td style={{ ..._iTd, ..._iR }}>{cr > dr ? fmt(cr - dr) : ''}</td><td style={{ ..._iTd, ..._iR }}>{dr > cr ? fmt(dr - cr) : ''}</td></tr>}
+        <tr style={{ background: '#F8F6F0' }}><td style={{ ..._iTd, fontWeight: 700 }}>Total</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(Math.max(dr, cr))}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(Math.max(dr, cr))}</td></tr></tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Management view from approved documents and vouchers — not an audited statement. Opening balances, fixed assets, depreciation and bank reconciliation are outside the app; the difference line shows what is not captured. Share with your CA for final books.</div>
+    </div>
+  </>);
+}
+
+// 3 · Budget vs actual
+function InsBudget({ ctx }) {
+  const { fmt, docs, vch, taxableOf, ins, setIns, canEdit, styles } = ctx;
+  const [month, setMonth] = React.useState(_iYM(new Date()));
+  const budgets = ins.budgets || {}, b = budgets[month] || {};
+  const setB = (k, v) => setIns('budgets', (p = {}) => ({ ...p, [month]: { ...(p[month] || {}), [k]: v } }));
+  const inM = d => String(d || '').slice(0, 7) === month;
+  const act = {
+    sales: _iSum(docs.filter(d => d.type === 'invoice' && inM(d.date)), taxableOf) - _iSum(docs.filter(d => d.type === 'creditnote' && inM(d.date)), taxableOf),
+    purchase: _iSum(docs.filter(d => d.type === 'purchasebill' && inM(d.date)), taxableOf),
+    expenses: _iSum(vch.filter(v => v.type === 'payment' && !_iSettles(v) && inM(v.date)), v => parseFloat(v.amount) || 0) + _iSum(_iPcEntries(ctx).filter(e => inM(e.date)), e => parseFloat(e.debit) || 0),
+  };
+  return (
+    <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <b>Month</b><input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...styles.input, width: 170, margin: 0 }} />
+        {canEdit && <button style={styles.ghostBtn} onClick={() => { const d = new Date(month + '-01'); d.setMonth(d.getMonth() - 1); const pb = budgets[_iYM(d)]; if (!pb) return alert('No budget in the previous month.'); setIns('budgets', (p = {}) => ({ ...p, [month]: { ...pb } })); }}>Copy last month's budget</button>}
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['', 'Budget', 'Actual', 'Variance', '% used'].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {[['sales', 'Sales', 1], ['purchase', 'Purchase', -1], ['expenses', 'Expenses', -1]].map(([k, l, sg]) => { const bud = parseFloat(b[k]) || 0, a = act[k], v = sg > 0 ? a - bud : bud - a, pct = bud > 0 ? Math.round(a / bud * 100) : null; return (
+          <tr key={k}><td style={_iTd}>{l}</td>
+            <td style={{ ..._iTd, ..._iR }}>{canEdit ? <input type="number" value={b[k] ?? ''} onChange={e => setB(k, e.target.value)} placeholder="0" style={{ ...styles.input, width: 130, margin: 0, textAlign: 'right' }} /> : fmt(bud)}</td>
+            <td style={{ ..._iTd, ..._iR }}>{fmt(a)}</td>
+            <td style={{ ..._iTd, ..._iR, color: bud ? (v >= 0 ? '#1A7A3E' : '#B5453A') : '#999', fontWeight: 600 }}>{bud ? (v >= 0 ? '+' : '−') + fmt(Math.abs(v)) : '—'}</td>
+            <td style={{ ..._iTd, ..._iR }}>{pct === null ? '—' : <span style={{ color: (sg > 0 ? pct >= 100 : pct <= 100) ? '#1A7A3E' : '#B5453A', fontWeight: 600 }}>{pct}%</span>}</td></tr>); })}
+      </tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Sales: green when actual ≥ budget. Purchase / expenses: green when actual ≤ budget. Actuals exclude GST and use approved documents.</div>
+    </div>
+  );
+}
+
+// 4 · Vendor payment planner
+function InsPayPlanner({ ctx }) {
+  const { fmt, payRows, today, dayMs, styles } = ctx;
+  const [cash, setCash] = React.useState('');
+  const avail = parseFloat(cash) || 0;
+  const rows = payRows.map(r => ({ ...r, days: r.due ? Math.floor((r.due - today) / dayMs) : 0 })).sort((a, b) => a.days - b.days || a.bal - b.bal);
+  let left = avail; const plan = rows.map(r => { const pay = left >= r.bal; if (pay) left -= r.bal; return { ...r, pay }; });
+  const grp = r => r.days < 0 ? 'Overdue' : r.days <= 7 ? 'Due this week' : r.days <= 14 ? 'Next 2 weeks' : 'Later';
+  const payNow = plan.filter(r => r.pay), hold = plan.filter(r => !r.pay);
+  return (<>
+    <div style={{ ..._iCard, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <b>Cash available to pay vendors</b><input type="number" value={cash} onChange={e => setCash(e.target.value)} placeholder="0" style={{ ...styles.input, width: 180, margin: 0 }} />
+      <span style={{ fontSize: 12, color: '#888' }}>Total payable {fmt(_iSum(rows, r => r.bal))} · pays overdue / earliest first</span>
+    </div>
+    {rows.length === 0 ? <div style={styles.emptyBox}>No outstanding purchase bills.</div> : (
+      <div style={_iCard}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{['Vendor', 'Bill', 'Due', 'When', 'Balance', 'Plan'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i === 4 ? _iR : {}) }}>{h}</th>)}</tr></thead>
+        <tbody>{plan.map(r => <tr key={r.d.id}><td style={_iTd}>{r.party}</td><td style={_iTd}>{r.d.number}</td><td style={_iTd}>{r.d.dueDate || r.d.date}</td>
+          <td style={{ ..._iTd, color: r.days < 0 ? '#B5453A' : r.days <= 7 ? '#E07B00' : '#666', fontWeight: 600 }}>{grp(r)}{r.days < 0 ? ' (' + (-r.days) + ' d)' : ''}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{fmt(r.bal)}</td>
+          <td style={_iTd}>{avail > 0 ? (r.pay ? <span style={{ color: '#1A7A3E', fontWeight: 700 }}>✔ Pay now</span> : <span style={{ color: '#B5453A' }}>Hold / part-pay</span>) : '—'}</td></tr>)}</tbody></table>
+        {avail > 0 && <div style={{ fontSize: 12.5, marginTop: 10 }}>Pay now: <b>{fmt(_iSum(payNow, r => r.bal))}</b> ({payNow.length} bills) · Hold: <b>{fmt(_iSum(hold, r => r.bal))}</b> ({hold.length}) · Cash left: <b>{fmt(left)}</b></div>}
+      </div>)}
+  </>);
+}
+
+// 1 · Payroll pre-check
+function InsPayrollCheck({ ctx }) {
+  const { employees, siteAttendance, fmt, styles } = ctx;
+  const [month, setMonth] = React.useState(_iYM(new Date()));
+  const [y, m] = month.split('-').map(Number), dim = new Date(y, m, 0).getDate();
+  const act = employees.filter(e => (e.status || 'active') === 'active');
+  const ids = new Set(employees.map(e => e.id));
+  const cnt = {};
+  (siteAttendance || []).filter(r => String(r.date || '').slice(0, 7) === month).forEach(r => (r.records || []).forEach(x => {
+    if (!ids.has(x.employeeId)) return;
+    const c = cnt[x.employeeId] = cnt[x.employeeId] || { present: 0, absent: 0, od: 0, ot: 0, days: 0 }; c.days++;
+    const s = String(x.status || ''); if (s === 'absent') c.absent++; else if (s === 'od') c.od++; else c.present++;
+    c.ot += parseFloat(x.otHours) || 0;
+  }));
+  const gross = e => (parseFloat(e.basicSalary) || 0) + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0);
+  const sorted = act.map(gross).filter(g => g > 0).sort((a, b) => a - b), med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  const bankCount = {}; act.forEach(e => { const k = String(e.bankAccount || '').trim(); if (k) bankCount[k] = (bankCount[k] || 0) + 1; });
+  const issues = [];
+  act.forEach(e => {
+    const c = cnt[e.id], g = gross(e), add = (lvl, msg) => issues.push({ lvl, who: e, msg });
+    if (!(parseFloat(e.basicSalary) > 0)) add('high', 'No basic salary set — will be paid 0');
+    if (!String(e.bankAccount || '').trim()) add('med', 'No bank account on file');
+    else if (bankCount[String(e.bankAccount).trim()] > 1) add('high', 'Same bank account used by another employee');
+    if (!c) add('med', 'No attendance recorded for ' + month);
+    else {
+      if (c.absent >= 6) add('med', c.absent + ' absent days — check loss of pay');
+      if (c.days > dim) add('high', 'Attendance entries (' + c.days + ') exceed days in month (' + dim + ')');
+      if (c.ot > 60) add('med', c.ot + ' overtime hours — unusually high, verify');
+      if (c.od > 0) add('low', c.od + ' official-duty day(s) — counted as present');
+    }
+    if (e.joiningDate && String(e.joiningDate).slice(0, 7) === month) add('low', 'Joined this month (' + e.joiningDate + ') — pro-rata pay');
+    if (med > 0 && g > med * 2.5) add('med', 'Gross ' + fmt(g) + ' is over 2.5× the median — verify');
+  });
+  employees.filter(e => e.status && e.status !== 'active' && cnt[e.id]).forEach(e => issues.push({ lvl: 'high', who: e, msg: 'Status "' + e.status + '" but has attendance this month' }));
+  const col = { high: '#B5453A', med: '#E07B00', low: '#6B7494' };
+  const nH = issues.filter(i => i.lvl === 'high').length, nM = issues.filter(i => i.lvl === 'med').length;
+  return (
+    <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <b>Payroll month</b><input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...styles.input, width: 170, margin: 0 }} />
+        <span style={{ fontSize: 13 }}>{act.length} active staff · <b style={{ color: nH ? '#B5453A' : '#1A7A3E' }}>{nH} must-fix</b> · <b style={{ color: '#E07B00' }}>{nM} to check</b> · Gross payroll {fmt(_iSum(act, gross))}</span>
+      </div>
+      {issues.length === 0 ? <div style={{ color: '#1A7A3E', fontWeight: 600 }}>✅ No issues found — payroll looks ready.</div> :
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Level', 'Employee', 'Issue'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+          {issues.sort((a, b) => ['high', 'med', 'low'].indexOf(a.lvl) - ['high', 'med', 'low'].indexOf(b.lvl)).map((i, k) => <tr key={k}><td style={{ ..._iTd, color: col[i.lvl], fontWeight: 700, fontSize: 11 }}>{i.lvl === 'high' ? 'MUST FIX' : i.lvl === 'med' ? 'CHECK' : 'INFO'}</td><td style={_iTd}>{i.who.name} <span style={{ color: '#aaa', fontSize: 11 }}>{i.who.empId}</span></td><td style={_iTd}>{i.msg}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Issues are only flagged, never changed automatically. Fix them in Employees / Attendance, then run payroll.</div>
+    </div>
+  );
+}
+
+// 7 · Compliance calendar
+function InsCompliance({ ctx }) {
+  const { ins, setIns, canEdit, today, dayMs, styles, businessInfo } = ctx;
+  const [form, setForm] = React.useState({ title: '', date: '', note: '' });
+  const isIN = (businessInfo.country || 'india') === 'india';
+  const std = [];
+  if (isIN) for (let k = 0; k < 3; k++) {
+    const base = new Date(today.getFullYear(), today.getMonth() + k, 1), y = base.getFullYear(), m = base.getMonth(), last = new Date(y, m + 1, 0).getDate();
+    const iso = (d) => y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    std.push({ id: 's-tds-' + iso(7), title: 'TDS payment (previous month)', date: iso(7) }, { id: 's-g1-' + iso(11), title: 'GSTR-1 filing', date: iso(11) }, { id: 's-pf-' + iso(15), title: 'PF & ESI payment', date: iso(15) }, { id: 's-g3-' + iso(20), title: 'GSTR-3B filing + tax payment', date: iso(20) });
+    if ([5, 8, 11, 2].includes(m)) std.push({ id: 's-at-' + iso(15), title: 'Advance tax instalment', date: iso(15) });
+    if ([0, 3, 6, 9].includes(m)) std.push({ id: 's-tdsr-' + iso(Math.min(31, last)), title: 'TDS return (quarterly) — check quarter', date: iso(Math.min(31, last)) });
+  }
+  const mine = ins.complianceItems || [], done = ins.complianceDone || {};
+  const all = [...std.map(x => ({ ...x, std: true })), ...mine.map(x => ({ ...x, std: false }))].filter(x => x.date).sort((a, b) => a.date.localeCompare(b.date));
+  const dl = x => Math.ceil((new Date(x.date) - today) / dayMs);
+  const isDone = x => x.std ? !!done[x.id] : !!x.done;
+  const toggle = (x) => x.std ? setIns('complianceDone', (p = {}) => ({ ...p, [x.id]: !p[x.id] })) : setIns('complianceItems', (p = []) => p.map(i => i.id === x.id ? { ...i, done: !i.done } : i));
+  const add = () => { if (!form.title.trim() || !form.date) return alert('Enter a title and date'); setIns('complianceItems', (p = []) => [...p, { id: 'c-' + Date.now(), ...form, title: form.title.trim() }]); setForm({ title: '', date: '', note: '' }); };
+  const shown = all.filter(x => dl(x) >= -30);
+  return (<>
+    {canEdit && <div style={{ ..._iCard, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <b>Add your own</b><input placeholder="e.g. Factory licence renewal" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} style={{ ...styles.input, width: 260, margin: 0 }} />
+      <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={{ ...styles.input, width: 160, margin: 0 }} />
+      <input placeholder="Note (optional)" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} style={{ ...styles.input, width: 220, margin: 0 }} />
+      <button style={styles.primaryBtn} onClick={add}>Add</button></div>}
+    <div style={_iCard}>
+      {shown.length === 0 && <div style={{ color: '#999' }}>Nothing due.</div>}
+      {shown.map(x => { const d = dl(x), dn = isDone(x); return (
+        <div key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F0ECE0', opacity: dn ? 0.5 : 1 }}>
+          <input type="checkbox" checked={dn} onChange={() => toggle(x)} />
+          <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, textDecoration: dn ? 'line-through' : 'none' }}>{x.title} {!x.std && <span style={{ fontSize: 10, background: '#EEF2FF', color: '#3D52A0', borderRadius: 4, padding: '1px 6px' }}>yours</span>}</div>{x.note && <div style={{ fontSize: 11.5, color: '#999' }}>{x.note}</div>}</div>
+          <div style={{ fontSize: 12.5, color: '#666', width: 100 }}>{x.date}</div>
+          <div style={{ width: 100, textAlign: 'right', fontWeight: 700, fontSize: 12.5, color: dn ? '#999' : d < 0 ? '#B5453A' : d <= 5 ? '#E07B00' : '#1A7A3E' }}>{d < 0 ? (-d) + ' d overdue' : d === 0 ? 'Today' : d + ' d left'}</div>
+          {!x.std && canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('complianceItems', (p = []) => p.filter(i => i.id !== x.id))}>✕</button>}
+        </div>); })}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 10 }}>Standard dates are the usual India due dates; they can shift for holidays / notifications and depend on your registrations — confirm with your CA. Tick when filed.</div>
+    </div>
+  </>);
+}
+
+// 8 · Risk register + SOP builder
+function InsRiskSop({ ctx }) {
+  const { ins, setIns, canEdit, styles, businessInfo } = ctx;
+  const blank = { title: '', category: 'Operations', likelihood: 3, impact: 3, owner: '', mitigation: '', status: 'Open' };
+  const [r, setR] = React.useState(blank);
+  const [sop, setSop] = React.useState({ title: '', purpose: '', scope: '', owner: '', steps: '' });
+  const risks = (ins.riskRegister || []).slice().sort((a, b) => (b.likelihood * b.impact) - (a.likelihood * a.impact));
+  const sops = ins.sops || [];
+  const lvl = s => s >= 15 ? ['High', '#B5453A'] : s >= 8 ? ['Medium', '#E07B00'] : ['Low', '#1A7A3E'];
+  const sopText = x => (x.title.toUpperCase() + '\n' + (businessInfo.name || '') + '\n\nPurpose: ' + x.purpose + '\nScope: ' + x.scope + '\nOwner: ' + x.owner + '\n\nProcedure:\n' + String(x.steps).split('\n').filter(Boolean).map((l, i) => (i + 1) + '. ' + l).join('\n'));
+  const num = (k) => <select value={r[k]} onChange={e => setR(p => ({ ...p, [k]: parseInt(e.target.value) }))} style={{ ...styles.input, width: 80, margin: 0 }}>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select>;
+  return (<>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Risk register</div>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <input placeholder="Risk (e.g. Key customer pays late)" value={r.title} onChange={e => setR(p => ({ ...p, title: e.target.value }))} style={{ ...styles.input, width: 250, margin: 0 }} />
+        <select value={r.category} onChange={e => setR(p => ({ ...p, category: e.target.value }))} style={{ ...styles.input, width: 130, margin: 0 }}>{['Operations', 'Finance', 'Safety', 'Quality', 'Legal', 'People', 'Supply chain', 'IT'].map(c => <option key={c}>{c}</option>)}</select>
+        <span style={{ fontSize: 12 }}>Likelihood</span>{num('likelihood')}<span style={{ fontSize: 12 }}>Impact</span>{num('impact')}
+        <input placeholder="Owner" value={r.owner} onChange={e => setR(p => ({ ...p, owner: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }} />
+        <input placeholder="Mitigation / action" value={r.mitigation} onChange={e => setR(p => ({ ...p, mitigation: e.target.value }))} style={{ ...styles.input, width: 240, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!r.title.trim()) return alert('Enter the risk'); setIns('riskRegister', (p = []) => [...p, { ...r, id: 'r-' + Date.now() }]); setR(blank); }}>Add</button></div>}
+      {risks.length === 0 ? <div style={{ color: '#999' }}>No risks logged yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Risk', 'Category', 'L×I', 'Level', 'Owner', 'Mitigation', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {risks.map(x => { const sc = x.likelihood * x.impact, [lv, c] = lvl(sc); return <tr key={x.id}><td style={_iTd}>{x.title}</td><td style={_iTd}>{x.category}</td><td style={_iTd}>{x.likelihood}×{x.impact}={sc}</td><td style={{ ..._iTd, color: c, fontWeight: 700 }}>{lv}</td><td style={_iTd}>{x.owner}</td><td style={_iTd}>{x.mitigation}</td>
+          <td style={_iTd}>{canEdit ? <select value={x.status} onChange={e => setIns('riskRegister', (p = []) => p.map(y => y.id === x.id ? { ...y, status: e.target.value } : y))} style={{ ...styles.input, margin: 0, width: 105 }}>{['Open', 'Mitigating', 'Closed'].map(s => <option key={s}>{s}</option>)}</select> : x.status}</td>
+          <td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('riskRegister', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>; })}</tbody></table>}
+    </div>
+    <div style={_iCard}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>SOP builder</div>
+      {canEdit && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        <input placeholder="SOP title (e.g. Goods receipt & inspection)" value={sop.title} onChange={e => setSop(p => ({ ...p, title: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Owner / department" value={sop.owner} onChange={e => setSop(p => ({ ...p, owner: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Purpose" value={sop.purpose} onChange={e => setSop(p => ({ ...p, purpose: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <input placeholder="Scope" value={sop.scope} onChange={e => setSop(p => ({ ...p, scope: e.target.value }))} style={{ ...styles.input, margin: 0 }} />
+        <textarea placeholder={'Steps — one per line'} value={sop.steps} onChange={e => setSop(p => ({ ...p, steps: e.target.value }))} rows={4} style={{ ...styles.input, margin: 0, gridColumn: '1/-1' }} />
+        <div><button style={styles.primaryBtn} onClick={() => { if (!sop.title.trim() || !sop.steps.trim()) return alert('Title and steps are required'); setIns('sops', (p = []) => [...p, { ...sop, id: 's-' + Date.now() }]); setSop({ title: '', purpose: '', scope: '', owner: '', steps: '' }); }}>Save SOP</button></div></div>}
+      {sops.length === 0 ? <div style={{ color: '#999' }}>No SOPs yet.</div> : sops.map(x => (
+        <div key={x.id} style={{ border: '1px solid #EAE6DB', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><b>{x.title}</b><span>
+            <button style={{ ...styles.ghostBtn, padding: '2px 10px', marginRight: 6 }} onClick={() => { try { navigator.clipboard.writeText(sopText(x)); alert('SOP copied'); } catch (e) { window.prompt('Copy:', sopText(x)); } }}>Copy</button>
+            {canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('sops', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</span></div>
+          <div style={{ fontSize: 12, color: '#777', margin: '4px 0' }}>{x.purpose}{x.owner ? ' · Owner: ' + x.owner : ''}</div>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13 }}>{String(x.steps).split('\n').filter(Boolean).map((l, i) => <li key={i}>{l}</li>)}</ol>
+        </div>))}
+    </div>
+  </>);
+}
+
+// 5 · Onboarding checklist + appraisal (stored on the employee record)
+const INS_ONBOARD = ['Offer letter signed', 'ID / address proof collected', 'Bank account details collected', 'PF / ESI enrolment', 'Employee ID & biometric ID created', 'Induction & safety briefing', 'PPE / tools / uniform issued', 'System / email access', 'Reporting manager introduced', 'Probation review date set'];
+const INS_APPR = ['Quality of work', 'Productivity', 'Punctuality & attendance', 'Teamwork', 'Initiative', 'Technical skill'];
+function InsPeople({ ctx }) {
+  const { employees, setEmployees, canEdit, styles } = ctx;
+  const [id, setId] = React.useState('');
+  const emp = employees.find(e => e.id === id);
+  const [ap, setAp] = React.useState({ period: String(new Date().getFullYear()), ratings: {}, comments: '' });
+  const upd = (fn) => setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...fn(e) } : e));
+  const prog = e => { const o = e.onboarding || {}; return Math.round(INS_ONBOARD.filter((_, i) => o[i]).length / INS_ONBOARD.length * 100); };
+  const recent = employees.filter(e => (e.status || 'active') === 'active' && e.joiningDate && (Date.now() - new Date(e.joiningDate)) < 90 * 86400000);
+  const avg = r => { const v = INS_APPR.map(a => r[a]).filter(Boolean); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0; };
+  return (<>
+    {recent.length > 0 && <div style={_iCard}><b>New joiners (last 90 days)</b>{recent.map(e => <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}><span>{e.name} <span style={{ color: '#aaa' }}>· {e.joiningDate}</span></span><span style={{ color: prog(e) === 100 ? '#1A7A3E' : '#E07B00', fontWeight: 600 }}>Onboarding {prog(e)}%</span></div>)}</div>}
+    <div style={{ ..._iCard, display: 'flex', gap: 10, alignItems: 'center' }}><b>Employee</b>
+      <select value={id} onChange={e => setId(e.target.value)} style={{ ...styles.input, width: 320, margin: 0 }}><option value="">— Select —</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.empId})</option>)}</select></div>
+    {emp && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Onboarding checklist — {prog(emp)}%</div>
+        {INS_ONBOARD.map((t, i) => <label key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', fontSize: 13 }}><input type="checkbox" disabled={!canEdit} checked={!!(emp.onboarding || {})[i]} onChange={e => { const v = e.target.checked; upd(x => ({ onboarding: { ...(x.onboarding || {}), [i]: v } })); }} />{t}</label>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Appraisal</div>
+        {canEdit && <div style={{ marginBottom: 10 }}>
+          <input value={ap.period} onChange={e => setAp(p => ({ ...p, period: e.target.value }))} placeholder="Period (e.g. 2026 / H1 2026)" style={{ ...styles.input, margin: '0 0 6px' }} />
+          {INS_APPR.map(a => <div key={a} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '3px 0' }}>{a}<select value={ap.ratings[a] || ''} onChange={e => setAp(p => ({ ...p, ratings: { ...p.ratings, [a]: parseInt(e.target.value) || 0 } }))} style={{ ...styles.input, width: 80, margin: 0 }}><option value="">—</option>{[1, 2, 3, 4, 5].map(n => <option key={n}>{n}</option>)}</select></div>)}
+          <textarea value={ap.comments} onChange={e => setAp(p => ({ ...p, comments: e.target.value }))} placeholder="Comments / goals for next period" rows={2} style={{ ...styles.input, margin: '6px 0' }} />
+          <button style={styles.primaryBtn} onClick={() => { if (avg(ap.ratings) === 0) return alert('Give at least one rating'); const rec = { ...ap, id: 'ap-' + Date.now(), date: new Date().toISOString().slice(0, 10), score: +avg(ap.ratings).toFixed(2) }; upd(x => ({ appraisals: [...(x.appraisals || []), rec] })); setAp({ period: ap.period, ratings: {}, comments: '' }); }}>Save appraisal</button></div>}
+        {(emp.appraisals || []).slice().reverse().map(a => <div key={a.id} style={{ borderTop: '1px solid #F0ECE0', padding: '6px 0', fontSize: 12.5 }}><b>{a.period}</b> · {a.date} · score <b style={{ color: a.score >= 4 ? '#1A7A3E' : a.score >= 3 ? '#E07B00' : '#B5453A' }}>{a.score}/5</b>{a.comments ? <div style={{ color: '#777' }}>{a.comments}</div> : null}</div>)}
+      </div>
+    </div>}
+  </>);
+}
+
+// 6 · Contract risk check (keyword screening — not legal advice)
+const INS_CRISK = [
+  [/unlimited liabilit|without limit(ation)? of liabilit/i, 'High', 'Unlimited liability', 'Cap liability at contract value / fees paid.'],
+  [/indemnif/i, 'Medium', 'Indemnity clause', 'Make it mutual and limited to third-party claims caused by your breach.'],
+  [/auto(matic(ally)?)?[- ]?renew|evergreen/i, 'Medium', 'Auto-renewal', 'Note the cancellation window; diarise the notice date.'],
+  [/terminat\w+[^.]{0,60}(sole|absolute) discretion|terminat\w+ for convenience|without (any )?(prior )?notice/i, 'High', 'One-sided / no-notice termination', 'Ask for a notice period and payment for work done.'],
+  [/liquidated damages|penalt(y|ies)|late delivery charge/i, 'Medium', 'Penalty / LD clause', 'Check the rate and cap (e.g. 0.5%/week, max 5%).'],
+  [/exclusiv/i, 'Medium', 'Exclusivity', 'Confirm scope, duration and territory.'],
+  [/non[- ]?compete|non[- ]?solicit/i, 'Medium', 'Non-compete / non-solicit', 'Limit duration and geography.'],
+  [/payment[^.]{0,60}(sixty|60|ninety|90|120)\s*days|(sixty|60|ninety|90|120)\s*days[^.]{0,40}(payment|invoice)/i, 'Medium', 'Long payment terms', 'Negotiate 30 days or advance / milestone payments.'],
+  [/pay[- ]when[- ]paid|pay[- ]if[- ]paid|back[- ]to[- ]back payment/i, 'High', 'Pay-when-paid', 'Your payment depends on the customer paying — avoid or add a long-stop date.'],
+  [/retention|security deposit|performance (bank )?guarantee|bank guarantee/i, 'Medium', 'Retention / guarantee', 'Check % held, release date and BG validity.'],
+  [/(three|five|3|5)\s*years?\s*warranty|warranty[^.]{0,60}(36|48|60)\s*months/i, 'Medium', 'Long warranty', 'Standard is 12–24 months from supply / commissioning.'],
+  [/sole discretion|at its discretion/i, 'Medium', 'One-sided discretion', 'Ask for reasonable / objective criteria.'],
+  [/assign(s|ed)? (all )?(intellectual property|ip|rights)|work (made )?for hire/i, 'Medium', 'IP assignment', 'Keep pre-existing IP; assign only deliverables.'],
+  [/laws of (singapore|england|dubai|new york)|jurisdiction[^.]{0,80}(singapore|london|dubai|new york)/i, 'Medium', 'Foreign law / jurisdiction', 'Prefer Indian law / local courts, or neutral arbitration.'],
+  [/consequential|indirect (loss|damage)/i, 'Low', 'Consequential-loss wording', 'Make sure consequential loss is excluded for both sides.'],
+  [/force majeure/i, 'Info', 'Force majeure present', 'Good — check it covers govt orders, pandemics, supply disruption.'],
+];
+function InsContractRisk({ ctx }) {
+  const { contracts, styles } = ctx;
+  const [txt, setTxt] = React.useState('');
+  const scan = (t) => INS_CRISK.filter(r => r[0].test(t)).map(r => ({ lvl: r[1], name: r[2], tip: r[3] }));
+  const col = { High: '#B5453A', Medium: '#E07B00', Low: '#6B7494', Info: '#1A7A3E' };
+  const list = (contracts || []).map(c => ({ c, hits: scan(JSON.stringify(c)) })).filter(x => x.hits.length);
+  const res = txt.trim() ? scan(txt) : null;
+  const Hits = ({ hits }) => hits.length === 0 ? <div style={{ color: '#1A7A3E' }}>No flagged terms found.</div> : <>{hits.slice().sort((a, b) => ['High', 'Medium', 'Low', 'Info'].indexOf(a.lvl) - ['High', 'Medium', 'Low', 'Info'].indexOf(b.lvl)).map((h, i) => <div key={i} style={{ display: 'flex', gap: 10, padding: '5px 0', fontSize: 13 }}><b style={{ color: col[h.lvl], width: 62 }}>{h.lvl}</b><div><b>{h.name}</b><div style={{ color: '#777', fontSize: 12 }}>{h.tip}</div></div></div>)}</>;
+  return (<>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Paste any contract / PO terms to screen</div>
+      <textarea value={txt} onChange={e => setTxt(e.target.value)} rows={6} placeholder="Paste clauses here…" style={{ ...styles.input, margin: 0, width: '100%', boxSizing: 'border-box' }} />
+      {res && <div style={{ marginTop: 10 }}><Hits hits={res} /></div>}</div>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Saved contracts with flagged terms ({list.length})</div>
+      {list.length === 0 ? <div style={{ color: '#999' }}>No saved contract has flagged terms.</div> : list.map(({ c, hits }) => <div key={c.id} style={{ borderTop: '1px solid #F0ECE0', padding: '8px 0' }}><b>{c.number || ''} {c.title || ''}</b><Hits hits={hits} /></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Keyword screening to show what to read closely. It is not legal advice — have important contracts reviewed by a lawyer.</div></div>
+  </>);
+}
+
+// 9 · Customer health + renewal radar
+function InsCustomerHealth({ ctx }) {
+  const { fmt, docs, customers, recvRows, amcContracts, contracts, today, dayMs, totalOf } = ctx;
+  const rows = customers.map(c => {
+    const inv = docs.filter(d => d.type === 'invoice' && d.customerId === c.id);
+    if (!inv.length) return null;
+    const billed12 = _iSum(inv.filter(d => (today - new Date(d.date)) < 365 * dayMs), totalOf);
+    const out = recvRows.filter(r => r.d.customerId === c.id), bal = _iSum(out, r => r.bal), maxLate = Math.max(0, ...out.map(r => r.late));
+    const last = inv.reduce((m, d) => (d.date || '') > m ? d.date : m, ''), rec = last ? Math.floor((today - new Date(last)) / dayMs) : 999;
+    let score = 100 - Math.min(40, maxLate / 3) - (rec > 180 ? 25 : rec > 90 ? 12 : 0) - (billed12 > 0 ? Math.min(25, bal / billed12 * 25) : 0);
+    score = Math.max(0, Math.round(score));
+    return { c, billed12, bal, maxLate, rec, n: inv.length, score, tag: score >= 75 ? ['Healthy', '#1A7A3E'] : score >= 50 ? ['Watch', '#E07B00'] : ['At risk', '#B5453A'] };
+  }).filter(Boolean).sort((a, b) => a.score - b.score);
+  const ren = [...(amcContracts || []).map(a => ({ id: a.id, no: a.contractNo, title: a.title, end: a.endDate, cust: a.customerId, val: a.value, kind: 'AMC' })), ...(contracts || []).filter(c => c.endDate).map(c => ({ id: c.id, no: c.number, title: c.title, end: c.endDate, cust: c.customerId, val: c.value, kind: 'Contract' }))]
+    .filter(x => x.end).map(x => ({ ...x, d: Math.ceil((new Date(x.end) - today) / dayMs) })).filter(x => x.d <= 90 && x.d >= -30).sort((a, b) => a.d - b.d);
+  return (<>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Renewal radar (next 90 days)</div>
+      {ren.length === 0 ? <div style={{ color: '#999' }}>No AMC / contract ending in the next 90 days.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Type', 'No.', 'Title', 'Customer', 'Ends', 'Value', 'Days'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {ren.map(x => <tr key={x.kind + x.id}><td style={_iTd}>{x.kind}</td><td style={_iTd}>{x.no}</td><td style={_iTd}>{x.title}</td><td style={_iTd}>{(customers.find(c => c.id === x.cust) || {}).name || '—'}</td><td style={_iTd}>{x.end}</td><td style={{ ..._iTd, ..._iR }}>{x.val ? fmt(parseFloat(x.val) || 0) : '—'}</td><td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? (-x.d) + ' d over' : x.d + ' d'}</td></tr>)}</tbody></table>}
+    </div>
+    <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Customer health</div>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No invoiced customers yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Customer', 'Invoices', 'Billed (12m)', 'Outstanding', 'Max days late', 'Last invoice', 'Score'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 1 && i < 5 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {rows.map(r => <tr key={r.c.id}><td style={_iTd}>{r.c.name}</td><td style={_iTd}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.billed12)}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.bal)}</td><td style={{ ..._iTd, ..._iR }}>{r.maxLate || '—'}</td><td style={_iTd}>{r.rec} d ago</td><td style={{ ..._iTd, color: r.tag[1], fontWeight: 700 }}>{r.score} · {r.tag[0]}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Score starts at 100; reduced for late payments, no recent invoice and a high outstanding-to-billing ratio.</div></div>
+  </>);
+}
+
+// 10 · Enquiry lead scoring
+function InsEnquiryScore({ ctx }) {
+  const { enquiries, customers, docs, today, dayMs } = ctx;
+  const iso = today.toISOString().slice(0, 10);
+  const rows = (enquiries || []).filter(e => !['Won', 'Lost', 'Converted', 'Closed', 'Cancelled'].includes(e.status)).map(e => {
+    const created = e.date || e.enquiryDate || (e.createdAt ? new Date(e.createdAt).toISOString().slice(0, 10) : ''), age = created ? Math.floor((today - new Date(created)) / dayMs) : null;
+    const known = e.customerId && docs.some(d => d.type === 'invoice' && d.customerId === e.customerId);
+    let s = 30; const why = [];
+    if (/quot/i.test(e.status || '')) { s += 20; why.push('quotation sent'); } else if (/contact|progress|follow/i.test(e.status || '')) { s += 10; why.push('in contact'); }
+    if (known) { s += 15; why.push('existing customer'); }
+    if (e.followUpDate) { if (e.followUpDate < iso) { s -= 20; why.push('follow-up overdue'); } else { s += 10; why.push('follow-up planned'); } } else { s -= 5; why.push('no follow-up date'); }
+    if (age !== null) { if (age <= 7) { s += 15; why.push('fresh (≤7d)'); } else if (age <= 30) s += 5; else if (age > 60) { s -= 15; why.push('stale (>60d)'); } }
+    if (/hot|high/i.test(e.interest || '')) { s += 10; why.push('high interest'); } else if (/cold|low/i.test(e.interest || '')) s -= 10;
+    s = Math.max(0, Math.min(100, s));
+    const tag = s >= 70 ? ['Hot', '#B5453A'] : s >= 45 ? ['Warm', '#E07B00'] : ['Cold', '#6B7494'];
+    const next = e.followUpDate && e.followUpDate < iso ? 'Call today — follow-up overdue' : /quot/i.test(e.status || '') ? 'Chase quotation decision' : /contact|progress|follow/i.test(e.status || '') ? 'Send quotation' : 'Make first contact / qualify';
+    return { e, s, tag, why, next, name: (customers.find(c => c.id === e.customerId) || {}).name || e.customerName || e.name || e.company || '—' };
+  }).sort((a, b) => b.s - a.s);
+  return (
+    <div style={_iCard}>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No open enquiries.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Enquiry', 'Customer', 'Interest', 'Status', 'Follow-up', 'Score', 'Why', 'Next action'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {rows.map(r => <tr key={r.e.id}><td style={_iTd}>{r.e.number}</td><td style={_iTd}>{r.name}</td><td style={_iTd}>{r.e.interest || '—'}</td><td style={_iTd}>{r.e.status}</td><td style={_iTd}>{r.e.followUpDate || '—'}</td><td style={{ ..._iTd, color: r.tag[1], fontWeight: 700 }}>{r.s} · {r.tag[0]}</td><td style={{ ..._iTd, fontSize: 11.5, color: '#777' }}>{r.why.join(', ')}</td><td style={{ ..._iTd, fontWeight: 600 }}>{r.next}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Hot ≥ 70, Warm ≥ 45. Based on stage, repeat customer, follow-up date, age and interest.</div>
+    </div>
+  );
+}
+
+// Trading · credit limits, item margin, top / slow sellers
+function InsTrading({ ctx }) {
+  const { fmt, docs, items, customers, recvRows, ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('credit');
+  const limits = ins.creditLimits || {};
+  const inv = docs.filter(d => d.type === 'invoice');
+  const byItem = {};
+  inv.forEach(d => (d.items || []).forEach(l => {
+    const key = l.itemId || l.name; if (!key) return;
+    const it = items.find(x => x.id === l.itemId) || items.find(x => x.name === l.name) || {};
+    const q = parseFloat(l.qty) || 0, rate = parseFloat(l.rate) || 0, rev = q * rate * (1 - (parseFloat(l.discount) || 0) / 100);
+    const cost = q * (parseFloat(it.purchaseRate ?? it.rate) || 0);
+    const r = byItem[key] = byItem[key] || { name: l.name || it.name || key, unit: l.unit || it.unit || '', qty: 0, rev: 0, cost: 0, hasCost: false, last: '' };
+    r.qty += q; r.rev += rev; r.cost += cost; if (it.purchaseRate ?? it.rate) r.hasCost = true; if ((d.date || '') > r.last) r.last = d.date || '';
+  }));
+  const mrows = Object.values(byItem).map(r => ({ ...r, margin: r.rev - r.cost, pct: r.rev > 0 && r.hasCost ? (r.rev - r.cost) / r.rev * 100 : null }));
+  const top = mrows.slice().sort((a, b) => b.rev - a.rev);
+  const soldKeys = new Set(Object.keys(byItem));
+  const slow = items.filter(it => !soldKeys.has(it.id) && !soldKeys.has(it.name));
+  const lowMargin = mrows.filter(r => r.pct !== null && r.pct < 10).sort((a, b) => a.pct - b.pct);
+  const crows = customers.map(c => { const out = recvRows.filter(r => r.d.customerId === c.id), bal = out.reduce((s, r) => s + r.bal, 0), lim = parseFloat(limits[c.id]) || 0; return { c, bal, lim, over: lim > 0 && bal > lim, pct: lim > 0 ? Math.round(bal / lim * 100) : null }; }).filter(r => r.bal > 0 || r.lim > 0).sort((a, b) => (b.over - a.over) || b.bal - a.bal);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('credit', 'Credit limits')}{pill('margin', 'Item margin')}{pill('top', 'Top & slow items')}</div>
+    {sub === 'credit' && <div style={_iCard}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Customer', 'Outstanding', 'Credit limit', 'Used', 'Status'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i === 1 || i === 2 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {crows.length === 0 && <tr><td style={_iTd} colSpan={5}>No outstanding balances.</td></tr>}
+        {crows.map(r => <tr key={r.c.id}><td style={_iTd}>{r.c.name}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.bal)}</td>
+          <td style={{ ..._iTd, ..._iR }}>{canEdit ? <input type="number" value={limits[r.c.id] ?? ''} placeholder="not set" onChange={e => setIns('creditLimits', (p = {}) => ({ ...p, [r.c.id]: e.target.value }))} style={{ ...styles.input, width: 130, margin: 0, textAlign: 'right' }} /> : (r.lim ? fmt(r.lim) : '—')}</td>
+          <td style={_iTd}>{r.pct === null ? '—' : r.pct + '%'}</td><td style={{ ..._iTd, fontWeight: 700, color: r.over ? '#B5453A' : r.pct > 80 ? '#E07B00' : '#1A7A3E' }}>{r.lim ? (r.over ? 'OVER LIMIT — hold new orders' : r.pct > 80 ? 'Near limit' : 'OK') : 'No limit set'}</td></tr>)}</tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Set a limit per customer; outstanding = approved invoices minus linked receipts. Limits are advisory and do not block invoices.</div></div>}
+    {sub === 'margin' && <div style={_iCard}>
+      {lowMargin.length > 0 && <div style={{ fontSize: 12.5, color: '#B5453A', background: '#FDF0EE', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>⚠ {lowMargin.length} item(s) sold at under 10% margin: {lowMargin.slice(0, 5).map(r => r.name).join(', ')}</div>}
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Item', 'Qty sold', 'Revenue', 'Cost (current buy rate)', 'Margin', 'Margin %'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {mrows.sort((a, b) => (a.pct ?? 999) - (b.pct ?? 999)).map(r => <tr key={r.name}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR }}>{r.qty} {r.unit}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.rev)}</td><td style={{ ..._iTd, ..._iR }}>{r.hasCost ? fmt(r.cost) : '—'}</td><td style={{ ..._iTd, ..._iR }}>{r.hasCost ? fmt(r.margin) : '—'}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.pct === null ? '#999' : r.pct < 10 ? '#B5453A' : r.pct < 20 ? '#E07B00' : '#1A7A3E' }}>{r.pct === null ? 'no buy rate' : r.pct.toFixed(1) + '%'}</td></tr>)}</tbody></table>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Cost uses the item master's current purchase rate, not historical batch cost — treat as an indication.</div></div>}
+    {sub === 'top' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Top 10 by revenue</div>{top.slice(0, 10).map((r, i) => <div key={r.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #F0ECE0' }}><span>{i + 1}. {r.name}</span><b>{fmt(r.rev)}</b></div>)}{top.length === 0 && <div style={{ color: '#999' }}>No invoiced items yet.</div>}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Never sold ({slow.length})</div>{slow.slice(0, 15).map(it => <div key={it.id} style={{ padding: '5px 0', fontSize: 13, borderBottom: '1px solid #F0ECE0' }}>{it.name}</div>)}{slow.length === 0 && <div style={{ color: '#999' }}>Every item has been sold.</div>}{slow.length > 15 && <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>+ {slow.length - 15} more</div>}</div>
+    </div>}
+  </>);
+}
+
+// Manufacturing · MRP shortages, cost per unit, on-time delivery
+function InsMfg({ ctx }) {
+  const { fmt, boms, productionOrders, rawMaterials, items, stock, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('mrp');
+  const itemOf = (rm) => items.find(i => i.name === (rm && rm.name));
+  const rate = (rm) => { const it = itemOf(rm); return parseFloat((it && (it.purchaseRate ?? it.rate)) ?? rm.rate ?? rm.cost) || 0; };
+  const open = (productionOrders || []).filter(o => !['completed', 'cancelled'].includes(o.status));
+  const need = {};
+  open.forEach(o => { const b = boms.find(x => x.id === o.bomId); if (!b) return; const f = (parseFloat(o.quantity) || 1) / (parseFloat(b.outputQty) || 1); (b.materials || []).forEach(m => { const k = m.materialId; const r = need[k] = need[k] || { rm: rawMaterials.find(x => x.id === k) || { name: m.name, unit: m.unit }, qty: 0, orders: [] }; r.qty += (parseFloat(m.qty) || 0) * f; if (!r.orders.includes(o.number)) r.orders.push(o.number); }); });
+  const mrp = Object.values(need).map(r => { const it = itemOf(r.rm), have = it && stock[it.id] ? stock[it.id].qty : null; return { ...r, have, short: have === null ? null : Math.max(0, r.qty - have), tracked: have !== null }; }).sort((a, b) => (b.short || 0) - (a.short || 0));
+  const costRows = boms.map(b => { const mats = (b.materials || []).map(m => { const rm = rawMaterials.find(x => x.id === m.materialId) || { name: m.name }; const r = rate(rm); return { name: m.name || rm.name, qty: parseFloat(m.qty) || 0, unit: m.unit, rate: r, amt: (parseFloat(m.qty) || 0) * r }; }); const tot = mats.reduce((s, x) => s + x.amt, 0), out = parseFloat(b.outputQty) || 1; return { b, mats, tot, unit: tot / out, miss: mats.filter(x => !x.rate).length }; });
+  const done = (productionOrders || []).filter(o => o.status === 'completed' && o.targetDate);
+  const dt = v => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+  const ot = done.map(o => { const c = dt(o.completedAt), t = dt(o.targetDate); if (!c || !t) return null; t.setHours(23, 59, 59); return { o, late: Math.ceil((c - t) / dayMs), ok: c <= t }; }).filter(Boolean);
+  const onTime = ot.length ? Math.round(ot.filter(x => x.ok).length / ot.length * 100) : null;
+  const lateOpen = open.filter(o => o.targetDate && new Date(o.targetDate) < today);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <InsMfgTypeBar ctx={ctx} />
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('mrp', 'MRP shortages')}{pill('cost', 'Cost per unit')}{pill('otd', 'On-time delivery')}</div>
+    {sub === 'mrp' && <div style={_iCard}><div style={{ fontSize: 12.5, color: '#666', marginBottom: 8 }}>Raw material needed for {open.length} open production order(s) vs stock on hand (matched by item name).</div>
+      {mrp.length === 0 ? <div style={{ color: '#999' }}>No open production orders.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Material', 'Needed', 'In stock', 'Shortfall', 'For orders'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 4 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {mrp.map((r, i) => <tr key={i}><td style={_iTd}>{r.rm.name}</td><td style={{ ..._iTd, ..._iR }}>{+r.qty.toFixed(2)} {r.rm.unit || ''}</td><td style={{ ..._iTd, ..._iR }}>{r.tracked ? +r.have.toFixed(2) : 'not in item master'}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.short > 0 ? '#B5453A' : '#1A7A3E' }}>{r.tracked ? (r.short > 0 ? +r.short.toFixed(2) : 'OK') : '—'}</td><td style={{ ..._iTd, fontSize: 11.5, color: '#777' }}>{r.orders.join(', ')}</td></tr>)}</tbody></table>}</div>}
+    {sub === 'cost' && <div style={_iCard}>{costRows.length === 0 ? <div style={{ color: '#999' }}>No BOMs yet.</div> : costRows.map(r => <div key={r.b.id} style={{ borderBottom: '1px solid #F0ECE0', padding: '8px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}><b>{r.b.name || r.b.outputItem}</b><span>Material cost / unit: <b>{fmt(r.unit)}</b> <span style={{ color: '#999', fontSize: 11.5 }}>(batch of {r.b.outputQty || 1}: {fmt(r.tot)})</span></span></div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 3 }}>{r.mats.map(m => m.name + ' ' + fmt(m.amt)).join(' · ')}{r.miss > 0 && <span style={{ color: '#B5453A' }}> · {r.miss} material(s) have no rate</span>}</div></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Material cost only at current item rate — labour, power and overhead are not included.</div></div>}
+    {sub === 'otd' && <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 24, marginBottom: 10 }}><div><div style={{ fontSize: 11, color: '#888' }}>On-time delivery</div><div style={{ fontSize: 24, fontWeight: 700, color: onTime === null ? '#999' : onTime >= 90 ? '#1A7A3E' : onTime >= 75 ? '#E07B00' : '#B5453A' }}>{onTime === null ? '—' : onTime + '%'}</div></div><div><div style={{ fontSize: 11, color: '#888' }}>Completed orders measured</div><div style={{ fontSize: 24, fontWeight: 700 }}>{ot.length}</div></div><div><div style={{ fontSize: 11, color: '#888' }}>Open &amp; past target</div><div style={{ fontSize: 24, fontWeight: 700, color: lateOpen.length ? '#B5453A' : '#1A7A3E' }}>{lateOpen.length}</div></div></div>
+      {lateOpen.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Order', 'Batch', 'Target', 'Days late', 'Status'].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>{lateOpen.map(o => <tr key={o.id}><td style={_iTd}>{o.number}</td><td style={_iTd}>{o.batchNumber}</td><td style={_iTd}>{o.targetDate}</td><td style={{ ..._iTd, color: '#B5453A', fontWeight: 700 }}>{Math.floor((today - new Date(o.targetDate)) / dayMs)}</td><td style={_iTd}>{o.status}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Only completed orders with a target date are counted.</div></div>}
+  </>);
+}
+
+// FM / AMC · PM overdue, work-order turnaround, spares, AMC value
+function InsFm({ ctx }) {
+  const { fmt, pmSchedules, fmWorkOrders, fmSpareParts, amcContracts, today, dayMs } = ctx;
+  const iso = today.toISOString().slice(0, 10);
+  const pmOver = (pmSchedules || []).filter(x => x.status !== 'inactive' && x.nextDueDate && x.nextDueDate < iso).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
+  const pmSoon = (pmSchedules || []).filter(x => x.status !== 'inactive' && x.nextDueDate && x.nextDueDate >= iso && (new Date(x.nextDueDate) - today) / dayMs <= 14);
+  const wos = fmWorkOrders || [], isDone = w => ['completed', 'closed', 'done'].includes(String(w.status || '').toLowerCase());
+  const doneT = wos.filter(isDone).map(w => { const c = w.completedDate || w.closedDate || w.completedAt, r = w.raisedDate; if (!c || !r) return null; const d = (new Date(c) - new Date(r)) / dayMs; return isNaN(d) ? null : { w, d: Math.max(0, d) }; }).filter(Boolean);
+  const byPri = {}; doneT.forEach(x => { const k = x.w.priority || 'medium'; (byPri[k] = byPri[k] || []).push(x.d); });
+  const openWo = wos.filter(w => !isDone(w) && String(w.status || '').toLowerCase() !== 'cancelled');
+  const woOver = openWo.filter(w => w.dueDate && w.dueDate < iso);
+  const lowSp = (fmSpareParts || []).filter(p => (parseFloat(p.currentStock) || 0) < (parseFloat(p.minStock) || 0));
+  const act = (amcContracts || []).filter(a => !a.endDate || a.endDate >= iso), amcVal = act.reduce((s, a) => s + (parseFloat(a.value) || 0), 0);
+  const kpi = (l, v, c) => <div style={{ ..._iCard, marginBottom: 0, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: c || '#1E2A4A' }}>{v}</div></div>;
+  return (<>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 14 }}>
+      {kpi('PM overdue', pmOver.length, pmOver.length ? '#B5453A' : '#1A7A3E')}{kpi('PM due in 14 days', pmSoon.length, '#E07B00')}{kpi('Open work orders', openWo.length)}{kpi('WO past due date', woOver.length, woOver.length ? '#B5453A' : '#1A7A3E')}{kpi('Active AMC value', fmt(amcVal))}
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Overdue preventive maintenance</div>{pmOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>None overdue.</div> : pmOver.map(x => <div key={x.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{x.title}</span><b style={{ color: '#B5453A' }}>{Math.floor((today - new Date(x.nextDueDate)) / dayMs)} d late</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Work-order turnaround (raised → completed)</div>{Object.keys(byPri).length === 0 ? <div style={{ color: '#999' }}>No completed work orders with dates yet.</div> : Object.entries(byPri).map(([k, a]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span style={{ textTransform: 'capitalize' }}>{k} ({a.length})</span><b>avg {(a.reduce((s, x) => s + x, 0) / a.length).toFixed(1)} days</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Open work orders past due</div>{woOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>None.</div> : woOver.slice(0, 12).map(w => <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{w.woNumber} · {w.title}</span><b style={{ color: '#B5453A' }}>{Math.floor((today - new Date(w.dueDate)) / dayMs)} d</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 8 }}>Spare parts below minimum</div>{lowSp.length === 0 ? <div style={{ color: '#1A7A3E' }}>All spares above minimum.</div> : lowSp.slice(0, 12).map(p => <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '5px 0', borderBottom: '1px solid #F0ECE0' }}><span>{p.name}</span><b style={{ color: '#B5453A' }}>{p.currentStock || 0} / min {p.minStock}</b></div>)}</div>
+    </div>
+    <div style={{ fontSize: 11.5, color: '#888' }}>AMC renewals are under Sales &amp; Legal → Customer health &amp; renewals.</div>
+  </>);
+}
+
+// QA · calibration register, inspection checklists, supplier quality score, CAPA ageing
+function InsQA({ ctx }) {
+  const { grns, capaRecords, ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('calib');
+  const iso = today.toISOString().slice(0, 10);
+  const blankC = { name: '', idNo: '', location: '', lastDate: '', freq: 12, agency: '', certNo: '' };
+  const [c, setC] = React.useState(blankC);
+  const cal = (ins.calibration || []).map(x => { const nd = x.lastDate ? new Date(new Date(x.lastDate).setMonth(new Date(x.lastDate).getMonth() + (parseInt(x.freq) || 12))) : null; return { ...x, next: nd ? nd.toISOString().slice(0, 10) : '', d: nd ? Math.ceil((nd - today) / dayMs) : null }; }).sort((a, b) => (a.d ?? 9999) - (b.d ?? 9999));
+  const tpls = ins.inspTemplates || [], runs = ins.inspections || [];
+  const [tpl, setTpl] = React.useState({ name: '', points: '' });
+  const [runF, setRunF] = React.useState({ tplId: '', ref: '', by: '', results: {}, remarks: '' });
+  const runTpl = tpls.find(t => t.id === runF.tplId);
+  const sup = {};
+  (grns || []).forEach(g => { const k = g.vendorName || '—'; const r = sup[k] = sup[k] || { name: k, recd: 0, rej: 0, n: 0, late: 0, lines: [] }; r.n++; (g.lines || []).forEach(l => { r.recd += parseFloat(l.receivedQty) || 0; r.rej += parseFloat(l.rejectedQty) || 0; }); });
+  const srows = Object.values(sup).map(r => { const pct = r.recd > 0 ? r.rej / r.recd * 100 : 0; return { ...r, pct, score: Math.max(0, Math.round(100 - pct * 5)) }; }).sort((a, b) => a.score - b.score);
+  const capa = (capaRecords || []), open = capa.filter(x => x.status !== 'closed');
+  const ageOf = x => x.date ? Math.floor((today - new Date(x.date)) / dayMs) : 0;
+  const capaOver = open.filter(x => (x.targetDate && x.targetDate < iso) || ageOf(x) > 30);
+  const bySrc = {}; capa.forEach(x => { const k = x.source || 'Other'; bySrc[k] = (bySrc[k] || 0) + 1; });
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>{pill('calib', 'Calibration register')}{pill('insp', 'Inspection checklists')}{pill('sup', 'Supplier quality')}{pill('capa', 'CAPA ageing')}</div>
+    {sub === 'calib' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <input placeholder="Instrument (e.g. Vernier 0-150)" value={c.name} onChange={e => setC(p => ({ ...p, name: e.target.value }))} style={{ ...styles.input, width: 220, margin: 0 }} />
+        <input placeholder="ID no." value={c.idNo} onChange={e => setC(p => ({ ...p, idNo: e.target.value }))} style={{ ...styles.input, width: 110, margin: 0 }} />
+        <input placeholder="Location" value={c.location} onChange={e => setC(p => ({ ...p, location: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }} />
+        <input type="date" title="Last calibrated" value={c.lastDate} onChange={e => setC(p => ({ ...p, lastDate: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} />
+        <input type="number" title="Frequency (months)" value={c.freq} onChange={e => setC(p => ({ ...p, freq: e.target.value }))} style={{ ...styles.input, width: 80, margin: 0 }} />
+        <input placeholder="Agency / cert no." value={c.agency} onChange={e => setC(p => ({ ...p, agency: e.target.value }))} style={{ ...styles.input, width: 160, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!c.name.trim() || !c.lastDate) return alert('Instrument name and last calibration date are required'); setIns('calibration', (p = []) => [...p, { ...c, id: 'cb-' + Date.now() }]); setC(blankC); }}>Add</button></div>}
+      {canEdit && ctx.mfgType && MFG_QA_PACK[ctx.mfgType] && <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Typical instruments for {(MFG_TYPES.find(t => t.id === ctx.mfgType) || {}).label}: {MFG_QA_PACK[ctx.mfgType].instruments.map(n => <button key={n} onClick={() => setC(p => ({ ...p, name: n }))} style={{ margin: '2px 4px 2px 0', padding: '2px 9px', borderRadius: 12, border: '1px solid #DDD', background: '#fff', fontSize: 11.5, cursor: 'pointer' }}>{n}</button>)}</div>}
+      {cal.length === 0 ? <div style={{ color: '#999' }}>No instruments registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Instrument', 'ID', 'Location', 'Last done', 'Every', 'Next due', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {cal.map(x => <tr key={x.id}><td style={_iTd}>{x.name}</td><td style={_iTd}>{x.idNo}</td><td style={_iTd}>{x.location}</td><td style={_iTd}>{x.lastDate}</td><td style={_iTd}>{x.freq} m</td><td style={_iTd}>{x.next}</td>
+          <td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? 'OVERDUE ' + (-x.d) + ' d — do not use' : x.d <= 30 ? 'Due in ' + x.d + ' d' : 'Valid'}</td>
+          <td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px', marginRight: 4 }} onClick={() => setIns('calibration', (p = []) => p.map(y => y.id === x.id ? { ...y, lastDate: iso } : y))}>Done today</button>}{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('calibration', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Next due = last calibration + frequency. "Done today" resets the date; keep the certificate on file.</div></div>}
+    {sub === 'insp' && <>
+      {canEdit && ctx.mfgType && MFG_QA_PACK[ctx.mfgType] && <div style={{ ..._iCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><span style={{ fontSize: 13 }}>Standard checklists for <b>{(MFG_TYPES.find(t => t.id === ctx.mfgType) || {}).label}</b> ({MFG_QA_PACK[ctx.mfgType].templates.length} templates)</span><button style={styles.primaryBtn} onClick={() => { const have = new Set(tpls.map(t => t.name)); const add = MFG_QA_PACK[ctx.mfgType].templates.filter(t => !have.has(t[0])).map((t, i) => ({ id: 't-' + Date.now() + '-' + i, name: t[0], points: t[1] })); if (!add.length) return alert('Standard checklists are already loaded.'); setIns('inspTemplates', (p = []) => [...p, ...add]); }}>Load standard checklists</button></div>}
+      {canEdit && <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>New checklist template</div>
+        <input placeholder="Template name (e.g. Incoming wire inspection)" value={tpl.name} onChange={e => setTpl(p => ({ ...p, name: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
+        <textarea rows={4} placeholder={'Check points — one per line\nConductor diameter within tolerance\nInsulation thickness\nSurface finish / no cuts'} value={tpl.points} onChange={e => setTpl(p => ({ ...p, points: e.target.value }))} style={{ ...styles.input, margin: '0 0 6px' }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!tpl.name.trim() || !tpl.points.trim()) return alert('Name and check points are required'); setIns('inspTemplates', (p = []) => [...p, { id: 't-' + Date.now(), name: tpl.name.trim(), points: tpl.points.split('\n').map(x => x.trim()).filter(Boolean) }]); setTpl({ name: '', points: '' }); }}>Save template</button></div>}
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Run an inspection</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <select value={runF.tplId} onChange={e => setRunF({ tplId: e.target.value, ref: runF.ref, by: runF.by, results: {}, remarks: '' })} style={{ ...styles.input, width: 260, margin: 0 }}><option value="">— Select template —</option>{tpls.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+          <input placeholder="Batch / GRN / PO ref" value={runF.ref} onChange={e => setRunF(p => ({ ...p, ref: e.target.value }))} style={{ ...styles.input, width: 180, margin: 0 }} />
+          <input placeholder="Inspected by" value={runF.by} onChange={e => setRunF(p => ({ ...p, by: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} /></div>
+        {runTpl && <>{runTpl.points.map((pt, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{i + 1}. {pt}</span>
+          <span>{['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setRunF(p => ({ ...p, results: { ...p.results, [i]: v } }))} style={{ marginLeft: 4, padding: '3px 10px', borderRadius: 12, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: runF.results[i] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: runF.results[i] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}</span></div>)}
+          <input placeholder="Remarks" value={runF.remarks} onChange={e => setRunF(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, margin: '8px 0' }} />
+          <button style={styles.primaryBtn} onClick={() => { const miss = runTpl.points.some((_, i) => !runF.results[i]); if (miss) return alert('Mark every check point (Pass / Fail / N/A)'); const fails = runTpl.points.filter((_, i) => runF.results[i] === 'fail'); setIns('inspections', (p = []) => [{ id: 'i-' + Date.now(), date: iso, tpl: runTpl.name, ref: runF.ref, by: runF.by, result: fails.length ? 'FAIL' : 'PASS', fails, remarks: runF.remarks }, ...p]); setRunF({ tplId: '', ref: '', by: '', results: {}, remarks: '' }); }}>Save result</button></>}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Recent inspections ({runs.length})</div>{runs.length === 0 ? <div style={{ color: '#999' }}>None yet.</div> : runs.slice(0, 30).map(r => <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{r.date} · {r.tpl}{r.ref ? ' · ' + r.ref : ''}{r.by ? ' · ' + r.by : ''}{r.fails.length > 0 && <span style={{ color: '#B5453A' }}> — failed: {r.fails.join('; ')}</span>}</span><b style={{ color: r.result === 'PASS' ? '#1A7A3E' : '#B5453A' }}>{r.result}</b></div>)}
+        <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>For a failed inspection raise a CAPA / NCR in Quality → CAPA.</div></div>
+    </>}
+    {sub === 'sup' && <div style={_iCard}>{srows.length === 0 ? <div style={{ color: '#999' }}>No GRNs yet.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Supplier', 'GRNs', 'Received qty', 'Rejected qty', 'Reject %', 'Quality score'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+      {srows.map(r => <tr key={r.name}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR }}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{+r.recd.toFixed(2)}</td><td style={{ ..._iTd, ..._iR }}>{+r.rej.toFixed(2)}</td><td style={{ ..._iTd, ..._iR }}>{r.pct.toFixed(1)}%</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.score >= 90 ? '#1A7A3E' : r.score >= 70 ? '#E07B00' : '#B5453A' }}>{r.score} · {r.score >= 90 ? 'Approved' : r.score >= 70 ? 'Conditional' : 'Review'}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Score = 100 − 5 × reject %. Based on GRN received vs rejected quantities (all time).</div></div>}
+    {sub === 'capa' && <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Total', capa.length, '#1E2A4A'], ['Open', open.length, '#E07B00'], ['Overdue / >30 days', capaOver.length, capaOver.length ? '#B5453A' : '#1A7A3E'], ['Closed', capa.length - open.length, '#1A7A3E']].map(([l, v, col]) => <div key={l} style={{ ..._iCard, marginBottom: 0, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: col }}>{v}</div></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>Open items needing attention</div>{capaOver.length === 0 ? <div style={{ color: '#1A7A3E' }}>Nothing overdue.</div> : capaOver.sort((a, b) => ageOf(b) - ageOf(a)).map(x => <div key={x.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}><span>{x.number || ''} · {x.title || x.description || x.source || 'CAPA'}</span><b style={{ color: '#B5453A' }}>{ageOf(x)} d open</b></div>)}</div>
+      <div style={_iCard}><div style={{ fontWeight: 700, marginBottom: 6 }}>By source</div>{Object.entries(bySrc).length === 0 ? <div style={{ color: '#999' }}>No CAPA records.</div> : Object.entries(bySrc).sort((a, b) => b[1] - a[1]).map(([k, v]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}><span>{k}</span><b>{v}</b></div>)}</div>
+    </>}
+  </>);
+}
+
+// MEP engineering calculators (preliminary sizing — verify against design standards / manufacturer data)
+const INS_CABLES = [[1.5, 24, 29], [2.5, 32, 18], [4, 42, 11], [6, 53, 7.3], [10, 71, 4.4], [16, 91, 2.8], [25, 120, 1.75], [35, 145, 1.25], [50, 170, 0.93], [70, 210, 0.64], [95, 255, 0.46], [120, 290, 0.37], [150, 325, 0.31], [185, 365, 0.25], [240, 420, 0.2], [300, 470, 0.17]]; // mm2, A (Cu XLPE, approx), mV/A/m (3-ph)
+const INS_PIPES = [15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200, 250, 300];
+function InsMepCalc({ ctx }) {
+  const { styles } = ctx;
+  const [sub, setSub] = React.useState('cable');
+  const [v, setV] = React.useState({ kw: 30, volt: 415, ph: 3, pf: 0.85, len: 80, mat: 'Cu', derate: 0.8, vdLim: 3, runs: 1, cfm: 2000, vel: 6, sideA: 500, flow: 20, pvel: 1.5, plen: 100, c: 130, sh: 20, resid: 10, eff: 0.65, area: 100, app: 110, people: 10, equip: 1000, fa: 100, dh: 20, ppl: 100, lpcd: 45 });
+  const n = k => parseFloat(v[k]) || 0, set = (k, x) => setV(p => ({ ...p, [k]: x }));
+  const F = (k, l, w) => <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: w || 130 }}>{l}<input type="number" value={v[k]} onChange={e => set(k, e.target.value)} style={{ ...styles.input, margin: 0 }} /></label>;
+  const Out = ({ rows }) => <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12 }}>{rows.map(([l, x, c]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13 }}><span>{l}</span><b style={{ color: c || '#1E2A4A' }}>{x}</b></div>)}</div>;
+  const note = t => <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>{t}</div>;
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  // cable
+  const volt = n('volt'), ph = n('ph') === 1 ? 1 : 3, pf = Math.min(1, Math.max(0.1, n('pf'))), runs = Math.max(1, Math.round(n('runs')));
+  const I = ph === 3 ? n('kw') * 1000 / (Math.sqrt(3) * volt * pf) : n('kw') * 1000 / (volt * pf);
+  const ik = v.mat === 'Al' ? 0.78 : 1, vk = v.mat === 'Al' ? 1.64 : 1, perRun = I / runs;
+  const vdOf = r => (ph === 3 ? 1 : 2 / Math.sqrt(3)) * r[2] * vk * perRun * n('len') / 1000;
+  const pick = INS_CABLES.find(r => r[1] * ik * n('derate') >= perRun && vdOf(r) / volt * 100 <= n('vdLim'));
+  const byAmp = INS_CABLES.find(r => r[1] * ik * n('derate') >= perRun);
+  // duct
+  const q = n('cfm') * 0.000471947, areaR = q / Math.max(0.1, n('vel')), dR = Math.sqrt(4 * areaR / Math.PI) * 1000;
+  const bSide = n('sideA') > 0 ? areaR * 1e6 / n('sideA') : 0, de = bSide > 0 ? 1.3 * Math.pow(n('sideA') * bSide, 0.625) / Math.pow(n('sideA') + bSide, 0.25) : 0;
+  // pipe
+  const Qp = n('flow') / 1000, dI = Math.sqrt(4 * Qp / (Math.PI * Math.max(0.1, n('pvel')))) * 1000, nom = INS_PIPES.find(d => d >= dI) || INS_PIPES[INS_PIPES.length - 1];
+  const hfm = d => 10.67 * Math.pow(Qp, 1.852) / (Math.pow(Math.max(1, n('c')), 1.852) * Math.pow(d / 1000, 4.87));
+  const actV = Qp / (Math.PI * Math.pow(nom / 2000, 2)), hf = hfm(nom) * n('plen') * 1.3;
+  const H = n('sh') + hf + n('resid'), kw = 9.81 * Qp * H / Math.max(0.1, n('eff'));
+  // HVAC
+  const fa = 4.5 * n('fa') * n('dh'), btu = n('area') * 10.764 * n('app') * 3.412 / 10.764 + n('people') * 450 + n('equip') * 3.412 + fa, tr = btu / 12000;
+  const tank = n('ppl') * n('lpcd');
+  return (<div style={_iCard}>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>{pill('cable', '⚡ Cable & voltage drop')}{pill('duct', '🌬 Duct sizing')}{pill('pipe', '🚰 Pipe & pump head')}{pill('hvac', '❄️ HVAC cooling load')}{pill('tank', '💧 Water demand')}</div>
+    {sub === 'cable' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('kw', 'Load (kW)')}{F('volt', 'Voltage (V)')}{F('ph', 'Phases (1 / 3)', 110)}{F('pf', 'Power factor', 110)}{F('len', 'Length (m)', 110)}{F('derate', 'Derating factor', 110)}{F('vdLim', 'Max V-drop %', 110)}{F('runs', 'Parallel runs', 100)}
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Conductor<select value={v.mat} onChange={e => set('mat', e.target.value)} style={{ ...styles.input, margin: 0 }}><option>Cu</option><option>Al</option></select></label></div>
+      <Out rows={[['Full-load current', I.toFixed(1) + ' A' + (runs > 1 ? ' (' + perRun.toFixed(1) + ' A per run)' : '')], ['Recommended size', pick ? (runs > 1 ? runs + ' × ' : '') + pick[0] + ' mm² ' + v.mat : 'Above table range — use parallel runs / larger', pick ? '#1A7A3E' : '#B5453A'], ...(pick ? [['Rated current (derated)', (pick[1] * ik * n('derate')).toFixed(0) + ' A'], ['Voltage drop', vdOf(pick).toFixed(2) + ' V = ' + (vdOf(pick) / volt * 100).toFixed(2) + ' %']] : []), ...(byAmp && pick && byAmp[0] !== pick[0] ? [['Size by current alone', byAmp[0] + ' mm² (voltage drop governs)', '#E07B00']] : [])]} />
+      {note('Approximate XLPE armoured cable ratings and mV/A/m (3-phase, 90 °C). Actual values depend on laying method, grouping, ambient temperature and manufacturer — confirm with the cable datasheet, IS 1554 / IEC 60364 and check short-circuit withstand and protection coordination.')}</>}
+    {sub === 'duct' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('cfm', 'Airflow (CFM)')}{F('vel', 'Velocity (m/s)')}{F('sideA', 'Rectangular side A (mm)', 150)}</div>
+      <Out rows={[['Airflow', q.toFixed(3) + ' m³/s  (' + (q * 3600).toFixed(0) + ' m³/h)'], ['Required area', (areaR * 1e4).toFixed(0) + ' cm²'], ['Round duct diameter', dR.toFixed(0) + ' mm → use ' + Math.ceil(dR / 25) * 25 + ' mm'], ['Rectangular (side A × B)', n('sideA') + ' × ' + Math.ceil(bSide / 25) * 25 + ' mm'], ['Equivalent round diameter', de.toFixed(0) + ' mm'], ['Velocity check', n('vel') <= 4 ? 'Low-velocity (quiet)' : n('vel') <= 8 ? 'Typical supply main' : 'High — noise / pressure drop risk', n('vel') > 9 ? '#B5453A' : '#1A7A3E']]} />
+      {note('Sized on velocity only. Typical: 4–6 m/s branches, 6–8 m/s mains (commercial). For pressure drop use equal-friction method / SMACNA charts; keep aspect ratio ≤ 4:1.')}</>}
+    {sub === 'pipe' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('flow', 'Flow (L/s)')}{F('pvel', 'Target velocity (m/s)', 150)}{F('plen', 'Pipe length (m)')}{F('c', 'Hazen-Williams C', 140)}{F('sh', 'Static head (m)')}{F('resid', 'Residual head (m)')}{F('eff', 'Pump efficiency', 120)}</div>
+      <Out rows={[['Calculated ID', dI.toFixed(0) + ' mm'], ['Nominal size', nom + ' mm', '#1A7A3E'], ['Actual velocity', actV.toFixed(2) + ' m/s', actV > 2.5 ? '#B5453A' : '#1A7A3E'], ['Friction loss', (hfm(nom) * 100).toFixed(2) + ' m / 100 m'], ['Friction incl. 30% fittings', hf.toFixed(1) + ' m'], ['Total pump head', H.toFixed(1) + ' m'], ['Pump shaft power (estimate)', kw.toFixed(2) + ' kW → select motor ≥ ' + (kw * 1.15).toFixed(2) + ' kW']]} />
+      {note('Treats nominal size as internal diameter and uses Hazen-Williams (water). Real pipe IDs differ by material / schedule; check manufacturer data and pump curve. Typical velocity: 1–2 m/s suction, 1.5–2.5 m/s delivery; fire mains up to 3 m/s per NFPA/NBC.')}</>}
+    {sub === 'hvac' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('area', 'Floor area (m²)')}
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Application (W/m² envelope + lights)<select value={v.app} onChange={e => set('app', e.target.value)} style={{ ...styles.input, margin: 0 }}><option value={90}>Residential — 90</option><option value={110}>Office — 110</option><option value={130}>Retail — 130</option><option value={160}>Restaurant — 160</option><option value={200}>Lab / data room — 200</option></select></label>
+        {F('people', 'Occupants')}{F('equip', 'Equipment (W)')}{F('fa', 'Fresh air (CFM)')}{F('dh', 'Fresh-air Δh (BTU/lb)', 150)}</div>
+      <Out rows={[['Envelope + lighting', (n('area') * n('app')).toFixed(0) + ' W'], ['Occupants', (n('people') * 450 / 3.412).toFixed(0) + ' W'], ['Equipment', n('equip').toFixed(0) + ' W'], ['Fresh-air load', (fa / 3.412).toFixed(0) + ' W'], ['Total cooling load', (btu / 3.412 / 1000).toFixed(1) + ' kW  =  ' + tr.toFixed(1) + ' TR', '#1A7A3E'], ['Suggested equipment (+10%)', (tr * 1.1).toFixed(1) + ' TR']]} />
+      {note('Rule-of-thumb estimate for budgeting only. Detailed design needs a heat-load calculation (ASHRAE / HAP / ISHRAE) with orientation, glazing, wall U-values and diversity.')}</>}
+    {sub === 'tank' && <>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{F('ppl', 'Persons')}{F('lpcd', 'Litres / person / day', 160)}</div>
+      <Out rows={[['Daily demand', tank.toFixed(0) + ' L'], ['Underground sump (1 day)', (tank / 1000).toFixed(1) + ' m³'], ['Overhead tank (½ day)', (tank / 2000).toFixed(1) + ' m³'], ['Fire reserve', 'as per NBC / local fire authority — add separately']]} />
+      {note('Typical NBC (IS 1172) allowances: office 45, residential 135, hotel 180–200, hospital 340+ L/person/day (flushing included). Confirm with the code for your occupancy.')}</>}
+  </div>);
+}
+
+// Manufacturing technical · conductor resistance check (IEC 60228 class 2 Cu) + material usage variance per production order
+const INS_CU_R = { 0.5: 36, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601 }; // max ohm/km at 20 C
+function InsMfgTech({ ctx }) {
+  const { productionOrders, boms, rawMaterials, sl, styles } = ctx;
+  const isCable = ctx.mfgType === 'wires_cables';
+  const [sub0, setSub] = React.useState('cond');
+  const sub = isCable ? sub0 : 'var';
+  const [f, setF] = React.useState({ size: '2.5', r: '', len: 100, t: 30, dia: '' });
+  const maxR = INS_CU_R[parseFloat(f.size)] || 0, len = parseFloat(f.len) || 0, rm = parseFloat(f.r) || 0, t = parseFloat(f.t) || 20;
+  const r20 = rm / (1 + 0.00393 * (t - 20)), perKm = len > 0 ? r20 / len * 1000 : 0;
+  const ok = rm > 0 && len > 0 && perKm <= maxR;
+  const kgKm = parseFloat(f.size) * 8.89;
+  const done = (productionOrders || []).filter(o => o.status === 'completed');
+  const rows = done.map(o => {
+    const b = boms.find(x => x.id === o.bomId); if (!b) return null;
+    const fac = (parseFloat(o.quantity) || 1) / (parseFloat(b.outputQty) || 1);
+    const lines = (b.materials || []).map(m => { const rmat = rawMaterials.find(x => x.id === m.materialId) || { name: m.name }; const exp = (parseFloat(m.qty) || 0) * fac; const act = sl.filter(e => e.sourceType === 'production' && e.sourceId === o.id && e.type === 'out' && e.itemName === rmat.name).reduce((s, e) => s + (parseFloat(e.qty) || 0), 0); return { name: rmat.name, unit: m.unit, exp, act, var: exp > 0 ? (act - exp) / exp * 100 : 0, tracked: act > 0 }; }).filter(x => x.tracked);
+    return lines.length ? { o, b, lines, worst: Math.max(...lines.map(x => x.var)) } : null;
+  }).filter(Boolean);
+  const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{isCable && pill('cond', 'Conductor resistance check')}{pill('var', 'Material usage variance')}</div>
+    {sub === 'cond' && <div style={_iCard}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Cu conductor size (mm²)<select value={f.size} onChange={e => setF(p => ({ ...p, size: e.target.value }))} style={{ ...styles.input, margin: 0, width: 150 }}>{Object.keys(INS_CU_R).map(k => <option key={k}>{k}</option>)}</select></label>
+        {[['r', 'Measured resistance (Ω)', 170], ['len', 'Sample length (m)', 130], ['t', 'Temperature (°C)', 130]].map(([k, l, w]) => <label key={k} style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: w }}>{l}<input type="number" value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}</div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12 }}>
+        {[['Resistance corrected to 20 °C', rm > 0 ? r20.toFixed(4) + ' Ω' : '—'], ['Per km at 20 °C', perKm > 0 ? perKm.toFixed(3) + ' Ω/km' : '—'], ['Maximum allowed (class 2, plain Cu)', maxR + ' Ω/km'], ['Result', rm > 0 && len > 0 ? (ok ? 'PASS' : 'FAIL — conductor under-size / high resistivity') : 'Enter measured values', ok ? '#1A7A3E' : rm > 0 && len > 0 ? '#B5453A' : '#999'], ['Theoretical copper weight', kgKm.toFixed(1) + ' kg/km (solid-area basis, excl. lay allowance)']].map(([l, x, c]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13 }}><span>{l}</span><b style={{ color: c || '#1E2A4A' }}>{x}</b></div>)}</div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Limits are the IEC 60228 / IS 8130 maximum DC resistance for plain annealed copper conductors (class 2). Correction uses α = 0.00393 /°C for copper. For tinned / aluminium / flexible (class 5) conductors use the respective table. Official test reports should still be raised as FAT records.</div></div>}
+    {sub === 'var' && <div style={_iCard}>
+      {rows.length === 0 ? <div style={{ color: '#999' }}>No completed production orders with stock-out entries yet. Variance is calculated from raw material issued to the order vs what the BOM expects.</div> : rows.map(r => <div key={r.o.id} style={{ borderBottom: '1px solid #F0ECE0', padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><b>{r.o.number} · {r.b.name || r.b.outputItem}</b><span style={{ fontSize: 12, color: '#888' }}>qty {r.o.quantity} · batch {r.o.batchNumber || '—'}</span></div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 4 }}><thead><tr>{['Material', 'Expected', 'Actual issued', 'Variance'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>{r.lines.map(l => <tr key={l.name}><td style={_iTd}>{l.name}</td><td style={{ ..._iTd, ..._iR }}>{+l.exp.toFixed(2)} {l.unit}</td><td style={{ ..._iTd, ..._iR }}>{+l.act.toFixed(2)}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: l.var > 5 ? '#B5453A' : l.var > 2 ? '#E07B00' : '#1A7A3E' }}>{l.var >= 0 ? '+' : ''}{l.var.toFixed(1)}%</td></tr>)}</tbody></table></div>)}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Positive variance = more material used than the BOM (scrap / wastage). Over +5% needs a reason.</div></div>}
+  </>);
+}
+
+// FM / AMC technical · asset reliability (failures, MTBF, MTTR, availability, repeat breakdowns, cost)
+function InsFmTech({ ctx }) {
+  const { fmWorkOrders, assets, fmt, today, dayMs } = ctx;
+  const [win, setWin] = React.useState(365);
+  const from = new Date(today.getTime() - win * dayMs);
+  const fails = (fmWorkOrders || []).filter(w => ['corrective', 'emergency'].includes(w.type) && w.assetId && w.raisedDate && new Date(w.raisedDate) >= from);
+  const by = {};
+  fails.forEach(w => { const r = by[w.assetId] = by[w.assetId] || { id: w.assetId, name: w.assetName || ((assets || []).find(a => a.id === w.assetId) || {}).name || w.assetId, n: 0, rep: [], cost: 0, last: '' }; r.n++; r.cost += parseFloat(w.cost) || 0; if ((w.raisedDate || '') > r.last) r.last = w.raisedDate; if (w.completedDate) { const d = (new Date(w.completedDate) - new Date(w.raisedDate)) / dayMs; if (!isNaN(d) && d >= 0) r.rep.push(d); } });
+  const rows = Object.values(by).map(r => { const mttr = r.rep.length ? r.rep.reduce((s, x) => s + x, 0) / r.rep.length : null, mtbf = win / r.n, av = mttr === null ? null : mtbf / (mtbf + mttr) * 100; return { ...r, mttr, mtbf, av }; }).sort((a, b) => b.n - a.n);
+  const totF = fails.length, totCost = rows.reduce((s, r) => s + r.cost, 0), rep = rows.filter(r => r.n >= 3);
+  return (<>
+    <div style={{ ..._iCard, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}><b>Period</b>
+      <select value={win} onChange={e => setWin(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #DDD' }}><option value={90}>Last 90 days</option><option value={180}>Last 180 days</option><option value={365}>Last 12 months</option></select>
+      <span style={{ fontSize: 13 }}>{totF} breakdown WO(s) on {rows.length} asset(s) · repair cost <b>{fmt(totCost)}</b> · <b style={{ color: rep.length ? '#B5453A' : '#1A7A3E' }}>{rep.length}</b> repeat-failure asset(s) (≥3)</span></div>
+    <div style={_iCard}>{rows.length === 0 ? <div style={{ color: '#999' }}>No corrective / emergency work orders with an asset in this period.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Asset', 'Failures', 'MTBF (days)', 'MTTR (days)', 'Availability', 'Repair cost', 'Last failure', 'Flag'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 6 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+      {rows.map(r => <tr key={r.id}><td style={_iTd}>{r.name}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700 }}>{r.n}</td><td style={{ ..._iTd, ..._iR }}>{r.mtbf.toFixed(0)}</td><td style={{ ..._iTd, ..._iR }}>{r.mttr === null ? '—' : r.mttr.toFixed(1)}</td><td style={{ ..._iTd, ..._iR }}>{r.av === null ? '—' : r.av.toFixed(1) + '%'}</td><td style={{ ..._iTd, ..._iR }}>{fmt(r.cost)}</td><td style={_iTd}>{r.last}</td><td style={{ ..._iTd, fontWeight: 700, color: r.n >= 3 ? '#B5453A' : '#888' }}>{r.n >= 3 ? 'Repeat failure — root-cause / replace?' : ''}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>MTBF = period ÷ number of breakdowns (a lower bound if the asset was not in service for the whole period). MTTR = average raised → completion date in days (needs a completion date on the work order). Availability = MTBF ÷ (MTBF + MTTR). Only corrective and emergency work orders linked to an asset count.</div></div>
+  </>);
+}
+
+// Manufacturing type strip + industry packs
+function InsMfgTypeBar({ ctx }) {
+  const { businessInfo, setBusinessInfo, canEdit, styles } = ctx;
+  const cur = MFG_TYPES.find(t => t.id === businessInfo.mfgType);
+  return <div style={{ ..._iCard, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderLeft: '4px solid ' + (cur ? '#C9752A' : '#B5453A') }}>
+    <b>Type of manufacturing</b>
+    {setBusinessInfo && !['sales', 'purchase', 'inventory', 'staff', 'foreman', 'engineer', 'viewer'].includes(ctx.userRole) ? <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ ...styles.input, width: 270, margin: 0 }}><option value="">— Choose —</option>{MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}</select> : <span>{cur ? cur.label : 'Not set'}</span>}
+    <span style={{ fontSize: 12, color: '#888' }}>{cur ? cur.desc : 'Choose a type to get the manufacturing and QA options for your industry.'}</span></div>;
+}
+
+function _insPill(sub, setSub, id, l) { return <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>; }
+
+// Wires & Cables pack: metal reconciliation + drum register
+function InsCablePack({ ctx }) {
+  const { ins, setIns, canEdit, styles } = ctx;
+  const [sub, setSub] = React.useState('metal');
+  const bm = { date: new Date().toISOString().slice(0, 10), metal: 'Copper', ref: '', input: '', good: '', scrap: '', offcut: '' };
+  const [m, setM] = React.useState(bm);
+  const bd = { drumNo: '', product: '', length: '', gross: '', tare: '', date: new Date().toISOString().slice(0, 10), testOk: 'yes', customer: '' };
+  const [d, setD] = React.useState(bd);
+  const recon = (ins.metalRecon || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const drums = (ins.drums || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const loss = r => { const i = parseFloat(r.input) || 0; return i > 0 ? (i - (parseFloat(r.good) || 0) - (parseFloat(r.scrap) || 0) - (parseFloat(r.offcut) || 0)) : 0; };
+  const tot = recon.reduce((a, r) => ({ i: a.i + (parseFloat(r.input) || 0), l: a.l + loss(r), s: a.s + (parseFloat(r.scrap) || 0) + (parseFloat(r.offcut) || 0) }), { i: 0, l: 0, s: 0 });
+  const dupDrum = drums.some(x => x.drumNo && x.drumNo === d.drumNo);
+  const mi = (k, ph, w, type) => <input type={type || 'text'} placeholder={ph} value={m[k]} onChange={e => setM(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: w, margin: 0 }} />;
+  const di = (k, ph, w, type) => <input type={type || 'text'} placeholder={ph} value={d[k]} onChange={e => setD(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: w, margin: 0 }} />;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{_insPill(sub, setSub, 'metal', 'Metal reconciliation')}{_insPill(sub, setSub, 'drum', 'Drum register')}</div>
+    {sub === 'metal' && <div style={_iCard}>
+      {recon.length > 0 && <div style={{ fontSize: 13, marginBottom: 10 }}>Overall: issued <b>{tot.i.toFixed(0)} kg</b> · recovered scrap/offcut <b>{tot.s.toFixed(0)} kg</b> · unaccounted loss <b style={{ color: tot.i && tot.l / tot.i * 100 > 1 ? '#B5453A' : '#1A7A3E' }}>{tot.l.toFixed(1)} kg ({tot.i ? (tot.l / tot.i * 100).toFixed(2) : 0}%)</b></div>}
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{mi('date', 'Date', 150, 'date')}
+        <select value={m.metal} onChange={e => setM(p => ({ ...p, metal: e.target.value }))} style={{ ...styles.input, width: 120, margin: 0 }}><option>Copper</option><option>Aluminium</option></select>
+        {mi('ref', 'Batch / shift ref', 140)}{mi('input', 'Rod issued (kg)', 130, 'number')}{mi('good', 'Good output (kg)', 130, 'number')}{mi('scrap', 'Scrap (kg)', 100, 'number')}{mi('offcut', 'Offcut / ends (kg)', 130, 'number')}
+        <button style={styles.primaryBtn} onClick={() => { if (!(parseFloat(m.input) > 0)) return alert('Enter the metal issued (kg)'); setIns('metalRecon', (p = []) => [...p, { ...m, id: 'm-' + Date.now() }]); setM({ ...bm, metal: m.metal }); }}>Add</button></div>}
+      {recon.length === 0 ? <div style={{ color: '#999' }}>No entries. Enter rod issued vs good output + scrap + offcut for each batch or shift.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Date', 'Metal', 'Ref', 'Issued', 'Good', 'Scrap', 'Offcut', 'Unaccounted', 'Loss %', ''].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i > 2 && i < 9 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {recon.map(r => { const l = loss(r), pc = (parseFloat(r.input) || 0) > 0 ? l / parseFloat(r.input) * 100 : 0; return <tr key={r.id}><td style={_iTd}>{r.date}</td><td style={_iTd}>{r.metal}</td><td style={_iTd}>{r.ref}</td><td style={{ ..._iTd, ..._iR }}>{r.input}</td><td style={{ ..._iTd, ..._iR }}>{r.good || 0}</td><td style={{ ..._iTd, ..._iR }}>{r.scrap || 0}</td><td style={{ ..._iTd, ..._iR }}>{r.offcut || 0}</td><td style={{ ..._iTd, ..._iR }}>{l.toFixed(1)}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: pc > 1.5 ? '#B5453A' : pc > 0.5 ? '#E07B00' : '#1A7A3E' }}>{pc.toFixed(2)}%</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('metalRecon', (p = []) => p.filter(y => y.id !== r.id))}>✕</button>}</td></tr>; })}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Unaccounted = issued − good − scrap − offcut. Above about 1.5% needs investigation (weighing, wire breakage, moisture, pilferage). Use the same weighing scale every time.</div></div>}
+    {sub === 'drum' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{di('drumNo', 'Drum no.', 110)}{di('product', 'Product (e.g. 3C × 2.5 sq.mm)', 210)}{di('length', 'Length (m)', 100, 'number')}{di('gross', 'Gross wt (kg)', 110, 'number')}{di('tare', 'Drum tare (kg)', 110, 'number')}{di('date', 'Date', 150, 'date')}
+        <select value={d.testOk} onChange={e => setD(p => ({ ...p, testOk: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }}><option value="yes">Tests passed</option><option value="no">Tests pending / failed</option></select>{di('customer', 'Dispatched to (customer / DC)', 200)}
+        <button style={styles.primaryBtn} onClick={() => { if (!d.drumNo.trim() || !(parseFloat(d.length) > 0)) return alert('Drum no. and length are required'); if (dupDrum) return alert('This drum no. already exists'); setIns('drums', (p = []) => [...p, { ...d, id: 'd-' + Date.now() }]); setD({ ...bd, product: d.product }); }}>Add</button></div>}
+      {drums.length === 0 ? <div style={{ color: '#999' }}>No drums registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Drum', 'Product', 'Length m', 'Net kg', 'Date', 'Test', 'Dispatched to', ''].map((h, i) => <th key={h + i} style={{ ..._iTh, ...(i === 2 || i === 3 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
+        {drums.map(x => <tr key={x.id}><td style={{ ..._iTd, fontWeight: 700 }}>{x.drumNo}</td><td style={_iTd}>{x.product}</td><td style={{ ..._iTd, ..._iR }}>{x.length}</td><td style={{ ..._iTd, ..._iR }}>{((parseFloat(x.gross) || 0) - (parseFloat(x.tare) || 0)).toFixed(1)}</td><td style={_iTd}>{x.date}</td><td style={{ ..._iTd, color: x.testOk === 'yes' ? '#1A7A3E' : '#B5453A', fontWeight: 600 }}>{x.testOk === 'yes' ? 'Passed' : 'Pending'}</td><td style={_iTd}>{canEdit ? <input value={x.customer || ''} placeholder="—" onChange={e => setIns('drums', (p = []) => p.map(y => y.id === x.id ? { ...y, customer: e.target.value } : y))} style={{ ...styles.input, margin: 0, width: 170 }} /> : x.customer}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('drums', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Dispatch only drums marked "Tests passed". Net weight = gross − drum tare.</div></div>}
+  </>);
+}
+
+// Fabrication pack: weight calculator, welder qualification, NDT log, painting DFT check
+function InsFabPack({ ctx }) {
+  const { ins, setIns, canEdit, styles, today, dayMs } = ctx;
+  const [sub, setSub] = React.useState('wt');
+  const [w, setW] = React.useState({ shape: 'plate', a: 1500, b: 6000, t: 10, qty: 1 });
+  const [wd, setWd] = React.useState({ name: '', idNo: '', process: 'SMAW', position: '3G', validTill: '' });
+  const [nd, setNd] = React.useState({ date: new Date().toISOString().slice(0, 10), mark: '', method: 'UT', joint: '', welder: '', result: 'Accepted', report: '' });
+  const [dft, setDft] = React.useState({ spec: 80, readings: '' });
+  const n = k => parseFloat(w[k]) || 0, DEN = 7.85;
+  let kgEach = 0, desc = '';
+  if (w.shape === 'plate') { kgEach = n('a') * n('b') * n('t') * DEN / 1e6; desc = 'Plate: width × length × thickness (mm)'; }
+  else if (w.shape === 'round') { kgEach = Math.PI * Math.pow(n('a') / 2, 2) * n('b') * DEN / 1e6; desc = 'Round bar: diameter × length (mm)'; }
+  else if (w.shape === 'pipe') { kgEach = Math.PI * (n('a') - n('t')) * n('t') * n('b') * DEN / 1e6; desc = 'Pipe: OD × length (mm), wall thickness t'; }
+  else if (w.shape === 'flat') { kgEach = n('a') * n('t') * n('b') * DEN / 1e6; desc = 'Flat: width × length, thickness t (mm)'; }
+  const welders = (ins.welders || []).map(x => ({ ...x, d: x.validTill ? Math.ceil((new Date(x.validTill) - today) / dayMs) : null })).sort((a, b) => (a.d ?? 9999) - (b.d ?? 9999));
+  const ndt = (ins.ndtLog || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const rej = ndt.filter(x => x.result === 'Rejected').length;
+  const reads = String(dft.readings).split(/[\s,;]+/).map(parseFloat).filter(x => !isNaN(x)), spec = parseFloat(dft.spec) || 0;
+  const avg = reads.length ? reads.reduce((s, x) => s + x, 0) / reads.length : 0, low = reads.filter(x => x < spec * 0.8).length;
+  const dftOk = reads.length > 0 && avg >= spec && low === 0;
+  const num = (k, l, wd2) => <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, width: wd2 || 120 }}>{l}<input type="number" value={w[k]} onChange={e => setW(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>;
+  const inp = (st, setSt, k, ph, wi, type) => <input type={type || 'text'} placeholder={ph} value={st[k]} onChange={e => setSt(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: wi, margin: 0 }} />;
+  const sel = (st, setSt, k, opts, wi) => <select value={st[k]} onChange={e => setSt(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, width: wi, margin: 0 }}>{opts.map(x => <option key={x}>{x}</option>)}</select>;
+  return (<>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>{_insPill(sub, setSub, 'wt', 'Steel weight')}{_insPill(sub, setSub, 'weld', 'Welder qualification')}{_insPill(sub, setSub, 'ndt', 'NDT log')}{_insPill(sub, setSub, 'dft', 'Painting DFT check')}</div>
+    {sub === 'wt' && <div style={_iCard}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Shape<select value={w.shape} onChange={e => setW(p => ({ ...p, shape: e.target.value }))} style={{ ...styles.input, margin: 0, width: 140 }}><option value="plate">Plate</option><option value="flat">Flat</option><option value="round">Round bar</option><option value="pipe">Pipe</option></select></label>
+      {num('a', w.shape === 'round' ? 'Diameter (mm)' : w.shape === 'pipe' ? 'OD (mm)' : 'Width (mm)')}{num('b', 'Length (mm)')}{w.shape !== 'round' && num('t', 'Thickness (mm)')}{num('qty', 'Quantity', 90)}</div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12, fontSize: 13 }}>{desc}<div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}><span>Weight each</span><b>{kgEach.toFixed(2)} kg</b></div><div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total ({n('qty')} nos)</span><b>{(kgEach * n('qty')).toFixed(2)} kg = {(kgEach * n('qty') / 1000).toFixed(3)} MT</b></div></div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Mild steel density 7.85 g/cm³. For rolled sections (ISMB, ISMC, angles) use the standard weight per metre from the section table; add 3–5% for welds and wastage when costing per MT.</div></div>}
+    {sub === 'weld' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{inp(wd, setWd, 'name', 'Welder name', 170)}{inp(wd, setWd, 'idNo', 'Welder ID / stamp', 130)}{sel(wd, setWd, 'process', ['SMAW', 'GMAW', 'GTAW', 'FCAW', 'SAW'], 100)}{sel(wd, setWd, 'position', ['1G', '2G', '3G', '4G', '5G', '6G'], 90)}
+        <input type="date" title="Qualification valid till" value={wd.validTill} onChange={e => setWd(p => ({ ...p, validTill: e.target.value }))} style={{ ...styles.input, width: 150, margin: 0 }} />
+        <button style={styles.primaryBtn} onClick={() => { if (!wd.name.trim() || !wd.validTill) return alert('Name and valid-till date are required'); setIns('welders', (p = []) => [...p, { ...wd, id: 'w-' + Date.now() }]); setWd({ name: '', idNo: '', process: 'SMAW', position: '3G', validTill: '' }); }}>Add</button></div>}
+      {welders.length === 0 ? <div style={{ color: '#999' }}>No welders registered.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Welder', 'ID', 'Process', 'Position', 'Valid till', 'Status', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {welders.map(x => <tr key={x.id}><td style={_iTd}>{x.name}</td><td style={_iTd}>{x.idNo}</td><td style={_iTd}>{x.process}</td><td style={_iTd}>{x.position}</td><td style={_iTd}>{x.validTill}</td><td style={{ ..._iTd, fontWeight: 700, color: x.d < 0 ? '#B5453A' : x.d <= 30 ? '#E07B00' : '#1A7A3E' }}>{x.d < 0 ? 'EXPIRED — do not weld' : x.d <= 30 ? 'Expires in ' + x.d + ' d' : 'Valid'}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('welders', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Keep the WPQ certificate and WPS reference on file. Continuity / re-test intervals depend on your code (AWS D1.1, ASME IX, IS 7310).</div></div>}
+    {sub === 'ndt' && <div style={_iCard}>
+      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{inp(nd, setNd, 'date', 'Date', 150, 'date')}{inp(nd, setNd, 'mark', 'Mark no. / item', 140)}{inp(nd, setNd, 'joint', 'Joint no.', 100)}{sel(nd, setNd, 'method', ['UT', 'RT', 'MPI', 'DPT', 'VT'], 90)}{inp(nd, setNd, 'welder', 'Welder ID', 110)}{sel(nd, setNd, 'result', ['Accepted', 'Rejected'], 120)}{inp(nd, setNd, 'report', 'Report no.', 120)}
+        <button style={styles.primaryBtn} onClick={() => { if (!nd.mark.trim()) return alert('Mark no. is required'); setIns('ndtLog', (p = []) => [...p, { ...nd, id: 'n-' + Date.now() }]); setNd({ ...nd, mark: '', joint: '', report: '' }); }}>Add</button></div>}
+      {ndt.length > 0 && <div style={{ fontSize: 13, marginBottom: 8 }}>{ndt.length} tests · rejection rate <b style={{ color: rej / ndt.length > 0.05 ? '#B5453A' : '#1A7A3E' }}>{(rej / ndt.length * 100).toFixed(1)}%</b></div>}
+      {ndt.length === 0 ? <div style={{ color: '#999' }}>No NDT records.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Date', 'Mark', 'Joint', 'Method', 'Welder', 'Result', 'Report', ''].map(h => <th key={h} style={_iTh}>{h}</th>)}</tr></thead><tbody>
+        {ndt.map(x => <tr key={x.id}><td style={_iTd}>{x.date}</td><td style={_iTd}>{x.mark}</td><td style={_iTd}>{x.joint}</td><td style={_iTd}>{x.method}</td><td style={_iTd}>{x.welder}</td><td style={{ ..._iTd, fontWeight: 700, color: x.result === 'Accepted' ? '#1A7A3E' : '#B5453A' }}>{x.result}</td><td style={_iTd}>{x.report}</td><td style={_iTd}>{canEdit && <button style={{ ...styles.ghostBtn, padding: '2px 8px' }} onClick={() => setIns('ndtLog', (p = []) => p.filter(y => y.id !== x.id))}>✕</button>}</td></tr>)}</tbody></table>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Rejected joints: repair, re-test and raise a CAPA if the same welder repeats.</div></div>}
+    {sub === 'dft' && <div style={_iCard}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3 }}>Specified DFT (µm)<input type="number" value={dft.spec} onChange={e => setDft(p => ({ ...p, spec: e.target.value }))} style={{ ...styles.input, margin: 0, width: 150 }} /></label>
+      <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11.5, color: '#666', gap: 3, flex: 1 }}>Readings (µm, separated by space / comma)<input value={dft.readings} onChange={e => setDft(p => ({ ...p, readings: e.target.value }))} placeholder="82 90 78 85 95" style={{ ...styles.input, margin: 0 }} /></label></div>
+      <div style={{ marginTop: 12, background: '#F8F6F0', borderRadius: 8, padding: 12, fontSize: 13 }}>
+        {[['Readings', reads.length], ['Average', reads.length ? avg.toFixed(1) + ' µm' : '—'], ['Minimum', reads.length ? Math.min(...reads) + ' µm' : '—'], ['Below 80% of spec', low], ['Result', reads.length ? (dftOk ? 'PASS' : 'FAIL — apply additional coat') : '—']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>{l}</span><b style={{ color: l === 'Result' ? (dftOk ? '#1A7A3E' : '#B5453A') : '#1E2A4A' }}>{v}</b></div>)}</div>
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>Rule used: average ≥ specified and no single reading below 80% of specified. Follow your painting specification (SSPC-PA2 / ISO 19840) if the contract requires a different rule.</div></div>}
+  </>);
+}
+
+function InsightsView({ initialTab, documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
+  const [tab, setTab] = React.useState(initialTab || 'recv');
+  const [openCash, setOpenCash] = React.useState('');
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const fmt = n => currency(n, cc.currency, cc.locale);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dayMs = 86400000;
+  const inDiv = x => !isMultiBiz || (x.bizType || 'trading') === currentBizType;
+  const tot = d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').grandTotal || 0;
+  const dueOf = d => { const s = d.dueDate || d.date; const t = s ? new Date(s) : null; return t && !isNaN(t) ? t : null; };
+  const nameOf = (d, list) => { const p = list.find(x => x.id === (d.customerId || d.vendorId)); return p ? p.name : (d.customerSnapshot && d.customerSnapshot.name) || '—'; };
+  const docs = (documents || []).filter(d => d.status === 'approved' && inDiv(d));
+  const vch = (vouchers || []).filter(v => v.status !== 'rejected' && v.status !== 'deleted' && inDiv(v));
+
+  // ── Receivables: invoice balance = grand total − receipts linked to that invoice number
+  const paidOn = (no, type) => vch.filter(v => v.type === type && v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim() === String(no || '').trim()).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const recvRows = docs.filter(d => d.type === 'invoice').map(d => {
+    const total = tot(d), paid = paidOn(d.number, 'receipt'), bal = Math.max(0, total - paid), due = dueOf(d);
+    const late = due ? Math.floor((today - due) / dayMs) : 0;
+    return { d, party: nameOf(d, customers), total, paid, bal, due, late };
+  }).filter(r => r.bal > 1).sort((a, b) => b.late - a.late);
+  const bucket = r => r.late <= 0 ? 0 : r.late <= 30 ? 1 : r.late <= 60 ? 2 : r.late <= 90 ? 3 : 4;
+  const BK = ['Not yet due', '1–30 days', '31–60 days', '61–90 days', '90+ days'];
+  const bucketTot = [0, 0, 0, 0, 0]; recvRows.forEach(r => { bucketTot[bucket(r)] += r.bal; });
+  const byParty = {}; recvRows.forEach(r => { (byParty[r.party] = byParty[r.party] || []).push(r); });
+  const unallocated = vch.filter(v => v.type === 'receipt' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const reminderText = (party, rows) => {
+    const od = rows.filter(r => r.late > 0), sum = rows.reduce((s, r) => s + r.bal, 0);
+    const tone = od.some(r => r.late > 60) ? 'This is now significantly overdue; please arrange payment at the earliest and let us know the expected date.' : od.length ? 'Kindly arrange payment at the earliest.' : 'A gentle reminder of the upcoming due date.';
+    return 'Dear ' + party + ',\n\nGreetings from ' + (businessInfo.name || 'us') + '. Our records show ' + fmt(sum) + ' outstanding:\n' +
+      rows.map(r => '• ' + (r.d.number || '') + ' dated ' + (r.d.date || '') + ' — ' + fmt(r.bal) + (r.late > 0 ? ' (' + r.late + ' days overdue)' : '')).join('\n') +
+      '\n\n' + tone + (businessInfo.bankName ? '\nBank: ' + businessInfo.bankName + (businessInfo.bankAccount ? ', A/C ' + businessInfo.bankAccount : '') + (businessInfo.ifsc ? ', IFSC ' + businessInfo.ifsc : '') : '') +
+      '\n\nIf already paid, please share the payment details so we can update our books.\n\nRegards,\n' + (businessInfo.name || '') + (businessInfo.phone ? '\n' + businessInfo.phone : '');
+  };
+  const partyOf = name => customers.find(c => c.name === name) || {};
+
+  // ── Cash forecast (30/60/90 days)
+  const payRows = docs.filter(d => d.type === 'purchasebill').map(d => {
+    const total = tot(d), bal = Math.max(0, total - paidOn(d.number, 'payment')), due = dueOf(d);
+    return { d, party: nameOf(d, vendors), bal, due };
+  }).filter(r => r.bal > 1);
+  const monthly = (n) => { // average of last 3 full months of expenses
+    const m = new Date(today.getFullYear(), today.getMonth() - n, 1), key = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2, '0');
+    const settles = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    return vch.filter(v => v.type === 'payment' && !settles(v) && String(v.date || '').slice(0, 7) === key).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0)
+      + (Array.isArray(pettyCash && pettyCash.entries) ? pettyCash.entries : []).filter(e => inDiv(e) && e.status !== 'rejected' && String(e.date || '').slice(0, 7) === key).reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
+  };
+  const avgExp = (monthly(1) + monthly(2) + monthly(3)) / 3;
+  const payroll = (employees || []).filter(e => (e.status || 'active') === 'active').reduce((s, e) => s + (parseFloat(e.basicSalary) || 0) + (parseFloat(e.hra) || 0) + (parseFloat(e.da) || 0) + (parseFloat(e.otherAllowances) || 0), 0);
+  const horizon = (H) => {
+    // overdue receivables are assumed to land within the first 30 days; other items fall on their due date
+    const within = (r, isRecv) => { const days = r.due ? Math.floor((r.due - today) / dayMs) : 0; const eff = isRecv && days < 0 ? 15 : Math.max(days, 0); return eff <= H; };
+    const inflow = recvRows.filter(r => within(r, true)).reduce((s, r) => s + r.bal, 0);
+    const out_bills = payRows.filter(r => within(r, false)).reduce((s, r) => s + r.bal, 0);
+    const months = H / 30;
+    return { H, inflow, out_bills, out_pay: payroll * months, out_exp: avgExp * months, net: inflow - out_bills - payroll * months - avgExp * months };
+  };
+  const hz = [30, 60, 90].map(horizon);
+  const opening = parseFloat(openCash) || 0;
+
+  // ── Reorder planner
+  const sl = (stockLedger || []).filter(inDiv);
+  const stock = computeStock(sl, items);
+  const cut = new Date(today.getTime() - 90 * dayMs);
+  const reorder = (items || []).map(it => {
+    const qty = (stock[it.id] || { qty: 0 }).qty;
+    const used = sl.filter(e => e.itemId === it.id && e.type !== 'in' && e.date && new Date(e.date) >= cut).reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
+    const vel = used / 90, cover = vel > 0 ? qty / vel : null, min = parseFloat(it.minStock) || 0;
+    const need = Math.max(0, Math.ceil(vel * 60 + min - qty));
+    const flag = qty <= 0 ? 'Out of stock' : (min > 0 && qty <= min) ? 'Below minimum' : (cover !== null && cover < 15) ? 'Under 15 days' : '';
+    return { it, qty, vel, cover, min, need, flag };
+  }).filter(r => r.flag || (r.vel > 0 && r.need > 0)).sort((a, b) => (a.cover ?? 9999) - (b.cover ?? 9999));
+  const slow = (items || []).filter(it => { const q = (stock[it.id] || { qty: 0 }).qty; return q > 0 && !sl.some(e => e.itemId === it.id && e.type !== 'in' && e.date && new Date(e.date) >= cut); }).length;
+
+  // ── Month-end check
+  const all = (documents || []).filter(inDiv);
+  const checks = [
+    ['Documents still in draft / awaiting approval', all.filter(d => ['draft', 'submitted', 'verified'].includes(d.status)).length, 'Approve or delete before closing'],
+    ['Approved invoices with no due date', docs.filter(d => d.type === 'invoice' && !d.dueDate).length, 'Ageing assumes the invoice date'],
+    ['Receipts not linked to any invoice', vch.filter(v => v.type === 'receipt' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).length, 'Link them so customer balances are right'],
+    ['Payments not linked to any bill (non-order)', vch.filter(v => v.type === 'payment' && !(v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim())).length, 'Check the account head is correct'],
+    ['Items with negative stock', Object.values(stock).filter(x => x.qty < 0).length, 'Fix GRN / issue entries'],
+    ['Overdue invoices (> 30 days)', recvRows.filter(r => r.late > 30).length, 'Send reminders (Receivables tab)'],
+    ['Employees without bank / basic salary set', (employees || []).filter(e => (e.status || 'active') === 'active' && !(parseFloat(e.basicSalary) > 0)).length, 'Payroll will miss them'],
+  ];
+
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888780', textTransform: 'uppercase', textAlign: 'left', borderBottom: '2px solid #EAE6DB', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const R = { textAlign: 'right' };
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 14 };
+  const pill = (id, label) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{label}</button>;
+  const copy = (t) => { try { navigator.clipboard.writeText(t); alert('Copied. Paste it into WhatsApp / email.'); } catch (e) { window.prompt('Copy this text:', t); } };
+
+  const bk = isMultiBiz ? currentBizType : '_all';
+  const ins = ((businessInfo.insightsData || {})[bk]) || {};
+  const setIns = (k, v) => { if (setBusinessInfo) setBusinessInfo(p => { const all = p.insightsData || {}, cur = all[bk] || {}; return { ...p, insightsData: { ...all, [bk]: { ...cur, [k]: typeof v === 'function' ? v(cur[k]) : v } } }; }); };
+  const canEdit = !['sales', 'purchase', 'inventory', 'staff', 'foreman', 'engineer', 'viewer'].includes(userRole);
+  const ctx = { setBusinessInfo, userRole, mfgType: businessInfo.mfgType || '', assets, sl, grns, capaRecords, boms, productionOrders, rawMaterials, pmSchedules, fmWorkOrders, fmSpareParts, fmt, docs, vch, items, stock, recvRows, payRows, pettyCash, inDiv, today, dayMs, businessInfo, ins, setIns, canEdit, styles, employees, setEmployees: setEmployees || (() => {}), siteAttendance, enquiries, contracts, amcContracts, customers,
+    totalOf: tot, taxableOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').taxable || 0, taxOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').totalTax || 0 };
+  const _isTr = !isMultiBiz || currentBizType === 'trading';
+  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ['qa', '🔬 Quality (QA)'], ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 MRP, cost & on-time delivery'], ['mfgtech', businessInfo.mfgType === 'wires_cables' ? '🧪 Conductor check & usage variance' : '🧪 Material usage variance'], ...(businessInfo.mfgType === 'wires_cables' ? [['cablepack', '🧵 Metal reconciliation & drums']] : []), ...(businessInfo.mfgType === 'fabrication' ? [['fabpack', '🔩 Weight, welders, NDT & DFT']] : [])]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><div><h2 className="serif" style={styles.pageTitle}>Business Insights</h2><div style={{ fontSize: 13, color: '#888780' }}>Receivables, cash forecast, reorder planner and month-end checks — from your approved documents</div></div></div>
+      {GROUPS.map(([g, tabs]) => <div key={g} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}><span style={{ fontSize: 11, color: '#888780', textTransform: 'uppercase', width: 92 }}>{g}</span>{tabs.map(([id, l]) => pill(id, l))}</div>)}
+      <div style={{ height: 8 }} />
+      {tab === 'trading' && <InsTrading ctx={ctx} />}
+      {tab === 'mepcalc' && <InsMepCalc ctx={ctx} />}
+      {tab === 'qa' && <InsQA ctx={ctx} />}
+      {tab === 'mfg' && <InsMfg ctx={ctx} />}
+      {tab === 'mfgtech' && <InsMfgTech ctx={ctx} />}
+      {tab === 'cablepack' && <InsCablePack ctx={ctx} />}
+      {tab === 'fabpack' && <InsFabPack ctx={ctx} />}
+      {tab === 'fm' && <InsFm ctx={ctx} />}
+      {tab === 'fmtech' && <InsFmTech ctx={ctx} />}
+      {tab === 'bs' && <InsBalanceSheet ctx={ctx} />}
+      {tab === 'budget' && <InsBudget ctx={ctx} />}
+      {tab === 'payplan' && <InsPayPlanner ctx={ctx} />}
+      {tab === 'payrollchk' && <InsPayrollCheck ctx={ctx} />}
+      {tab === 'compliance' && <InsCompliance ctx={ctx} />}
+      {tab === 'risk' && <InsRiskSop ctx={ctx} />}
+      {tab === 'people' && <InsPeople ctx={ctx} />}
+      {tab === 'contract' && <InsContractRisk ctx={ctx} />}
+      {tab === 'custhealth' && <InsCustomerHealth ctx={ctx} />}
+      {tab === 'leads' && <InsEnquiryScore ctx={ctx} />}
+
+      {tab === 'recv' && (<>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 14 }}>
+          {BK.map((l, i) => <div key={l} style={{ ...card, marginBottom: 0, padding: 12, borderTop: '3px solid ' + ['#1A7A3E', '#C9A24B', '#E07B00', '#C2410C', '#B5453A'][i] }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontWeight: 700, fontSize: 15, marginTop: 3 }}>{fmt(bucketTot[i])}</div></div>)}
+        </div>
+        {unallocated > 0 && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>⚠ {fmt(unallocated)} of receipts are not linked to an invoice, so they are not deducted below. Link them in Vouchers.</div>}
+        {recvRows.length === 0 ? <div style={styles.emptyBox}>No outstanding approved invoices.</div> : Object.entries(byParty).map(([party, rows]) => {
+          const sum = rows.reduce((s, r) => s + r.bal, 0), c = partyOf(party), msg = reminderText(party, rows);
+          const ph = String(c.phone || '').replace(/[^0-9]/g, '');
+          return (
+            <div key={party} style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <div><b style={{ fontSize: 14 }}>{party}</b> <span style={{ color: '#888', fontSize: 12 }}>· {rows.length} invoice(s)</span></div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <b style={{ color: '#B5453A' }}>{fmt(sum)}</b>
+                  <button style={styles.ghostBtn} onClick={() => copy(msg)}>📋 Copy reminder</button>
+                  {ph && <a style={{ ...styles.ghostBtn, textDecoration: 'none' }} target="_blank" rel="noreferrer" href={'https://wa.me/' + (ph.length === 10 ? '91' + ph : ph) + '?text=' + encodeURIComponent(msg)}>WhatsApp</a>}
+                  {c.email && <a style={{ ...styles.ghostBtn, textDecoration: 'none' }} href={'mailto:' + c.email + '?subject=' + encodeURIComponent('Payment reminder — ' + (businessInfo.name || '')) + '&body=' + encodeURIComponent(msg)}>Email</a>}
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Invoice', 'Date', 'Due', 'Total', 'Received', 'Balance', 'Age'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>{rows.map(r => <tr key={r.d.id}><td style={td}>{r.d.number}</td><td style={td}>{r.d.date}</td><td style={td}>{r.d.dueDate || '—'}</td><td style={{ ...td, ...R }}>{fmt(r.total)}</td><td style={{ ...td, ...R }}>{fmt(r.paid)}</td><td style={{ ...td, ...R, fontWeight: 700 }}>{fmt(r.bal)}</td><td style={{ ...td, color: r.late > 60 ? '#B5453A' : r.late > 0 ? '#E07B00' : '#1A7A3E', fontWeight: 600 }}>{r.late > 0 ? r.late + ' d late' : 'not due'}</td></tr>)}</tbody></table>
+            </div>
+          );
+        })}
+      </>)}
+
+      {tab === 'cash' && (<>
+        <div style={{ ...card, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>Opening cash + bank balance today</label>
+          <input type="number" value={openCash} onChange={e => setOpenCash(e.target.value)} placeholder="0" style={{ ...styles.input, width: 180, margin: 0 }} />
+          <span style={{ fontSize: 11.5, color: '#888' }}>Not stored — enter to see the closing position.</span>
+        </div>
+        <div style={card}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><th style={th}></th>{hz.map(h => <th key={h.H} style={{ ...th, ...R }}>Next {h.H} days</th>)}</tr></thead>
+            <tbody>
+              {[['Expected collections (invoices)', 'inflow', '#1A7A3E', 1], ['Supplier bills due', 'out_bills', '#C2410C', -1], ['Payroll (gross, active staff)', 'out_pay', '#C2410C', -1], ['Other expenses (3-month average)', 'out_exp', '#C2410C', -1]].map(([l, k, c, sg]) =>
+                <tr key={k}><td style={td}>{l}</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, color: c }}>{sg < 0 ? '− ' : ''}{fmt(h[k])}</td>)}</tr>)}
+              <tr style={{ background: '#F8F6F0' }}><td style={{ ...td, fontWeight: 700 }}>Net movement</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, fontWeight: 700, color: h.net >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(h.net)}</td>)}</tr>
+              {opening !== 0 && <tr><td style={{ ...td, fontWeight: 700 }}>Closing position</td>{hz.map(h => <td key={h.H} style={{ ...td, ...R, fontWeight: 700, color: opening + h.net >= 0 ? '#1A7A3E' : '#B5453A' }}>{fmt(opening + h.net)}</td>)}</tr>}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11.5, color: '#888', marginTop: 10, lineHeight: 1.6 }}>Overdue invoices are assumed to be collected within ~15 days; others on their due date. Payroll uses salary heads from Employees. Expenses use payment vouchers + petty cash (excluding bill settlements). This is an estimate, not a guarantee.</div>
+        </div>
+      </>)}
+
+      {tab === 'reorder' && (<>
+        <div style={{ fontSize: 12.5, color: '#666', marginBottom: 10 }}>Based on issue / usage in the last 90 days. Suggested order = 60 days of usage + minimum stock − stock on hand. {slow > 0 && <span style={{ color: '#856404' }}>· {slow} item(s) have stock but no movement in 90 days (slow movers).</span>}</div>
+        {reorder.length === 0 ? <div style={styles.emptyBox}>Nothing to reorder right now.</div> : (
+          <div style={card}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{['Item', 'On hand', 'Min', 'Use / day', 'Days cover', 'Status', 'Suggested order'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{reorder.map(r => <tr key={r.it.id}><td style={td}>{r.it.name}{r.it.itemCode ? <span style={{ color: '#aaa', fontSize: 11 }}> · {r.it.itemCode}</span> : null}</td><td style={{ ...td, ...R }}>{r.qty} {r.it.unit || ''}</td><td style={{ ...td, ...R }}>{r.min || '—'}</td><td style={{ ...td, ...R }}>{r.vel ? r.vel.toFixed(2) : '—'}</td><td style={{ ...td, ...R }}>{r.cover === null ? '—' : Math.floor(r.cover)}</td><td style={{ ...td, color: r.flag === 'Out of stock' || r.flag === 'Below minimum' ? '#B5453A' : '#E07B00', fontWeight: 600 }}>{r.flag || '—'}</td><td style={{ ...td, ...R, fontWeight: 700 }}>{r.need} {r.it.unit || ''}</td></tr>)}</tbody></table>
+            <div style={{ marginTop: 10 }}><button style={styles.ghostBtn} onClick={() => copy('Reorder list — ' + (businessInfo.name || '') + '\n' + reorder.filter(r => r.need > 0).map(r => '• ' + r.it.name + ': ' + r.need + ' ' + (r.it.unit || '')).join('\n'))}>📋 Copy order list</button></div>
+          </div>)}
+      </>)}
+
+      {tab === 'close' && (
+        <div style={card}>
+          <div style={{ fontSize: 12.5, color: '#666', marginBottom: 10 }}>Clear these before you close the month and run the P&amp;L / GST reports.</div>
+          {checks.map(([l, n, hint]) => (
+            <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid #F0ECE0' }}>
+              <div><div style={{ fontSize: 13.5 }}>{n === 0 ? '✅' : '⚠️'} {l}</div><div style={{ fontSize: 11.5, color: '#999', marginLeft: 22 }}>{hint}</div></div>
+              <b style={{ color: n === 0 ? '#1A7A3E' : '#B5453A' }}>{n}</b>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -5283,6 +6733,1427 @@ function DocumentsList({ docs, customers, vendors, search, setSearch, openDoc, d
   );
 }
 
+// ─── Won quotation → one BOM per item → one production order per item → order shortage → draft PR ───
+// Pure function (no React) so it can be tested. Item no. = quotation line no. (1-based) and is carried everywhere.
+function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stockMap = {}, purchaseReqs = [], productionOrders = [], bizType = 'manufacturing', today }) {
+  const dt = today || new Date().toISOString().slice(0, 10);
+  const norm = s => String(s || '').trim().toLowerCase();
+  const cust = (doc.customerSnapshot && doc.customerSnapshot.name) || '';
+  const lines = (doc.items || []).map((it, i) => ({ it, itemNo: i + 1 })).filter(x => (x.it.name || '').trim() && (parseFloat(x.it.qty) || 0) > 0);
+  // master BOMs = BOMs not created for a specific order
+  const masters = (boms || []).filter(b => b && !b.orderRef);
+  const findMaster = (name, itemId) => (itemId && masters.find(b => b.itemId === itemId)) || masters.find(b => norm(b.name) === norm(name) || norm(b.outputItem) === norm(name));
+  const rmById = {}; (rawMaterials || []).forEach(r => { if (r && r.id) rmById[r.id] = r; });
+  const rmFor = m => rmById[m.materialId] || (rawMaterials || []).find(r => norm(r.name) === norm(m.name));
+  let poSeq = (productionOrders || []).length;
+  const newBoms = [], newOrders = [], need = {};
+  const missing = [];
+  lines.forEach(({ it, itemNo }) => {
+    const tpl = findMaster(it.name, it.itemId);
+    const qty = parseFloat(it.qty) || 0;
+    const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust, woNo: doc.woNo || '', customerRef: doc.customerRef || '' };
+    if (!tpl || !(tpl.materials || []).length) { missing.push(itemNo + '. ' + (it.name || '').trim()); return; }
+    poSeq += 1;
+    newOrders.push({
+      id: 'po-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
+      number: (doc.woNo ? doc.woNo : 'PRO/' + (doc.number || 'Q')) + '/' + itemNo, batchNumber: (typeof genBatchNumber === 'function' ? genBatchNumber() : 'BN-' + poSeq),
+      bomId: tpl.id, bomRev: tpl.rev || 0, itemId: it.itemId || tpl.itemId || '', quantity: qty, startDate: dt, targetDate: doc.deliveryDate || doc.validUntil || '',
+      status: 'planned', notes: 'Auto from won ' + (doc.number || '') + ' · item ' + itemNo + (cust ? ' · ' + cust : ''),
+      orderRef: ref, bizType, createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '',
+    });
+    const fac = qty / (parseFloat(tpl.outputQty) || 1);
+    (tpl.materials || []).forEach(m => {
+      const ms = matStock(m, { items, stockMap, rawMaterials }), rm = ms.item ? null : rmFor(m), ri = resolveMatItem(m, items, rawMaterials), key = ms.id || ri.itemId || norm(ri.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : ri.itemId, itemCode: ms.item ? (ms.item.itemCode || '') : ri.itemCode, name: (ms.item && ms.item.name) || ri.name || (rm && rm.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || (rm && rm.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : ''), itemNos: [] };
+      r.overall += (parseFloat(m.qty) || 0) * fac;
+      if (!r.itemNos.includes(itemNo)) r.itemNos.push(itemNo);
+    });
+  });
+  const rows = Object.values(need).map(r => ({ ...r, overall: Math.round(r.overall * 1000) / 1000, perBom: Math.round(r.overall * 1000) / 1000, shortage: Math.max(0, Math.round((r.overall - r.available) * 1000) / 1000), itemNos: r.itemNos.join(', ') }));
+  const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + (doc.number || '') + (cust ? ' — ' + cust : ''), qty: 1, outputQty: 1, outputUnit: '', date: dt, rows, orderRef: { docId: doc.id, docNo: doc.number, woNo: doc.woNo || '' }, bizType, createdAt: new Date().toISOString() };
+  const short = rows.filter(r => r.shortage > 0);
+  let pr = null;
+  if (short.length) {
+    const cnt = (purchaseReqs || []).filter(m => (m.number || '').includes('PR/' + (typeof fyNow === 'function' ? fyNow() : '') + '/')).length + 1;
+    pr = {
+      id: 'pr-' + doc.id + '-' + Date.now(), number: (typeof dn === 'function' ? dn('PR', cnt) : 'PR-' + cnt), bizType,
+      type: 'manufacturing', linkId: doc.id, linkName: 'WO ' + (doc.woNo || doc.number || ''), date: dt, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (won quotation)', priority: 'Normal',
+      items: short.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'WO ' + (doc.woNo || doc.number || '') + ' · item ' + r.itemNos })),
+      remarks: 'Auto-raised for WO ' + (doc.woNo || '') + ' (quotation ' + (doc.number || '') + ') — material shortage against the product BOMs', orderRef: { docId: doc.id, docNo: doc.number, woNo: doc.woNo || '', customerRef: doc.customerRef || '' },
+      approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
+    };
+  }
+  return { newBoms, newOrders, report, pr, missingBom: missing };
+}
+
+// Placeholder for Wires & Cables menus that are being built step by step
+const MFG_NEXT = {
+  cabledesign: ['Cable Design Master', 2, 'One record per cable construction: conductor (Cu / Al, size, class, strands), insulation, laying-up, armour, sheath and test plan. Copper / compound / armour kg per km are calculated automatically, and the BOM and Technical Data Sheet are generated from it. A won quotation item matches a design by name.', [['bom', 'Bill of Materials'], ['partsmaster', 'Parts Master (old)']]],
+  incomingqa: ['Incoming QA', 3, 'Queue of every GRN lot waiting for inspection (rod, compound, armour). Accept → lot becomes "Approved" and can be issued; reject → returned to supplier and counted in supplier quality.', [['grn', 'Goods Receipt (GRN)']]],
+  wip: ['WIP (Bobbins / Coils)', 4, 'Every bobbin / coil coming out of a stage with its lot numbers, length / weight and the next stage it waits for.', [['storeissue', 'Issue to Production'], ['productionorders', 'Production Orders']]],
+  drumstock: ['Drum Stock & Scrap', 4, 'Finished drums released by QA (drum no., product, length, net weight, order item no., test certificate) plus scrap and offcut stock. Delivery Note and Packing List pick drums from here.', [['stock', 'Stock Position']]],
+  machinelog: ['Machine Log & Downtime', 4, 'Shift-wise running hours, output and downtime reasons per machine, linked to the Breakdown Log and used for OEE.', [['productionorders', 'Production Orders'], ['fmworkorders', 'Breakdown Log']]],
+};
+// ─── Cable Design Master (Wires & Cables · Engineering) ───────────────────────────────────────────────
+// Construction → calculated diameters & kg/km → Finished-Good item + master BOM (per 1000 m) + TDS.
+// Densities g/cm³ (mm² × g/cm³ = kg/km). Resistances: IEC 60228 / IS 8130 max DC at 20 °C (Ω/km).
+const CAB_DENS = { Cu: 8.89, Al: 2.703, PVC: 1.45, XLPE: 0.92, HFFR: 1.50, PE: 0.94, GI: 7.85, AlArm: 2.70 };
+const CAB_R = {
+  Cu2: { 0.5: 36, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601, 400: 0.047, 500: 0.0366, 630: 0.0283 },
+  Cu5: { 0.5: 39, 0.75: 26, 1: 19.5, 1.5: 13.3, 2.5: 7.98, 4: 4.95, 6: 3.3, 10: 1.91, 16: 1.21, 25: 0.78, 35: 0.554, 50: 0.386, 70: 0.272, 95: 0.206, 120: 0.161, 150: 0.129, 185: 0.106, 240: 0.0801 },
+  Al2: { 10: 3.08, 16: 1.91, 25: 1.2, 35: 0.868, 50: 0.641, 70: 0.443, 95: 0.32, 120: 0.253, 150: 0.206, 185: 0.164, 240: 0.125, 300: 0.1, 400: 0.0778, 500: 0.0605, 630: 0.0469 },
+};
+const CAB_LAYUP = { 1: 1, 2: 2, 3: 2.155, 4: 2.414, 5: 2.7, 6: 3, 7: 3, 8: 3.31, 10: 4, 12: 4.15, 14: 4.41, 16: 4.7, 19: 5, 24: 6, 27: 6.15, 30: 6.41, 37: 7 };
+const cabLayup = n => CAB_LAYUP[n] || (n <= 1 ? 1 : 1.0 + 0.95 * Math.sqrt(n) * 1.18);
+const CAB_BLANK = {
+  name: '', autoName: true, code: '', standard: 'IS 1554 (Part 1)', voltage: '1.1 kV', cores: 3, size: 2.5, condMat: 'Cu', condClass: '2', strands: '', fill: '',
+  insMat: 'PVC', insT: 0.9, insColour: 'Red, Yellow, Blue', innerType: 'extruded', innerMat: 'PVC', innerT: 0.3,
+  armour: 'none', armMat: 'GI', armDia: 1.4, armT: 0.8, armW: 4, sheathMat: 'PVC', sheathT: 1.8, sheathColour: 'Black', fr: 'FR',
+  wasteCond: 0.5, wasteComp: 3, drumLen: 500, hvTest: '3 kV, 5 min (verify per standard)', mat: {}, notes: '',
+};
+
+function calcCable(d) {
+  const n = Math.max(1, parseInt(d.cores) || 1), S = parseFloat(d.size) || 0, num = v => parseFloat(v) || 0;
+  const cls = String(d.condClass || '2');
+  const fill = num(d.fill) || (cls === '1' ? 1 : cls === '5' ? 0.72 : /sector/i.test(d.condShape || '') ? 0.92 : /compact/i.test(d.condShape || '') ? 0.9 : 0.78);
+  const lay = cls === '1' ? 1 : cls === '5' ? 1.04 : 1.02;
+  const dc = Math.sqrt(4 * S / (Math.PI * fill));
+  const rhoC = d.condMat === 'Al' ? CAB_DENS.Al : CAB_DENS.Cu;
+  const wCond = S * rhoC * lay * n;
+  const ti = num(d.insT), di = dc + 2 * ti;
+  const wIns = n * Math.PI * (di * di - dc * dc) / 4 * (CAB_DENS[d.insMat] || 1.45);
+  const D1 = di * cabLayup(n);
+  const tb = d.innerType === 'none' ? 0 : num(d.innerT);
+  const interstice = n > 1 ? Math.max(0, Math.PI * D1 * D1 / 4 - n * Math.PI * di * di / 4) : 0;
+  const D2 = D1 + 2 * tb;
+  const wBed = (n > 1 || tb > 0) ? ((Math.PI * (D2 * D2 - D1 * D1) / 4) + (d.innerType === 'none' ? 0 : interstice)) * (CAB_DENS[d.innerMat] || 1.45) : 0;
+  let D3 = D2, wArm = 0, nArm = 0;
+  const rhoA = d.armMat === 'Al' ? CAB_DENS.AlArm : CAB_DENS.GI;
+  if (d.armour === 'wire') { const da = num(d.armDia); if (da > 0) { nArm = Math.floor(Math.PI * (D2 + da) / da * 0.95); wArm = nArm * Math.PI * da * da / 4 * rhoA * 1.06; D3 = D2 + 2 * da; } }
+  if (d.armour === 'strip') { const t = num(d.armT), w = num(d.armW); if (t > 0 && w > 0) { nArm = Math.floor(Math.PI * (D2 + t) / w * 0.95); wArm = nArm * w * t * rhoA * 1.06; D3 = D2 + 2 * t; } }
+  const ts = num(d.sheathT), D4 = D3 + 2 * ts;
+  const wSheath = Math.PI * (D4 * D4 - D3 * D3) / 4 * (CAB_DENS[d.sheathMat] || 1.45);
+  const tbl = d.condMat === 'Al' ? CAB_R.Al2 : (cls === '5' ? CAB_R.Cu5 : CAB_R.Cu2);
+  const maxR = tbl[S] || null;
+  const insMin = ti > 0 ? Math.max(0, ti - (0.1 + 0.1 * ti)) : 0;
+  const sheathMin = ts > 0 ? Math.max(0, d.armour === 'none' ? 0.85 * ts - 0.1 : 0.8 * ts - 0.2) : 0;
+  const wTotal = wCond + wIns + wBed + wArm + wSheath;
+  const r2 = v => Math.round(v * 100) / 100;
+  return { n, S, dc: r2(dc), di: r2(di), D1: r2(D1), D2: r2(D2), D3: r2(D3), D4: r2(D4), wCond: r2(wCond), wIns: r2(wIns), wBed: r2(wBed), wArm: r2(wArm), nArm, wSheath: r2(wSheath), wTotal: r2(wTotal), maxR, insMin: r2(insMin), sheathMin: r2(sheathMin) };
+}
+// ─── Cable electrical parameters (IEC 60287-1-1 simplified, 50 Hz) — every value can be overridden manually ───
+// Indicative current ratings, Cu XLPE 3-core armoured 1.1 kV [in ground, in air] — typical manufacturer tables.
+const CAB_AMP = { 1.5: [27, 24], 2.5: [36, 32], 4: [46, 42], 6: [58, 52], 10: [77, 71], 16: [100, 95], 25: [130, 125], 35: [155, 150], 50: [185, 185], 70: [225, 230], 95: [270, 285], 120: [305, 330], 150: [340, 375], 185: [385, 430], 240: [445, 510], 300: [495, 580], 400: [560, 670] };
+const CAB_K = { Cu: { PVC: 115, XLPE: 143, HFFR: 143, PE: 115 }, Al: { PVC: 76, XLPE: 94, HFFR: 94, PE: 76 } }; // adiabatic SC constant (A·s½/mm²)
+const CAB_EPS = { PVC: 8, XLPE: 2.5, HFFR: 3.5, PE: 2.3 };
+function cableElectrical(d, k) {
+  const f = 50, S = parseFloat(d.size) || 0, n = Math.max(1, parseInt(d.cores) || 1), mat = d.condMat === 'Al' ? 'Al' : 'Cu';
+  const theta = (d.insMat === 'XLPE' || d.insMat === 'HFFR') ? 90 : 70;
+  const alpha = mat === 'Al' ? 0.00403 : 0.00393;
+  const r20 = k.maxR || (S > 0 ? (mat === 'Al' ? 28.264 : 17.241) / S : 0); // Ω/km
+  const rT = r20 * (1 + alpha * (theta - 20));
+  const Rm = rT / 1000; // Ω/m
+  const x4 = Rm > 0 ? Math.pow(8 * Math.PI * f / Rm * 1e-7, 2) : 0;
+  const F = x4 / (192 + 0.8 * x4);
+  const s = n > 1 ? k.di : k.D4; // axial spacing: touching cores / trefoil single cores
+  const ratio = s > 0 ? k.dc / s : 0;
+  const xp4 = x4 * 0.64, Fp = xp4 / (192 + 0.8 * xp4); // kp = 0.8 (stranded / compacted / sector), ks = 1
+  let yp = s > 0 ? Fp * ratio * ratio * (0.312 * ratio * ratio + 1.18 / (Fp + 0.27)) : 0;
+  if (n > 1 && S >= 35 && /sector/i.test(d.condShape || '')) yp *= 2 / 3;
+  const rac = rT * (1 + F + yp);
+  const L = s > 0 && k.dc > 0 ? 0.05 + 0.2 * Math.log(2 * s / k.dc) : 0; // mH/km
+  const x = 2 * Math.PI * f * L / 1000; // Ω/km
+  const c = k.di > k.dc ? (CAB_EPS[d.insMat] || 2.5) / (18 * Math.log(k.di / k.dc)) : 0; // µF/km
+  const sc = (CAB_K[mat][d.insMat] || 115) * S / 1000; // kA for 1 s
+  let amp = CAB_AMP[S] ? CAB_AMP[S].slice() : null;
+  if (amp) {
+    let fct = (d.insMat === 'PVC' || d.insMat === 'PE') ? 0.82 : 1;
+    if (mat === 'Al') fct *= 0.78;
+    if (n === 1) amp = [amp[0] * 1.05, amp[1] * 1.15]; else if (n === 2) amp = [amp[0] * 1.15, amp[1] * 1.15];
+    amp = amp.map(v => Math.round(v * fct));
+  }
+  const r4 = v => Math.round(v * 10000) / 10000, r3 = v => Math.round(v * 1000) / 1000;
+  return { theta, r20: r4(r20), rT: r4(rT), rac: r4(rac), x: r3(x), c: r3(c), sc: r3(sc), ground: amp ? amp[0] : null, air: amp ? amp[1] : null };
+}
+
+function cableAutoName(d) {
+  const arm = d.armour === 'none' ? 'Unarmoured' : 'Armoured';
+  return (d.cores || 1) + 'C x ' + (d.size || '') + ' sq.mm ' + (d.condMat === 'Al' ? 'Al' : 'Cu') + ' ' + d.insMat + '/' + d.sheathMat + ' ' + arm + (d.fr ? ' ' + d.fr : '') + ' ' + (d.voltage || '');
+}
+
+function CabField({ t, children, w }) { return <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: w || 150 }}>{t}{children}</label>; }
+
+function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms = [], setBoms, tdsSheets = [], setTdsSheets, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const [ed, setEd] = useState(null);
+  const [q, setQ] = useState('');
+  const mats = (items || []).filter(isMaterialItem);
+  const list = (designs || []).filter(x => !x.deleted && (!q || _nm(x.name).includes(_nm(q)) || _nm(x.code).includes(_nm(q))));
+  const set = (k, v) => setEd(p => { const nx = { ...p, [k]: v }; if (nx.autoName && k !== 'name') nx.name = cableAutoName(nx); return nx; });
+  const setMat = (role, id) => setEd(p => ({ ...p, mat: { ...(p.mat || {}), [role]: id } }));
+  const c = ed ? calcCable(ed) : null;
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+
+  function bomLines(d, k) {
+    const wc = 1 + (parseFloat(d.wasteCond) || 0) / 100, wp = 1 + (parseFloat(d.wasteComp) || 0) / 100, r3 = v => Math.round(v * 1000) / 1000;
+    const pick = (role, fallback) => { const it = mats.find(x => x.id === (d.mat || {})[role]); return it ? { materialId: it.id, name: it.name, src: 'item' } : { materialId: '', name: fallback }; };
+    const L = [];
+    if (k.wCond) L.push({ ...pick('cond', (d.condMat === 'Al' ? 'Aluminium' : 'Copper') + ' rod'), unit: 'kg', qty: r3(k.wCond * wc), role: 'Conductor' });
+    if (k.wIns) L.push({ ...pick('ins', d.insMat + ' insulation compound'), unit: 'kg', qty: r3(k.wIns * wp), role: 'Insulation' });
+    if (k.wBed) L.push({ ...pick('inner', d.innerMat + ' inner sheath / filler compound'), unit: 'kg', qty: r3(k.wBed * wp), role: 'Inner sheath' });
+    if (k.wArm) L.push({ ...pick('arm', (d.armMat === 'Al' ? 'Aluminium' : 'GI') + ' armour ' + (d.armour === 'strip' ? 'strip' : 'wire')), unit: 'kg', qty: r3(k.wArm * 1.01), role: 'Armour' });
+    if (k.wSheath) L.push({ ...pick('sheath', d.sheathMat + ' outer sheath compound'), unit: 'kg', qty: r3(k.wSheath * wp), role: 'Outer sheath' });
+    if ((d.mat || {}).drum && parseFloat(d.drumLen) > 0) L.push({ ...pick('drum', 'Drum'), unit: 'pcs', qty: r3(1000 / parseFloat(d.drumLen)), role: 'Packing' });
+    return L;
+  }
+
+  function saveDesign() {
+    const d = { ...ed, name: (ed.name || '').trim() };
+    if (!d.name) { alert('Enter the cable name.'); return; }
+    if (!(parseFloat(d.size) > 0) || !(parseInt(d.cores) > 0)) { alert('Enter cores and conductor size.'); return; }
+    const dup = (designs || []).find(x => !x.deleted && x.id !== d.id && _nm(x.name) === _nm(d.name));
+    if (dup) { alert('A design with this name already exists.'); return; }
+    const k = calcCable(d), id = d.id || 'cd-' + Date.now(), now = new Date().toISOString();
+    const E = cableElectrical(d, k), mE = d.elecManual || {}, pick = (kk, v) => (mE[kk] !== undefined && String(mE[kk]).trim() !== '') ? String(mE[kk]).trim() : (v == null ? '' : String(v));
+    const lines = bomLines(d, k);
+    // 1) Finished-good item (one per design, linked by designId)
+    const exist = (items || []).find(x => x.designId === id) || (items || []).find(x => _nm(x.name) === _nm(d.name));
+    const fgId = exist ? exist.id : 'itm-' + id;
+    const fg = { ...(exist || { saleRate: 0, purchaseRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0, hsn: '8544', itemCode: '' }), id: fgId, name: d.name, unit: 'm', category: 'Finished Good', designId: id, bizType: (exist && exist.bizType) || currentBizType, specs: { standard: d.standard, voltage: d.voltage, od: String(k.D4), weight: String(k.wTotal) + ' kg/km' } };
+    setItems(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === fgId) ? a.map(x => x.id === fgId ? fg : x) : [...a, fg]; });
+    // 2) Master BOM per 1000 m (matched by name when a quotation is won)
+    const oldBom = (boms || []).find(b => !b.orderRef && b.designId === id);
+    const bom = { ...(oldBom || {}), id: oldBom ? oldBom.id : 'bom-' + id, name: d.name, outputItem: d.name, outputQty: 1000, unit: 'm', materials: lines.map(({ role, ...m }) => ({ ...m, remarks: role })), designId: id, bizType: currentBizType, needsMaterials: !lines.length, updatedAt: Date.now() };
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === bom.id) ? a.map(x => x.id === bom.id ? bom : x) : [...a, bom]; });
+    // 3) Technical data sheet (existing TDS format)
+    const oldT = (tdsSheets || []).find(t => t.designId === id && !t.deleted);
+    const cnt = (tdsSheets || []).filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1;
+    const v = { ...TDS_BASE, title: d.name.toUpperCase(), cableType: (d.insMat === 'XLPE' ? 'XLPE ' : 'PVC ') + (d.armour === 'none' ? 'UNARMOURED' : 'ARMOURED') + ' CABLE', cores: d.cores + ' CORE X ' + d.size, code: d.code || '', voltage: String(d.voltage || '').replace(/[^0-9.]/g, '') === '1.1' ? '1100' : (d.voltage || ''),
+      condMat: (d.condClass === '1' ? 'SOLID' : d.condClass === '5' ? 'FLEXIBLE' : 'STRANDED') + ' ANNEALED ' + (d.condMat === 'Al' ? 'ALUMINIUM' : 'BARE COPPER'), condShape: d.condClass === '1' ? 'SOLID CIRCULAR' : d.condShape === 'sector' ? 'STRANDED SECTOR SHAPED' : d.condShape === 'compacted' ? 'STRANDED COMPACTED CIRCULAR' : 'STRANDED CIRCULAR', area: String(d.size), minWires: d.strands || '', dcRes: k.maxR ? String(k.maxR) : '',
+      insMat: d.insMat === 'XLPE' ? 'CROSS LINKED POLY ETHYLENE (XLPE)' : 'POLYVINYL CHLORIDE (PVC)', insColour: (d.insColour || '').toUpperCase(), insNom: String(d.insT), insMin: String(k.insMin),
+      hasInner: d.innerType !== 'none', innerMethod: d.innerType === 'taped' ? 'TAPE WRAPPED' : 'EXTRUDED', innerDia: k.D1 ? String(k.D1) : '', innerMin: String(d.innerT || ''),
+      hasArmour: d.armour !== 'none', armMat: d.armour === 'none' ? '' : (d.armMat === 'Al' ? 'ALUMINIUM' : 'GALVANISED STEEL') + (d.armour === 'strip' ? ' FORMED WIRE (FLAT STRIP)' : ' ROUND WIRE'), armType: d.armour === 'strip' ? 'FLAT STRIP' : d.armour === 'wire' ? 'ROUND WIRE' : '', armDim: d.armour === 'strip' ? (d.armW + ' X ' + d.armT) : d.armour === 'wire' ? String(d.armDia) : '', armDia: d.armour !== 'none' ? String(k.D2) : '',
+      outMat: (d.sheathMat === 'HFFR' ? 'HFFR' : 'PVC TYPE ST-' + (d.insMat === 'XLPE' ? '2' : '1')) + (d.fr ? ' ' + d.fr : ''), outColour: (d.sheathColour || '').toUpperCase(), outNom: String(d.sheathT), outDia: String(k.D3), outMin: String(k.sheathMin), overall: k.D4 + ' ± ' + Math.max(1, Math.round(k.D4 * 0.1)), drum: String(d.drumLen || ''), hasFR: !!d.fr, acRes: pick('acRes', E.rac), react: pick('react', E.x), cap: pick('cap', E.c), scRating: pick('scRating', E.sc), ground: pick('ground', E.ground), air: pick('air', E.air), dcRes: pick('rdc20', k.maxR || E.r20) };
+    const tds = { ...(oldT || { id: 'tds-' + id, number: dn('TDS', cnt), docNo: 'TDS/IMS/F01', customer: 'MARKET', customerId: '', refDoc: '', createdAt: now }), date: now.slice(0, 10), designId: id, bizType: currentBizType, updatedAt: now, v: { ...((oldT || {}).v || {}), ...v } };
+    setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === tds.id) ? a.map(x => x.id === tds.id ? tds : x) : [tds, ...a]; });
+    // 4) the design itself
+    const rec = { ...d, id, calc: { ...k, elec: E }, itemId: fgId, bomId: bom.id, tdsId: tds.id, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
+    setDesigns(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === id) ? a.map(x => x.id === id ? rec : x) : [rec, ...a]; });
+    setEd(null);
+    alert('✅ Saved ' + d.name + ' (rev ' + rec.rev + ').\n\nUpdated: Finished-good item · master BOM (' + lines.length + ' materials per 1000 m) · TDS ' + tds.number + (lines.some(l => !l.materialId) ? '\n\nSome BOM lines are not linked to a material item — pick the materials in the design so stock and shortages work.' : ''));
+  }
+
+  const inp = { ...styles.input, margin: 0 };
+  const sel = (k, opts, w) => <select value={ed[k]} onChange={e => set(k, e.target.value)} style={{ ...inp, width: w || '100%' }}>{opts.map(o => Array.isArray(o) ? <option key={o[0]} value={o[0]}>{o[1]}</option> : <option key={o}>{o}</option>)}</select>;
+  const numIn = (k, step) => <input type="number" step={step || 'any'} value={ed[k]} onChange={e => set(k, e.target.value)} style={inp} />;
+  const txt = (k, ph) => <input value={ed[k] || ''} placeholder={ph || ''} onChange={e => set(k, e.target.value)} style={inp} />;
+  const matPick = (role, label) => <CabField t={label} w={220}><select value={(ed.mat || {})[role] || ''} onChange={e => setMat(role, e.target.value)} style={inp}><option value="">— not linked —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}{m.rmCategory ? ' · ' + m.rmCategory : ''}</option>)}</select></CabField>;
+  const sec = t => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4 }}>{t}</div>;
+  const row = ch => <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>{ch}</div>;
+
+  if (ed) return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Back</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Edit cable design' : 'New cable design'}</h1></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 16, alignItems: 'start' }}>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '6px 18px 18px' }}>
+          {sec('Product')}
+          {row(<>
+            <CabField t={'Cable name (quotation items must use this exact name)'} w={460}><input value={ed.name} onChange={e => setEd(p => ({ ...p, name: e.target.value, autoName: false }))} style={inp} /></CabField>
+            <label style={{ fontSize: 12, display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={!!ed.autoName} onChange={e => setEd(p => ({ ...p, autoName: e.target.checked, name: e.target.checked ? cableAutoName(p) : p.name }))} />Auto name</label>
+            <CabField t="Type code (e.g. 2XWY, YWY)" w={140}>{txt('code')}</CabField>
+            <CabField t="Standard" w={170}>{sel('standard', ['IS 694', 'IS 1554 (Part 1)', 'IS 7098 (Part 1)', 'IEC 60502-1', 'BS 6346', 'Customer spec'])}</CabField>
+            <CabField t="Voltage grade" w={120}>{sel('voltage', ['450/750 V', '1.1 kV', '3.3 kV', '6.6 kV', '11 kV'])}</CabField>
+          </>)}
+          {sec('Conductor')}
+          {row(<>
+            <CabField t="No. of cores" w={100}>{numIn('cores', 1)}</CabField>
+            <CabField t="Size (sq.mm)" w={110}>{numIn('size')}</CabField>
+            <CabField t="Material" w={110}>{sel('condMat', [['Cu', 'Copper'], ['Al', 'Aluminium']])}</CabField>
+            <CabField t="Class" w={170}>{sel('condClass', [['1', 'Class 1 — solid'], ['2', 'Class 2 — stranded'], ['5', 'Class 5 — flexible']])}</CabField>
+            {ed.condClass === '2' && <CabField t="Shape" w={190}>{sel('condShape', [['circular', 'Circular (non-compacted)'], ['compacted', 'Compacted circular'], ['sector', 'Sector shaped']])}</CabField>}
+            <CabField t="Strands × wire dia" w={140}>{txt('strands', '7 × 0.67')}</CabField>
+            <CabField t="Fill factor (optional)" w={130}>{txt('fill', 'auto')}</CabField>
+          </>)}
+          {sec('Insulation')}
+          {row(<>
+            <CabField t="Material" w={110}>{sel('insMat', ['PVC', 'XLPE', 'HFFR', 'PE'])}</CabField>
+            <CabField t="Nominal thickness (mm)" w={150}>{numIn('insT')}</CabField>
+            <CabField t="Core colours" w={220}>{txt('insColour')}</CabField>
+          </>)}
+          {sec('Inner sheath / bedding')}
+          {row(<>
+            <CabField t="Type" w={150}>{sel('innerType', [['extruded', 'Extruded'], ['taped', 'Tape wrapped'], ['none', 'None']])}</CabField>
+            {ed.innerType !== 'none' && <CabField t="Material" w={110}>{sel('innerMat', ['PVC', 'HFFR', 'PE'])}</CabField>}
+            {ed.innerType !== 'none' && <CabField t="Thickness (mm)" w={120}>{numIn('innerT')}</CabField>}
+          </>)}
+          {sec('Armour')}
+          {row(<>
+            <CabField t="Type" w={160}>{sel('armour', [['none', 'Unarmoured'], ['wire', 'Round wire'], ['strip', 'Flat strip / formed wire']])}</CabField>
+            {ed.armour !== 'none' && <CabField t="Material" w={140}>{sel('armMat', [['GI', 'Galvanised steel'], ['Al', 'Aluminium']])}</CabField>}
+            {ed.armour === 'wire' && <CabField t="Wire dia (mm)" w={110}>{numIn('armDia')}</CabField>}
+            {ed.armour === 'strip' && <CabField t="Strip width (mm)" w={120}>{numIn('armW')}</CabField>}
+            {ed.armour === 'strip' && <CabField t="Strip thickness (mm)" w={130}>{numIn('armT')}</CabField>}
+          </>)}
+          {sec('Outer sheath')}
+          {row(<>
+            <CabField t="Material" w={110}>{sel('sheathMat', ['PVC', 'HFFR', 'PE'])}</CabField>
+            <CabField t="Nominal thickness (mm)" w={150}>{numIn('sheathT')}</CabField>
+            <CabField t="Colour" w={120}>{txt('sheathColour')}</CabField>
+            <CabField t="Fire property" w={130}>{sel('fr', [['', 'None'], ['FR', 'FR'], ['FR-LSH', 'FR-LSH'], ['FRLS', 'FRLS'], ['LSZH', 'LSZH']])}</CabField>
+          </>)}
+          {sec('Production & tests')}
+          {row(<>
+            <CabField t="Conductor allowance %" w={150}>{numIn('wasteCond')}</CabField>
+            <CabField t="Compound wastage %" w={150}>{numIn('wasteComp')}</CabField>
+            <CabField t="Standard drum length (m)" w={160}>{numIn('drumLen')}</CabField>
+            <CabField t="HV test" w={240}>{txt('hvTest')}</CabField>
+          </>)}
+          {sec('Electrical parameters (TDS) — calculated per IEC 60287-1-1; type a value to override')}
+          {(() => { const E = cableElectrical(ed, c), m = ed.elecManual || {}; const setM = (kk, v) => setEd(p => ({ ...p, elecManual: { ...(p.elecManual || {}), [kk]: v } }));
+            const rowsE = [['rdc20', 'DC resistance @20 °C (Ω/km)', E.r20], ['rT', 'DC resistance @' + E.theta + ' °C (Ω/km)', E.rT], ['acRes', 'AC resistance @' + E.theta + ' °C, 50 Hz (Ω/km)', E.rac], ['react', 'Reactance @50 Hz (Ω/km)', E.x], ['cap', 'Capacitance (µF/km)', E.c], ['scRating', 'Short-circuit rating, 1 s (kA)', E.sc], ['ground', 'Current rating in ground (A)', E.ground], ['air', 'Current rating in air (A)', E.air]];
+            return (<table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Parameter', 'Calculated', 'Manual value (TDS uses this if filled)'].map(h => <th key={h} style={{ textAlign: 'left', padding: '4px 6px', fontSize: 11, color: '#777', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+              <tbody>{rowsE.map(([kk, l, v]) => <tr key={kk}><td style={{ padding: '4px 6px' }}>{l}</td><td style={{ padding: '4px 6px', fontWeight: 600 }}>{v == null ? '—' : v}</td><td style={{ padding: '3px 6px' }}><input value={m[kk] ?? ''} placeholder="auto" onChange={e => setM(kk, e.target.value)} style={{ ...inp, width: 160, padding: '4px 8px' }} /></td></tr>)}</tbody></table>); })()}
+          <div style={{ fontSize: 11, color: '#888', margin: '4px 0 0', lineHeight: 1.5 }}>AC resistance includes skin and proximity effect; reactance from conductor spacing; capacitance uses ε (PVC 8, XLPE 2.5). Short-circuit rating = K·S/√t (Cu XLPE 143, Cu PVC 115, Al XLPE 94, Al PVC 76). Current ratings are indicative from typical manufacturer tables (3-core armoured, standard conditions) — apply your standard / derating factors or type the declared value.</div>
+          {sec('Link materials (from Item Master) — used in the BOM, stock and shortages')}
+          {row(<>
+            {matPick('cond', 'Conductor rod')}{matPick('ins', 'Insulation compound')}
+            {ed.innerType !== 'none' && matPick('inner', 'Inner sheath compound')}
+            {ed.armour !== 'none' && matPick('arm', 'Armour wire / strip')}
+            {matPick('sheath', 'Outer sheath compound')}{matPick('drum', 'Drum (optional)')}
+          </>)}
+          {sec('Notes')}
+          <textarea value={ed.notes || ''} onChange={e => set('notes', e.target.value)} rows={2} style={{ ...inp, width: '100%', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+            <button onClick={() => setEd(null)} style={styles.ghostBtn}>Cancel</button>
+            {canEdit && <button onClick={saveDesign} style={styles.primaryBtn}>Save & generate item · BOM · TDS</button>}
+          </div>
+        </div>
+        <div style={{ position: 'sticky', top: 10, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Calculated (per 1000 m)</div>
+          {[['Conductor dia', c.dc + ' mm'], ['Insulated core dia', c.di + ' mm'], ['Laid-up dia', c.D1 + ' mm'], ['Over inner sheath', c.D2 + ' mm'], ...(ed.armour !== 'none' ? [['Over armour', c.D3 + ' mm'], ['Armour wires / strips', c.nArm]] : []), ['Overall diameter', c.D4 + ' mm']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v}</b></div>)}
+          <div style={{ borderTop: '1px solid #EAE6DB', margin: '8px 0' }} />
+          {[['Conductor', c.wCond], ['Insulation', c.wIns], ['Inner sheath / filler', c.wBed], ['Armour', c.wArm], ['Outer sheath', c.wSheath]].filter(r => r[1] > 0).map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v} kg</b></div>)}
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13.5 }}><span>Approx. cable weight</span><b>{c.wTotal} kg/km</b></div>
+          <div style={{ borderTop: '1px solid #EAE6DB', margin: '8px 0' }} />
+          {[['Max DC resistance @20°C', c.maxR ? c.maxR + ' Ω/km' : 'size not in table'], ['Insulation min thickness', c.insMin + ' mm'], ['Sheath min thickness', c.sheathMin + ' mm']].map(([l, v]) => <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span style={{ color: '#666' }}>{l}</span><b>{v}</b></div>)}
+          <div style={{ fontSize: 11, color: '#888', marginTop: 10, lineHeight: 1.5 }}>Estimates from nominal dimensions (stranded fill factor, lay-up factors, standard densities). Resistance per IEC 60228 / IS 8130. Min thickness: insulation t − (0.1 + 10% t); sheath 85% t − 0.1 (unarmoured) or 80% t − 0.2 (armoured) — confirm against your standard and measured samples before issuing to customers.</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Cable Design Master</h1><p style={styles.muted}>One record per cable construction. Saving a design creates / updates its finished-good item, master BOM (per 1000 m) and Technical Data Sheet. A won quotation item with the same name picks this BOM automatically.</p></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        {canEdit && <button onClick={() => setEd({ ...CAB_BLANK, name: cableAutoName(CAB_BLANK) })} style={styles.primaryBtn}><Plus size={15} /> New design</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 240 }} />
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} design(s)</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No cable designs yet. Click “New design”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['Cable', 'Code', 'Standard', 'OD (mm)', 'kg/km', 'Cu/Al kg/km', 'Max R (Ω/km)', 'Rev', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 3 && i <= 7 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+            <tbody>{list.map(x => { const k = x.calc || calcCable(x); return (
+              <tr key={x.id} style={{ borderBottom: '1px solid #F0ECE0' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 600 }}>{x.name}</td><td style={{ padding: '8px 10px' }}>{x.code}</td><td style={{ padding: '8px 10px', fontSize: 12 }}>{x.standard} · {x.voltage}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.D4}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.wTotal}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.wCond}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{k.maxR || '—'}</td><td style={{ padding: '8px 10px', textAlign: 'right' }}>{x.rev || 0}</td>
+                <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{canEdit && <button onClick={() => setEd({ ...CAB_BLANK, ...x, mat: { ...(x.mat || {}) } })} style={styles.ghostBtn}>Edit</button>}{canEdit && <button onClick={() => setEd({ ...CAB_BLANK, ...x, id: undefined, rev: 0, createdAt: undefined, name: x.name + ' (copy)', autoName: false, mat: { ...(x.mat || {}) } })} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Copy</button>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </div>}
+    </div>
+  );
+}
+
+// ─── Incoming QA (Quality) — GRN lots wait here; only accepted qty enters usable stock ───
+// PO balance per line: ordered − (accepted + waiting QA + rejected that was closed by debit note).
+// Rejected qty sent back for REPLACEMENT stays open, so the next GRN brings it in and it goes to Incoming QA again.
+function poBalance(po, grns = [], exceptGrnId) {
+  const k = (id, name) => id || _nm(name);
+  const got = {};
+  (grns || []).filter(g => g && g.poId === po.id && g.status !== 'deleted' && g.status !== 'rejected' && g.id !== exceptGrnId).forEach(g => (g.lines || []).forEach(l => {
+    const rec = parseFloat(l.receivedQty) || 0, acc = parseFloat(l.acceptedQty) || 0, rej = parseFloat(l.rejectedQty) || 0;
+    const qaDone = !!l.qaDate || l.qaStatus === 'accepted' || l.qaStatus === 'ok';
+    const closed = !qaDone ? rec : acc + (l.rejDisposition === 'debit' ? rej : 0) + (l.qaStatus === 'ok' && !l.qaDate ? rec - acc : 0);
+    const key = k(l.itemId, l.itemName); got[key] = (got[key] || 0) + closed;
+  }));
+  return (po.items || []).map(it => { const ord = parseFloat(it.qty) || 0, key = k(it.itemId, it.name), take = Math.min(ord, got[key] || 0); got[key] = (got[key] || 0) - take; return { itemId: it.itemId || '', name: it.name, ordered: ord, closed: Math.round(take * 1000) / 1000, balance: Math.max(0, Math.round((ord - take) * 1000) / 1000), rate: parseFloat(it.rate) || 0 }; });
+}
+
+const iqaPending = (l) => !!l && !!l.itemId && (l.qaPending || !l.qaStatus || l.qaStatus === 'inprocess') && !l.qaDate;
+function iqaTemplate(item, mt) {
+  const pack = (MFG_QA_PACK[mt] || MFG_QA_PACK.general || { templates: [] }).templates || [];
+  const inc = pack.filter(t => /incoming|receipt|receiving|sampling|component/i.test(t[0]));
+  const key = _nm((item && (item.rmCategory || item.name)) || '');
+  const words = [['armour', 'armour'], ['copper', 'rod'], ['alumin', 'rod'], ['pvc', 'compound'], ['xlpe', 'compound'], ['tape', 'tapes'], ['filler', 'tapes'], ['drum', 'tapes'], ['steel', 'steel'], ['plate', 'steel'], ['resin', 'resin'], ['ingredient', 'receiv'], ['fabric', 'fabric'], ['yarn', 'fabric'], ['component', 'component']];
+  for (const [w, t] of words) if (key.includes(w)) { const hit = inc.find(x => _nm(x[0]).includes(t)); if (hit) return hit; }
+  return inc[0] || pack[0] || ['Incoming material inspection', ['Material as per PO', 'Quantity matches DC / invoice', 'Test certificate available', 'Visual damage check']];
+}
+
+function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockLedger = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const canInspect = ['admin', 'manager', 'qa', 'staff'].includes(userRole) || !['sales', 'purchase', 'accounts'].includes(userRole);
+  const [tab, setTab] = useState('queue');
+  const [cur, setCur] = useState(null); // { grnId, idx }
+  const [f, setF] = useState({});
+  const today = new Date(); const iso = today.toISOString().slice(0, 10);
+  const mt = _mfgType();
+  const live = (grns || []).filter(g => g && g.status !== 'deleted' && g.status !== 'rejected');
+  const queue = [], done = [];
+  live.forEach(g => (g.lines || []).forEach((l, idx) => { const row = { g, l, idx, item: (items || []).find(i => i.id === l.itemId) }; if (iqaPending(l)) queue.push(row); else if (l.qaDate) done.push(row); }));
+  queue.sort((a, b) => String(a.g.date || '').localeCompare(String(b.g.date || '')));
+  done.sort((a, b) => String(b.l.qaDate || '').localeCompare(String(a.l.qaDate || '')));
+  const mon = iso.slice(0, 7), doneMon = done.filter(r => String(r.l.qaDate || '').slice(0, 7) === mon);
+  const recM = doneMon.reduce((s, r) => s + (parseFloat(r.l.receivedQty) || 0), 0), rejM = doneMon.reduce((s, r) => s + (parseFloat(r.l.rejectedQty) || 0), 0);
+  function open(r) {
+    const tpl = iqaTemplate(r.item, mt);
+    setCur({ grnId: r.g.id, idx: r.idx });
+    setF({ tpl: tpl[0], points: tpl[1], results: {}, readings: {}, lotNo: r.l.lotNo || '', certNo: r.l.certNo || '', accepted: parseFloat(r.l.receivedQty) || 0, inspector: '', remarks: '' });
+  }
+  const row = cur ? queue.find(r => r.g.id === cur.grnId && r.idx === cur.idx) : null;
+  function save() {
+    if (!row) return;
+    const rec = parseFloat(row.l.receivedQty) || 0, acc = Math.max(0, Math.min(rec, parseFloat(f.accepted) || 0)), rej = Math.round((rec - acc) * 1000) / 1000;
+    if (f.points.some((_, i) => !f.results[i])) { alert('Mark every check point (Pass / Fail / N/A).'); return; }
+    if (!String(f.lotNo).trim()) { alert('Enter the lot / heat / batch number — it is needed for traceability.'); return; }
+    const fails = f.points.filter((_, i) => f.results[i] === 'fail');
+    if (fails.length && acc > 0 && !window.confirm('Failed: ' + fails.join('; ') + '\n\nAccept ' + acc + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' under deviation anyway?')) return;
+    const status = acc <= 0 ? 'rejected' : 'accepted';
+    let disp = {};
+    if (rej > 0) {
+      const replace = window.confirm('Rejected ' + rej + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' of ' + ((row.item && row.item.name) || row.l.itemName) + '.\n\nOK = Return to vendor for REPLACEMENT (PO balance stays open; the next GRN goes to Incoming QA again)\nCancel = Return with DEBIT NOTE (no replacement; PO line closed)');
+      const rtvSeq = (grns || []).reduce((n, g) => n + (g.lines || []).filter(l => l.rtvNo).length, 0) + 1;
+      disp = { rejDisposition: replace ? 'replace' : 'debit', rtvNo: dn('RTV', rtvSeq), rtvDate: iso, rejValue: Math.round(rej * (parseFloat(row.l.rate) || 0) * 100) / 100, rejReason: fails.join('; ') || f.remarks || '' };
+    }
+    const patch = { ...disp, qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, expiry: f.expiry || '', qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
+    setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== row.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === row.idx ? { ...l, ...patch } : l) }));
+    if (setStockLedger) {
+      const posted = (stockLedger || []).filter(e => e.sourceType === 'grn' && e.sourceId === row.g.id && e.itemId === row.l.itemId).reduce((s, e) => s + (e.type === 'in' ? 1 : -1) * (parseFloat(e.qty) || 0), 0);
+      const delta = Math.round((acc - posted) * 1000) / 1000;
+      if (delta !== 0) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), {
+        id: crypto.randomUUID(), date: iso, itemId: row.l.itemId, itemName: (row.item && row.item.name) || row.l.itemName,
+        type: delta > 0 ? 'in' : 'out', qty: Math.abs(delta), rate: parseFloat(row.l.rate) || 0,
+        sourceType: delta > 0 ? 'grn' : 'qa-reject', sourceId: row.g.id, sourceNumber: row.g.number, lotNo: patch.lotNo, expiry: patch.expiry, qaStatus: status, createdAt: Date.now(), bizType: currentBizType,
+      }]);
+    }
+    setCur(null);
+    if (disp.rtvNo) alert('Return to vendor ' + disp.rtvNo + ' created (' + (disp.rejDisposition === 'replace' ? 'replacement' : 'debit note ₹' + disp.rejValue.toLocaleString('en-IN')) + ').\nPrint it from the "Rejections (RTV)" tab and send it with the material.');
+  }
+  // rejection register: every rejected GRN line, and whether the loop is closed
+  const rtvRows = [];
+  live.forEach(g => (g.lines || []).forEach((l, idx) => { if (!(parseFloat(l.rejectedQty) > 0) || !l.qaDate) return;
+    const po = (documents || []).find(d => d.id === g.poId);
+    const bal = po ? (poBalance(po, grns).find(b => (l.itemId && b.itemId === l.itemId) || _nm(b.name) === _nm(l.itemName)) || null) : null;
+    const repl = l.rejDisposition === 'replace' || !l.rejDisposition;
+    const closed = !repl || (bal ? bal.balance <= 0 : !!l.replacedBy);
+    rtvRows.push({ g, l, idx, po, bal, repl, closed, item: (items || []).find(i => i.id === l.itemId) });
+  }));
+  const rtvOpen = rtvRows.filter(r => !r.closed).length;
+  const [rtvPrint, setRtvPrint] = useState(null);
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  if (rtvPrint) { const r = rtvPrint, l = r.l; return (
+    <div>
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={() => setRtvPrint(null)}><X size={15} /> Close</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.rtv-print', businessInfo)}><Printer size={15} /> Print</button>
+      </div>
+      <div className="rtv-print" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+        <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between' }}>
+          <div><div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div><div style={{ fontSize: 11, color: '#888' }}>{businessInfo.address}</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ fontSize: 16, fontWeight: 700, color: '#B5453A', letterSpacing: '0.06em' }}>{r.repl ? 'RETURN TO VENDOR — REPLACEMENT' : 'RETURN TO VENDOR — DEBIT NOTE'}</div><div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{l.rtvNo || '—'} · {l.rtvDate || l.qaDate}</div></div>
+        </div>
+        <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16 }}><tbody>
+          <tr><td style={{ color: '#888', width: 140 }}>Vendor</td><td style={{ fontWeight: 600 }}>{r.g.vendorName || '—'}</td><td style={{ color: '#888', width: 120 }}>GRN</td><td style={{ fontWeight: 600 }}>{r.g.number} · {r.g.date}</td></tr>
+          <tr><td style={{ color: '#888' }}>Purchase order</td><td style={{ fontWeight: 600 }}>{r.g.poNumber || '—'}</td><td style={{ color: '#888' }}>Order ref</td><td style={{ fontWeight: 600 }}>{(r.g.orderRef && woNo(r.g.orderRef)) || '—'}</td></tr>
+        </tbody></table>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+          <thead><tr>{['Item code', 'Item description', 'Lot / heat', 'Received', 'Accepted', 'Rejected', 'Rate', 'Value'].map(h => <th key={h} style={{ background: '#6BA855', color: '#fff', padding: '6px 8px', textAlign: 'left', border: '1px solid #6BA855' }}>{h}</th>)}</tr></thead>
+          <tbody><tr>{[(r.item && r.item.itemCode) || '—', (r.item && r.item.name) || l.itemName, l.lotNo || '—', l.receivedQty, l.acceptedQty, l.rejectedQty, l.rate || '—', l.rejValue != null ? l.rejValue.toLocaleString('en-IN') : ((parseFloat(l.rejectedQty) || 0) * (parseFloat(l.rate) || 0)).toLocaleString('en-IN')].map((v, i) => <td key={i} style={{ padding: '6px 8px', border: '1px solid #DDD' }}>{v}</td>)}</tr></tbody>
+        </table>
+        <div style={{ fontSize: 12, marginBottom: 8 }}><b>Reason for rejection:</b> {l.rejReason || l.qaRemarks || (l.qaChecks && (l.qaChecks.points || []).filter((_, i) => (l.qaChecks.results || {})[i] === 'fail').join('; ')) || '—'}</div>
+        <div style={{ fontSize: 12, marginBottom: 30 }}><b>Action required from vendor:</b> {r.repl ? 'Replace the rejected quantity against the same PO. Replacement will be inspected again on receipt.' : 'Accept this debit note for the value above; the PO line is closed for this quantity.'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 50 }}>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />QA inspector</div>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Stores</div>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Vendor acknowledgement</div>
+        </div>
+      </div>
+    </div>); }
+  const pill = (id, l) => <button key={id} onClick={() => { setTab(id); setCur(null); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Incoming QA</h1><p style={styles.muted}>Every GRN line waits here. Accepted quantity is added to stock with its lot number; rejected quantity never enters stock.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Waiting for inspection', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Oldest waiting', queue.length ? Math.max(0, Math.floor((today - new Date(queue[0].g.date)) / 86400000)) + ' days' : '—', '#1E2A4A'], ['Inspected this month', doneMon.length, '#1E2A4A'], ['Reject % this month', recM ? (rejM / recM * 100).toFixed(1) + '%' : '—', rejM ? '#B5453A' : '#1A7A3E']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>{pill('queue', 'Waiting (' + queue.length + ')')}{pill('done', 'Inspected')}{pill('rtv', 'Rejections (RTV)' + (rtvOpen ? ' · ' + rtvOpen + ' open' : ''))}</div>
+      {tab === 'queue' && (row ? (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, maxWidth: 900 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <div><b style={{ fontSize: 15 }}>{(row.item && row.item.name) || row.l.itemName}</b><div style={{ fontSize: 12, color: '#777' }}>{row.g.number} · {row.g.date} · {row.g.vendorName || ''}{row.g.poNumber ? ' · PO ' + row.g.poNumber : ''} · received {row.l.receivedQty} {row.l.unit || (row.item && row.item.unit) || ''}</div></div>
+            <button onClick={() => setCur(null)} style={styles.ghostBtn}>← Back to queue</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+            {[['lotNo', 'Lot / heat / batch no. *'], ['certNo', 'Supplier TC / MTC no.'], ['inspector', 'Inspected by'], ...(mfgCfg().unit.fields.some(x => x[0] === 'expiry') ? [['expiry', 'Expiry / best-before (yyyy-mm-dd)']] : [])].map(([k, l]) => <label key={k} style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>{l}<input value={f[k] || ''} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>)}
+            <label style={{ fontSize: 11.5, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>Accepted qty (rest = rejected)<input type="number" value={f.accepted} onChange={e => setF(p => ({ ...p, accepted: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          </div>
+          <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{f.tpl}</div>
+            {f.points.map((pt, i) => <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #EEE', fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{pt}</span>
+              <input placeholder="Reading / value" value={f.readings[i] || ''} onChange={e => setF(p => ({ ...p, readings: { ...p.readings, [i]: e.target.value } }))} style={{ ...styles.input, margin: 0, width: 150, fontSize: 12 }} />
+              {['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setF(p => ({ ...p, results: { ...p.results, [i]: v } }))} style={{ padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: f.results[i] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: f.results[i] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}
+            </div>)}
+          </div>
+          <input placeholder="Remarks" value={f.remarks} onChange={e => setF(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, width: '100%', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+            <span style={{ fontSize: 12.5 }}>Accepted <b style={{ color: '#1A7A3E' }}>{Math.max(0, Math.min(parseFloat(row.l.receivedQty) || 0, parseFloat(f.accepted) || 0))}</b> · Rejected <b style={{ color: '#B5453A' }}>{Math.max(0, Math.round(((parseFloat(row.l.receivedQty) || 0) - (parseFloat(f.accepted) || 0)) * 1000) / 1000)}</b></span>
+            {canInspect && <button onClick={save} style={styles.primaryBtn}>Save inspection</button>}
+          </div>
+        </div>
+      ) : (queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. New GRN lines appear here automatically.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['GRN', 'Date', 'Vendor', 'Material', 'Received', 'Waiting', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{queue.map(r => { const age = Math.max(0, Math.floor((today - new Date(r.g.date)) / 86400000)); return <tr key={r.g.id + '-' + r.idx}><td style={td}>{r.g.number}</td><td style={td}>{r.g.date}</td><td style={td}>{r.g.vendorName || ''}</td><td style={td}><b>{(r.item && r.item.name) || r.l.itemName}</b>{r.item && r.item.rmCategory ? <span style={{ color: '#888', fontSize: 11.5 }}> · {r.item.rmCategory}</span> : null}</td><td style={td}>{r.l.receivedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td><td style={{ ...td, color: age > 2 ? '#B5453A' : '#666', fontWeight: age > 2 ? 700 : 400 }}>{age} d</td><td style={td}>{canInspect && <button onClick={() => open(r)} style={styles.primaryBtn}>Inspect</button>}</td></tr>; })}</tbody>
+        </table></div>))}
+      {tab === 'rtv' && (rtvRows.length === 0 ? <div style={styles.emptyBox}>No rejected material. Rejected quantity from Incoming QA appears here with its return-to-vendor note.</div> :
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['RTV no.', 'GRN / PO', 'Vendor', 'Item', 'Rejected', 'Action', 'Value', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rtvRows.map(r => <tr key={r.g.id + '-' + r.idx}>
+            <td style={td}>{r.l.rtvNo || '—'}</td>
+            <td style={td}>{r.g.number}<div style={{ fontSize: 11, color: '#888' }}>{r.g.poNumber || 'no PO'}{r.g.orderRef && r.g.orderRef.docNo ? ' · ' + woNo(r.g.orderRef) : ''}</div></td>
+            <td style={td}>{r.g.vendorName || ''}</td>
+            <td style={td}>{(r.item && r.item.itemCode) ? r.item.itemCode + ' · ' : ''}{(r.item && r.item.name) || r.l.itemName}</td>
+            <td style={td}>{r.l.rejectedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td>
+            <td style={td}>{r.repl ? 'Replacement' : 'Debit note'}</td>
+            <td style={td}>₹{Math.round(r.l.rejValue != null ? r.l.rejValue : (parseFloat(r.l.rejectedQty) || 0) * (parseFloat(r.l.rate) || 0)).toLocaleString('en-IN')}</td>
+            <td style={{ ...td, fontWeight: 700, color: r.closed ? '#1A7A3E' : '#B5453A' }}>{r.closed ? (r.repl ? 'Replaced ✔' : 'Closed ✔') : 'Awaiting replacement' + (r.bal ? ' (' + r.bal.balance + ' open on PO)' : '')}</td>
+            <td style={td}><button onClick={() => setRtvPrint(r)} style={styles.ghostBtn}><Printer size={13} /> RTV</button>
+              {canInspect && !r.closed && r.repl && <button onClick={() => { if (!window.confirm('Vendor will not replace — close with a debit note instead?')) return; setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== r.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === r.idx ? { ...l, rejDisposition: 'debit' } : l) })); }} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Debit note</button>}</td>
+          </tr>)}</tbody>
+        </table></div>)}
+      {tab === 'done' && (done.length === 0 ? <div style={styles.emptyBox}>No inspections yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Date', 'GRN', 'Vendor', 'Material', 'Lot', 'Accepted', 'Rejected', 'Result', 'By'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{done.slice(0, 200).map(r => <tr key={r.g.id + '-' + r.idx}><td style={td}>{r.l.qaDate}</td><td style={td}>{r.g.number}</td><td style={td}>{r.g.vendorName || ''}</td><td style={td}>{(r.item && r.item.name) || r.l.itemName}</td><td style={td}>{r.l.lotNo || '—'}</td><td style={td}>{r.l.acceptedQty}</td><td style={td}>{r.l.rejectedQty || 0}</td><td style={{ ...td, fontWeight: 700, color: r.l.qaStatus === 'rejected' ? '#B5453A' : (r.l.qaChecks && r.l.qaChecks.deviation) ? '#E07B00' : '#1A7A3E' }}>{r.l.qaStatus === 'rejected' ? 'Rejected' : (r.l.qaChecks && r.l.qaChecks.deviation) ? 'Accepted (deviation)' : (parseFloat(r.l.rejectedQty) > 0 ? 'Partly accepted' : 'Accepted')}</td><td style={td}>{r.l.qaBy || ''}</td></tr>)}</tbody>
+        </table></div>)}
+    </div>
+  );
+}
+
+// ─── Step 4: WIP · Drum stock & scrap · Metal reconciliation · Machine log ──────────────────────────
+const _n = v => parseFloat(v) || 0;
+const r3 = v => Math.round(v * 1000) / 1000;
+// every drum recorded on any production order's final route stage
+function allDrums(productionOrders = [], boms = []) {
+  const out = [];
+  (productionOrders || []).forEach(o => {
+    const st = (o.route && o.route.stages) || [];
+    st.forEach((s, si) => (s.drums || []).forEach((d, di) => {
+      const bom = (boms || []).find(b => b.id === o.bomId);
+      out.push({ ...d, key: o.id + '-' + si + '-' + di, order: o, stageIdx: si, drumIdx: di, product: bom ? bom.name : '', net: r3(_n(d.gross) - _n(d.tare)), length: _n(d.length) });
+    }));
+  });
+  return out;
+}
+const fgAccepted = d => d && d.testStatus === 'passed' && (!d.awaitStores || d.storesAccepted);
+const fgFor = (d, items = [], boms = [], cableDesigns = []) => {
+  const b = (boms || []).find(x => x.id === d.order.bomId);
+  return (b && b.itemId && (items || []).find(i => i.id === b.itemId)) || (items || []).find(i => i.designId && (cableDesigns || []).some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || (items || []).find(i => _nm(i.name) === _nm(d.product)) || null;
+};
+function StoresAcceptView({ embedded = false, productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, userRole, currentBizType = 'manufacturing', businessInfo = {} }) {
+  const U = mfgCfg().unit;
+  const canAccept = !['sales', 'accounts', 'purchase'].includes(userRole);
+  const iso = new Date().toISOString().slice(0, 10);
+  const drums = allDrums(productionOrders, boms);
+  const queue = drums.filter(d => d.testStatus === 'passed' && d.awaitStores && !d.storesAccepted);
+  const done = drums.filter(d => d.storesAccepted).sort((a, b) => String(b.storesDate || '').localeCompare(String(a.storesDate || '')));
+  const [f, setF] = useState({});
+  const patchDrum = (dr, patch) => setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => o.id !== dr.order.id ? o : ({ ...o, route: { ...o.route, stages: (o.route.stages || []).map((st, si) => si !== dr.stageIdx ? st : ({ ...st, drums: (st.drums || []).map((x, di) => di === dr.drumIdx ? { ...x, ...patch } : x) })) } })));
+  const row = (d) => f[d.key] || { qty: String(d.length || ''), loc: '', by: '' };
+  const setRow = (d, k, v) => setF(p => ({ ...p, [d.key]: { ...row(d), [k]: v } }));
+  function accept(d) {
+    const r = row(d), qty = parseFloat(r.qty) || 0;
+    if (!(qty > 0)) { alert('Enter the quantity physically received.'); return; }
+    if (!String(r.by).trim()) { alert('Enter who received it in stores.'); return; }
+    if (Math.abs(qty - (parseFloat(d.length) || 0)) > 0.001 && !window.confirm('Received ' + qty + ' but QA released ' + d.length + ' ' + U.qtyUnit + '. Accept with this difference? (Use "Back to QA" if the ' + U.name.toLowerCase() + ' must be re-checked.)')) return;
+    const fg = fgFor(d, items, boms, cableDesigns);
+    const fgrnNo = dn('FGRN', drums.filter(x => x.fgrnNo).length + 1);
+    patchDrum(d, { storesAccepted: true, storesDate: iso, storesBy: String(r.by).trim(), storesLoc: r.loc, storesQty: qty, fgrnNo });
+    if (fg && setStockLedger) setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), { id: crypto.randomUUID(), date: iso, itemId: fg.id, itemName: fg.name, type: 'in', qty, rate: parseFloat(fg.purchaseRate ?? fg.rate) || 0, sourceType: 'fg-receipt', sourceId: d.order.id + ':' + d.drumNo, sourceNumber: fgrnNo, lotNo: d.drumNo, location: r.loc, note: 'FG receipt ' + fgrnNo + ' · ' + d.order.number + ' · cert ' + (d.certNo || ''), createdAt: Date.now(), bizType: currentBizType }]);
+    alert('✅ ' + fgrnNo + ' — ' + U.name + ' ' + d.drumNo + ' accepted into finished stock' + (fg ? ' (' + fg.name + ', ' + qty + ' ' + U.qtyUnit + ')' : '') + '.' + (fg ? '' : '\n\nNo finished-good item linked — stock not posted. Link the BOM to its product code.') + '\nIt can now be dispatched (after payment clearance).');
+  }
+  function backToQa(d) {
+    const why = window.prompt('Reason for sending ' + U.name.toLowerCase() + ' ' + d.drumNo + ' back to QA (length / damage / marking / label):');
+    if (!why) return;
+    patchDrum(d, { testStatus: 'pending', awaitStores: false, storesReturn: (d.storesReturn || 0) + 1, storesReturnNote: why, storesReturnDate: iso });
+  }
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
+  const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0', verticalAlign: 'middle' };
+  const inp = { ...styles.input, padding: '5px 8px', fontSize: 12.5, marginBottom: 0 };
+  if (embedded) {
+    if (!queue.length) return null;
+    return (
+      <div style={{ ...styles.page, paddingBottom: 0 }}>
+        <div style={{ background: '#FFF6E5', border: '1px solid #F2D48A', borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ fontWeight: 700, color: '#8A5A00', marginBottom: 8 }}>📥 Forwarded by QA — awaiting stores acceptance ({queue.length})<span style={{ fontWeight: 400, fontSize: 12, color: '#8A6D3B', marginLeft: 8 }}>Check quantity, label and condition → Accept (becomes finished stock, can be dispatched) or send back to QA.</span></div>
+          <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 8 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{[U.name + ' no.', 'Product', 'Work Order / item', 'QA released', 'Certificate', 'Qty received', 'Location', 'Received by', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{queue.map(d => { const r = row(d); return <tr key={d.key}>
+              <td style={{ ...td, fontWeight: 700 }}>{d.drumNo}</td><td style={td}>{d.product}</td>
+              <td style={td}>{(d.order.orderRef && woNo(d.order.orderRef)) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
+              <td style={td}>{d.length} {U.qtyUnit}<div style={{ fontSize: 11, color: '#888' }}>{d.testDate}</div></td><td style={td}>{d.certNo || '—'}</td>
+              <td style={td}><input type="number" value={r.qty} onChange={e => setRow(d, 'qty', e.target.value)} style={{ ...inp, width: 90 }} /></td>
+              <td style={td}><input value={r.loc} onChange={e => setRow(d, 'loc', e.target.value)} placeholder="Bay / rack" style={{ ...inp, width: 100 }} /></td>
+              <td style={td}><input value={r.by} onChange={e => setRow(d, 'by', e.target.value)} placeholder="Name" style={{ ...inp, width: 110 }} /></td>
+              <td style={td}>{canAccept && <><button onClick={() => accept(d)} style={styles.primaryBtn}>Accept</button><button onClick={() => backToQa(d)} style={{ ...styles.ghostBtn, marginLeft: 4, color: '#B5453A' }}>Back to QA</button></>}</td>
+            </tr>; })}</tbody>
+          </table></div>
+        </div>
+      </div>);
+  }
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Stores acceptance (finished goods)</h1><p style={styles.muted}>QA-passed {U.plural.toLowerCase()} wait here. Stores checks quantity, label and condition, gives a location and accepts — only then it becomes finished stock and can be dispatched. Mismatch → back to QA.</p></div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        {[['Waiting for stores', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Accepted (FG receipts)', done.length, '#1E2A4A'], ['Sent back to QA', drums.filter(d => d.storesReturn).length, '#B5453A']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 16px', minWidth: 150 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 22, fontWeight: 700, color: c }}>{v}</div></div>)}
+      </div>
+      {queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. {U.plural} that pass the {mfgCfg().test.title.toLowerCase()} appear here for stores acceptance.</div> :
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, marginBottom: 18 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{[U.name + ' no.', 'Product', 'Order / item', 'QA released', 'Certificate', 'Qty received', 'Location', 'Received by', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{queue.map(d => { const r = row(d); return <tr key={d.key}>
+            <td style={{ ...td, fontWeight: 700 }}>{d.drumNo}</td>
+            <td style={td}>{d.product}</td>
+            <td style={td}>{(d.order.orderRef && woNo(d.order.orderRef)) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
+            <td style={td}>{d.length} {U.qtyUnit}<div style={{ fontSize: 11, color: '#888' }}>{d.testDate}</div></td>
+            <td style={td}>{d.certNo || '—'}</td>
+            <td style={td}><input type="number" value={r.qty} onChange={e => setRow(d, 'qty', e.target.value)} style={{ ...inp, width: 90 }} /></td>
+            <td style={td}><input value={r.loc} onChange={e => setRow(d, 'loc', e.target.value)} placeholder="Bay / rack" style={{ ...inp, width: 100 }} /></td>
+            <td style={td}><input value={r.by} onChange={e => setRow(d, 'by', e.target.value)} placeholder="Name" style={{ ...inp, width: 110 }} /></td>
+            <td style={td}>{canAccept && <><button onClick={() => accept(d)} style={styles.primaryBtn}>Accept</button><button onClick={() => backToQa(d)} style={{ ...styles.ghostBtn, marginLeft: 4, color: '#B5453A' }}>Back to QA</button></>}</td>
+          </tr>; })}</tbody>
+        </table></div>}
+      {done.length > 0 && <>
+        <div style={{ fontWeight: 700, color: '#1E2A4A', margin: '6px 0 8px' }}>Finished goods receipts</div>
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['FGRN', 'Date', U.name + ' no.', 'Product', 'Order', 'Qty', 'Location', 'Received by', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{done.slice(0, 200).map(d => <tr key={d.key}><td style={td}>{d.fgrnNo}</td><td style={td}>{d.storesDate}</td><td style={td}>{d.drumNo}</td><td style={td}>{d.product}</td><td style={td}>{(d.order.orderRef && d.order.orderRef.docNo) || d.order.number}</td><td style={td}>{d.storesQty ?? d.length} {U.qtyUnit}</td><td style={td}>{d.storesLoc || '—'}</td><td style={td}>{d.storesBy}</td><td style={td}>{d.dispatched ? 'Dispatched · ' + (d.dispatchedDoc || '') : 'In stock'}</td></tr>)}</tbody>
+        </table></div></>}
+    </div>
+  );
+}
+
+const DRUM_STATUS = { pending: ['Awaiting routine test', '#E07B00'], withstores: ['QA passed → with stores (awaiting acceptance)', '#B26B00'], passed: ['In finished stock (stores accepted)', '#1A7A3E'], failed: ['Failed — QA hold', '#B5453A'], dispatched: ['Dispatched', '#6B7494'] };
+
+function WIPView({ productionOrders = [], boms = [], setView }) {
+  const today = new Date();
+  const rows = (productionOrders || []).filter(o => !['completed', 'cancelled'].includes(o.status)).map(o => {
+    const st = (o.route && o.route.stages) || [], bom = (boms || []).find(b => b.id === o.bomId);
+    const curIdx = st.findIndex(s => s.status !== 'done'), last = [...st].reverse().find(s => s.status === 'done');
+    const cur = curIdx >= 0 ? st[curIdx] : null;
+    const refs = last ? [last.fields && (last.fields.bobbin || last.fields.drumNo), last.machine].filter(Boolean).join(' · ') : '';
+    const since = last && last.date ? Math.floor((today - new Date(last.date)) / 86400000) : null;
+    return { o, bom, total: st.length, done: st.filter(s => s.status === 'done').length, cur, last, refs, since, hold: st.some(s => s.status === 'hold') };
+  });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>WIP (Bobbins / Coils)</h1><p style={styles.muted}>Work in progress from the production routes — what came out of the last completed stage and where it waits next.</p></div>
+      {rows.length === 0 ? <div style={styles.emptyBox}>No open production orders.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Order', 'Product', 'Order item', 'Progress', 'Last stage output', 'Bobbin / machine', 'Waiting at', 'Since'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map(r => <tr key={r.o.id}>
+            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}</td><td style={td}>{r.o.orderRef ? woNo(r.o.orderRef) + ' / ' + r.o.orderRef.itemNo : '—'}</td>
+            <td style={{ ...td, color: r.hold ? '#B5453A' : '#2255A0', fontWeight: 600 }}>{r.total ? r.done + '/' + r.total : 'Route not started'}{r.hold ? ' ⚠ QA hold' : ''}</td>
+            <td style={td}>{r.last ? r.last.name + ': ' + (r.last.outQty || 0) : '—'}</td><td style={td}>{r.refs || '—'}</td>
+            <td style={td}>{r.cur ? r.cur.name : (r.total ? 'All stages done' : '—')}</td><td style={{ ...td, color: r.since > 2 ? '#B5453A' : '#666' }}>{r.since === null ? '—' : r.since + ' d'}</td>
+          </tr>)}</tbody></table></div>}
+      {setView && <div style={{ marginTop: 10 }}><button onClick={() => setView('productionorders')} style={styles.ghostBtn}>Open Production Orders (🧭 Route)</button></div>}
+    </div>
+  );
+}
+
+function DrumStockView({ productionOrders = [], boms = [], setView }) {
+  const U = mfgCfg().unit, isCab = mfgCfg().eng === 'cable';
+  const [tab, setTab] = useState('drums');
+  const [q, setQ] = useState('');
+  const drums = allDrums(productionOrders, boms);
+  const dupNo = {}; drums.forEach(d => { const k = _nm(d.drumNo); if (k) dupNo[k] = (dupNo[k] || 0) + 1; });
+  const shown = drums.filter(d => !q || _nm(d.drumNo).includes(_nm(q)) || _nm(d.product).includes(_nm(q)) || _nm(d.order.number).includes(_nm(q)));
+  const inStock = drums.filter(d => d.testStatus === 'passed' && !d.dispatched);
+  const byProd = {}; inStock.forEach(d => { const b = byProd[d.product] = byProd[d.product] || { m: 0, n: 0, kg: 0 }; b.m += d.length; b.n++; b.kg += d.net; });
+  const scrap = [];
+  (productionOrders || []).forEach(o => ((o.route && o.route.stages) || []).forEach(s => { if (_n(s.scrap) > 0) scrap.push({ o, stage: s.name, qty: _n(s.scrap), date: s.date, machine: s.machine, remarks: s.remarks }); }));
+  const scrapByStage = {}; scrap.forEach(x => { scrapByStage[x.stage] = (scrapByStage[x.stage] || 0) + x.qty; });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const pill = (id, l) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{isCab ? 'Drum Stock & Scrap' : 'Finished ' + U.plural + ' & Scrap'}</h1><p style={styles.muted}>{U.plural} are recorded on the last route stage of each production order. They become stock only after the final test / inspection passes ({mfgCfg().test.menu}).</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[...(U.fields.some(x => x[0] === 'expiry') ? [['Expired / expiring ≤ 30 d', drums.filter(d => d.expiry && !d.dispatched && (new Date(d.expiry) - new Date()) / 86400000 <= 30).length]] : []), [U.plural + ' recorded', drums.length], ['Released, in stock', inStock.length + ' · ' + r3(inStock.reduce((s, d) => s + d.length, 0)) + ' m'], ['Awaiting test', drums.filter(d => !d.testStatus || d.testStatus === 'pending').length], ['On QA hold', drums.filter(d => d.testStatus === 'failed').length]].map(([l, v]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div></div>)}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>{pill('drums', 'Drums')}{pill('stock', 'Stock by product')}{pill('scrap', 'Scrap & offcuts')}<input value={q} onChange={e => setQ(e.target.value)} placeholder="Drum no., product, order…" style={{ ...styles.input, margin: '0 0 0 auto', width: 230 }} /></div>
+      {tab === 'drums' && (shown.length === 0 ? <div style={styles.emptyBox}>No drums yet. Record drums on the last stage of a production order route (🧭 Route → Drumming).</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{[U.numLabel, 'Product', 'Order', 'Quote / item', U.qtyLabel, U.fields.some(x => x[0] === 'expiry') ? 'Expiry' : 'Net (kg)', 'Date', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{shown.map(d => { const stt = d.dispatched ? 'dispatched' : (d.testStatus === 'passed' && d.awaitStores && !d.storesAccepted) ? 'withstores' : (d.testStatus || 'pending'), lab = DRUM_STATUS[stt] || DRUM_STATUS.pending; return <tr key={d.key}>
+            <td style={td}><b>{d.drumNo || '—'}</b>{dupNo[_nm(d.drumNo)] > 1 ? <span style={{ color: '#B5453A', fontSize: 11 }}> duplicate no.</span> : null}</td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td>
+            <td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td>{U.fields.some(x => x[0] === 'expiry') ? (() => { const dl = d.expiry ? Math.floor((new Date(d.expiry) - new Date()) / 86400000) : null; return <td style={{ ...td, fontWeight: dl !== null && dl <= 30 ? 700 : 400, color: dl === null ? '#999' : dl < 0 ? '#B5453A' : dl <= 30 ? '#E07B00' : '#1A7A3E' }}>{d.expiry ? d.expiry + (dl < 0 ? ' · expired' : ' · ' + dl + ' d') : '—'}</td>; })() : <td style={td}>{d.net || '—'}</td>}<td style={td}>{d.date || ''}</td>
+            <td style={{ ...td, color: lab[1], fontWeight: 700 }}>{lab[0]}</td></tr>; })}</tbody></table></div>)}
+      {tab === 'stock' && (Object.keys(byProd).length === 0 ? <div style={styles.emptyBox}>No released drums in stock yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Product', 'Drums', 'Metres', 'Net kg'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(byProd).map(([p, b]) => <tr key={p}><td style={td}><b>{p}</b></td><td style={td}>{b.n}</td><td style={td}>{r3(b.m)}</td><td style={td}>{r3(b.kg)}</td></tr>)}</tbody></table></div>)}
+      {tab === 'scrap' && <>
+        {Object.keys(scrapByStage).length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>{Object.entries(scrapByStage).map(([k, v]) => <span key={k} style={{ background: '#FBEAE7', color: '#B5453A', borderRadius: 14, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>{k}: {r3(v)}</span>)}</div>}
+        {scrap.length === 0 ? <div style={styles.emptyBox}>No scrap recorded on the routes yet.</div> :
+          <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{['Date', 'Order', 'Stage', 'Machine', 'Scrap qty', 'Remarks'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{scrap.map((x, i) => <tr key={i}><td style={td}>{x.date || ''}</td><td style={td}>{x.o.number}</td><td style={td}>{x.stage}</td><td style={td}>{x.machine || ''}</td><td style={{ ...td, fontWeight: 700 }}>{x.qty}</td><td style={td}>{x.remarks || ''}</td></tr>)}</tbody></table></div>}
+      </>}
+      {setView && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><button onClick={() => setView('routinetest')} style={styles.ghostBtn}>Routine Test & Certificates</button><button onClick={() => setView('productionorders')} style={styles.ghostBtn}>Production Orders</button></div>}
+    </div>
+  );
+}
+
+function MetalReconView({ productionOrders = [], boms = [], cableDesigns = [], storeIssues = [], items = [], stockLedger = [], setView }) {
+  const isMetal = it => !!it && /copper|alumin|\bcu\b|\bal\b/i.test((it.rmCategory || '') + ' ' + (it.name || '')) && !/armour/i.test((it.rmCategory || '') + ' ' + (it.name || ''));
+  const designOf = bom => { if (!bom) return null; const did = bom.designId || ((boms || []).find(b => b.id === bom.templateId) || {}).designId; return (cableDesigns || []).find(d => d.id === did) || (cableDesigns || []).find(d => _nm(d.name) === _nm(bom.name)) || null; };
+  const rows = (productionOrders || []).filter(o => o.route && (o.route.stages || []).some(s => s.status === 'done' || (s.drums || []).length)).map(o => {
+    const bom = (boms || []).find(b => b.id === o.bomId), des = designOf(bom), wCond = des && des.calc ? _n(des.calc.wCond) : 0;
+    const sivs = (storeIssues || []).filter(si => si.productionRef && si.productionRef === o.number);
+    let issued = 0; sivs.forEach(si => (si.lines || []).forEach(l => { const it = (items || []).find(x => x.id === l.itemId); if (isMetal(it || { name: l.itemName })) issued += _n(l.qty); }));
+    if (!issued) (stockLedger || []).filter(e => e.sourceId === o.id && e.type === 'out').forEach(e => { const it = (items || []).find(x => x.id === e.itemId); if (isMetal(it || { name: e.itemName })) issued += _n(e.qty); });
+    const st = o.route.stages || [];
+    const metres = st.reduce((s, x) => s + (x.drums || []).reduce((t, d) => t + _n(d.length), 0), 0);
+    const good = wCond ? metres / 1000 * wCond : 0;
+    const scrap = st.slice(0, 3).reduce((s, x) => s + _n(x.scrap), 0);
+    const loss = issued ? issued - good - scrap : 0;
+    return { o, bom, des, issued: r3(issued), metres: r3(metres), good: r3(good), scrap: r3(scrap), loss: r3(loss), pct: issued ? loss / issued * 100 : null, noDesign: !wCond };
+  });
+  const tot = rows.reduce((a, r) => ({ i: a.i + r.issued, g: a.g + r.good, s: a.s + r.scrap, l: a.l + (r.issued ? r.loss : 0) }), { i: 0, g: 0, s: 0, l: 0 });
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Metal Reconciliation</h1><p style={styles.muted}>Per production order: conductor metal issued (Issue to Production against the order) vs metal in finished drums (length × conductor kg/km from the cable design) and scrap recorded on drawing / annealing / stranding.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Metal issued', r3(tot.i) + ' kg'], ['Metal in drums', r3(tot.g) + ' kg'], ['Recorded scrap', r3(tot.s) + ' kg'], ['Unaccounted', r3(tot.l) + ' kg' + (tot.i ? ' (' + (tot.l / tot.i * 100).toFixed(2) + '%)' : '')]].map(([l, v], i) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: i === 3 && tot.i && tot.l / tot.i * 100 > 1.5 ? '#B5453A' : '#1E2A4A' }}>{v}</div></div>)}
+      </div>
+      {rows.length === 0 ? <div style={styles.emptyBox}>No production orders with route progress yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Order', 'Product', 'Issued (kg)', 'Drum length (m)', 'Metal in drums (kg)', 'Scrap (kg)', 'Unaccounted (kg)', 'Loss %'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{rows.map(r => <tr key={r.o.id}>
+            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}{r.noDesign ? <div style={{ color: '#B5453A', fontSize: 11 }}>No cable design linked — metal in drums cannot be calculated</div> : null}</td>
+            <td style={td}>{r.issued || <span style={{ color: '#B5453A', fontSize: 12 }}>not issued against order</span>}</td><td style={td}>{r.metres}</td><td style={td}>{r.good}</td><td style={td}>{r.scrap}</td><td style={td}>{r.issued ? r.loss : '—'}</td>
+            <td style={{ ...td, fontWeight: 700, color: r.pct === null ? '#999' : r.pct > 1.5 ? '#B5453A' : r.pct > 0.5 ? '#E07B00' : '#1A7A3E' }}>{r.pct === null ? '—' : r.pct.toFixed(2) + '%'}</td></tr>)}</tbody></table></div>}
+      <div style={{ fontSize: 11.5, color: '#888', marginTop: 8, lineHeight: 1.6 }}>Issue copper / aluminium rod with “Production Order Ref” = this order so it is counted. Above ~1.5% needs investigation (weighing, wire breaks, unrecorded scrap). Wire still on bobbins (WIP) shows as loss until it reaches a drum.</div>
+      {setView && <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><button onClick={() => setView('storeissue')} style={styles.ghostBtn}>Issue to Production</button><button onClick={() => setView('insights')} style={styles.ghostBtn}>Manual reconciliation (Insights)</button></div>}
+    </div>
+  );
+}
+
+const ML_REASONS = ['Breakdown', 'Setup / changeover', 'Material shortage', 'Power cut', 'Quality hold', 'No operator', 'Planned maintenance', 'Other'];
+function machineHealth(machineId, pmSchedules = [], fmWorkOrders = [], days = 90) {
+  const iso = new Date().toISOString().slice(0, 10), soon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const pms = (pmSchedules || []).filter(p => p.assetId === machineId && p.status !== 'inactive' && p.nextDueDate);
+  const pm = pms.some(p => p.nextDueDate < iso) ? 'overdue' : pms.some(p => p.nextDueDate <= soon) ? 'due' : pms.length ? 'ok' : 'none';
+  const from = new Date(Date.now() - days * 86400000);
+  const bd = (fmWorkOrders || []).filter(w => w.assetId === machineId && ['corrective', 'emergency'].includes(w.type) && w.raisedDate && new Date(w.raisedDate) >= from);
+  const rep = bd.filter(w => w.completedDate).map(w => (new Date(w.completedDate) - new Date(w.raisedDate)) / 86400000).filter(x => !isNaN(x) && x >= 0);
+  return { pm, breakdowns: bd.length, mttr: rep.length ? rep.reduce((a, b) => a + b, 0) / rep.length : null, mtbf: bd.length ? days / bd.length : null, open: bd.filter(w => !['completed', 'closed'].includes(String(w.status || '').toLowerCase())).length };
+}
+const PM_LABEL = { overdue: ['PM overdue', '#B5453A'], due: ['PM due ≤ 7 d', '#E07B00'], ok: ['PM ok', '#1A7A3E'], none: ['No PM plan', '#999'] };
+
+function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = [], setFmWorkOrders, pmSchedules = [], fmWorkOrders = [], userRole }) {
+  const canEdit = !['sales', 'accounts'].includes(userRole);
+  const iso = new Date().toISOString().slice(0, 10);
+  const blank = { date: iso, shift: 'A', machineId: '', orderNo: '', plannedHrs: 8, runHrs: '', output: '', unit: 'm', downMin: '', reason: '', operator: '', remarks: '' };
+  const [f, setF] = useState(blank);
+  const [days, setDays] = useState(30);
+  const machines = (assets || []).filter(a => a && a.status !== 'disposed');
+  const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const recent = (logs || []).filter(l => (l.date || '') >= from).sort((a, b) => (b.date + b.shift).localeCompare(a.date + a.shift));
+  const per = {}; recent.forEach(l => { const p = per[l.machineId || l.machineName] = per[l.machineId || l.machineName] || { name: l.machineName, plan: 0, run: 0, down: 0, out: 0, unit: l.unit, reasons: {} }; p.plan += _n(l.plannedHrs); p.run += _n(l.runHrs); p.down += _n(l.downMin); p.out += _n(l.output); if (l.reason && _n(l.downMin)) p.reasons[l.reason] = (p.reasons[l.reason] || 0) + _n(l.downMin); });
+  function add() {
+    if (!f.machineId) { alert('Select the machine.'); return; }
+    if (_n(f.downMin) > 0 && !f.reason) { alert('Select the downtime reason.'); return; }
+    const m = machines.find(x => x.id === f.machineId) || {};
+    const rec = { ...f, id: 'ml-' + Date.now(), machineName: m.name || '', createdAt: Date.now() };
+    setLogs(prev => [rec, ...(Array.isArray(prev) ? prev : [])]);
+    if (f.reason === 'Breakdown' && setFmWorkOrders && window.confirm('Downtime reason is Breakdown. Create a breakdown work order for ' + (m.name || 'this machine') + ' in Maintenance → Breakdown Log?')) {
+      setFmWorkOrders(prev => [{ id: crypto.randomUUID(), woNumber: 'BD-' + Date.now().toString().slice(-6), type: 'corrective', assetId: m.id, assetName: m.name || '', title: 'Breakdown — ' + (m.name || ''), description: f.remarks || '', priority: 'high', raisedDate: f.date, dueDate: f.date, assignedTo: '', status: 'open', completedDate: '', cost: 0, sparesUsed: [], notes: 'From machine log ' + f.date + ' shift ' + f.shift }, ...(Array.isArray(prev) ? prev : [])]);
+    }
+    setF({ ...blank, date: f.date, shift: f.shift });
+  }
+  const inp = { ...styles.input, margin: 0 };
+  const fld = (k, l, w, type) => <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: w }}>{l}<input type={type || 'text'} value={f[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.value }))} style={inp} /></label>;
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Machine Log & Downtime</h1><p style={styles.muted}>Shift-wise running hours, output and downtime per machine. Machines come from Maintenance → Machine / Equipment Register. A Breakdown entry can raise a breakdown work order.</p></div>
+      {machines.length === 0 && <div style={{ background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', fontSize: 12.5, marginBottom: 10 }}>No machines yet — add your drawing, annealing, stranding, extruder, armouring and drumming lines in Machine / Equipment Register first.</div>}
+      {canEdit && <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        {fld('date', 'Date', 150, 'date')}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 80 }}>Shift<select value={f.shift} onChange={e => setF(p => ({ ...p, shift: e.target.value }))} style={inp}>{['A', 'B', 'C', 'General'].map(x => <option key={x}>{x}</option>)}</select></label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 200 }}>Machine<select value={f.machineId} onChange={e => setF(p => ({ ...p, machineId: e.target.value }))} style={inp}><option value="">— Select —</option>{machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.assetId ? ' · ' + m.assetId : ''}</option>)}</select></label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 160 }}>Production order<select value={f.orderNo} onChange={e => setF(p => ({ ...p, orderNo: e.target.value }))} style={inp}><option value="">—</option>{(productionOrders || []).filter(o => o.status !== 'completed').map(o => <option key={o.id} value={o.number}>{o.number}</option>)}</select></label>
+        {f.machineId && (() => { const h = machineHealth(f.machineId, pmSchedules, fmWorkOrders); return h.pm === 'overdue' || h.pm === 'due' || h.open ? <span style={{ fontSize: 11.5, fontWeight: 700, color: h.pm === 'overdue' || h.open ? '#B5453A' : '#E07B00', alignSelf: 'center' }}>{h.pm === 'overdue' ? '⚠ PM overdue' : h.pm === 'due' ? 'PM due soon' : ''}{h.open ? ' · ' + h.open + ' open breakdown' : ''}</span> : null; })()}
+        {fld('plannedHrs', 'Planned hrs', 90, 'number')}{fld('runHrs', 'Run hrs', 80, 'number')}{fld('output', 'Output', 90, 'number')}{fld('unit', 'Unit', 60)}{fld('downMin', 'Downtime (min)', 110, 'number')}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 170 }}>Reason<select value={f.reason} onChange={e => setF(p => ({ ...p, reason: e.target.value }))} style={inp}><option value="">—</option>{ML_REASONS.map(x => <option key={x}>{x}</option>)}</select></label>
+        {fld('operator', 'Operator', 130)}{fld('remarks', 'Remarks', 200)}
+        <button onClick={add} style={styles.primaryBtn}>Add entry</button>
+      </div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}><b style={{ fontSize: 13 }}>Summary</b><select value={days} onChange={e => setDays(parseInt(e.target.value))} style={{ ...inp, width: 150 }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></div>
+      {Object.keys(per).length === 0 ? <div style={styles.emptyBox}>No entries in this period.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Machine', 'Planned hrs', 'Run hrs', 'Availability', 'Output', 'Downtime', 'Top reason', 'PM', 'Breakdowns (90 d)', 'MTBF / MTTR'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(per).map(([k, p]) => { const av = p.plan ? p.run / p.plan * 100 : null, top = Object.entries(p.reasons).sort((a, b) => b[1] - a[1])[0]; return <tr key={k}><td style={td}><b>{p.name}</b></td><td style={td}>{r3(p.plan)}</td><td style={td}>{r3(p.run)}</td><td style={{ ...td, fontWeight: 700, color: av === null ? '#999' : av >= 85 ? '#1A7A3E' : av >= 70 ? '#E07B00' : '#B5453A' }}>{av === null ? '—' : av.toFixed(1) + '%'}</td><td style={td}>{r3(p.out)} {p.unit || ''}</td><td style={td}>{Math.round(p.down)} min</td><td style={td}>{top ? top[0] + ' (' + Math.round(top[1]) + ' min)' : '—'}</td>{(() => { const h = machineHealth(k, pmSchedules, fmWorkOrders); const pl = PM_LABEL[h.pm]; return <><td style={{ ...td, color: pl[1], fontWeight: 600 }}>{pl[0]}</td><td style={td}>{h.breakdowns}{h.open ? ' (' + h.open + ' open)' : ''}</td><td style={td}>{h.mtbf ? Math.round(h.mtbf) + ' d' : '—'} / {h.mttr !== null ? h.mttr.toFixed(1) + ' d' : '—'}</td></>; })()}</tr>; })}</tbody></table></div>}
+      {recent.length > 0 && <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{['Date', 'Shift', 'Machine', 'Order', 'Run / plan hrs', 'Output', 'Downtime', 'Reason', 'Operator', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{recent.slice(0, 200).map(l => <tr key={l.id}><td style={td}>{l.date}</td><td style={td}>{l.shift}</td><td style={td}>{l.machineName}</td><td style={td}>{l.orderNo || ''}</td><td style={td}>{l.runHrs || 0} / {l.plannedHrs || 0}</td><td style={td}>{l.output || ''} {l.unit || ''}</td><td style={td}>{l.downMin ? l.downMin + ' min' : ''}</td><td style={{ ...td, color: l.reason === 'Breakdown' ? '#B5453A' : '#666' }}>{l.reason || ''}</td><td style={td}>{l.operator || ''}</td><td style={td}>{canEdit && <button onClick={() => { if (window.confirm('Delete this entry?')) setLogs(prev => (prev || []).filter(x => x.id !== l.id)); }} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
+// ─── Step 5: Routine test per drum · test certificate · release to stock · fail → QA hold / re-route ───
+function drumDesign(order, boms = [], cableDesigns = []) {
+  const bom = (boms || []).find(b => b.id === order.bomId);
+  if (!bom) return { bom: null, design: null };
+  const did = bom.designId || ((boms || []).find(b => b.id === bom.templateId) || {}).designId;
+  const design = (cableDesigns || []).find(d => d.id === did) || (cableDesigns || []).find(d => _nm(d.name) === _nm(bom.name)) || null;
+  return { bom, design };
+}
+// Evaluate one routine test against the design limits. Blank optional readings are skipped.
+function evalRoutineTest(t, design, drum) {
+  const k = (design && design.calc) || {}, num = v => (v === '' || v == null) ? null : parseFloat(v);
+  const res = [];
+  const L = num(t.resLen) || parseFloat(drum && drum.length) || 0, Rm = num(t.resOhm), temp = num(t.resTemp);
+  const alpha = design && design.condMat === 'Al' ? 0.00403 : 0.00393;
+  if (Rm !== null && L > 0) {
+    const r20 = Rm / (1 + alpha * ((temp == null ? 20 : temp) - 20)) * 1000 / L;
+    res.push({ test: 'Conductor resistance @20 °C (worst core)', req: k.maxR ? '≤ ' + k.maxR + ' Ω/km' : 'per standard', val: (Math.round(r20 * 10000) / 10000) + ' Ω/km', ok: k.maxR ? r20 <= k.maxR : null });
+  } else res.push({ test: 'Conductor resistance @20 °C', req: k.maxR ? '≤ ' + k.maxR + ' Ω/km' : '', val: 'not entered', ok: false, missing: true });
+  const ir = num(t.irMohm), irMin = num(t.irMin);
+  if (ir !== null) { const irkm = L > 0 ? ir * L / 1000 : ir; res.push({ test: 'Insulation resistance (worst core)', req: irMin != null ? '≥ ' + irMin + ' MΩ·km' : 'record', val: (Math.round(irkm * 100) / 100) + ' MΩ·km', ok: irMin != null ? irkm >= irMin : null }); }
+  res.push({ test: 'High voltage withstand', req: (t.hvKv || '—') + ' kV, ' + (t.hvMin || '—') + ' min', val: t.hvOk === 'yes' ? 'Withstood' : t.hvOk === 'no' ? 'Breakdown' : 'not entered', ok: t.hvOk === 'yes' ? true : t.hvOk === 'no' ? false : false, missing: !t.hvOk });
+  const od = num(t.od);
+  if (od !== null && k.D4) res.push({ test: 'Overall diameter', req: k.D4 + ' mm ± 10%', val: od + ' mm', ok: Math.abs(od - k.D4) <= k.D4 * 0.1 });
+  const ti = num(t.insMinMeas);
+  if (ti !== null && k.insMin) res.push({ test: 'Insulation thickness (min)', req: '≥ ' + k.insMin + ' mm', val: ti + ' mm', ok: ti >= k.insMin });
+  const ts = num(t.sheathMinMeas);
+  if (ts !== null && k.sheathMin) res.push({ test: 'Outer sheath thickness (min)', req: '≥ ' + k.sheathMin + ' mm', val: ts + ' mm', ok: ts >= k.sheathMin });
+  if (t.marking) res.push({ test: 'Marking & length verification', req: 'Legible, length as declared', val: t.marking === 'yes' ? 'OK' : 'Not OK', ok: t.marking === 'yes' });
+  const missing = res.some(r => r.missing), failed = res.some(r => r.ok === false && !r.missing);
+  return { rows: res, verdict: failed ? 'failed' : missing ? 'incomplete' : 'passed' };
+}
+
+function RoutineTestView({ setFatReports, productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const cfg = mfgCfg(), generic = cfg.test.evaluator !== 'cable', U = cfg.unit;
+  const canTest = !['sales', 'accounts', 'purchase'].includes(userRole);
+  const [tab, setTab] = useState('queue');
+  const [cur, setCur] = useState(null);
+  const [t, setT] = useState({});
+  const [reroute, setReroute] = useState(null);
+  const [cert, setCert] = useState(null);
+  const iso = new Date().toISOString().slice(0, 10);
+  const drums = allDrums(productionOrders, boms);
+  const queue = drums.filter(d => !d.testStatus || d.testStatus === 'pending');
+  const failed = drums.filter(d => d.testStatus === 'failed' && !d.reworked);
+  const passed = drums.filter(d => d.testStatus === 'passed').sort((a, b) => String(b.testDate || '').localeCompare(String(a.testDate || '')));
+  const patchDrum = (dr, patch, orderPatch) => setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => o.id !== dr.order.id ? o : ({ ...o, ...(orderPatch ? orderPatch(o) : {}), route: { ...o.route, stages: (o.route.stages || []).map((s, si) => si !== dr.stageIdx ? s : ({ ...s, drums: (s.drums || []).map((x, di) => di === dr.drumIdx ? { ...x, ...patch } : x) })) } })));
+  function open(dr) {
+    if (generic) { setCur(dr); setT({ vals: {}, lims: {}, testedBy: '', remarks: '' }); return; }
+    const { design } = drumDesign(dr.order, boms, cableDesigns);
+    setCur(dr);
+    setT({ resOhm: '', resLen: dr.length || '', resTemp: '', irMohm: '', irMin: (design && design.irMin) || '', hvKv: (design && /(\d+(\.\d+)?)\s*kv/i.exec(design.hvTest || '') || [])[1] || '', hvMin: (design && /(\d+)\s*min/i.exec(design.hvTest || '') || [])[1] || '', hvOk: '', od: '', insMinMeas: '', sheathMinMeas: '', marking: '', testedBy: '', remarks: '' });
+  }
+  const ctx = cur ? drumDesign(cur.order, boms, cableDesigns) : {};
+  const ev = cur ? (generic ? evalGenericTest(t, cfg.test.checks) : evalRoutineTest(t, ctx.design, cur)) : null;
+  function save() {
+    if (!cur) return;
+    if (ev.verdict === 'incomplete') { alert(generic ? 'Mark every Conforms / Does not conform check.' : 'Enter at least conductor resistance and the HV test result.'); return; }
+    const certCount = drums.filter(d => d.certNo).length + 1;
+    const test = { ...t, rows: ev.rows, verdict: ev.verdict, date: iso };
+    if (ev.verdict === 'passed') {
+      const certNo = cur.certNo || dn('TC', certCount);
+      patchDrum(cur, { testStatus: 'passed', testDate: iso, testedBy: t.testedBy, certNo, test, awaitStores: true, storesAccepted: false });
+      setCur(null);
+      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.\nForwarded to Stores (finished stock screen) — it becomes finished stock when Stores accepts it.');
+    } else {
+      patchDrum(cur, { testStatus: 'failed', testDate: iso, testedBy: t.testedBy, test });
+      setCur(null); setReroute({ ...cur, test });
+    }
+  }
+  function doReroute(stageIdx, reason) {
+    const dr = reroute;
+    patchDrum(dr, { reworked: true, reworkTo: dr.order.route.stages[stageIdx].name, reworkReason: reason }, (o) => ({ status: 'in_progress', reworks: [...(o.reworks || []), { date: iso, drumNo: dr.drumNo, toStage: o.route.stages[stageIdx].name, reason }] }));
+    setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => o.id !== dr.order.id ? o : ({ ...o, route: { ...o.route, stages: (o.route.stages || []).map((s, si) => si >= stageIdx ? { ...s, status: si === stageIdx ? 'pending' : (s.status === 'done' ? 'pending' : s.status), remarks: si === stageIdx ? ('Rework: drum ' + dr.drumNo + ' — ' + reason) : s.remarks } : s) } })));
+    setReroute(null);
+    alert('Order ' + dr.order.number + ' re-opened from "' + dr.order.route.stages[stageIdx].name + '". Record the rework in 🧭 Route, then add the re-made drum and test it again.');
+  }
+  const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }, td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  const pill = (id, l) => <button key={id} onClick={() => { setTab(id); setCur(null); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
+  const fld = (k, l, w, type) => <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: w }}>{l}<input type={type || 'number'} value={t[k] || ''} onChange={e => setT(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>;
+  const yn = (k, l) => <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 150 }}>{l}<select value={t[k] || ''} onChange={e => setT(p => ({ ...p, [k]: e.target.value }))} style={{ ...styles.input, margin: 0 }}><option value="">—</option><option value="yes">Yes / OK</option><option value="no">No / Not OK</option></select></label>;
+  const k = ctx.design && ctx.design.calc;
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{cfg.test.menu}</h1><p style={styles.muted}>{generic ? 'Inspect every ' + U.name.toLowerCase() + ' before it becomes stock. Pass → certificate + finished stock. Fail → QA hold and re-route.' : 'Test every drum before it becomes stock. Limits come from the cable design (IEC 60228 resistance, minimum thickness, OD). Pass → certificate + finished stock. Fail → QA hold and re-route.'}</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+        {[['Drums waiting for test', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Passed', passed.length, '#1A7A3E'], ['On QA hold', failed.length, failed.length ? '#B5453A' : '#1A7A3E'], ['First-pass yield', (passed.length + drums.filter(d => d.testStatus === 'failed').length) ? Math.round(passed.filter(d => !(d.test && d.test.retest)).length / (passed.length + drums.filter(d => d.testStatus === 'failed').length) * 100) + '%' : '—', '#1E2A4A']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>{pill('queue', 'Waiting (' + queue.length + ')')}{pill('hold', 'QA hold (' + failed.length + ')')}{pill('certs', 'Certificates')}</div>
+
+      {reroute && <div style={{ background: '#FBEAE7', border: '1px solid #F2B8AE', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+        <b>Drum {reroute.drumNo} failed.</b> Choose where the order goes back to (rework), or keep it on hold:
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>{(reroute.order.route.stages || []).map((s, si) => <button key={si} onClick={() => { const r = window.prompt('Reason / non-conformance for re-route to "' + s.name + '":', (reroute.test.rows.filter(x => x.ok === false).map(x => x.test).join('; '))); if (r !== null) doReroute(si, r); }} style={styles.ghostBtn}>{si + 1}. {s.name}</button>)}
+          <button onClick={() => setReroute(null)} style={{ ...styles.ghostBtn, color: '#B5453A' }}>Keep on hold (decide later)</button></div>
+        <div style={{ fontSize: 11.5, color: '#7A2E25', marginTop: 6 }}>Raise a CAPA in Quality → CAPA if the cause is systematic.</div>
+      </div>}
+
+      {tab === 'queue' && (cur ? (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 16, maxWidth: 980 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div><b style={{ fontSize: 15 }}>{U.name} {cur.drumNo}</b> · {cur.product} · {cur.length} {U.qtyUnit}<div style={{ fontSize: 12, color: '#777' }}>{cur.order.number}{cur.order.orderRef ? ' · ' + cur.order.orderRef.docNo + ' / item ' + cur.order.orderRef.itemNo + (cur.order.orderRef.customer ? ' · ' + cur.order.orderRef.customer : '') : ''}{generic || ctx.design ? '' : ' · ⚠ no cable design linked — limits not available'}</div></div>
+            <button onClick={() => setCur(null)} style={styles.ghostBtn}>← Back</button>
+          </div>
+          {generic ? (<div style={{ marginBottom: 10 }}>
+            {(cfg.test.checks || []).map(c => <div key={c.key} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{c.label}</span>
+              {c.kind === 'num' ? <>
+                <input type="number" placeholder={'Value' + (c.unit ? ' (' + c.unit + ')' : '')} value={(t.vals || {})[c.key] || ''} onChange={e => setT(p => ({ ...p, vals: { ...p.vals, [c.key]: e.target.value } }))} style={{ ...styles.input, margin: 0, width: 120 }} />
+                <input type="number" placeholder="min" value={((t.lims || {})[c.key] || {}).min ?? c.min} onChange={e => setT(p => ({ ...p, lims: { ...p.lims, [c.key]: { ...((p.lims || {})[c.key] || {}), min: e.target.value } } }))} style={{ ...styles.input, margin: 0, width: 80 }} />
+                <input type="number" placeholder="max" value={((t.lims || {})[c.key] || {}).max ?? c.max} onChange={e => setT(p => ({ ...p, lims: { ...p.lims, [c.key]: { ...((p.lims || {})[c.key] || {}), max: e.target.value } } }))} style={{ ...styles.input, margin: 0, width: 80 }} />
+              </> : ['yes', 'no'].map(v => <button key={v} onClick={() => setT(p => ({ ...p, vals: { ...p.vals, [c.key]: v } }))} style={{ padding: '3px 12px', borderRadius: 12, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: (t.vals || {})[c.key] === v ? (v === 'yes' ? '#1A7A3E' : '#B5453A') : '#fff', color: (t.vals || {})[c.key] === v ? '#fff' : '#666' }}>{v === 'yes' ? 'Conforms' : 'Does not conform'}</button>)}
+            </div>)}
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>{fld('testedBy', 'Inspected by', 180, 'text')}<label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', flex: 1 }}>Remarks<input value={t.remarks || ''} onChange={e => setT(p => ({ ...p, remarks: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label></div>
+          </div>) : (<>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
+            {fld('resOhm', 'Conductor resistance measured (Ω) *', 210)}{fld('resLen', 'Measured length (m)', 140)}{fld('resTemp', 'Temperature (°C)', 120)}
+            {fld('irMohm', 'Insulation resistance (MΩ)', 170)}{fld('irMin', 'Min IR (MΩ·km)', 130)}
+            {fld('hvKv', 'HV test (kV)', 100)}{fld('hvMin', 'Duration (min)', 110)}{yn('hvOk', 'HV withstood? *')}
+            {fld('od', 'Overall dia (mm)' + (k ? ' · design ' + k.D4 : ''), 190)}{fld('insMinMeas', 'Insulation min (mm)' + (k ? ' · ≥ ' + k.insMin : ''), 190)}{fld('sheathMinMeas', 'Sheath min (mm)' + (k ? ' · ≥ ' + k.sheathMin : ''), 180)}
+            {yn('marking', 'Marking & length OK?')}{fld('testedBy', 'Tested by', 150, 'text')}
+          </div>
+          </>)}
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}><thead><tr>{['Test', 'Requirement', 'Result', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{ev.rows.map((r, i) => <tr key={i}><td style={td}>{r.test}</td><td style={td}>{r.req}</td><td style={td}>{r.val}</td><td style={{ ...td, fontWeight: 700, color: r.missing ? '#999' : r.ok === null ? '#666' : r.ok ? '#1A7A3E' : '#B5453A' }}>{r.missing ? 'pending' : r.ok === null ? 'recorded' : r.ok ? 'PASS' : 'FAIL'}</td></tr>)}</tbody></table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: 700, color: ev.verdict === 'passed' ? '#1A7A3E' : ev.verdict === 'failed' ? '#B5453A' : '#999' }}>Verdict: {ev.verdict === 'passed' ? 'PASS — release drum' : ev.verdict === 'failed' ? 'FAIL — QA hold' : 'incomplete'}</span>
+            {canTest && <button onClick={save} style={styles.primaryBtn}>Save test result</button>}
+          </div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>Resistance is corrected to 20 °C (α = 0.00393 Cu / 0.00403 Al) and scaled to 1 km. Enter the worst core. HV voltage / duration and the IR limit must match your standard.</div>
+        </div>
+      ) : (queue.length === 0 ? <div style={styles.emptyBox}>Nothing waiting. Items appear here when they are added on the last stage of a production order route (🧭 Route).</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Drum', 'Product', 'Order', 'Quote / item', 'Length (m)', 'Wound on', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{queue.map(d => <tr key={d.key}><td style={td}><b>{d.drumNo || '—'}</b></td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td><td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td><td style={td}>{d.date || ''}</td><td style={td}>{canTest && <button onClick={() => open(d)} style={styles.primaryBtn}>Test</button>}</td></tr>)}</tbody></table></div>))}
+
+      {tab === 'hold' && (failed.length === 0 ? <div style={styles.emptyBox}>No drums on hold.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Drum', 'Product', 'Order', 'Failed on', 'Failed tests', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{failed.map(d => <tr key={d.key}><td style={td}><b>{d.drumNo}</b></td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td><td style={td}>{d.testDate}</td><td style={{ ...td, color: '#B5453A' }}>{((d.test && d.test.rows) || []).filter(r => r.ok === false).map(r => r.test).join('; ')}</td>
+            <td style={td}>{canTest && <><button onClick={() => setReroute({ ...d })} style={styles.ghostBtn}>Re-route</button><button onClick={() => { open(d); setTab('queue'); }} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Re-test</button></>}</td></tr>)}</tbody></table></div>)}
+
+      {tab === 'certs' && (passed.length === 0 ? <div style={styles.emptyBox}>No certificates yet.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{['Certificate', 'Date', 'Drum', 'Product', 'Length', 'Customer / order', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{passed.map(d => <tr key={d.key}><td style={td}><b>{d.certNo}</b></td><td style={td}>{d.testDate}</td><td style={td}>{d.drumNo}</td><td style={td}>{d.product}</td><td style={td}>{d.length} m</td><td style={td}>{d.order.orderRef ? (d.order.orderRef.customer || '') + ' · ' + d.order.orderRef.docNo : d.order.number}</td><td style={{ ...td, color: d.dispatched ? '#6B7494' : '#1A7A3E' }}>{d.dispatched ? 'Dispatched ' + (d.dispatchedDoc || '') : 'In stock'}</td><td style={td}><button onClick={() => setCert(d)} style={styles.ghostBtn}>Print</button>{_mfgType() === 'panels' && setFatReports && <button onClick={() => {
+              const std = PRODUCT_TEST_STANDARDS['LV Switchgear Panel (PCC/MCC)'] || { iec: '', is: '', tests: [] };
+              const rec = { id: Date.now().toString(), testType: 'FAT', number: dn('FAT', Date.now() % 1000), date: new Date().toISOString().slice(0, 10), product: 'LV Switchgear Panel (PCC/MCC)', iec: std.iec, isCode: std.is, clientId: '', client: (d.order.orderRef && d.order.orderRef.customer) || '', project: d.order.orderRef ? d.order.orderRef.docNo + ' / item ' + d.order.orderRef.itemNo : d.order.number, make: '', rating: '', serialNo: d.drumNo, qty: '1',
+                rows: [...std.tests.map(([name, ref, acc]) => ({ name, ref, acceptance: acc, observed: '', status: '', remarks: '' })), ...((d.test && d.test.rows) || []).map(r => ({ name: r.test, ref: 'Routine test ' + (d.certNo || ''), acceptance: r.req, observed: r.val, status: r.ok === false ? 'Fail' : 'Pass', remarks: '' }))],
+                testedBy: d.testedBy || '', witnessedBy: '', approvedBy: '', overall: 'Pass', remarks: 'Created from ' + (d.certNo || ''), bizType: 'manufacturing', createdAt: new Date().toISOString() };
+              setFatReports(prev => [rec, ...(Array.isArray(prev) ? prev : [])]); alert('FAT report created for panel ' + d.drumNo + ' — open Quality → FAT / SAT / STP to complete witness and print.');
+            }} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Create FAT</button>}</td></tr>)}</tbody></table></div>)}
+
+      {cert && (() => { const dz = drumDesign(cert.order, boms, cableDesigns); const des = dz.design || {}; const rows = (cert.test && cert.test.rows) || []; const cellB = { border: '1px solid #999', padding: '5px 8px', fontSize: 12 }; return (
+        <DocPrintOverlay onClose={() => setCert(null)} filename={'Test-Certificate-' + (cert.certNo || '').replace(/\//g, '-') + '.pdf'} businessInfo={businessInfo}>
+          <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, letterSpacing: 1, borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', padding: '6px 0', marginBottom: 12 }}>{cfg.test.cert}</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>
+            {[['Certificate no.', cert.certNo, 'Date', cert.testDate], ['Customer', (cert.order.orderRef && cert.order.orderRef.customer) || '—', 'Order / item', cert.order.orderRef ? cert.order.orderRef.docNo + ' / ' + cert.order.orderRef.itemNo : cert.order.number], ['Product', cert.product, 'Standard', (des.standard || '') + (des.voltage ? ' · ' + des.voltage : '')], [U.numLabel, cert.drumNo, U.qtyLabel, cert.length + ' ' + U.qtyUnit], ['Production order', cert.order.number, 'Net weight', cert.net ? cert.net + ' kg' : '—']].map((r, i) => <tr key={i}><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[0]}</td><td style={{ ...cellB, width: '32%' }}>{r[1]}</td><td style={{ ...cellB, background: '#F1EFE9', fontWeight: 600, width: '18%' }}>{r[2]}</td><td style={cellB}>{r[3]}</td></tr>)}
+          </tbody></table>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><thead><tr>{['#', 'Test', 'Requirement', 'Observed', 'Result'].map(h => <th key={h} style={{ ...cellB, background: '#1E2A4A', color: '#fff', textAlign: 'left' }}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map((r, i) => <tr key={i}><td style={cellB}>{i + 1}</td><td style={cellB}>{r.test}</td><td style={cellB}>{r.req}</td><td style={cellB}>{r.val}</td><td style={{ ...cellB, fontWeight: 700 }}>{r.ok === null ? 'Recorded' : r.ok ? 'Pass' : 'Fail'}</td></tr>)}</tbody></table>
+          <div style={{ fontSize: 12, marginBottom: 30 }}>We certify that the above {U.name.toLowerCase()} has been {generic ? 'inspected' : 'tested'} as per the requirements of the referred specification / standard and found to {rows.some(r => r.ok === false) ? 'NOT ' : ''}comply.{cert.test && cert.test.remarks ? ' Remarks: ' + cert.test.remarks : ''}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><div style={{ textAlign: 'center', minWidth: 160 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>Tested by{cert.testedBy ? ' — ' + cert.testedBy : ''}</div></div><div style={{ textAlign: 'center', minWidth: 160 }}><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>QA In-charge</div></div></div>
+        </DocPrintOverlay>); })()}
+    </div>
+  );
+}
+
+// ─── Config-driven manufacturing: what differs per type (output unit, final test, engineering master, registers) ───
+// check: [key, label, kind ('num' | 'yn'), min, max, unit]
+const C_ = (key, label, kind, min, max, unit) => ({ key, label, kind: kind || 'yn', min: min ?? '', max: max ?? '', unit: unit || '' });
+const _unit = (name, plural, numLabel, qtyLabel, qtyUnit, fields) => ({ name, plural, numLabel, qtyLabel, qtyUnit, fields: fields || [] });
+const MFG_CONFIG = {
+  wires_cables: { unit: _unit('Drum', 'Drums', 'Drum no.', 'Length (m)', 'm', [['gross', 'Gross kg'], ['tare', 'Tare kg']]), test: { evaluator: 'cable', menu: 'Routine Test & Certificates', title: 'Routine Test', cert: 'ROUTINE TEST CERTIFICATE' }, eng: 'cable', registers: ['metal'], wipLabel: 'WIP (Bobbins / Coils)' },
+  fabrication: { unit: _unit('Mark', 'Marks', 'Mark no.', 'Weight (kg)', 'kg', [['drawingRev', 'Drawing / rev']]), test: { menu: 'Final Inspection & Dossier', title: 'Final Inspection', cert: 'INSPECTION CERTIFICATE', checks: [C_('dim', 'Dimensional check as per drawing'), C_('weld', 'Weld visual inspection'), C_('ndt', 'NDT result (UT / MPI / DPT / RT)'), C_('dft', 'Paint DFT average', 'num', 80, '', 'µm'), C_('galv', 'Galvanizing thickness', 'num', '', '', 'µm'), C_('marking', 'Mark no. stencilled / identification')] }, eng: 'spec' },
+  machining: { unit: _unit('Lot', 'Lots', 'Lot / serial no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Critical dimensions within tolerance'), C_('ra', 'Surface finish Ra', 'num', '', 1.6, 'µm'), C_('hard', 'Hardness', 'num', '', '', 'HRC'), C_('visual', 'Visual — burr / damage free')] }, eng: 'spec' },
+  sheetmetal: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Dimensions & flatness'), C_('dft', 'Coating thickness', 'num', 60, '', 'µm'), C_('adh', 'Coating adhesion'), C_('visual', 'Visual / finish')] }, eng: 'spec' },
+  foundry: { unit: _unit('Heat lot', 'Heat lots', 'Heat / lot no.', 'Quantity', 'pcs', [['castWt', 'Cast weight kg']]), test: { menu: 'Final Inspection & Test', title: 'Casting Inspection', cert: 'TEST CERTIFICATE', checks: [C_('chem', 'Chemistry within grade'), C_('hard', 'Hardness', 'num', '', '', 'BHN'), C_('tensile', 'Tensile strength', 'num', '', '', 'MPa'), C_('ndt', 'NDT accepted'), C_('dims', 'Dimensional check')] }, eng: 'spec' },
+  plastics: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Critical dimensions'), C_('wt', 'Part weight', 'num', '', '', 'g'), C_('visual', 'No flash / short shot / sink'), C_('colour', 'Colour match')] }, eng: 'spec' },
+  rubber_pack: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('hard', 'Hardness / GSM', 'num'), C_('dims', 'Dimensions'), C_('print', 'Print / registration'), C_('bond', 'Bond / seal strength')] }, eng: 'spec' },
+  panels: { unit: _unit('Panel', 'Panels', 'Panel serial no.', 'Quantity', 'nos'), test: { menu: 'Routine Test & FAT', title: 'Routine Test', cert: 'TEST CERTIFICATE', checks: [C_('ir', 'Insulation resistance', 'num', 1, '', 'MΩ'), C_('hv', 'HV withstand test'), C_('func', 'Functional / interlock test'), C_('earth', 'Earth continuity', 'num', '', 0.1, 'Ω'), C_('wiring', 'Wiring as per schematic')] }, eng: 'spec' },
+  electronics_pcb: { unit: _unit('Serial', 'Serials', 'Serial / batch no.', 'Quantity', 'nos'), test: { menu: 'Final Test', title: 'Final Test', cert: 'TEST REPORT', checks: [C_('ict', 'ICT passed'), C_('fct', 'Functional test passed'), C_('visual', 'Visual per IPC-A-610'), C_('fw', 'Firmware version verified')] }, eng: 'spec' },
+  food: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'kg', [['mfgDate', 'Mfg date'], ['expiry', 'Expiry date']]), test: { menu: 'QC Release', title: 'QC Release', cert: 'CERTIFICATE OF ANALYSIS', checks: [C_('micro', 'Microbiology within limits'), C_('moist', 'Moisture', 'num', '', '', '%'), C_('net', 'Net content'), C_('seal', 'Seal integrity'), C_('label', 'Label — FSSAI no., batch, MRP, dates')] }, eng: 'spec' },
+  pharma_chem: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'kg', [['mfgDate', 'Mfg date'], ['expiry', 'Expiry / retest date']]), test: { menu: 'QC Release & COA', title: 'QC Release', cert: 'CERTIFICATE OF ANALYSIS', checks: [C_('assay', 'Assay', 'num', 98, 102, '%'), C_('ident', 'Identification'), C_('appear', 'Appearance / description'), C_('ph', 'pH', 'num'), C_('bmr', 'Batch record reviewed')] }, eng: 'spec' },
+  textile: { unit: _unit('Roll / carton', 'Rolls / cartons', 'Roll / carton no.', 'Quantity', 'm'), test: { menu: 'Final Audit', title: 'Final Audit', cert: 'INSPECTION REPORT', checks: [C_('gsm', 'GSM', 'num'), C_('shade', 'Shade match'), C_('aql', 'AQL audit passed'), C_('shrink', 'Shrinkage', 'num', '', 5, '%')] }, eng: 'spec' },
+  wood: { unit: _unit('Lot', 'Lots', 'Lot no.', 'Quantity', 'nos'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('dims', 'Dimensions & squareness'), C_('finish', 'Finish & colour'), C_('moist', 'Moisture', 'num', '', 12, '%'), C_('hw', 'Hardware complete')] }, eng: 'spec' },
+  building: { unit: _unit('Batch', 'Batches', 'Batch no.', 'Quantity', 'nos', [['castDate', 'Cast date']]), test: { menu: 'Product Testing', title: 'Product Test', cert: 'TEST CERTIFICATE', checks: [C_('strength', 'Compressive strength', 'num', '', '', 'N/mm²'), C_('absorb', 'Water absorption', 'num', '', '', '%'), C_('dims', 'Dimensions')] }, eng: 'spec' },
+  printing: { unit: _unit('Job lot', 'Job lots', 'Job / lot no.', 'Quantity', 'pcs'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'INSPECTION REPORT', checks: [C_('colour', 'Colour / density'), C_('reg', 'Registration'), C_('finish', 'Finishing'), C_('count', 'Count verified')] }, eng: 'spec' },
+  general: { unit: _unit('Lot', 'Lots', 'Lot / serial no.', 'Quantity', 'nos'), test: { menu: 'Final Inspection', title: 'Final Inspection', cert: 'FINAL INSPECTION REPORT', checks: [C_('spec', 'As per specification'), C_('dims', 'Dimensions'), C_('visual', 'Visual')] }, eng: 'spec' },
+};
+const mfgCfg = (mt) => MFG_CONFIG[mt || _mfgType()] || MFG_CONFIG.general;
+
+// Generic final-test evaluator (all types except cable): num checks within min / max, yn checks must be Yes.
+function evalGenericTest(t, checks = []) {
+  const rows = (checks || []).map(c => {
+    const v = (t.vals || {})[c.key], lim = (t.lims || {})[c.key] || {};
+    const min = lim.min !== undefined && lim.min !== '' ? parseFloat(lim.min) : (c.min !== '' ? parseFloat(c.min) : null);
+    const max = lim.max !== undefined && lim.max !== '' ? parseFloat(lim.max) : (c.max !== '' ? parseFloat(c.max) : null);
+    if (c.kind === 'num') {
+      if (v === undefined || v === '') return { test: c.label, req: [min != null ? '≥ ' + min : '', max != null ? '≤ ' + max : ''].filter(Boolean).join(' · ') + (c.unit ? ' ' + c.unit : '') || 'record', val: '—', ok: null, skipped: true };
+      const n = parseFloat(v), ok = (min == null || n >= min) && (max == null || n <= max);
+      return { test: c.label, req: ([min != null ? '≥ ' + min : '', max != null ? '≤ ' + max : ''].filter(Boolean).join(' · ') || 'record') + (c.unit ? ' ' + c.unit : ''), val: n + (c.unit ? ' ' + c.unit : ''), ok: (min == null && max == null) ? null : ok };
+    }
+    if (!v) return { test: c.label, req: 'Conforms', val: 'not checked', ok: false, missing: true };
+    return { test: c.label, req: 'Conforms', val: v === 'yes' ? 'Conforms' : 'Does not conform', ok: v === 'yes' };
+  });
+  const missing = rows.some(r => r.missing), failed = rows.some(r => r.ok === false && !r.missing);
+  return { rows, verdict: failed ? 'failed' : missing ? 'incomplete' : 'passed' };
+}
+
+// ─── Product Spec Master (Engineering, every type except cables) → finished-good item + master BOM ───
+function ProductSpecView({ specs = [], setSpecs, items = [], setItems, boms = [], setBoms, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const mt = _mfgType(), cfg = mfgCfg(mt), fields = PART_DATASHEET_PACK[mt] || PART_DATASHEET_PACK.general;
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const mats = (items || []).filter(isMaterialItem);
+  const [ed, setEd] = useState(null);
+  const [q, setQ] = useState('');
+  const list = (specs || []).filter(x => !x.deleted && !x.calc && (!q || _nm(x.name).includes(_nm(q)) || _nm(x.code).includes(_nm(q))));
+  const blank = { name: '', code: '', unit: cfg.unit.qtyUnit || 'nos', basis: 1, datasheet: {}, lines: [], hsn: '', notes: '' };
+  const set = (k, v) => setEd(p => ({ ...p, [k]: v }));
+  const setLine = (i, k, v) => setEd(p => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, [k]: v } : l) }));
+  function save() {
+    const d = { ...ed, name: (ed.name || '').trim() };
+    if (!d.name) { alert('Enter the product name.'); return; }
+    if ((specs || []).some(x => !x.deleted && x.id !== d.id && _nm(x.name) === _nm(d.name))) { alert('A product with this name already exists.'); return; }
+    const id = d.id || 'ps-' + Date.now(), now = new Date().toISOString();
+    const exist = (items || []).find(x => x.designId === id) || (items || []).find(x => _nm(x.name) === _nm(d.name));
+    const fgId = exist ? exist.id : 'itm-' + id;
+    const fg = { ...(exist || { saleRate: 0, purchaseRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0, itemCode: '' }), id: fgId, name: d.name, unit: d.unit, hsn: d.hsn || (exist && exist.hsn) || '', category: 'Finished Good', designId: id, bizType: (exist && exist.bizType) || currentBizType, specs: { ...(d.datasheet || {}) } };
+    setItems(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === fgId) ? a.map(x => x.id === fgId ? fg : x) : [...a, fg]; });
+    const lines = (d.lines || []).filter(l => (l.materialId || (l.name || '').trim()) && parseFloat(l.qty) > 0).map(l => { const it = mats.find(m => m.id === l.materialId); return { materialId: it ? it.id : '', name: it ? it.name : l.name, unit: it ? (it.unit || '') : (l.unit || ''), qty: parseFloat(l.qty), src: it ? 'item' : '', remarks: l.remarks || '' }; });
+    const oldBom = (boms || []).find(b => !b.orderRef && b.designId === id);
+    const bom = { ...(oldBom || {}), id: oldBom ? oldBom.id : 'bom-' + id, name: d.name, outputItem: d.name, outputQty: parseFloat(d.basis) || 1, unit: d.unit, materials: lines, designId: id, bizType: currentBizType, needsMaterials: !lines.length, updatedAt: Date.now() };
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === bom.id) ? a.map(x => x.id === bom.id ? bom : x) : [...a, bom]; });
+    const rec = { ...d, id, itemId: fgId, bomId: bom.id, kind: mt, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
+    setSpecs(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === id) ? a.map(x => x.id === id ? rec : x) : [rec, ...a]; });
+    setEd(null);
+    alert('✅ Saved ' + d.name + ' (rev ' + rec.rev + ') — finished-good item and master BOM (' + lines.length + ' materials per ' + bom.outputQty + ' ' + d.unit + ') updated.');
+  }
+  const inp = { ...styles.input, margin: 0 };
+  if (ed) return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Back</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'Edit product' : 'New product'}</h1></div>
+      <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 18, maxWidth: 980 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <CabField t="Product name (quotation items must use this exact name)" w={420}><input value={ed.name} onChange={e => set('name', e.target.value)} style={inp} /></CabField>
+          <CabField t="Code" w={140}><input value={ed.code || ''} onChange={e => set('code', e.target.value)} style={inp} /></CabField>
+          <CabField t="Unit" w={100}><input value={ed.unit || ''} onChange={e => set('unit', e.target.value)} style={inp} /></CabField>
+          <CabField t="HSN" w={110}><input value={ed.hsn || ''} onChange={e => set('hsn', e.target.value)} style={inp} /></CabField>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4 }}>Product datasheet — {(MFG_TYPES.find(t => t.id === mt) || { label: 'General' }).label}</div>
+        <SpecsFields specs={ed.datasheet || {}} onChange={v => set('datasheet', v)} fields={fields} />
+        {mt === 'fabrication' && (() => {
+          const rows = ed.cutList || [], DEN = 7.85, nn = v => parseFloat(v) || 0;
+          const wOf = r => { const a = nn(r.a), b = nn(r.b), t = nn(r.t), L = nn(r.L), q = nn(r.qty) || 1; let w = 0;
+            if (r.shape === 'plate' || r.shape === 'flat') w = a * t * L * DEN / 1e6; else if (r.shape === 'round') w = Math.PI * a * a / 4 * L * DEN / 1e6; else if (r.shape === 'pipe') w = Math.PI * (a - t) * t * L * DEN / 1e6; else if (r.shape === 'section') w = nn(r.kgm) * L / 1000;
+            return w * q; };
+          const tot = rows.reduce((s2, r) => s2 + wOf(r), 0);
+          const setR = (i, kk, v) => set('cutList', rows.map((r, j) => j === i ? { ...r, [kk]: v } : r));
+          const applySteel = () => { if (!ed.steelItem) { alert('Select the steel material item first.'); return; } const qty = Math.round(tot * (1 + nn(ed.allowance ?? 5) / 100) * 1000) / 1000; const it = mats.find(m => m.id === ed.steelItem); const lines = (ed.lines || []).filter(l => !l.fromCutList); setEd(p => ({ ...p, lines: [{ materialId: ed.steelItem, name: it ? it.name : '', qty, unit: 'kg', remarks: 'Steel — cutting list + ' + (ed.allowance ?? 5) + '% allowance', fromCutList: true }, ...lines], datasheet: { ...(p.datasheet || {}), unitWt: String(Math.round(tot * 100) / 100) } })); };
+          const cell = { padding: '2px 4px' };
+          return (<div style={{ background: '#FAF9F5', border: '1px solid #EAE6DB', borderRadius: 8, padding: '8px 12px', margin: '12px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>Cutting list & steel weight — total {Math.round(tot * 100) / 100} kg per unit</b><button onClick={() => set('cutList', [...rows, { desc: '', shape: 'plate', a: '', t: '', L: '', kgm: '', qty: 1 }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add piece</button></div>
+            {rows.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Piece / mark', 'Shape', 'Width / dia / OD (mm)', 'Thk (mm)', 'kg/m (section)', 'Length (mm)', 'Qty', 'kg', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 4px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((r, i) => <tr key={i}><td style={cell}><input value={r.desc} onChange={e => setR(i, 'desc', e.target.value)} style={{ ...inp, padding: '4px 6px' }} /></td>
+                <td style={cell}><select value={r.shape} onChange={e => setR(i, 'shape', e.target.value)} style={{ ...inp, padding: '4px 6px' }}><option value="plate">Plate</option><option value="flat">Flat</option><option value="round">Round bar</option><option value="pipe">Pipe</option><option value="section">Section (kg/m)</option></select></td>
+                {['a', 't', 'kgm', 'L', 'qty'].map(kk => <td key={kk} style={cell}><input type="number" value={r[kk] ?? ''} disabled={(kk === 'kgm' && r.shape !== 'section') || (kk === 't' && (r.shape === 'round' || r.shape === 'section')) || (kk === 'a' && r.shape === 'section')} onChange={e => setR(i, kk, e.target.value)} style={{ ...inp, padding: '4px 6px', width: 80 }} /></td>)}
+                <td style={{ ...cell, fontWeight: 600 }}>{Math.round(wOf(r) * 100) / 100}</td><td style={cell}><button onClick={() => set('cutList', rows.filter((_, j) => j !== i))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button></td></tr>)}</tbody></table>}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <select value={ed.steelItem || ''} onChange={e => set('steelItem', e.target.value)} style={{ ...inp, width: 260 }}><option value="">— steel material item —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+              <span style={{ fontSize: 12 }}>Allowance %</span><input type="number" value={ed.allowance ?? 5} onChange={e => set('allowance', e.target.value)} style={{ ...inp, width: 70 }} />
+              <button onClick={applySteel} style={styles.ghostBtn}>Set steel line in BOM</button>
+              <span style={{ fontSize: 11, color: '#888' }}>Density 7.85 g/cm³. For rolled sections enter the kg/m from the section table.</span>
+            </div>
+          </div>);
+        })()}
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Bill of materials — quantity per <input type="number" value={ed.basis} onChange={e => set('basis', e.target.value)} style={{ ...inp, width: 80, display: 'inline-block', padding: '3px 6px' }} /> {ed.unit}</span>
+          <button onClick={() => set('lines', [...(ed.lines || []), { materialId: '', name: '', qty: '', unit: '', remarks: '' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add material</button></div>
+        {(ed.lines || []).length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add the materials (from Item Master) used to make this product.</div> :
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><tbody>{ed.lines.map((l, i) => <tr key={i}>
+            <td style={{ padding: '3px 4px', width: '45%' }}><select value={l.materialId} onChange={e => setLine(i, 'materialId', e.target.value)} style={inp}><option value="">— select material —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ' (' + m.unit + ')' : ''}</option>)}</select></td>
+            <td style={{ padding: '3px 4px', width: 120 }}><input type="number" placeholder="Qty" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} style={inp} /></td>
+            <td style={{ padding: '3px 4px' }}><input placeholder="Remarks / operation" value={l.remarks || ''} onChange={e => setLine(i, 'remarks', e.target.value)} style={inp} /></td>
+            <td style={{ padding: '3px 4px', width: 40 }}><button onClick={() => set('lines', ed.lines.filter((_, j) => j !== i))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button></td></tr>)}</tbody></table>}
+        <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px' }}>Notes</div>
+        <textarea rows={2} value={ed.notes || ''} onChange={e => set('notes', e.target.value)} style={{ ...inp, width: '100%', boxSizing: 'border-box' }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>Cancel</button>{canEdit && <button onClick={save} style={styles.primaryBtn}>Save & generate item · BOM</button>}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Product Spec Master</h1><p style={styles.muted}>One record per product. Saving creates / updates its finished-good item and master BOM. A won quotation item with the same name uses this BOM automatically.</p></div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        {canEdit && <button onClick={() => setEd({ ...blank })} style={styles.primaryBtn}><Plus size={15} /> New product</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 240 }} />
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} product(s)</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No products yet. Click “New product”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Code', 'Unit', 'BOM materials', 'Rev', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+          <tbody>{list.map(x => <tr key={x.id} style={{ borderBottom: '1px solid #F0ECE0' }}><td style={{ padding: '8px 10px', fontWeight: 600 }}>{x.name}</td><td style={{ padding: '8px 10px' }}>{x.code}</td><td style={{ padding: '8px 10px' }}>{x.unit}</td><td style={{ padding: '8px 10px' }}>{(x.lines || []).length}</td><td style={{ padding: '8px 10px' }}>{x.rev || 0}</td>
+            <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{canEdit && <button onClick={() => setEd({ ...blank, ...x, lines: (x.lines || []).map(l => ({ ...l })) })} style={styles.ghostBtn}>Edit</button>}{canEdit && <button onClick={() => setEd({ ...blank, ...x, id: undefined, rev: 0, createdAt: undefined, name: x.name + ' (copy)', lines: (x.lines || []).map(l => ({ ...l })) })} style={{ ...styles.ghostBtn, marginLeft: 4 }}>Copy</button>}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
+// ─── Order Tracker — one reference number (won quotation no.) → status of every flowchart step ───
+// The order's common tracking number: Work Order no. given when the quotation is won (falls back to the quotation no.)
+function woNo(ref) {
+  if (!ref) return '';
+  if (typeof ref === 'object') { if (ref.woNo) return ref.woNo; ref = ref.docNo || ''; }
+  const m = (typeof window !== 'undefined' && window.__operixWo) || {};
+  return m[_nm(ref)] || ref;
+}
+function resolveOrderRef(input, { documents = [], productionOrders = [], purchaseReqs = [], grns = [] }) {
+  const v = String(input || '').trim(); if (!v) return '';
+  const eq = (a) => _nm(a) === _nm(v);
+  const q = documents.find(d => d.type === 'quotation' && (eq(d.number) || (d.woNo && eq(d.woNo)) || (d.customerRef && eq(d.customerRef)))); if (q) return q.number;
+  const po = productionOrders.find(o => eq(o.number)); if (po && po.orderRef) return po.orderRef.docNo;
+  const d = documents.find(x => eq(x.number)); if (d) { if (d.orderRef && d.orderRef.docNo) return d.orderRef.docNo; if (d.linkedFrom && d.linkedFrom.docType === 'quotation') return d.linkedFrom.docNumber; }
+  const pr = purchaseReqs.find(x => eq(x.number)); if (pr && pr.orderRef) return pr.orderRef.docNo;
+  const g = grns.find(x => eq(x.number)); if (g && g.orderRef) return g.orderRef.docNo;
+  return v;
+}
+
+// No payment → no dispatch. Received money (advance on the won quotation + receipts on the order's invoices)
+// must cover everything dispatched on the order, including this document.
+function docValue(d) { try { return Math.round((computeTotals(d, d.placeOfSupply || '', 'india').grandTotal || 0) * 100) / 100; } catch (e) { return 0; } }
+function dispatchOrderRef(doc, documents = []) {
+  if (doc.orderRef && doc.orderRef.docNo) return doc.orderRef.docNo;
+  const lf = doc.linkedFrom;
+  if (lf && lf.docType === 'quotation' && lf.docNumber) return lf.docNumber;
+  if (lf && lf.id) { const src = (documents || []).find(x => x.id === lf.id); if (src && src.id !== doc.id) return dispatchOrderRef(src, documents); }
+  return '';
+}
+function dispatchClearance(doc, { documents = [], vouchers = [] }) {
+  const ref = dispatchOrderRef(doc, documents);
+  const live = d => d && d.status !== 'deleted' && d.id !== doc.id;
+  const custName = _nm((doc.customerSnapshot && doc.customerSnapshot.name) || '');
+  const quote = ref ? (documents || []).find(d => d.type === 'quotation' && _nm(d.number) === _nm(ref)) : null;
+  // value of this dispatch: document total; if the dispatch has no rates, value it at the quotation rates
+  let value = docValue(doc);
+  if (!value && quote) {
+    const qt = docValue(quote), qSub = (quote.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0), taxF = qSub ? qt / qSub : 1;
+    value = Math.round((doc.items || []).reduce((s, it) => { const ql = (quote.items || []).find(q => (it.itemId && q.itemId === it.itemId) || _nm(String(it.name || '').split(' — ')[0]) === _nm(q.name)); return s + (parseFloat(it.qty) || 0) * (ql ? (parseFloat(ql.rate) || 0) : 0); }, 0) * taxF * 100) / 100;
+  }
+  const sameOrder = d => ref ? _nm(dispatchOrderRef(d, documents)) === _nm(ref) : _nm((d.customerSnapshot && d.customerSnapshot.name) || '') === custName && !dispatchOrderRef(d, documents);
+  const prior = (documents || []).filter(d => live(d) && d.type === 'delivery' && d.dispatchCleared && sameOrder(d)).reduce((s, d) => s + (d.clearedValue != null ? d.clearedValue : docValue(d)), 0);
+  const invNos = (documents || []).filter(d => d.type === 'invoice' && d.status !== 'deleted' && sameOrder(d)).map(d => _nm(d.number));
+  const refs = new Set([...(ref ? [_nm(ref)] : []), ...invNos]);
+  const paid = (vouchers || []).filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && (refs.has(_nm(v.linkedDocNo)) || (ref && v.orderRef && _nm(v.orderRef.docNo || v.orderRef) === _nm(ref)))).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const need = Math.round((prior + value) * 100) / 100;
+  return { ok: value > 0 && paid + 0.5 >= need, ref, value, prior: Math.round(prior * 100) / 100, paid: Math.round(paid * 100) / 100, need, short: Math.max(0, Math.round((need - paid) * 100) / 100), noValue: !(value > 0) };
+}
+
+function buildOrderStatus(ref, data) {
+  const { documents = [], boms = [], productionOrders = [], purchaseReqs = [], grns = [], storeIssues = [], boShortages = [], vouchers = [] } = data;
+  const byRef = (x) => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
+  const quote = documents.find(d => d.type === 'quotation' && _nm(d.number) === _nm(ref));
+  const orders = productionOrders.filter(byRef), orderNos = orders.map(o => o.number), oBoms = orders.map(o => boms.find(b => b.id === o.bomId)).filter(Boolean);
+  const prs = purchaseReqs.filter(byRef);
+  const pos = documents.filter(d => d.type === 'purchase' && d.status !== 'deleted' && (byRef(d) || prs.some(p => d.linkedFrom && d.linkedFrom.id === p.id)));
+  const g = grns.filter(x => x.status !== 'deleted' && (byRef(x) || pos.some(p => x.poId === p.id)));
+  const lines = []; g.forEach(x => (x.lines || []).forEach(l => lines.push(l)));
+  const qaPend = lines.filter(l => typeof iqaPending === 'function' ? iqaPending(l) : (!l.qaStatus || l.qaStatus === 'inprocess')).length;
+  const openBal = pos.reduce((n, p) => n + poBalance(p, grns).filter(b => b.balance > 0).length, 0);
+  const qaRejOpen = lines.filter(l => parseFloat(l.rejectedQty) > 0 && l.rejDisposition !== 'debit').length && openBal;
+  const qaRej = lines.filter(l => parseFloat(l.rejectedQty) > 0).length;
+  const sivs = storeIssues.filter(s => s.productionRef && orderNos.includes(s.productionRef));
+  const rep = boShortages.find(byRef), shortLines = rep ? (rep.rows || []).filter(r => r.shortage > 0).length : 0;
+  const stg = orders.reduce((a, o) => { const st = (o.route && o.route.stages) || []; a.total += st.length; a.done += st.filter(s => s.status === 'done').length; a.hold += st.filter(s => s.status === 'hold').length; return a; }, { total: 0, done: 0, hold: 0 });
+  const units = typeof allDrums === 'function' ? allDrums(orders, boms) : [];
+  const awaitSt = units.filter(u => u.testStatus === 'passed' && u.awaitStores && !u.storesAccepted), accSt = units.filter(u => fgAccepted(u));
+  const passed = units.filter(u => u.testStatus === 'passed'), failed = units.filter(u => u.testStatus === 'failed' && !u.reworked), pendT = units.filter(u => !u.testStatus || u.testStatus === 'pending');
+  const unitKeys = new Set(units.map(u => u.key));
+  const deliveries = documents.filter(d => ['delivery', 'packing_list'].includes(d.type) && d.status !== 'deleted' && (byRef(d) || (d.items || []).some(it => unitKeys.has(it.drumKey))));
+  const dispatched = units.filter(u => u.dispatched);
+  const invoices = documents.filter(d => d.type === 'invoice' && d.status !== 'deleted' && (byRef(d) || (d.linkedFrom && _nm(d.linkedFrom.docNumber) === _nm(ref)) || deliveries.some(dl => d.linkedFrom && d.linkedFrom.id === dl.id)));
+  const invTotal = invoices.reduce((s, d) => { try { return s + (computeTotals(d, d.placeOfSupply || '', 'india').grandTotal || 0); } catch (e) { return s; } }, 0);
+  const invNos = invoices.map(d => d.number);
+  const received = vouchers.filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && invNos.includes(String(v.linkedDocNo || '').trim())).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const U = mfgCfg().unit;
+  const S = (key, dept, title, status, detail, view) => ({ key, dept, title, status, detail, view });
+  const steps = [
+    S('quote', 'Sales', 'Quotation', quote ? (quote.status === 'approved' || quote.outcome ? 'done' : 'active') : 'issue', quote ? quote.number + ' · ' + (quote.date || '') + ' · ' + ((quote.customerSnapshot && quote.customerSnapshot.name) || '') + ' · ' + quote.status : 'Quotation not found', 'documents'),
+    S('won', 'Sales', 'Contract review · order won', !quote ? 'pending' : quote.outcome === 'won' ? 'done' : quote.outcome === 'lost' ? 'issue' : 'active', !quote ? '' : quote.outcome === 'won' ? 'Won ' + (quote.outcomeDate || '') : quote.outcome === 'lost' ? 'Lost ' + (quote.outcomeDate || '') : 'Waiting for customer decision', 'documents'),
+    S('bom', 'Engineering', 'Product BOM → production orders', !orders.length ? (quote && quote.outcome === 'won' ? 'active' : 'pending') : 'done', orders.length ? orders.map(o => { const b = boms.find(x => x.id === o.bomId); return (b ? b.name : o.number) + ' (Rev ' + ((b && b.rev) || 0) + ') × ' + o.quantity; }).join(', ') : 'Not converted yet', 'stdbom'),
+    S('plan', 'Stores', 'Material planning', !rep ? (oBoms.length ? 'active' : 'pending') : 'done', rep ? (shortLines ? shortLines + ' material(s) short' : 'All materials in stock') : '', 'boshortage'),
+    S('pr', 'Purchase', 'Purchase requisition', !shortLines && rep ? 'done' : !prs.length ? (shortLines ? 'active' : 'pending') : prs.every(p => p.convertedToPO) ? 'done' : 'active', prs.length ? prs.map(p => p.number + ' (' + (p.convertedToPO ? 'PO raised' : (p.approvalStatus || 'draft')) + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'purchasereq'),
+    S('po', 'Purchase', 'Purchase order', !shortLines && rep ? 'done' : !pos.length ? (prs.length ? 'active' : 'pending') : pos.every(p => p.status === 'approved') ? 'done' : 'active', pos.length ? pos.map(p => p.number + ' (' + p.status + ')').join(', ') : (rep && !shortLines ? 'Not needed' : ''), 'documents'),
+    S('grn', 'Stores', 'Goods receipt (GRN)', !pos.length ? (rep && !shortLines ? 'done' : 'pending') : !g.length ? 'active' : openBal ? 'active' : 'done', g.length ? g.map(x => x.number).join(', ') + (openBal ? ' · ' + openBal + ' PO line(s) still open' + (qaRejOpen ? ' (replacement awaited)' : '') : '') : (rep && !shortLines ? 'Not needed' : ''), 'grn'),
+    S('iqa', 'Quality', 'Incoming QA', !g.length ? (rep && !shortLines ? 'done' : 'pending') : qaPend ? 'active' : qaRejOpen ? 'issue' : 'done', g.length ? (qaPend ? qaPend + ' line(s) waiting' : 'All inspected') + (qaRej ? ' · ' + qaRej + ' rejected → ' + (qaRejOpen ? 'returned, replacement awaited (resumes at GRN)' : 'closed') : '') : '', 'incomingqa'),
+    S('issue', 'Stores', 'Issue to production', !orders.length ? 'pending' : sivs.length ? 'done' : 'active', sivs.length ? sivs.map(s => s.sivNumber).join(', ') : 'Not issued yet', 'storeissue'),
+    S('prod', 'Production', 'Production (route stages)', !orders.length ? 'pending' : stg.hold ? 'issue' : stg.total && stg.done === stg.total ? 'done' : (stg.done || units.length) ? 'active' : 'pending', orders.length ? orders.length + ' order(s) · stages ' + stg.done + '/' + stg.total + (stg.hold ? ' · ' + stg.hold + ' on hold' : '') : '', 'productionorders'),
+    S('test', 'Quality', mfgCfg().test.title + ' & certificate', !units.length ? 'pending' : failed.length ? 'issue' : pendT.length ? 'active' : 'done', units.length ? passed.length + ' passed · ' + pendT.length + ' waiting' + (failed.length ? ' · ' + failed.length + ' failed' : '') + ' (' + U.plural.toLowerCase() + ')' : '', 'routinetest'),
+    S('stacc', 'Stores', 'QA → stores acceptance (FG receipt)', !passed.length ? 'pending' : awaitSt.length ? 'active' : 'done', passed.length ? accSt.length + ' accepted' + (awaitSt.length ? ' · ' + awaitSt.length + ' waiting for stores' : '') + (units.some(u => u.storesReturn) ? ' · ' + units.filter(u => u.storesReturn).length + ' sent back to QA' : '') : '', 'drumstock'),
+    S('payclr', 'Accounts', 'Payment received → dispatch clearance', !passed.length ? 'pending' : deliveries.some(d => d.dispatchHold && !d.dispatchCleared) ? 'issue' : deliveries.some(d => d.dispatchCleared) ? 'done' : 'active', (() => { const adv = vouchers.filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && _nm(v.linkedDocNo) === _nm(ref)).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0); const held = deliveries.filter(d => d.dispatchHold && !d.dispatchCleared); return (adv ? 'Advance ₹' + Math.round(adv).toLocaleString('en-IN') : 'No advance received') + (held.length ? ' · on hold: ' + held.map(d => d.number + ' (short ₹' + Math.round((d.clearance && d.clearance.short) || 0).toLocaleString('en-IN') + ')').join(', ') : ''); })(), 'vouchers'),
+    S('disp', 'Stores', 'Finished goods & dispatch', !passed.length ? 'pending' : dispatched.length >= passed.length && passed.length === units.length ? 'done' : dispatched.length ? 'active' : 'active', passed.length ? dispatched.length + '/' + passed.length + ' dispatched' + (deliveries.length ? ' · ' + deliveries.map(d => d.number).join(', ') : '') : '', 'drumstock'),
+    S('inv', 'Accounts', 'Invoice', !invoices.length ? (dispatched.length ? 'active' : 'pending') : 'done', invoices.length ? invoices.map(d => d.number + ' (' + d.status + ')').join(', ') + ' · ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'documents'),
+    S('pay', 'Accounts', 'Payment received', !invoices.length ? 'pending' : received >= invTotal - 1 ? 'done' : received > 0 ? 'active' : 'active', invoices.length ? '₹' + Math.round(received).toLocaleString('en-IN') + ' of ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'vouchers'),
+  ];
+  const cur = steps.find(s => s.status === 'issue') || steps.find(s => s.status === 'active') || null;
+  const doneN = steps.filter(s => s.status === 'done').length;
+  return { quote, steps, current: cur, pct: Math.round(doneN / steps.length * 100), orders, units };
+}
+
+function OrderTrackerView({ data, setView, initialRef = '' }) {
+  const [input, setInput] = useState(initialRef);
+  const [ref, setRef] = useState(initialRef ? resolveOrderRef(initialRef, data) : '');
+  const won = (data.documents || []).filter(d => d.type === 'quotation' && d.outcome === 'won').sort((a, b) => String(b.outcomeDate || '').localeCompare(String(a.outcomeDate || '')));
+  const st = ref ? buildOrderStatus(ref, data) : null;
+  const col = { done: ['#1A7A3E', '#EAF6EE', '✔'], active: ['#B26B00', '#FFF6E5', '●'], pending: ['#999', '#F6F5F1', '○'], issue: ['#B5453A', '#FDEEEC', '!'] };
+  const go = () => setRef(resolveOrderRef(input, data));
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Order Tracker</h1><p style={styles.muted}>One reference number for the whole order. Type the Work Order no. (or customer PO ref / quotation no.) — or any production order, PR, PO, GRN, delivery or invoice no. of that order.</p></div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 14, maxWidth: 640 }}>
+        <div style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') go(); }}><ComboField value={input} onChange={setInput} placeholder="Order reference (won quotation no.)" options={won.map(d => ({ value: d.woNo || d.number, label: (d.woNo || d.number), sub: [d.woNo ? d.number : '', d.customerRef ? 'Cust ' + d.customerRef : '', ((d.customerSnapshot && d.customerSnapshot.name) || ''), d.outcomeDate || ''].filter(Boolean).join(' · ') }))} onPick={o => setRef(o.value)} /></div>
+        <button onClick={go} style={styles.primaryBtn}>Track</button>
+      </div>
+      {st && <>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px', marginBottom: 12, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div><div style={{ fontSize: 11, color: '#888' }}>Work Order</div><div style={{ fontSize: 18, fontWeight: 700 }}>{(st.quote && st.quote.woNo) || woNo(ref)}</div><div style={{ fontSize: 11, color: '#888' }}>Quotation {ref}{st.quote && st.quote.customerRef ? ' · Cust ref ' + st.quote.customerRef : ''}</div></div>
+          <div><div style={{ fontSize: 11, color: '#888' }}>Customer</div><div style={{ fontWeight: 600 }}>{(st.quote && st.quote.customerSnapshot && st.quote.customerSnapshot.name) || '—'}</div></div>
+          <div><div style={{ fontSize: 11, color: '#888' }}>Now at</div><div style={{ fontWeight: 700, color: st.current ? col[st.current.status][0] : '#1A7A3E' }}>{st.current ? st.current.dept + ' — ' + st.current.title : 'Completed'}</div></div>
+          <div style={{ flex: 1, minWidth: 180 }}><div style={{ fontSize: 11, color: '#888' }}>Progress {st.pct}%</div><div style={{ height: 8, background: '#EEE', borderRadius: 4, overflow: 'hidden', marginTop: 4 }}><div style={{ width: st.pct + '%', height: '100%', background: '#1A7A3E' }} /></div></div>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}>
+          {st.steps.map((s, i) => { const c = col[s.status]; return (
+            <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid #F0ECE0', background: st.current && st.current.key === s.key ? c[1] : '#fff' }}>
+              <div style={{ width: 26, height: 26, borderRadius: 13, background: c[1], border: '1.5px solid ' + c[0], color: c[0], display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{c[2]}</div>
+              <div style={{ width: 95, fontSize: 11.5, color: '#666', flexShrink: 0 }}>{i + 1}. {s.dept}</div>
+              <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 13.5 }}>{s.title}</div><div style={{ fontSize: 12, color: '#777' }}>{s.detail || (s.status === 'pending' ? 'Not started' : '')}</div></div>
+              {setView && s.view && <button onClick={() => setView(s.view)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>Open</button>}
+            </div>); })}
+        </div>
+        <div style={{ fontSize: 11.5, color: '#888', marginTop: 8 }}>✔ done · ● in progress · ○ not started · ! needs attention. The reference is carried automatically from the won quotation to BOM, PR, PO, GRN, issue, production, test, delivery and invoice — no manual linking.</div>
+      </>}
+    </div>
+  );
+}
+
+// ─── Products & Standard BOM (Engineering) — spreadsheet-style BOM linked to Item Master by item code ───
+const FG_CATS = ['Finished Good', 'Semi-Finished'];
+// Latest buying rate per item: newest GRN line → newest PO / purchase bill line → item purchase rate
+function latestRates(documents = [], grns = [], items = []) {
+  const map = {}, put = (id, rate, date, src) => { if (!id || !(parseFloat(rate) > 0)) return; const cur = map[id]; if (!cur || String(date || '') > String(cur.date || '')) map[id] = { rate: parseFloat(rate), date: date || '', src }; };
+  (grns || []).forEach(g => (g.lines || []).forEach(l => put(l.itemId, l.rate, g.date, 'GRN ' + (g.number || ''))));
+  (documents || []).filter(d => (d.type === 'purchase' || d.type === 'purchasebill') && d.status !== 'deleted').forEach(d => (d.items || []).forEach(it => { if (!map[it.itemId] || map[it.itemId].src.indexOf('GRN') !== 0) put(it.itemId, it.rate, d.date, (d.type === 'purchase' ? 'PO ' : 'Bill ') + (d.number || '')); }));
+  (items || []).forEach(i => { if (!map[i.id] && parseFloat(i.purchaseRate ?? i.rate) > 0) map[i.id] = { rate: parseFloat(i.purchaseRate ?? i.rate), date: '', src: 'Item Master' }; });
+  return map;
+}
+function bomCosting(b, rates = {}, defaults = {}) {
+  const lines = (b.materials || []).map(m => { const r = rates[m.materialId] || null; const q = parseFloat(m.qty) || 0; return { ...m, rate: r ? r.rate : 0, src: r ? r.src : 'no rate', amount: q * (r ? r.rate : 0) }; });
+  const material = lines.reduce((t, l) => t + l.amount, 0);
+  const convPct = b.convPct !== undefined && b.convPct !== '' ? parseFloat(b.convPct) || 0 : (parseFloat(defaults.convPct) || 15);
+  const marginPct = b.marginPct !== undefined && b.marginPct !== '' ? parseFloat(b.marginPct) || 0 : (parseFloat(defaults.marginPct) || 12);
+  const conv = material * convPct / 100, total = material + conv, per = parseFloat(b.outputQty) || 1;
+  const unitCost = total / per, unitPrice = unitCost * (1 + marginPct / 100), r2 = v => Math.round(v * 100) / 100;
+  return { lines, material: r2(material), convPct, conv: r2(conv), total: r2(total), marginPct, unitCost: r2(unitCost), unitPrice: r2(unitPrice), missingRates: lines.filter(l => !l.rate).map(l => l.name) };
+}
+function StandardBomView({ documents = [], grns = [], boms = [], setBoms, items = [], setItems, cableDesigns = [], businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+  const rates = latestRates(documents, grns, items), costDef = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct };
+  const fmtR = makeFmt(businessInfo);
+  const canEdit = ['admin', 'manager'].includes(userRole);
+  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+  const masters = (boms || []).filter(b => b && !b.orderRef);
+  const products = (items || []).filter(i => FG_CATS.includes(i.category));
+  const comps = (items || []).filter(i => !FG_CATS.includes(i.category) && i.category !== 'Service' && i.category !== 'Capex / Asset');
+  const [q, setQ] = useState('');
+  const [ed, setEd] = useState(null);
+  const blankRow = () => ({ key: Math.random().toString(36).slice(2), itemId: '', code: '', name: '', unit: '', qty: '', wastage: '', remarks: '' });
+  const itemOpt = it => ({ value: it.itemCode || it.name, label: (it.itemCode ? it.itemCode + ' · ' : '') + it.name, sub: [it.category, it.unit].filter(Boolean).join(' · '), it });
+  const fromBom = (b) => (b.materials || []).map(m => { const it = (items || []).find(x => x.id === m.materialId) || (items || []).find(x => _nm(x.name) === _nm(m.name)); return { key: Math.random().toString(36).slice(2), itemId: it ? it.id : '', code: it ? (it.itemCode || '') : '', name: it ? it.name : (m.name || ''), unit: it ? (it.unit || '') : (m.unit || ''), qty: String(m.baseQty ?? m.qty ?? ''), wastage: String(m.wastage ?? ''), remarks: m.remarks || '' }; });
+  const list = masters.filter(b => !q || _nm(b.name).includes(_nm(q)) || _nm(((items || []).find(i => i.id === b.itemId) || {}).itemCode).includes(_nm(q)));
+  function open(b) {
+    const fg = b ? ((items || []).find(i => i.id === b.itemId) || (items || []).find(i => _nm(i.name) === _nm(b.name))) : null;
+    setEd(b ? { id: b.id, itemId: fg ? fg.id : '', product: fg ? (fg.itemCode || fg.name) : b.name, productName: fg ? fg.name : b.name, outputQty: String(b.outputQty || 1), unit: b.unit || (fg && fg.unit) || 'm', lines: [...fromBom(b), blankRow()], rev: b.rev || 0, revHistory: b.revHistory || [], designId: b.designId || '', note: '', convPct: b.convPct ?? '', marginPct: b.marginPct ?? '' }
+      : { id: '', itemId: '', product: '', productName: '', outputQty: '1000', unit: 'm', lines: [blankRow()], rev: 0, revHistory: [], designId: '', note: '', convPct: '', marginPct: '' });
+  }
+  const setRow = (k, patch) => setEd(p => { let lines = p.lines.map(r => r.key === k ? { ...r, ...patch } : r); if (lines.length && (lines[lines.length - 1].itemId || lines[lines.length - 1].name)) lines = [...lines, blankRow()]; return { ...p, lines }; });
+  function pickItem(k, it) { setRow(k, { itemId: it.id, code: it.itemCode || '', name: it.name, unit: it.unit || '' }); }
+  function onPaste(e) {
+    const txt = e.clipboardData && e.clipboardData.getData('text'); if (!txt || !/\t|\n/.test(txt)) return;
+    e.preventDefault();
+    const rows = txt.split(/\r?\n/).map(l => l.split('\t')).filter(c => c.some(x => String(x).trim()));
+    const parsed = rows.map(c => { const key = String(c[0] || '').trim(); const it = comps.find(x => _nm(x.itemCode) === _nm(key)) || comps.find(x => _nm(x.name) === _nm(key)); return { key: Math.random().toString(36).slice(2), itemId: it ? it.id : '', code: it ? (it.itemCode || '') : '', name: it ? it.name : key, unit: it ? (it.unit || '') : '', qty: String(c[1] || '').trim(), wastage: String(c[2] || '').trim(), remarks: String(c[3] || '').trim() }; }).filter(r => !/^(item|code|item code|material)$/i.test(r.name));
+    setEd(p => ({ ...p, lines: [...p.lines.filter(r => r.itemId || r.name), ...parsed, blankRow()] }));
+  }
+  function copyFrom(id) { const b = masters.find(x => x.id === id); if (!b) return; if (ed.lines.some(r => r.itemId) && !window.confirm('Replace the current lines with the BOM of ' + b.name + '?')) return; setEd(p => ({ ...p, lines: [...fromBom(b), blankRow()], outputQty: String(b.outputQty || p.outputQty), unit: b.unit || p.unit })); }
+  function fillFromDesign() {
+    const d = (cableDesigns || []).find(x => !x.deleted && ((ed.itemId && x.itemId === ed.itemId) || _nm(x.name) === _nm(ed.productName || ed.product)));
+    if (!d) { alert('No Cable Design with this product name. Save the design in Cable Design Master first.'); return; }
+    const b = masters.find(x => x.designId === d.id); if (!b) { alert('Open the design in Cable Design Master and save it once to generate its calculated quantities.'); return; }
+    setEd(p => ({ ...p, lines: [...fromBom(b), ...p.lines.filter(r => (r.itemId || r.name) && !fromBom(b).some(x => x.itemId && x.itemId === r.itemId)), blankRow()], outputQty: String(b.outputQty || 1000), unit: b.unit || 'm', designId: d.id }));
+  }
+  function save() {
+    const lines = ed.lines.filter(r => r.itemId || (r.name || '').trim());
+    const unlinked = lines.filter(r => !r.itemId);
+    if (!(ed.product || '').trim()) { alert('Select or enter the product.'); return; }
+    if (!lines.length) { alert('Add at least one material line.'); return; }
+    if (unlinked.length) { alert('These lines are not in the Item Master — add them there first so stock, PR and GRN can link:\n\n' + unlinked.map(r => '• ' + r.name).join('\n')); return; }
+    if (lines.some(r => !(parseFloat(r.qty) > 0))) { alert('Every line needs a quantity.'); return; }
+    let fg = (items || []).find(i => i.id === ed.itemId) || products.find(i => _nm(i.itemCode) === _nm(ed.product) || _nm(i.name) === _nm(ed.product));
+    if (!fg) {
+      if (!window.confirm('"' + ed.product + '" is not in the Item Master. Create it as a Finished Good?')) return;
+      fg = { id: 'itm-' + Date.now(), name: ed.product.trim(), unit: ed.unit || 'nos', category: 'Finished Good', itemCode: '', hsn: '', gst: businessInfo.taxRate ?? cc.defaultTaxRate, purchaseRate: 0, saleRate: 0, openingStock: 0, minStock: 0, bizType: currentBizType };
+      setItems(prev => [...(Array.isArray(prev) ? prev : []), fg]);
+    }
+    if (masters.some(b => b.id !== ed.id && (b.itemId === fg.id || _nm(b.name) === _nm(fg.name)))) { alert('A standard BOM already exists for ' + fg.name + '. Open it from the list to revise it.'); return; }
+    const old = masters.find(b => b.id === ed.id);
+    const mats = lines.map(r => { const w = parseFloat(r.wastage) || 0, base = parseFloat(r.qty) || 0; return { materialId: r.itemId, name: r.name, unit: r.unit, baseQty: base, wastage: w, qty: Math.round(base * (1 + w / 100) * 100000) / 100000, remarks: r.remarks || '', src: 'item' }; });
+    const changed = !old || JSON.stringify((old.materials || []).map(m => [m.materialId, m.qty])) !== JSON.stringify(mats.map(m => [m.materialId, m.qty])) || String(old.outputQty) !== String(ed.outputQty);
+    const rev = old ? (changed ? (parseInt(old.rev) || 0) + 1 : (parseInt(old.rev) || 0)) : 0;
+    const hist = [...(ed.revHistory || []), ...(changed ? [{ rev, date: new Date().toISOString().slice(0, 10), note: ed.note || (old ? 'Revised' : 'Created'), lines: mats.length }] : [])];
+    const rec0 = { ...(old || {}), id: old ? old.id : 'bom-std-' + Date.now(), name: fg.name, outputItem: fg.name, itemId: fg.id, outputQty: parseFloat(ed.outputQty) || 1, unit: ed.unit || fg.unit || 'nos', materials: mats, rev, revHistory: hist, designId: ed.designId || (old && old.designId) || '', bizType: currentBizType, needsMaterials: false, standard: true, updatedAt: Date.now(), convPct: ed.convPct, marginPct: ed.marginPct };
+    const cost = bomCosting(rec0, rates, costDef);
+    const rec = { ...rec0, costing: { material: cost.material, conv: cost.conv, total: cost.total, unitCost: cost.unitCost, unitPrice: cost.unitPrice, convPct: cost.convPct, marginPct: cost.marginPct, date: new Date().toISOString().slice(0, 10) } };
+    if (cost.unitCost > 0) setItems(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === fg.id ? { ...x, purchaseRate: cost.unitCost, saleRate: cost.unitPrice, marginPct: cost.marginPct, costFromBom: true } : x));
+    setBoms(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [...a, rec]; });
+    setEd(null);
+    alert('✅ BOM saved for ' + fg.name + (fg.itemCode ? ' (' + fg.itemCode + ')' : '') + ' — Rev ' + rev + ', ' + mats.length + ' lines per ' + rec.outputQty + ' ' + rec.unit + '.\nQuotations with this product code now create production orders, shortage and PR automatically.');
+  }
+  const cell = { padding: '3px 4px', borderBottom: '1px solid #EEE' }, inp = { ...styles.input, margin: 0, padding: '5px 7px', fontSize: 12.5 };
+  if (ed) {
+    const filled = ed.lines.filter(r => r.itemId || r.name);
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}><button onClick={() => setEd(null)} style={styles.ghostBtn}>← Products</button><h1 className="serif" style={{ ...styles.h1, margin: 0 }}>{ed.id ? 'BOM — ' + (ed.productName || ed.product) : 'New BOM'}</h1>{ed.id ? <span style={{ fontSize: 12, color: '#888' }}>Rev {ed.rev}</span> : null}</div>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 14, marginBottom: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 360 }}>Product (finished good — item code or name)
+            <ComboField value={ed.product} onChange={v => setEd(p => ({ ...p, product: v, itemId: '', productName: v }))} placeholder="Select from Item Master or type a new product" options={products.map(itemOpt)} onPick={o => setEd(p => ({ ...p, itemId: o.it.id, product: o.it.itemCode || o.it.name, productName: o.it.name, unit: p.id ? p.unit : (o.it.unit || p.unit) }))} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 110 }}>Quantities per<input type="number" value={ed.outputQty} onChange={e => setEd(p => ({ ...p, outputQty: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 80 }}>Unit<input value={ed.unit} onChange={e => setEd(p => ({ ...p, unit: e.target.value }))} style={{ ...styles.input, margin: 0 }} /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#666', width: 230 }}>Copy lines from
+            <select value="" onChange={e => copyFrom(e.target.value)} style={{ ...styles.input, margin: 0 }}><option value="">— another product's BOM —</option>{masters.filter(b => b.id !== ed.id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          {_mfgType() === 'wires_cables' && <button onClick={fillFromDesign} style={styles.ghostBtn} title="Copper / compound / armour quantities from the cable design calculation">Fill from Cable Design</button>}
+        </div>
+        <div onPaste={onPaste} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'visible' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['#', 'Item (code / name)', 'Unit', 'Qty', 'Wastage %', 'Net qty', 'Rate', 'Amount', 'Remarks', ''].map((h, i) => <th key={h + i} style={{ padding: '7px 6px', fontSize: 11, color: '#777', textAlign: 'left', borderBottom: '1px solid #EAE6DB', width: [30, '', 60, 90, 80, 90, 90, 100, '', 34][i] || undefined }}>{h}</th>)}</tr></thead>
+            <tbody>{ed.lines.map((r, i) => { const net = (parseFloat(r.qty) || 0) * (1 + (parseFloat(r.wastage) || 0) / 100); return (
+              <tr key={r.key} style={{ background: (r.name && !r.itemId) ? '#FDEEEC' : undefined }}>
+                <td style={{ ...cell, color: '#999', fontSize: 12 }}>{i + 1}</td>
+                <td style={{ ...cell, minWidth: 280 }}><ComboField value={r.itemId ? ((r.code ? r.code + ' · ' : '') + r.name) : r.name} onChange={v => setRow(r.key, { name: v, itemId: '', code: '', unit: '' })} placeholder="Type code or name…" options={comps.map(itemOpt)} onPick={o => pickItem(r.key, o.it)} invalid={!!(r.name && !r.itemId)} /></td>
+                <td style={{ ...cell, fontSize: 12.5, color: '#555' }}>{r.unit}</td>
+                <td style={cell}><input type="number" value={r.qty} onChange={e => setRow(r.key, { qty: e.target.value })} style={inp} /></td>
+                <td style={cell}><input type="number" value={r.wastage} onChange={e => setRow(r.key, { wastage: e.target.value })} style={inp} placeholder="0" /></td>
+                <td style={{ ...cell, fontSize: 12.5, fontWeight: 600 }}>{r.qty ? Math.round(net * 1000) / 1000 : ''}</td>
+                <td style={{ ...cell, fontSize: 12, color: rates[r.itemId] ? '#333' : '#B5453A' }} title={rates[r.itemId] ? rates[r.itemId].src + (rates[r.itemId].date ? ' · ' + rates[r.itemId].date : '') : 'No purchase rate yet'}>{r.itemId ? (rates[r.itemId] ? fmtR(rates[r.itemId].rate) : 'no rate') : ''}</td>
+                <td style={{ ...cell, fontSize: 12.5 }}>{r.itemId && r.qty && rates[r.itemId] ? fmtR(net * rates[r.itemId].rate) : ''}</td>
+                <td style={cell}><input value={r.remarks} onChange={e => setRow(r.key, { remarks: e.target.value })} style={inp} /></td>
+                <td style={cell}>{(r.itemId || r.name) && <button onClick={() => setEd(p => ({ ...p, lines: p.lines.filter(x => x.key !== r.key) }))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </div>
+        {(() => { const c = bomCosting({ outputQty: ed.outputQty, convPct: ed.convPct, marginPct: ed.marginPct, materials: ed.lines.filter(r => r.itemId && parseFloat(r.qty) > 0).map(r => ({ materialId: r.itemId, name: r.name, qty: (parseFloat(r.qty) || 0) * (1 + (parseFloat(r.wastage) || 0) / 100) })) }, rates, costDef); return (
+          <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 14px', marginTop: 10, display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end', fontSize: 13 }}>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Material cost / {ed.outputQty} {ed.unit}</div><b>{fmtR(c.material)}</b></div>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11, color: '#888', width: 110 }}>Conversion %<input type="number" value={ed.convPct === '' ? '' : ed.convPct} placeholder={String(c.convPct)} onChange={e => setEd(p => ({ ...p, convPct: e.target.value }))} style={{ ...styles.input, margin: 0, padding: '4px 8px' }} /></label>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Total cost</div><b>{fmtR(c.total)}</b></div>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Cost / {ed.unit}</div><b>{fmtR(c.unitCost)}</b></div>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 11, color: '#888', width: 100 }}>Margin %<input type="number" value={ed.marginPct === '' ? '' : ed.marginPct} placeholder={String(c.marginPct)} onChange={e => setEd(p => ({ ...p, marginPct: e.target.value }))} style={{ ...styles.input, margin: 0, padding: '4px 8px' }} /></label>
+            <div><div style={{ fontSize: 11, color: '#888' }}>Selling price / {ed.unit}</div><b style={{ color: '#1A7A3E', fontSize: 15 }}>{fmtR(c.unitPrice)}</b></div>
+            {c.missingRates.length > 0 && <div style={{ color: '#B5453A', fontSize: 11.5, flexBasis: '100%' }}>No purchase rate yet for: {c.missingRates.join(', ')} — set it in Item Master or it updates after the first PO / GRN.</div>}
+            <div style={{ color: '#888', fontSize: 11, flexBasis: '100%' }}>Rates = latest GRN / PO / bill rate, else Item Master purchase rate. Saving the BOM updates the product's cost and sale rate — quotations pick this sale rate automatically.</div>
+          </div>); })()}
+        <div style={{ fontSize: 11.5, color: '#888', margin: '6px 0 12px' }}>Pick each item from the Item Master (code or name). A new row opens automatically. You can paste rows from Excel: columns <b>Item code, Qty, Wastage %, Remarks</b>. Red rows are not in the Item Master.</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <input value={ed.note} onChange={e => setEd(p => ({ ...p, note: e.target.value }))} placeholder={ed.id ? 'Revision note (what changed)' : 'Note'} style={{ ...styles.input, margin: 0, flex: 1, minWidth: 260 }} />
+          <span style={{ fontSize: 12.5, color: '#555' }}>{filled.length} line(s)</span>
+          {canEdit && <button onClick={save} style={styles.primaryBtn}>Save standard BOM</button>}
+        </div>
+        {(ed.revHistory || []).length > 0 && <div style={{ marginTop: 14, fontSize: 12, color: '#666' }}><b>Revision history:</b> {(ed.revHistory || []).map(h => 'Rev ' + h.rev + ' · ' + h.date + ' · ' + h.note).join('  |  ')}</div>}
+      </div>
+    );
+  }
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>BOM</h1><p style={styles.muted}>One BOM per finished product code — every raw material, misc item, fastener and packing, picked from the Item Master. Quotations, production orders, shortage and PR all use this BOM.</p></div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        {canEdit && <button onClick={() => open(null)} style={styles.primaryBtn}><Plus size={15} /> New product BOM</button>}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search product or code…" style={{ ...styles.input, margin: 0, width: 260 }} />
+        {canEdit && masters.length > 0 && <button onClick={() => { if (!window.confirm('Recalculate cost and selling price of all ' + masters.length + ' products from the latest purchase rates, and update their sale rate in the Item Master?')) return; const upd = {}; masters.forEach(b => { const c = bomCosting(b, rates, costDef); if (b.itemId && c.unitCost > 0) upd[b.itemId] = c; }); setItems(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] ? { ...x, purchaseRate: upd[x.id].unitCost, saleRate: upd[x.id].unitPrice, marginPct: upd[x.id].marginPct, costFromBom: true } : x)); setBoms(prev => (Array.isArray(prev) ? prev : []).map(b => !b.orderRef && upd[b.itemId] ? { ...b, costing: { material: upd[b.itemId].material, conv: upd[b.itemId].conv, total: upd[b.itemId].total, unitCost: upd[b.itemId].unitCost, unitPrice: upd[b.itemId].unitPrice, convPct: upd[b.itemId].convPct, marginPct: upd[b.itemId].marginPct, date: new Date().toISOString().slice(0, 10) } } : b)); alert('✅ Prices updated for ' + Object.keys(upd).length + ' product(s).'); }} style={styles.ghostBtn}>↻ Update prices from latest rates</button>}
+        <span style={{ fontSize: 12, color: '#888' }}>{list.length} product(s) · {products.filter(p => !masters.some(b => b.itemId === p.id || _nm(b.name) === _nm(p.name))).length} finished good(s) without a BOM</span>
+      </div>
+      {list.length === 0 ? <div style={styles.emptyBox}>No standard BOMs yet. Click “New product BOM”.</div> :
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead><tr style={{ background: '#F8F6F0' }}>{['Product', 'Item code', 'Per', 'Lines', 'Cost / unit', 'Price / unit', 'Rev', 'Updated', ''].map(h => <th key={h} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+          <tbody>{list.map(b => { const fg = (items || []).find(i => i.id === b.itemId); return (
+            <tr key={b.id} style={{ borderBottom: '1px solid #F0ECE0', cursor: 'pointer' }} onClick={() => open(b)}>
+              <td style={{ padding: '8px 10px', fontWeight: 600 }}>{b.name}</td><td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 12 }}>{fg ? fg.itemCode || '' : <span style={{ color: '#B5453A', fontFamily: 'inherit' }}>not linked</span>}</td>
+              <td style={{ padding: '8px 10px' }}>{b.outputQty} {b.unit}</td><td style={{ padding: '8px 10px' }}>{(b.materials || []).length}</td>{(() => { const c = bomCosting(b, rates, costDef); return <><td style={{ padding: '8px 10px' }}>{fmtR(c.unitCost)}{c.missingRates.length ? <span title={'No rate: ' + c.missingRates.join(', ')} style={{ color: '#B5453A' }}> ⚠</span> : null}</td><td style={{ padding: '8px 10px', fontWeight: 600, color: '#1A7A3E' }}>{fmtR(c.unitPrice)}</td></>; })()}<td style={{ padding: '8px 10px' }}>{b.rev || 0}</td>
+              <td style={{ padding: '8px 10px', fontSize: 12, color: '#888' }}>{b.updatedAt ? new Date(b.updatedAt).toISOString().slice(0, 10) : ''}</td>
+              <td style={{ padding: '8px 10px' }}><button onClick={e => { e.stopPropagation(); setEd(null); setTimeout(() => { open(b); setEd(p => ({ ...p, id: '', itemId: '', product: '', productName: '', rev: 0, revHistory: [], note: 'Copied from ' + b.name })); }, 0); }} style={styles.ghostBtn}>Copy as new</button></td>
+            </tr>); })}</tbody></table></div>}
+    </div>
+  );
+}
+
+function MfgNextStepView({ id, setView }) {
+  const d = MFG_NEXT[id] || [id, 0, '', []];
+  return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{d[0]}</h1></div>
+      <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: '4px solid #C9752A', borderRadius: 10, padding: '16px 20px', maxWidth: 760 }}>
+        <div style={{ fontSize: 12, color: '#C9752A', fontWeight: 700, marginBottom: 6 }}>Being built — step {d[1]} of the Wires & Cables rework</div>
+        <div style={{ fontSize: 14, lineHeight: 1.7, color: '#333' }}>{d[2]}</div>
+        {d[3].length > 0 && <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><span style={{ fontSize: 12, color: '#888' }}>Until then use:</span>{d[3].map(([v, l]) => <button key={v} onClick={() => setView && setView(v)} style={styles.ghostBtn}>{l}</button>)}</div>}
+      </div>
+    </div>
+  );
+}
+
+function orderShortagePlan({ doc, boms = [], items = [], stockMap = {}, rawMaterials = [], purchaseReqs = [], productionOrders = [] }) {
+  const ref = doc.number, byRef = x => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
+  const oOrders = (productionOrders || []).filter(byRef);
+  const oBoms = oOrders.map(o => { const b = (boms || []).find(x => x.id === o.bomId); return b ? { ...b, orderRef: o.orderRef, _qty: parseFloat(o.quantity) || 0 } : null; }).filter(Boolean), need = {};
+  const emptyBoms = oBoms.filter(b => !(b.materials || []).length).map(b => (b.orderRef.itemNo || '') + '. ' + b.name);
+  oBoms.forEach(b => {
+    const qty = b._qty;
+    const fac = qty / (parseFloat(b.outputQty) || 1);
+    (b.materials || []).forEach(m => {
+      const ms = matStock(m, { items, stockMap, rawMaterials }), ri = resolveMatItem(m, items, rawMaterials), key = ms.id || ri.itemId || _nm(ri.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : ri.itemId, itemCode: ms.item ? (ms.item.itemCode || '') : ri.itemCode, name: (ms.item && ms.item.name) || ri.name || '—', unit: m.unit || (ms.item && ms.item.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', itemNos: [] };
+      r.overall += (parseFloat(m.qty) || 0) * fac; if (!r.itemNos.includes(b.orderRef.itemNo)) r.itemNos.push(b.orderRef.itemNo);
+    });
+  });
+  const onPR = {};
+  (purchaseReqs || []).filter(byRef).forEach(pr => (pr.items || []).forEach(it => { const k = it.itemId || _nm(it.name); onPR[k] = (onPR[k] || 0) + (parseFloat(it.qty) || 0); }));
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const rows = Object.values(need).map(r => { const k = r.itemId || _nm(r.name), gross = Math.max(0, r.overall - r.available), req = onPR[k] || 0; return { ...r, overall: r3(r.overall), perBom: r3(r.overall), shortage: r3(gross), alreadyRequested: r3(req), toRequest: r3(Math.max(0, gross - req)), itemNos: r.itemNos.join(', ') }; });
+  return { oBoms, emptyBoms, rows, toRequest: rows.filter(r => r.toRequest > 0) };
+}
+
 function ConvertDropdown({ doc, onConvert }) {
   const [open, setOpen] = useState(false);
   const targets = CONVERT_TO[doc.type] || [];
@@ -5318,10 +8189,12 @@ const SECTION_VIEWS = {
   sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
-  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack'],
-  engineering: ['partsmaster', 'engdocs', 'tds'],
-  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage'],
-  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat'],
+  stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock', 'fgaccept'],
+  engineering: ['partsmaster', 'engdocs', 'tds', 'cabledesign', 'productspec', 'stdbom'],
+  planning:    ['ordertracker', 'bom', 'boshortage'],
+  maintenance: ['assetregister', 'pmschedules', 'fmworkorders', 'fmspareparts'],
+  production:  ['rawmaterials', 'bom', 'productionorders', 'boshortage', 'machinelog', 'metalrecon'],
+  quality:     ['isoprinciples', 'deptprocedures', 'inprocessqa', 'qatesting', 'fatsat', 'routinetest', 'incomingqa', 'calibration', 'capa', 'internalaudit', 'mis'],
   hr:          ['employees', 'payroll', 'siteattendance', 'offerletter', 'warnletter', 'termletter'],
   scope:       ['scopeofwork','mepbom'],
   mep_clients: ['customers', 'enquiries', 'items'],
@@ -5334,7 +8207,7 @@ const SECTION_VIEWS = {
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
   trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  manufacturing: ['stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -5344,10 +8217,41 @@ const BIZ_SECTION_VIEWS = {
 const BizTypeCtx = React.createContext(null);
 const SidebarCtx = React.createContext(null);
 
+// Related screens grouped as tabs of one module. Sidebar shows one entry per module; each tab keeps its own screen.
+const VIEW_HUBS = {
+  sales:     { title: 'Customers', tabs: [['customers', 'Customers'], ['enquiries', 'Enquiries'], ['serviceorders', 'SAS', () => !!_mfgType()]] },
+  vendors:   { title: 'Vendors', tabs: [['vendors', 'Vendors'], ['vendoreval', 'Vendor evaluation']] },
+  eng:       { title: 'Engineering', when: () => !!_mfgType(), tabs: [['stdbom', 'BOM (product code)'], ['cabledesign', 'Cable design', () => mfgCfg().eng === 'cable'], ['productspec', 'Product spec', () => mfgCfg().eng !== 'cable'], ['tds', 'Technical data sheet'], ['engdocs', 'Standards & documents']] },
+  planning:  { title: 'Order Tracker', when: () => !!_mfgType(), tabs: [['ordertracker', 'Order tracker (WO)'], ['boshortage', 'Material shortage']] },
+  stock:     { title: 'Stock', tabs: [['stock', 'Stock position'], ['stockledger', 'Stock ledger'], ['bincard', 'Bin card'], ['verticalrack', 'Racks / locations']] },
+  prod:      { title: 'Production', when: () => !!_mfgType(), tabs: [['productionorders', 'Production orders'], ['wip', 'WIP (in process)'], ['machinelog', 'Machine log & downtime'], ['metalrecon', 'Metal reconciliation', () => (mfgCfg().registers || []).includes('metal')]] },
+  maint:     { title: 'Maintenance', when: () => !!_mfgType(), tabs: [['assetregister', 'Machines / equipment'], ['pmschedules', 'Preventive maintenance'], ['fmworkorders', 'Breakdown log'], ['fmspareparts', 'Spares']] },
+  qc:        { title: 'Quality control', when: () => !!_mfgType(), tabs: [['incomingqa', 'Incoming QA'], ['inprocessqa', 'Production QA'], ['routinetest', 'Final test'], ['fatsat', 'FAT / SAT / STP'], ['calibration', 'Calibration']] },
+  qms:       { title: 'ISO 9001 / QMS', when: () => !!_mfgType(), tabs: [['isoprinciples', 'ISO principles'], ['deptprocedures', 'Dept procedures'], ['capa', 'CAPA / NCR'], ['internalaudit', 'Internal audit'], ['mis', 'MIS / management review']] },
+};
+const HUB_OF = {};
+Object.entries(VIEW_HUBS).forEach(([h, d]) => d.tabs.forEach(t => { HUB_OF[t[0]] = h; }));
+const hubTabs = (h) => (VIEW_HUBS[h] ? VIEW_HUBS[h].tabs.filter(t => !t[2] || (() => { try { return t[2](); } catch (e) { return true; } })()) : []);
+function HubFrame({ view, setView, businessInfo, children }) {
+  const h = HUB_OF[view]; const tabs = hubTabs(h);
+  if (!h || tabs.length < 2 || (VIEW_HUBS[h].when && !VIEW_HUBS[h].when())) return children;
+  const label = (tabs.find(t => t[0] === view) || [])[1] || '';
+  return (
+    <div>
+      <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 20, background: '#F7F4EE', borderBottom: '1px solid #E5E0D4', padding: '10px 40px 8px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span className="serif" style={{ fontWeight: 700, color: '#1E2A4A', fontSize: 15, marginRight: 10 }}>{VIEW_HUBS[h].title}</span>
+        {tabs.map(([id, l]) => <button key={id} onClick={() => setView(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (view === id ? '#1E2A4A' : '#DDD'), background: view === id ? '#1E2A4A' : '#fff', color: view === id ? '#fff' : '#555' }}>{l}</button>)}
+        <button onClick={() => printView('.hub-print', businessInfo, { title: VIEW_HUBS[h].title + ' — ' + label })} style={{ ...styles.ghostBtn, marginLeft: 'auto' }} title={'Print ' + label}><Printer size={14} /> Print</button>
+      </div>
+      <div className="hub-print">{children}</div>
+    </div>
+  );
+}
+
 function NavBtn({ id, label, icon: Icon, small }) {
   const { view, setView, setActiveDoc, onBizContextChange } = React.useContext(SidebarCtx);
   const ctxBizType = React.useContext(BizTypeCtx);
-  const active = view === id;
+  const active = view === id || (!!HUB_OF[id] && HUB_OF[id] === HUB_OF[view]);
   return (
     <button
       type="button"
@@ -5492,6 +8396,8 @@ const COMING_SOON = {};
 function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, onLogout, userRole, companyType, activeTypes, country, unreadCount = 0, onShowNotifications, activeDocBizType = null, activeBizContext = null, onBizContextChange = null, onSwitchActivity = null, navOpen = false }) {
   const showTrade      = activeTypes.includes('trading') || activeTypes.includes('manufacturing');
   const showProduction = activeTypes.includes('manufacturing');
+  const isCable = showProduction && !!_mfgType(); // process-flow menu for every manufacturing type
+  const fc = mfgCfg();
   const showService    = activeTypes.includes('service');
   const showFMAMC      = activeTypes.includes('fmamc');
   const isMultiBiz     = activeTypes.length > 1;
@@ -5554,6 +8460,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       {/* Dashboard — always at top */}
       <div style={{ ...styles.navGroup, marginBottom: 4 }}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
 
       {isMultiBiz ? (
@@ -5609,8 +8516,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               {bt === 'manufacturing' && <>
                 <SubLabel label="Sales" />
                 <NavBtn id="customers"     label="Customers" icon={Users} />
-                <NavBtn id="enquiries"     label="Enquiries" icon={FileSignature} />
-                <NavBtn id="serviceorders" label="SAS"       icon={Briefcase} />
                 <CreateBtn docKey="quotation"  bizType="manufacturing" />
                 <CreateBtn docKey="invoice"    bizType="manufacturing" />
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
@@ -5618,14 +8523,37 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Purchase" />
                 <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
-                <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
                 <CreateBtn docKey="purchase"     bizType="manufacturing" />
                 <CreateBtn docKey="purchasebill" bizType="manufacturing" />
                 <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
 
+                {isCable ? (<>
+                <SubLabel label="Engineering" />
+                <NavBtn id="stdbom" label="Engineering (BOM · design · TDS)" icon={ClipboardList} />
+
+                <SubLabel label="Planning" />
+                <NavBtn id="ordertracker" label="Order Tracker (WO)" icon={BarChart2} />
+
+                <SubLabel label="Stores" />
+                <NavBtn id="items"        label="Item Master"          icon={Package} />
+                <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
+                <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}   icon={Package} />
+                <NavBtn id="stock"        label="Stock (position · ledger · bin card · racks)" icon={ClipboardList} />
+                <CreateBtn docKey="delivery"     bizType="manufacturing" />
+                <CreateBtn docKey="packing_list" bizType="manufacturing" />
+
+                <SubLabel label="Production" />
+                <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
+
+                <SubLabel label="Maintenance" />
+                <NavBtn id="assetregister" label="Maintenance (machines · PM · breakdown · spares)" icon={Wrench} />
+
+                <SubLabel label="Quality" />
+                <NavBtn id="incomingqa"     label="Quality control (incoming · production · final test · FAT)" icon={CheckSquare} />
+                <NavBtn id="isoprinciples"  label="ISO 9001 / QMS (procedures · CAPA · audit · MIS)" icon={CheckCircle} />
+                </>) : (<>
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Items"                icon={Package} />
-                <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
@@ -5638,7 +8566,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
 
                 <SubLabel label="Production" />
-                <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+                <NavBtn id="stdbom"           label="BOM (product code)" icon={ClipboardList} />
                 <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
                 <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
 
@@ -5651,6 +8579,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="capa"           label="CAPA"              icon={AlertTriangle} />
                 <NavBtn id="internalaudit"  label="Internal Audit"    icon={ClipboardList} />
                 <NavBtn id="mis"            label="MIS / Mgmt Review" icon={BarChart2} />
+                </>)}
 
                 <SubLabel label="Assets" />
                 <NavBtn id="assetregister" label="Asset Register" icon={Package} />
@@ -5916,9 +8845,11 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           </Section>
 
           {/* Stores — all biz types */}
-          {(showTrade || showService || showFMAMC) && (
+          {(showTrade || showService || showFMAMC || isCable) && (
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
+              {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
+              {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
@@ -5971,8 +8902,44 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             </Section>
           )}
 
+          {/* Wires & Cables — process-flow menu */}
+          {isCable && (<>
+            <Section sectionKey="engineering" label="Engineering">
+              <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
+              <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
+              <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
+            </Section>
+            <Section sectionKey="planning" label="Planning">
+              <NavBtn id="ordertracker" label="Order Tracker" icon={BarChart2} />
+              <NavBtn id="boshortage" label="BO Shortages → PR" icon={AlertTriangle} />
+            </Section>
+            <Section sectionKey="production" label="Production">
+              <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
+              <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
+              {(fc.registers || []).includes('metal') && <NavBtn id="metalrecon" label="Metal Reconciliation" icon={BarChart2} />}
+            </Section>
+            <Section sectionKey="maintenance" label="Maintenance">
+              <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
+              <NavBtn id="pmschedules"   label="Preventive Maintenance"       icon={ClipboardList} />
+              <NavBtn id="fmworkorders"  label="Breakdown Log"                icon={Wrench} />
+              <NavBtn id="fmspareparts"  label="Maintenance Spares"           icon={Package} />
+            </Section>
+            <Section sectionKey="quality" label="Quality">
+              <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
+              <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
+              <NavBtn id="routinetest"    label={fc.test.menu} icon={CheckCircle} />
+              <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
+              <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
+              <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
+              <NavBtn id="capa"           label="CAPA"                        icon={AlertTriangle} />
+              <NavBtn id="calibration"    label="Calibration"                 icon={CheckCircle} />
+              <NavBtn id="internalaudit"  label="Internal Audit"              icon={ClipboardList} />
+              <NavBtn id="mis"            label="MIS / Mgmt Review"           icon={BarChart2} />
+            </Section>
+          </>)}
+
           {/* Engineering */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="engineering" label="Engineering">
               <NavBtn id="partsmaster" label="Parts Master"  icon={Wrench} />
               <NavBtn id="engdocs"     label="Eng Documents" icon={BookOpen} />
@@ -5981,17 +8948,17 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           )}
 
           {/* Production */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="production" label="Production">
-              <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
-              <NavBtn id="bom"              label="Bill of Materials" icon={ClipboardList} />
+              {!(showTrade || showService || showFMAMC) && <NavBtn id="items" label="Item Master" icon={Package} />}
+              <NavBtn id="stdbom"           label="BOM (product code)" icon={ClipboardList} />
               <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
               <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
             </Section>
           )}
 
           {/* Quality */}
-          {showProduction && (
+          {showProduction && !isCable && (
             <Section sectionKey="quality" label="Quality">
               <NavBtn id="isoprinciples"  label="ISO Principles"    icon={CheckCircle} />
               <NavBtn id="deptprocedures" label="Dept Procedures"   icon={BookOpen} />
@@ -6085,6 +9052,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
       <Section sectionKey="sales" label="Sales">
         <NavBtn id="customers" label="Customers"     icon={Users} />
@@ -6121,6 +9089,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
       </div>
       <Section sectionKey="purchase" label="Purchase">
         <NavBtn id="vendors"   label="Vendors"          icon={Truck} />
@@ -6154,6 +9123,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
       </div>
       {showTrade && (
@@ -6167,7 +9137,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       {showProduction && (
         <Section sectionKey="production" label="Production">
-          <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+          {!showTrade && <NavBtn id="items" label="Item Master" icon={Package} />}
           <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
         </Section>
       )}
@@ -6200,6 +9170,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard"     icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="All Documents" icon={FileText} />
       </div>
       <Section sectionKey="sales" label="Parties">
@@ -6234,6 +9205,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       <div style={styles.navGroup}>
         <NavBtn id="dashboard" label="Dashboard" icon={LayoutDashboard} />
+        <NavBtn id="insights" label="Business Insights" icon={BarChart2} />
         <NavBtn id="documents" label="Documents"  icon={FileText} />
       </div>
       <SidebarFooter syncStatus={syncStatus} user={user} userRole={userRole} onLogout={onLogout} view={view} setView={setView} unreadCount={unreadCount} onShowNotifications={onShowNotifications} />
@@ -6336,7 +9308,7 @@ function HsnSearchModal({ onSelect, onClose }) {
     h.code.startsWith(q) || h.desc.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal onClose={onClose} title="HSN / SAC Code Lookup">
+    <Modal dock={false} onClose={onClose} title="HSN / SAC Code Lookup">
       <div style={{ marginBottom: 10 }}>
         <input
           autoFocus
@@ -6405,7 +9377,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
   }
 
   return (
-    <Modal onClose={onClose} title="📋 Load Activities into Invoice" width={580}>
+    <Modal dock={false} onClose={onClose} title="📋 Load Activities into Invoice" width={580}>
       <div style={{ marginBottom: 12 }}>
         <label style={styles.label}>Project</label>
         <select value={selProject} onChange={e => { setSelProject(e.target.value); setSelected({}); }} style={styles.input}>
@@ -6462,7 +9434,18 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+  // Manufacturing: sales documents pick only finished products (and services); purchase documents never pick finished products.
+  const pickItems = (() => {
+    const mfg = (doc.bizType || '') === 'manufacturing';
+    if (!mfg) return items || [];
+    const sale = ['quotation', 'invoice', 'delivery', 'packing_list', 'creditnote', 'proforma'].includes(doc.type);
+    const buy = ['purchase', 'purchasebill', 'purchaseorder'].includes(doc.type);
+    const keep = (m) => (doc.items || []).some(it => it.itemId === m.id);
+    const list = sale ? (items || []).filter(m => FG_CATS.includes(m.category) || m.category === 'Service' || keep(m))
+      : buy ? (items || []).filter(m => !FG_CATS.includes(m.category) || keep(m)) : (items || []);
+    return list.length ? list.slice().sort((x, y) => String(x.itemCode || x.name).localeCompare(String(y.itemCode || y.name))) : (items || []);
+  })();
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -6629,6 +9612,47 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
               <option value="">📄 View {t.label}s ▾</option>
               {sameDocs.map(d => <option key={d.id} value={d.id}>{d.number} · {d.date}</option>)}
             </select>
+          )}
+          {dispatchCheck && ['delivery', 'packing_list'].includes(doc.type) && (() => { const c = dispatchCheck, f = n => '₹' + Math.round(n || 0).toLocaleString('en-IN'); return (
+            <div style={{ width: '100%', margin: '6px 0', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: c.ok ? '#EAF6EE' : '#FDEEEC', border: '1px solid ' + (c.ok ? '#B7DEC4' : '#F2B8AE'), color: c.ok ? '#1A7A3E' : '#B5453A' }}>
+              <b>{c.ok ? '✔ Payment received — dispatch cleared' : '⛔ No payment, no dispatch'}</b>{c.ref ? ' · WO ' + woNo(c.ref) : ' · customer level'} · This dispatch {f(c.value)} · Already dispatched {f(c.prior)} · Received {f(c.paid)}{!c.ok ? ' · Short ' + f(c.short) + ' — record a receipt linked to ' + (c.ref || 'the invoice') + ', then save.' : ''}
+            </div>); })()}
+          {doc.type === 'quotation' && costCheck.length > 0 && (() => { const low = costCheck.filter(c => c.rate < c.cost), minM = Math.min(...costCheck.map(c => c.margin)); return (
+            <details style={{ position: 'relative' }}>
+              <summary style={{ listStyle: 'none', cursor: 'pointer', padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: low.length ? '#FDEEEC' : '#EAF6EE', color: low.length ? '#B5453A' : '#1A7A3E', border: '1px solid ' + (low.length ? '#F2B8AE' : '#B7DFC4') }}>{low.length ? '⚠ ' + low.length + ' below cost' : 'Margin ' + (isFinite(minM) ? minM.toFixed(1) : '—') + '%+'}</summary>
+              <div style={{ position: 'absolute', zIndex: 300, top: '110%', left: 0, background: '#fff', border: '1px solid #E2DDD5', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 10, width: 480 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}><thead><tr>{['Item', 'BOM cost / unit', 'Quoted rate', 'Margin'].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 5px', color: '#888', fontSize: 11 }}>{h}</th>)}</tr></thead>
+                  <tbody>{costCheck.map((c, i) => <tr key={i}><td style={{ padding: '3px 5px' }}>{c.name}</td><td style={{ padding: '3px 5px' }}>{c.cost.toFixed(2)}</td><td style={{ padding: '3px 5px' }}>{c.rate.toFixed(2)}</td><td style={{ padding: '3px 5px', fontWeight: 700, color: c.margin < 0 ? '#B5453A' : c.margin < 8 ? '#E07B00' : '#1A7A3E' }}>{c.margin.toFixed(1)}%</td></tr>)}</tbody></table>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>Cost = BOM materials at latest purchase rates + conversion %. Rate after line discount.</div>
+              </div>
+            </details>); })()}
+          {doc.type === 'quotation' && bomMissing.length > 0 && <button onClick={() => onOrderAction && onOrderAction('stdbom', doc)} title={'No BOM for: ' + bomMissing.join(', ')} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#FFF4D6', color: '#7A4B00', border: '1px solid #F2D48A', cursor: 'pointer' }}>⚠ BOM missing ({bomMissing.length})</button>}
+          {doc.type === 'quotation' && doc.id && onQuoteOutcome && (
+            doc.outcome ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 700, background: doc.outcome === 'won' ? '#D6F0E0' : '#FBEAE7', color: doc.outcome === 'won' ? '#1A5C35' : '#B5453A' }}>{doc.outcome === 'won' ? '✓ Won' : '✗ Lost'}{doc.outcomeDate ? ' · ' + doc.outcomeDate : ''}</span>
+                {doc.outcome === 'won' && doc.woNo && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12.5, fontWeight: 800, background: '#1E2A4A', color: '#fff', letterSpacing: 0.3 }} title="Work Order no. — common tracking number for all departments">{doc.woNo}{doc.customerRef ? ' · Cust ref ' + doc.customerRef : ''}</span>}
+                {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
+                {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
+                {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.woNo || doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
+                {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
+              </span>
+            ) : (['draft', 'rejected', 'deleted'].includes(doc.status)
+              ? <span style={{ fontSize: 11.5, color: '#888' }} title="Submit / approve the quotation first">Won / Lost after approval</span>
+              : <span style={{ display: 'inline-flex', gap: 6 }}>
+                  <button onClick={() => onQuoteOutcome(doc, 'won')} style={{ ...styles.ghostBtn, padding: '5px 10px', fontSize: 12, color: '#1A5C35', borderColor: '#9FD3B2' }}>✓ Mark Won</button>
+                  <button onClick={() => onQuoteOutcome(doc, 'lost')} style={{ ...styles.ghostBtn, padding: '5px 10px', fontSize: 12, color: '#B5453A', borderColor: '#F2B8AE' }}>✗ Lost</button>
+                </span>)
+          )}
+          {['delivery', 'packing_list'].includes(doc.type) && onPickDrums && releasedDrums.length > 0 && (
+            <details style={{ position: 'relative' }}>
+              <summary style={{ ...styles.ghostBtn, listStyle: 'none', cursor: 'pointer' }}>＋ Add released {mfgCfg().unit.plural.toLowerCase()} ({releasedDrums.length})</summary>
+              <div style={{ position: 'absolute', zIndex: 300, top: '110%', left: 0, background: '#fff', border: '1px solid #E2DDD5', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 10, width: 460, maxHeight: 340, overflowY: 'auto' }}>
+                <div style={{ fontSize: 12, color: '#777', marginBottom: 6 }}>Drums that passed the routine test and are not dispatched. They are marked dispatched when you save this document.</div>
+                {releasedDrums.slice().sort((a, b) => String(a.expiry || '9999').localeCompare(String(b.expiry || '9999'))).map(d => <label key={d.key} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', fontSize: 12.5, borderBottom: '1px solid #F0ECE0' }}><input type="checkbox" className="drum-pick" value={d.key} /><b>{d.drumNo}</b> · {d.product} · {d.length} {mfgCfg().unit.qtyUnit}{d.expiry ? <span style={{ color: (new Date(d.expiry) - new Date()) / 86400000 <= 30 ? '#B5453A' : '#888' }}> · exp {d.expiry}</span> : null}{d.order.orderRef ? <span style={{ color: '#888' }}> · {d.order.orderRef.docNo}/{d.order.orderRef.itemNo}</span> : null}</label>)}
+                <button onClick={(e) => { const box = e.currentTarget.parentElement; const keys = [...box.querySelectorAll('input.drum-pick:checked')].map(x => x.value); if (!keys.length) { alert('Select at least one drum.'); return; } onPickDrums(doc, keys); box.parentElement.removeAttribute('open'); }} style={{ ...styles.primaryBtn, marginTop: 8 }}>Add selected drums</button>
+              </div>
+            </details>
           )}
           {/* Convert to → dropdown */}
           {onConvert && CONVERT_TO[doc.type] && doc.id && (
@@ -7035,7 +10059,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                         style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 4, fontSize: 11, padding: '3px 6px', marginBottom: 5, background: '#fff', color: '#1E2A4A' }}
                       >
                         <option value="">— Select from items master —</option>
-                        {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
                       </select>
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -7565,7 +10589,7 @@ function DocEditor({ doc, setDoc, customers, vendors, items, businessInfo, userR
                       {isEditable && <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                         <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 240 }}>
                           <option value="">Custom item</option>
-                          {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                          {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
                         </select>
                         {_gid && <span style={{ fontSize: 10, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 7px', whiteSpace: 'nowrap' }}>{_isHead ? '⑃ group ' + _span : '↳ grouped'}</span>}
                         {_gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 7px' }} title="Split group">Unmerge</button>}
@@ -8108,7 +11132,7 @@ function PettyCashVoucherPrint({ entry, businessInfo, onClose }) {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1E2A4A' }} className="no-print">
         <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Petty Cash Voucher</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => window.print()} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
+          <button onClick={() => printView('.petty-voucher-print', businessInfo)} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Printer size={14}/> Print</button>
           <button onClick={() => downloadDocPDF('.petty-voucher-print', `petty-voucher-${entry.voucherNo || ''}.pdf`)} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><Download size={14}/> PDF</button>
           <button onClick={onClose} style={{ ...styles.ghostBtn, background: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.3)', fontSize: 13 }}><X size={14}/></button>
         </div>
@@ -8343,6 +11367,26 @@ function VoucherList({ vouchers, setVouchers, businessInfo, customers, vendors, 
   );
 }
 
+// Dropdown + free typing in one field (pick from the list or type a value that is not in it)
+function ComboField({ value, onChange, options = [], placeholder, onPick, invalid }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const q = _nm(value);
+  const shown = (all || !q ? options : options.filter(o => _nm(o.value).includes(q) || _nm(o.label).includes(q) || _nm(o.sub).includes(q))).slice(0, 60);
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ display: 'flex' }}>
+        <input value={value} onChange={e => { onChange(e.target.value); setOpen(true); setAll(false); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder={placeholder} style={{ ...styles.input, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderColor: invalid ? '#B91C1C' : undefined }} />
+        <button type="button" onMouseDown={e => { e.preventDefault(); setAll(true); setOpen(o => !o); }} style={{ ...styles.input, width: 40, borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, cursor: 'pointer', background: '#F8F6F0' }} title="Show list">▾</button>
+      </div>
+      {open && shown.length > 0 && <div style={{ position: 'absolute', zIndex: 400, left: 0, right: 0, top: '100%', background: '#fff', border: '1px solid #DDD', borderRadius: 8, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', maxHeight: 260, overflowY: 'auto' }}>
+        {shown.map(o => <div key={o.value + (o.sub || '')} onMouseDown={e => { e.preventDefault(); onChange(o.value); if (onPick) onPick(o); setOpen(false); }} style={{ padding: '7px 10px', cursor: 'pointer', borderBottom: '1px solid #F2EFE8', fontSize: 13 }} onMouseEnter={e => e.currentTarget.style.background = '#F5F3EF'} onMouseLeave={e => e.currentTarget.style.background = '#fff'}>
+          <b>{o.label || o.value}</b>{o.sub ? <span style={{ color: '#888', fontSize: 11.5 }}> · {o.sub}</span> : null}</div>)}
+      </div>}
+    </div>
+  );
+}
+
 function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onClose }) {
   const [form, setForm] = useState({
     id:           voucher?.id || '',
@@ -8367,9 +11411,14 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   // Invoices / POs available for linking (receipt → invoices; payment → purchase bills)
   const linkableDocs = documents.filter(d =>
     form.type === 'receipt'
-      ? d.type === 'invoice'
-      : d.type === 'purchasebill' || d.type === 'purchaseorder'
-  );
+      ? (d.type === 'invoice' || (d.type === 'quotation' && d.outcome === 'won'))
+      : d.type === 'purchasebill' || d.type === 'purchase' || d.type === 'purchaseorder'
+  ).filter(d => d.status !== 'deleted');
+  const partyOfDoc = (d) => { const list = form.type === 'receipt' ? customers : vendors; const p = (list || []).find(x => x.id === (d.customerId || d.vendorId)); return p ? p.name : ((d.customerSnapshot && d.customerSnapshot.name) || d.vendorName || ''); };
+  const docTotal = (d) => { try { return Math.round((computeTotals(d, d.placeOfSupply || '', 'india').grandTotal || 0) * 100) / 100; } catch (e) { return 0; } };
+  const partyList = form.voucherSubtype === 'order' ? (form.type === 'receipt' ? customers : vendors) : [...customers, ...vendors];
+  const docOptions = linkableDocs.filter(d => !form.party.trim() || _nm(partyOfDoc(d)) === _nm(form.party) || !partyList.some(p => _nm(p.name) === _nm(form.party)))
+    .map(d => ({ value: d.number || d.docNumber || d.id, label: d.number || d.docNumber || d.id, sub: [(DOC_TYPES[d.type] || {}).label || d.type, partyOfDoc(d), docTotal(d) ? '₹' + docTotal(d).toLocaleString('en-IN') : '', d.status !== 'approved' ? 'not approved' : ''].filter(Boolean).join(' · '), doc: d }));
   const linkableNos = [...new Set(linkableDocs.map(d => d.number || d.docNumber || d.id).filter(Boolean))];
 
   function validateLink() {
@@ -8381,10 +11430,10 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
       (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()
     );
     if (!linked) {
-      setLinkError('Document not found. Check the invoice/PO number.');
-      return false;
+      setLinkError('');
+      return true; // manual reference (not in the system) — confirmed on save
     }
-    if (linked.status !== 'approved') {
+    if (linked.status !== 'approved' && !(linked.type === 'quotation' && linked.outcome === 'won')) {
       const label = form.type === 'receipt' ? 'Invoice' : 'Purchase bill / PO';
       setLinkError(`${label} "${form.linkedDocNo}" is not approved yet. Only approved documents can be linked to a voucher.`);
       return false;
@@ -8396,6 +11445,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   function handleSave() {
     if (!form.date || !form.amount || !form.party) { alert('Date, party and amount are required.'); return; }
     if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !validateLink()) return;
+    if (form.voucherSubtype === 'order' && form.linkedDocNo.trim() && !linkableDocs.some(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()) && !window.confirm('"' + form.linkedDocNo.trim() + '" is not in the system. Save it as a manual reference?')) return;
     onSave({ ...form, amount: parseFloat(form.amount) || 0 });
   }
 
@@ -8441,8 +11491,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Party Name</label>
-          <input list="voucher-party-list" value={form.party} onChange={e => set('party', e.target.value)} style={styles.input} placeholder="Customer / Vendor / Name" />
-          <datalist id="voucher-party-list">{parties.map(p => <option key={p} value={p} />)}</datalist>
+          <ComboField value={form.party} onChange={v => set('party', v)} placeholder={form.voucherSubtype === 'order' ? (isReceipt ? 'Select customer or type' : 'Select vendor or type') : 'Customer / Vendor / Name'} options={partyList.map(p => ({ value: p.name, label: p.name, sub: [p.gstin || p.gst || '', p.city || ''].filter(Boolean).join(' · ') }))} />
         </div>
 
         {/* Order-linked doc number field — only shown for 'order' subtype */}
@@ -8451,15 +11500,11 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
             <label style={styles.label}>{isReceipt ? 'Invoice No / PO No' : 'Purchase Bill No / PO No'} <span style={{ color: '#B91C1C' }}>*</span></label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <div style={{ flex: 1 }}>
-                <input
-                  list="voucher-doc-list"
-                  value={form.linkedDocNo}
-                  onChange={e => set('linkedDocNo', e.target.value)}
-                  onBlur={validateLink}
-                  style={{ ...styles.input, borderColor: linkError ? '#B91C1C' : undefined }}
-                  placeholder={isReceipt ? 'e.g. INV-001' : 'e.g. PB-001 / PO-001'}
-                />
-                <datalist id="voucher-doc-list">{linkableNos.map(n => <option key={n} value={n} />)}</datalist>
+                <ComboField value={form.linkedDocNo} onChange={v => set('linkedDocNo', v)} invalid={!!linkError}
+                  placeholder={isReceipt ? 'Select invoice or type (e.g. INV-001)' : 'Select purchase bill / PO or type (e.g. PO-001)'}
+                  options={docOptions}
+                  onPick={o => { const d = o.doc; setForm(f => ({ ...f, linkedDocNo: o.value, party: f.party.trim() ? f.party : partyOfDoc(d), amount: (f.amount === '' || f.amount == null) ? (docTotal(d) || '') : f.amount })); setLinkError(d.status !== 'approved' ? ((isReceipt ? 'Invoice' : 'Purchase bill / PO') + ' "' + o.value + '" is not approved yet. Only approved documents can be linked to a voucher.') : ''); }} />
+                {form.linkedDocNo.trim() && !linkableDocs.some(d => (d.number || d.docNumber || d.id) === form.linkedDocNo.trim()) && <div style={{ marginTop: 6, fontSize: 12, color: '#856404' }}>Not found in the system — will be saved as a manual reference.</div>}
                 {linkError && (
                   <div style={{ marginTop: 6, fontSize: 12, color: '#B91C1C', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <AlertTriangle size={13} /> {linkError}
@@ -8598,6 +11643,18 @@ function LetterheadHeader({ bi, style = {} }) {
 }
 
 function printHTML(html){
+  // Route through the common print engine (framed A4 pages, page footer, verification QR). Detached holder → no style leak.
+  try {
+    const sm = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+    const bm = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const hold = document.createElement('div');
+    hold.className = 'print-area';
+    hold.innerHTML = (sm ? '<style>' + sm[1].replace(/@page[^{]*\{[^}]*\}/g, '') + '</style>' : '') + (bm ? bm[1] : html);
+    if ((hold.textContent || '').trim()) { printView(hold, (typeof window !== 'undefined' && window.__operixBI) || {}, {}); return; }
+  } catch (e) { console.warn('printHTML via engine failed', e); }
+  printHTMLLegacy(html);
+}
+function printHTMLLegacy(html){
   try {
     const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -8856,6 +11913,9 @@ function PartyStatementModal({ party, vouchers, businessInfo, onClose }) {
 
 // ─── Stock ─────────────────────────────────────────────────────
 
+// Ledger direction: explicit type wins; older entries without a type carry a signed qty (+ in, − out).
+const ledgerIn = (e) => (e && e.type) ? e.type === 'in' : (parseFloat(e && e.qty) || 0) > 0;
+const ledgerQty = (e) => Math.abs(parseFloat(e && e.qty) || 0);
 function computeStock(stockLedger, items) {
   // Returns map: itemId → { qty, value, item }
   const map = {};
@@ -8864,9 +11924,9 @@ function computeStock(stockLedger, items) {
   });
   (stockLedger || []).forEach(e => {
     if (!map[e.itemId]) map[e.itemId] = { qty: 0, value: 0, item: { name: e.itemName, unit: '' } };
-    const qty = parseFloat(e.qty) || 0;
+    const qty = ledgerQty(e);
     const rate = parseFloat(e.rate) || 0;
-    if (e.type === 'in') {
+    if (ledgerIn(e)) {
       map[e.itemId].qty += qty;
       map[e.itemId].value += qty * rate;
     } else {
@@ -8965,8 +12025,8 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
             {rows.length === 0 && <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: '#888780', padding: 28 }}>No items found.</td></tr>}
             {rows.map(({ qty, value, item }) => {
               const ledgerRows = (stockLedger || []).filter(e => e.itemId === item.id);
-              const totalIn  = ledgerRows.filter(e => e.type === 'in').reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
-              const totalOut = ledgerRows.filter(e => e.type === 'out').reduce((s, e) => s + (parseFloat(e.qty) || 0), 0);
+              const totalIn  = ledgerRows.filter(e => ledgerIn(e)).reduce((s, e) => s + ledgerQty(e), 0);
+              const totalOut = ledgerRows.filter(e => !ledgerIn(e)).reduce((s, e) => s + ledgerQty(e), 0);
               const openingStock = parseFloat(item.openingStock) || 0;
               const minStock = parseFloat(item.minStock) || 0;
               const isLow = minStock > 0 && qty <= minStock;
@@ -8994,7 +12054,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
       </div>
 
       {showAdj && (
-        <Modal title="Manual Stock Adjustment" onClose={() => setShowAdj(false)}>
+        <Modal dock={false} title="Manual Stock Adjustment" onClose={() => setShowAdj(false)}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Item</label>
@@ -9081,9 +12141,9 @@ function StockLedgerView({ items, stockLedger, setStockLedger, businessInfo }) {
                 <td style={{ ...styles.td, fontWeight: 500 }}>{e.itemName}</td>
                 <td style={styles.td}>
                   <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 4, padding: '2px 8px',
-                    background: e.type === 'in' ? '#D1FAE5' : '#FEE2E2',
-                    color: e.type === 'in' ? '#065F46' : '#B91C1C' }}>
-                    {e.type === 'in' ? '▲ IN' : '▼ OUT'}
+                    background: ledgerIn(e) ? '#D1FAE5' : '#FEE2E2',
+                    color: ledgerIn(e) ? '#065F46' : '#B91C1C' }}>
+                    {ledgerIn(e) ? '▲ IN' : '▼ OUT'}
                   </span>
                 </td>
                 <td style={{ ...styles.td, textAlign: 'right', fontWeight: 600 }}>{e.qty}</td>
@@ -9723,8 +12783,8 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
 
   let running = openingStock;
   const rows = entries.map(e => {
-    const qty = parseFloat(e.qty) || 0;
-    const isIn = e.type === 'in';
+    const qty = ledgerQty(e);
+    const isIn = ledgerIn(e);
     running = isIn ? running + qty : running - qty;
     const siv = e.sourceType === 'siv' ? storeIssues.find(s => s.id === e.sourceId) : null;
     return { ...e, inQty: isIn ? qty : 0, outQty: isIn ? 0 : qty, balance: running, siv };
@@ -9745,7 +12805,7 @@ function BinCard({ items, stockLedger: allSL, businessInfo, storeIssues: allSIV 
         </div>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHBin(v => !v)} style={{ ...styles.ghostBtn, ...(useLHBin ? { background: '#EEF2FF', color: '#3D52A0', fontWeight: 600 } : {}) }}>📃 {useLHBin ? 'Letterhead ON' : 'Use Letterhead'}</button>}
         <button onClick={() => downloadDocPDF('.print-area','bin-card.pdf')} style={styles.ghostBtn}><Download size={15}/> PDF</button>
-        <button onClick={() => window.print()} style={styles.primaryBtn}>🖨 Print</button>
+        <button onClick={() => printView('.print-area', useLHBin ? businessInfo : { ...businessInfo, printHeader: 'logo' })} style={styles.primaryBtn}>🖨 Print</button>
       </div>
 
       {/* Item selector */}
@@ -10257,12 +13317,14 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
     const isNew = !(allGrns || []).find(g => g.id === grn.id);
     let updated;
     if (isNew) {
-      const newGrn = { ...grn, bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
+      const mfgGate = currentBizType === 'manufacturing';
+      const waitsQa = (l) => mfgGate && (!l.qaStatus || l.qaStatus === 'inprocess');
+      const newGrn = { ...grn, lines: (grn.lines || []).map(l => waitsQa(l) ? { ...l, qaPending: true } : l), bizType: currentBizType, id: crypto.randomUUID(), createdAt: Date.now(), status: 'draft', rejectionNote: '' };
       updated = [newGrn, ...(allGrns || [])];
       // Only create stock IN entries for QA-accepted / visually OK lines
       if (setStockLedger) {
         const entries = (grn.lines || [])
-          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok')
+          .filter(l => l.itemId && parseFloat(l.acceptedQty || l.receivedQty) > 0 && l.qaStatus !== 'rejected' && l.qaStatus !== 'notok' && !waitsQa(l))
           .map(l => {
             const it = items.find(i => i.id === l.itemId);
             const acceptedQty = (l.qaStatus === 'inprocess' || l.qaStatus === 'ok')
@@ -10353,14 +13415,14 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
       </div>
 
       {showForm && (
-        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <GRNForm allGrns={allGrns} grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printGrn && <GRNPrint grn={printGrn} businessInfo={businessInfo} onClose={() => setPrintGrn(null)} />}
     </div>
   );
 }
 
-function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose }) {
+function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose, allGrns = [] }) {
   const [form, setForm] = useState({ lines: [], ...grn });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const isTrading = businessInfo?.companyType === 'trading';
@@ -10369,14 +13431,17 @@ function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose })
     const po = poList.find(p => p.id === poId);
     if (!po) { set('poId', poId); return; }
     const vendor = vendors.find(v => v.id === po.customerId);
-    const lines = (po.items || []).map(it => ({
-      itemId: it.itemId || '',
-      itemName: it.name,
-      orderedQty: parseFloat(it.qty) || 0,
-      receivedQty: parseFloat(it.qty) || 0,
-      rate: parseFloat(it.rate) || 0,
+    const bal = poBalance(po, allGrns, form.id);
+    const lines = bal.filter(b => b.balance > 0).map(b => ({
+      itemId: b.itemId,
+      itemName: b.name,
+      orderedQty: b.ordered,
+      receivedQty: b.balance,
+      rate: b.rate,
+      ...(b.closed > 0 ? { balanceNote: 'Balance / replacement — ' + b.closed + ' of ' + b.ordered + ' already closed' } : {}),
     }));
-    setForm(p => ({ ...p, poId, poNumber: po.number, vendorName: vendor ? vendor.name : '', lines }));
+    if (!lines.length) alert('PO ' + po.number + ' is fully received — nothing pending (rejected quantity closed by debit note is not expected again).');
+    setForm(p => ({ ...p, poId, poNumber: po.number, vendorName: vendor ? vendor.name : '', lines, orderRef: po.orderRef || null }));
   }
 
   function updateLine(idx, key, val) {
@@ -13019,7 +16084,7 @@ function DateRangePicker({ from, setFrom, to, setTo, count, label }) {
 // ─────────────────────────────────────────────
 // P&L AUDIT VIEW
 // ─────────────────────────────────────────────
-function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
+function PurchaseRequisitionView({ onAutoPO, purchaseReqs, setPurchaseReqs, items = [], siteProjects = [], productionOrders = [], customers = [], boms = [], mepBoms = [], businessInfo, userRole, currentBizType = 'trading', isMultiBiz = false, onConvertToPO, assets = [], setAssets }) {
   const today = new Date().toISOString().slice(0, 10);
   const blankItem = () => ({ itemId: '', itemCode: '', name: '', uom: '', qty: '', rate: '', hsn: '', purpose: '', make: '', spec: '' });
   const blank = () => ({
@@ -13073,6 +16138,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   function del(id) { if (!window.confirm('Delete this requisition?')) return; setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).filter(x => x.id !== id)); }
   function setStatus(m, status) {
     setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === m.id ? { ...x, approvalStatus: status, updatedAt: new Date().toISOString() } : x));
+    if (status === 'approved' && onAutoPO && !m.convertedToPO) onAutoPO(m);
   }
 
   const upd = (patch) => setEditing(e => ({ ...e, ...patch }));
@@ -13217,10 +16283,49 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
   const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
   const typeLabel = t => t === 'capex' ? 'Capex (Plant & Machinery)' : t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
 
+  // Fill item code + description on auto-raised lines from the Item Master / the order's product BOM
+  const repairPrLines = (m) => {
+    const used = new Set();
+    let cands = null;
+    const bomCands = () => {
+      if (cands) return cands;
+      cands = [];
+      if (!m.orderRef || !m.orderRef.docNo) return cands;
+      (productionOrders || []).filter(o => o.orderRef && _nm(o.orderRef.docNo) === _nm(m.orderRef.docNo)).forEach(o => {
+        const b = (boms || []).find(x => x.id === o.bomId); if (!b) return;
+        const fac = (parseFloat(o.quantity) || 0) / (parseFloat(b.outputQty) || 1);
+        (b.materials || []).forEach((ml, i) => { const ri = resolveMatItem(ml, items); if (ri.itemId || ri.name) cands.push({ key: o.id + ':' + i, ri, unit: _nm(ml.unit || ri.unit), req: (parseFloat(ml.qty) || 0) * fac }); });
+      });
+      return cands;
+    };
+    let changed = false;
+    const its = (m.items || []).map(it => {
+      if (it.itemId && it.itemCode && it.name && it.name !== '—') return it;
+      let ri = resolveMatItem(it, items);
+      if (!ri.itemId && (!it.name || it.name === '—')) {
+        const q = parseFloat(it.qty) || 0;
+        const pool = bomCands().filter(c => !used.has(c.key) && (!it.uom || !c.unit || c.unit === _nm(it.uom)) && c.req + 0.0005 >= q);
+        pool.sort((a, b) => (a.req - q) - (b.req - q));
+        if (pool[0]) { used.add(pool[0].key); ri = pool[0].ri; }
+      }
+      if (!ri.itemId && !ri.name) return it;
+      const nx = { ...it, itemId: it.itemId || ri.itemId, itemCode: it.itemCode || ri.itemCode, name: (it.name && it.name !== '—') ? it.name : (ri.name || it.name) };
+      if (nx.itemId !== it.itemId || nx.itemCode !== it.itemCode || nx.name !== it.name) changed = true;
+      return nx;
+    });
+    return changed ? { ...m, items: its } : m;
+  };
+  useEffect(() => {
+    if (!setPurchaseReqs || !(purchaseReqs || []).length) return;
+    const fixes = {};
+    (purchaseReqs || []).forEach(m => { if ((m.items || []).some(it => !it.itemCode || !it.name || it.name === '—')) { const f = repairPrLines(m); if (f !== m) fixes[m.id] = f; } });
+    if (Object.keys(fixes).length) setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => fixes[x.id] || x));
+  }, [purchaseReqs, items, boms, productionOrders]);
+
   // ── PRINT ──
   if (viewDoc) {
-    const m = viewDoc;
-    const rows = (m.items || []).filter(it => (it.name || '').trim());
+    const m = repairPrLines(viewDoc);
+    const rows = (m.items || []).filter(it => (it.name || it.itemCode || '').trim());
     return (
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
@@ -13246,7 +16351,7 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
             </tbody>
           </table>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
-            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item / Material', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item code', 'Item description', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {rows.map((it, i) => m.type === 'capex' ? (
                 <tr key={i}>
@@ -13260,7 +16365,8 @@ function PurchaseRequisitionView({ purchaseReqs, setPurchaseReqs, items = [], si
               ) : (
                 <tr key={i}>
                   <td style={td}>{i + 1}</td>
-                  <td style={td}>{it.name}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 600 }}>{it.itemCode || '—'}</td>
+                  <td style={td}>{it.name || '—'}</td>
                   <td style={td}>{it.uom || '—'}</td>
                   <td style={td}>{it.qty || '—'}</td>
                   <td style={td}>{it.purpose || '—'}</td>
@@ -13964,7 +17070,7 @@ function FATSATView({ businessInfo, userRole, currentBizType = 'manufacturing', 
 }
 
 // ─── BO Shortages (Manufacturing) — material availability vs BOM requirement ──
-function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
+function BOShortageView({ items = [], stockLedger = [], businessInfo, userRole, currentBizType = 'manufacturing', isMultiBiz = false, boms = [], rawMaterials = [], boShortages = [], setBoShortages, purchaseReqs = [], setPurchaseReqs, setView }) {
   const canEdit = userRole === 'admin' || userRole === 'manager';
   const today = new Date().toISOString().slice(0, 10);
   const n3 = (x) => Math.round((parseFloat(x) || 0) * 1000) / 1000;
@@ -13975,19 +17081,18 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
   const [result, setResult] = React.useState(null);
   const [printRep, setPrintRep] = React.useState(null);
 
+  const _stockMap = computeStock(stockLedger, items);
   function buildRows(bom, q) {
     // Support both BOM shapes: BOMForm saves `materials` ({materialId,...}); older/other
     // BOMs may use `components` ({itemId,...}). Match stock from Raw Materials by id or name.
     const lines = (bom.materials && bom.materials.length) ? bom.materials : (bom.components || []);
     return lines.map(m => {
-      const mid = m.materialId || m.itemId || '';
       const nm = m.name || '';
-      let rm = rmById[mid];
-      if (!rm && nm) rm = (rawMaterials || []).find(r => (r.name || '').trim().toLowerCase() === nm.trim().toLowerCase());
+      const ms = matStock(m, { items, stockMap: _stockMap, rawMaterials });
       const perBom = parseFloat(m.qty) || 0;
       const overall = perBom * q;
-      const available = rm ? (parseFloat(rm.stock) || 0) : 0;
-      return { materialId: rm ? rm.id : mid, name: nm || (rm && rm.name) || '—', unit: m.unit || (rm && rm.unit) || '', perBom, overall, available, shortage: Math.max(0, overall - available) };
+      const available = ms.qty;
+      return { materialId: ms.id, itemId: ms.item ? ms.item.id : '', name: nm || (ms.item && ms.item.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || '', rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', perBom, overall, available, shortage: Math.max(0, overall - available) };
     });
   }
   function compute() {
@@ -14016,7 +17121,8 @@ function BOShortageView({ businessInfo, userRole, currentBizType = 'manufacturin
     if (!shortRows.length) { alert('No shortages — nothing to raise a PR for.'); return; }
     const items = shortRows.map(r => {
       const rm = rmById[r.materialId];
-      return { itemId: '', itemCode: '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: rm ? (parseFloat(rm.rate) || '') : '', hsn: '', purpose: 'BOM shortage — ' + rep.bomName };
+      const it = (items || []).find(x => x.id === (r.itemId || r.materialId));
+      return { itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : '', name: r.name, uom: r.unit, qty: Math.round(r.shortage * 1000) / 1000, rate: r.rate || (it ? (parseFloat(it.purchaseRate ?? it.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : '')), hsn: it ? (it.hsn || '') : '', purpose: 'BOM shortage — ' + rep.bomName };
     });
     const rec = {
       id: Date.now().toString(), number: nextPRNumber(), bizType: currentBizType,
@@ -14709,6 +17815,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);out.appendChild(s);cur=s;bd=b;}'
         + 'np();'
         + 'for(var i=0;i<BLOCKS.length;i++){var w=document.createElement("div");w.innerHTML=BLOCKS[i];var node=w.firstElementChild;if(!node)continue;bd.appendChild(node);if(bd.scrollHeight>bd.clientHeight+1){bd.removeChild(node);np();if(node.className&&node.className.indexOf("drow")>-1){var dh=document.createElement("div");dh.innerHTML=DHEADHTML;if(dh.firstElementChild)bd.appendChild(dh.firstElementChild);}bd.appendChild(node);}}'
+        + 'if(typeof QRH==="string"&&QRH){var le=bd.lastElementChild;var us=le?le.offsetTop+le.offsetHeight:0;var fr=bd.clientHeight-us;var sz=Math.min(112,fr-34);if(sz<64){np();sz=104;}var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}bd.appendChild(qw);}'
         + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
         + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
         + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
@@ -14735,7 +17842,7 @@ function MoMView({ businessInfo, userRole, currentBizType = 'trading', isMultiBi
         <div id="out"></div>
         <div id="hdtpl" style="display:none">${headerInner}</div>
         <div id="fttpl" style="display:none">${footerInner}</div>
-        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};${script}</script>
+        <script>var BLOCKS=${JSON.stringify(B)};var DHEADHTML=${JSON.stringify(DHEAD)};var QRH=${JSON.stringify(qrBoxHtml({ c: businessInfo.name, t: 'Minutes of Meeting', n: m.number, d: m.date, p: new Date().toISOString().slice(0, 10) }, 112))};${script}</script>
       </body></html>`;
       // Hidden iframe = isolated print context that works inside the desktop app
       // (window.open popups are blocked there). The in-document script paginates & prints.
@@ -15038,13 +18145,13 @@ function ProjectPnLView({ siteProjects = [], raBillings = [], siteActivities = [
   const pcol = (v) => ({ ...td, fontWeight: 700, color: v >= 0 ? '#1A7A3E' : '#B5453A' });
 
   return (
-    <div style={styles.page}>
+    <div style={styles.page} className="pnl-print-area">
       <div style={styles.pageHeader}>
         <div>
           <h2 className="serif" style={styles.pageTitle}>Project P&amp;L</h2>
           <p style={styles.muted}>Profit &amp; loss per project — billing vs cost</p>
         </div>
-        <button style={styles.secondaryBtn} className="no-print" onClick={() => window.print()}>Print</button>
+        <button style={styles.secondaryBtn} className="no-print" onClick={() => printView('.pnl-print-area', businessInfo)}>Print</button>
       </div>
 
       {rows.length > 0 && (() => {
@@ -15180,18 +18287,28 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
     const vlist = Array.isArray(vouchers) ? vouchers : [];
     const pcEntries = Array.isArray(pettyCash?.entries) ? pettyCash.entries : [];
 
-    // Revenue — approved/finalized invoices
-    const invoices = docs.filter(d => d.type === 'invoice' && inRange(d.date || '') && inDiv(d));
-    const revenue  = invoices.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+    // Amounts are computed from line items (documents have no stored "total"); P&L uses the value EXCLUDING GST.
+    const taxableOf = d => computeTotals(d, businessInfo?.state || '', businessInfo?.country || 'india').taxable || 0;
+    const live = d => d.status === 'approved' && inRange(d.date || '') && inDiv(d);
 
-    // COGS — purchase bills
-    const pbills = docs.filter(d => d.type === 'purchasebill' && inRange(d.date || '') && inDiv(d));
-    const cogs   = pbills.reduce((s, d) => s + (parseFloat(d.total) || 0), 0);
+    // Revenue — approved invoices less approved credit notes (taxable value, ex-GST)
+    const invoices = docs.filter(d => d.type === 'invoice' && live(d));
+    const cnotes   = docs.filter(d => d.type === 'creditnote' && live(d));
+    const revenue  = invoices.reduce((s, d) => s + taxableOf(d), 0) - cnotes.reduce((s, d) => s + taxableOf(d), 0);
 
-    // Operating expenses — voucher payments + petty cash debits
-    const voucherExp = vlist
-      .filter(v => inRange(v.date || '') && inDiv(v) && v.status !== 'rejected')
-      .reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+    // Payment vouchers only. Receipts are money IN (collections) — never an expense.
+    // A payment linked to a bill/PO just settles it (already in COGS) → skipped to avoid double counting.
+    const payments = vlist.filter(v => v.type === 'payment' && inRange(v.date || '') && inDiv(v) && v.status !== 'rejected' && v.status !== 'deleted');
+    const settles  = v => (v.voucherSubtype === 'order' && String(v.linkedDocNo || '').trim()) || ['Accounts Payable', 'Accounts Receivable', 'Sales', 'Loan', 'Capital'].includes(v.accountHead);
+    const direct   = payments.filter(v => !settles(v));
+
+    // COGS — approved purchase bills (ex-GST) + direct payments booked to "Purchase"
+    const pbills = docs.filter(d => d.type === 'purchasebill' && live(d));
+    const cogs   = pbills.reduce((s, d) => s + taxableOf(d), 0)
+      + direct.filter(v => v.accountHead === 'Purchase').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+
+    // Operating expenses — other direct payment vouchers + petty cash debits
+    const voucherExp = direct.filter(v => v.accountHead !== 'Purchase').reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
     const pcExp = pcEntries
       .filter(e => inRange(e.date || '') && inDiv(e) && e.status !== 'rejected')
       .reduce((s, e) => s + (parseFloat(e.debit) || 0), 0);
@@ -15244,8 +18361,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
       const abs = Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return n < 0 ? `(${sym}${abs})` : `${sym}${abs}`;
     };
-    const w = window.open('', '_blank');
-    w.document.write(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
+    printHTML(`<!DOCTYPE html><html><head><title>P&L – ${doc.periodLabel} ${doc.year}</title>
     <style>
       body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 40px; }
       h2 { text-align: center; font-size: 16px; margin: 0 0 2px; }
@@ -15289,8 +18405,6 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
     ${doc.notes ? `<hr/><p><strong>Notes:</strong> ${doc.notes}</p>` : ''}
     <div class="footer">Generated on ${new Date(doc.createdAt).toLocaleString('en-IN')} · Oryqen</div>
     </body></html>`);
-    w.document.close();
-    setTimeout(() => { w.print(); }, 400);
   }
 
   const cardStyle = { background: '#fff', borderRadius: 10, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' };
@@ -15314,7 +18428,7 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
           <div style={rowStyle}><span style={labelStyle}>Sales Revenue ({vpl.invoiceCount} invoices)</span><span style={valueStyle(vpl.revenue)}>{fmt(vpl.revenue)}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Cost of Goods Sold ({vpl.pbillCount} bills)</span><span style={valueStyle(-vpl.cogs)}>{fmt(-vpl.cogs)}</span></div>
           <div style={{ ...rowStyle, fontWeight: 700, borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}><span style={{ fontSize: 13 }}>GROSS PROFIT</span><span style={valueStyle(vpl.grossProfit)}>{fmt(vpl.grossProfit)}</span></div>
-          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Payment Vouchers + Petty Cash)</span><span style={valueStyle(-vpl.opExpenses)}>{fmt(-vpl.opExpenses)}</span></div>
           <div style={{ ...rowStyle, fontWeight: 700, fontSize: 15, background: vpl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', borderRadius: 7, padding: '10px 12px', marginTop: 8, border: `1.5px solid ${vpl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
             <span>NET {vpl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
             <span style={{ color: vpl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(vpl.netProfit)}</span>
@@ -15363,7 +18477,8 @@ function AuditView({ documents, vouchers, pettyCash, businessInfo, userRole, cur
           <span style={{ fontSize: 13 }}>GROSS PROFIT</span>
           <span style={valueStyle(pl.grossProfit)}>{fmt(pl.grossProfit)}</span>
         </div>
-        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={rowStyle}><span style={labelStyle}>Operating Expenses (Payment Vouchers + Petty Cash)</span><span style={valueStyle(-pl.opExpenses)}>{fmt(-pl.opExpenses)}</span></div>
+        <div style={{ fontSize: 11, color: '#999', margin: '6px 0 2px', lineHeight: 1.5 }}>Basis: approved invoices / credit notes / purchase bills, excluding GST. Receipt vouchers are collections (not expenses). Payments linked to a bill or PO are not counted again. Payroll is not included.</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderRadius: 8, marginTop: 8, background: pl.netProfit >= 0 ? '#EEF2FF' : '#FEF2F2', border: `1.5px solid ${pl.netProfit >= 0 ? '#6366F1' : '#FCA5A5'}` }}>
           <span style={{ fontWeight: 700, fontSize: 15 }}>NET {pl.netProfit >= 0 ? 'PROFIT' : 'LOSS'}</span>
           <span style={{ fontWeight: 700, fontSize: 15, color: pl.netProfit >= 0 ? '#4338CA' : '#B91C1C' }}>{fmt(pl.netProfit)}</span>
@@ -16141,7 +19256,7 @@ function TaxReport({ documents, customers, businessInfo }) {
         </div>
         {(businessInfo?.letterhead||businessInfo?.letterheadHtml) && <button onClick={() => setUseLHTax(v=>!v)} style={{ ...styles.ghostBtn, ...(useLHTax?{background:'#EEF2FF',color:'#3D52A0',fontWeight:600}:{}) }}>📃 {useLHTax?'Letterhead ON':'Use Letterhead'}</button>}
         <button style={styles.ghostBtn} onClick={() => downloadDocPDF('#tax-report-page','tax-report.pdf')}><Download size={15}/> PDF</button>
-        <button style={styles.primaryBtn} onClick={() => window.print()}><Printer size={15} /> Print</button>
+        <button style={styles.primaryBtn} onClick={() => printView('#tax-report-page', useLHTax ? businessInfo : { ...businessInfo, printHeader: 'logo' })}><Printer size={15} /> Print</button>
       </div>
 
       {useLHTax && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -16283,7 +19398,7 @@ function QCModal({ order, onSubmit, onClose }) {
   const [result, setResult] = useState('pass');
   const [notes, setNotes] = useState('');
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={styles.modal}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>QC — {order.number}</span>
@@ -16313,7 +19428,7 @@ function QCModal({ order, onSubmit, onClose }) {
           </button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -16474,7 +19589,7 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
   }
 
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={{ ...styles.modal, width: 560, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>{initial ? 'Edit Part' : 'New Part'}</span>
@@ -16511,6 +19626,11 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
             <input value={form.finish} onChange={e => set('finish', e.target.value)} style={styles.input} placeholder="e.g. Powder coated" />
           </div>
         </div>
+
+        {(PART_DATASHEET_PACK[_mfgType()] || null) && (<>
+          <div style={styles.sectionDivider}>Product datasheet — {(MFG_TYPES.find(t => t.id === _mfgType()) || {}).label}</div>
+          <SpecsFields specs={form.datasheet || {}} onChange={(d) => set('datasheet', d)} fields={PART_DATASHEET_PACK[_mfgType()]} />
+        </>)}
 
         <div style={styles.formGroup}>
           <label style={styles.label}>Tolerance / Specs</label>
@@ -16551,7 +19671,7 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
           <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save Part</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -16676,7 +19796,7 @@ function EngDocForm({ initial, parts, ownerUid, onSave, onClose, DOC_CATS }) {
   }
 
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={{ ...styles.modal, width: 520, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>{initial ? 'Edit Document' : 'New Eng. Document'}</span>
@@ -16738,7 +19858,7 @@ function EngDocForm({ initial, parts, ownerUid, onSave, onClose, DOC_CATS }) {
           <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save Document</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -16810,97 +19930,12 @@ function DrawingUploader({ files = [], onChange, ownerUid, folder }) {
   );
 }
 
-function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, businessInfo }) {
-  const [editing, setEditing] = useState(null);
-  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory';
-  const fmt = makeFmt(businessInfo);
 
-  function upsert(m) {
-    if (m.id) {
-      setRawMaterials((r) => r.map((x) => (x.id === m.id ? m : x)));
-    } else {
-      setRawMaterials((r) => [...r, { ...m, id: crypto.randomUUID() }]);
-    }
-    setEditing(null);
-  }
-
-  async function downloadRMTemplate() {
-    const aoa = [['Name', 'Unit', 'Current Stock', 'Min Stock', 'Rate'], ['STEEL ROD 10MM', 'kg', 500, 50, 65], ['COPPER WIRE 2.5SQMM', 'm', 1200, 100, 18], ['PVC GRANULES', 'kg', 300, 40, 95]];
-    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'RawMaterials'); XLSX.writeFile(wb, 'RawMaterials-Import-Template.xlsx'); }
-    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'RawMaterials-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
-  }
-  async function importRMXlsx(e) {
-    const file = e.target.files && e.target.files[0]; if (!file) return;
-    const nm = (file.name || '').toLowerCase();
-    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
-    try {
-      let rows = [];
-      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
-      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
-      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
-      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
-      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
-      const hasHeader = head.some(h => /name|material|unit|stock|rate|min/.test(h));
-      let idx, start;
-      if (hasHeader) { start = 1; idx = { name: find('name', 'material', 'item'), unit: find('unit', 'uom'), stock: find('current stock', 'stock', 'qty', 'opening'), min: find('min'), rate: find('rate', 'price', 'cost') }; }
-      else { start = 0; idx = { name: 0, unit: 1, stock: 2, min: 3, rate: 4 }; }
-      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
-      const num = (v) => parseFloat(String(v).replace(/[^0-9.]/g, '')) || 0;
-      const existing = Array.isArray(rawMaterials) ? rawMaterials : [];
-      const added = []; let updated = 0;
-      r2.slice(start).forEach(c => {
-        const name = g(c, idx.name); if (!name || /^(name|material|item)$/i.test(name)) return;
-        const rec = { name, unit: g(c, idx.unit), stock: num(g(c, idx.stock)), minStock: num(g(c, idx.min)), rate: num(g(c, idx.rate)) };
-        const match = existing.find(x => (x.name || '').trim().toLowerCase() === name.toLowerCase());
-        if (match) { updated++; match._upd = rec; } else { added.push({ ...rec, id: crypto.randomUUID() }); }
-      });
-      if (!added.length && !updated) { alert('No rows with a Name found. Check the Name column.'); e.target.value = ''; return; }
-      setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(x => x._upd ? { ...x, ...x._upd, _upd: undefined } : x).concat(added));
-      alert('✅ Imported ' + added.length + ' new material(s)' + (updated ? ' and updated ' + updated + ' existing (stock/rate refreshed).' : '.'));
-    } catch (err) { alert('Import failed: ' + (err.message || err)); }
-    e.target.value = '';
-  }
-
-  return (
-    <div style={styles.page}>
-      <div style={styles.pageHeader}>
-        <h1 className="serif" style={styles.h1}>Raw Materials</h1>
-        <p style={styles.muted}>Track your raw material inventory and stock levels.</p>
-      </div>
-      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
-        <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>
-        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Name, Unit, Current Stock, Min Stock, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importRMXlsx} /></label>
-        <button type="button" onClick={downloadRMTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
-      </div>}
-      <div style={{ ...styles.list, marginTop: 16 }}>
-        {rawMaterials.length === 0 && <div style={styles.emptyBox}>No raw materials yet. Add materials to use in Bill of Materials.</div>}
-        {rawMaterials.map((m) => (
-          <div key={m.id} style={styles.recordRow}>
-            <div style={{ flex: 1 }}>
-              <div style={styles.docRowTitle}>{m.name}</div>
-              <div style={styles.docRowSub}>Unit: {m.unit || '—'} · Rate: {fmt(m.rate || 0)} · Min stock: {m.minStock || 0}</div>
-            </div>
-            <div style={{ textAlign: 'right', minWidth: 80 }}>
-              <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: (m.stock <= m.minStock) ? '#B5453A' : '#1E2A4A' }}>{m.stock}</div>
-              <div style={{ fontSize: 11, color: '#888780' }}>{m.unit}</div>
-            </div>
-            {(m.stock <= m.minStock) && <span style={{ ...styles.badge, background: '#FBEAE7', color: '#B5453A' }}>Low stock</span>}
-            {canEdit && <button onClick={() => setEditing(m)} style={styles.ghostBtn}>Edit</button>}
-            {canEdit && <button onClick={() => setRawMaterials((r) => r.filter((x) => x.id !== m.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>}
-          </div>
-        ))}
-      </div>
-      {editing && (
-        <Modal onClose={() => setEditing(null)} title={editing.id ? 'Edit material' : 'Add raw material'}>
-          <RawMaterialForm initial={editing} onSave={upsert} ownerUid={ownerUid} />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function RawMaterialForm({ initial, onSave, ownerUid }) {
+function RawMaterialForm({ initial, onSave, ownerUid, existingCats = [] }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], ...initial });
+  const mt = _mfgType(), pack = RM_SPEC_PACK[mt] || RM_SPEC_PACK.general, cats = [...new Set([...Object.keys(pack), ...existingCats.filter(Boolean), ...(initial && initial.category ? [initial.category] : [])])];
+  const catDef = pack && form.category ? pack[form.category] : null;
+  const setCat = (c) => setForm((p) => ({ ...p, category: c, unit: p.unit || (pack && pack[c] ? pack[c].unit : p.unit) }));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {[['name','Name'],['unit','Unit (kg/litre/pcs)']].map(([f,l]) => (
@@ -16917,11 +19952,22 @@ function RawMaterialForm({ initial, onSave, ownerUid }) {
           </div>
         ))}
       </div>
-      <div style={styles.sectionDivider}>Material Specifications</div>
+      {pack && (
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Material category{mt ? ' (' + ((MFG_TYPES.find(t => t.id === mt) || {}).label || '') + ')' : ''}</label>
+          <select value={form.category || ''} onChange={(e) => { if (e.target.value === '__new') { const c = (window.prompt('New material category name (e.g. Tapes, Lubricants, Safety items):') || '').trim(); if (c) setCat(c); } else setCat(e.target.value); }} style={styles.input}>
+            <option value="">— Select category —</option>
+            {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value="__new">+ Add new category…</option>
+          </select>
+        </div>
+      )}
+      {!mt && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>Tip: choose the Type of manufacturing (Settings) to get industry-specific datasheet fields here.</div>}
+      <div style={styles.sectionDivider}>{catDef ? (form.category + ' — datasheet') : 'Material Specifications'}</div>
       <SpecsFields
         specs={form.specs}
         onChange={(s) => setForm((p) => ({ ...p, specs: s }))}
-        fields={[
+        fields={catDef ? catDef.fields : [
           ['grade', 'Grade / Standard', 'e.g. IS 2062, ASTM A36'],
           ['density', 'Density', 'e.g. 7850 kg/m³'],
           ['hardness', 'Hardness', 'e.g. 150 HRB'],
@@ -16944,7 +19990,7 @@ function RawMaterialForm({ initial, onSave, ownerUid }) {
 
 // ─── Bill of Materials ────────────────────────────────────────────────────────
 
-function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
+function BOMList({ boms, setBoms, rawMaterials, items = [], userRole, ownerUid, parts }) {
   const [editing, setEditing] = useState(null);
   const canEdit = userRole === 'admin' || userRole === 'manager';
 
@@ -16971,12 +20017,12 @@ function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
             <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <div style={styles.docRowTitle}>{b.name}</div>
-                <div style={styles.docRowSub}>Output: {b.outputQty} {b.unit} - {b.materials.length} materials</div>
+                <div style={styles.docRowSub}>Output: {b.outputQty} {b.unit} - {(b.materials || []).length} materials{b.orderRef ? <span style={{ marginLeft: 8, color: '#2255A0', fontWeight: 600 }}>· Order {b.orderRef.docNo} / item {b.orderRef.itemNo}{b.orderRef.customer ? ' · ' + b.orderRef.customer : ''}</span> : <span style={{ marginLeft: 8, color: '#888' }}>· Master</span>}{b.needsMaterials && !(b.materials || []).length ? <span style={{ marginLeft: 8, color: '#B5453A', fontWeight: 700 }}>⚠ add materials</span> : null}</div>
               </div>
               {canEdit && <button onClick={() => setEditing(b)} style={styles.ghostBtn}>Edit</button>}
               {canEdit && <button onClick={() => setBoms((list) => list.filter((x) => x.id !== b.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>}
             </div>
-            {b.materials.length > 0 && (
+            {(b.materials || []).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {b.materials.map((m, i) => (
                   <span key={i} style={{ ...styles.badge, background: '#EDE6F9', color: '#5B2DA0' }}>{m.name} - {m.qty} {m.unit}</span>
@@ -16988,14 +20034,14 @@ function BOMList({ boms, setBoms, rawMaterials, userRole, ownerUid, parts }) {
       </div>
       {editing && (
         <Modal onClose={() => setEditing(null)} title={editing.id ? 'Edit BOM' : 'New Bill of Materials'}>
-          <BOMForm initial={editing} rawMaterials={rawMaterials} onSave={upsert} ownerUid={ownerUid} parts={parts} />
+          <BOMForm initial={editing} rawMaterials={rawMaterials} items={items} onSave={upsert} ownerUid={ownerUid} parts={parts} />
         </Modal>
       )}
     </div>
   );
 }
 
-function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
+function BOMForm({ initial, rawMaterials, items = [], onSave, ownerUid, parts = [] }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], partId: '', ...initial, materials: initial.materials || [] });
 
   function linkPart(partId) {
@@ -17015,8 +20061,10 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
       const mats = [...f.materials];
       mats[i] = { ...mats[i], [field]: value };
       if (field === 'materialId') {
-        const rm = rawMaterials.find((r) => r.id === value);
-        if (rm) { mats[i].name = rm.name; mats[i].unit = rm.unit; }
+        const itm = (items || []).find((x) => x.id === value);
+        const rm = itm ? null : rawMaterials.find((r) => r.id === value);
+        if (itm) { mats[i].name = itm.name; mats[i].unit = itm.unit || ''; mats[i].src = 'item'; }
+        else if (rm) { mats[i].name = rm.name; mats[i].unit = rm.unit; mats[i].src = 'rm'; }
       }
       return { ...f, materials: mats };
     });
@@ -17055,7 +20103,7 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
       if (!added.length) { alert('No rows with a Material name found. Check the Material column.'); e.target.value = ''; return; }
       const unmatched = added.filter(a => !a.materialId).length;
       setForm((f) => ({ ...f, materials: [...(f.materials || []), ...added] }));
-      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Raw Materials — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
+      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Item Master — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
     } catch (err) { alert('Import failed: ' + (err.message || err)); }
     e.target.value = '';
   }
@@ -17089,8 +20137,9 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
       {form.materials.map((m, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <select value={m.materialId} onChange={(e) => updateMaterial(i, 'materialId', e.target.value)} style={{ ...styles.input, flex: 2 }}>
-            <option value="">Select material</option>
-            {rawMaterials.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            <option value="">{((items || []).filter(isMaterialItem).length + rawMaterials.filter(r => !r.migratedItemId).length) ? 'Select material' : 'No materials — add them in Raw Materials'}</option>
+            {(items || []).filter(isMaterialItem).length > 0 && <optgroup label="Materials (Item Master)">{(items || []).filter(isMaterialItem).map((it) => <option key={it.id} value={it.id}>{it.name}{it.itemCode ? ' · ' + it.itemCode : ''}{it.unit ? ' (' + it.unit + ')' : ''}</option>)}</optgroup>}
+            {rawMaterials.filter(r => !r.migratedItemId).length > 0 && <optgroup label="Old raw-material list (not moved yet)">{rawMaterials.filter(r => !r.migratedItemId).map((r) => <option key={r.id} value={r.id}>{r.name}{r.unit ? ' (' + r.unit + ')' : ''}</option>)}</optgroup>}
           </select>
           <input type="number" value={m.qty} onChange={(e) => updateMaterial(i, 'qty', Number(e.target.value))} style={{ ...styles.input, width: 70 }} placeholder="Qty" />
           <span style={{ fontSize: 12, color: '#888780', minWidth: 30 }}>{m.unit}</span>
@@ -17101,7 +20150,7 @@ function BOMForm({ initial, rawMaterials, onSave, ownerUid, parts = [] }) {
         <button onClick={addMaterial} style={{ ...styles.ghostBtn, fontSize: 13 }}><Plus size={14} /> Add material</button>
         <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }} title="Bulk-import materials from Excel/CSV — columns: Material, Unit, Qty">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importBomXlsx} /></label>
         <button type="button" onClick={downloadBomTemplate} style={{ ...styles.ghostBtn, fontSize: 13 }} title="Download the import template">⬇ Template</button>
-        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Raw Materials by name)</span>
+        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Item Master by name)</span>
       </div>
       <div style={styles.sectionDivider}>Engineering Specifications</div>
       <SpecsFields
@@ -17206,10 +20255,120 @@ function ProductionOrderPrint({ order, bom, businessInfo, onClose }) {
   );
 }
 
-function ProductionOrdersList({ productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
+// ─── Process route (stage-wise production tracking, driven by Type of manufacturing) ───
+function routeInit(mt) {
+  const def = MFG_ROUTES[mt] || MFG_ROUTES.general;
+  return def.map(st => ({ name: st.name, status: 'pending', machine: '', operator: '', date: '', inQty: '', outQty: '', scrap: '', fields: {}, qa: {}, remarks: '' }));
+}
+function routeProgress(order) {
+  const st = order && order.route && order.route.stages;
+  if (!st || !st.length) return null;
+  return { done: st.filter(x => x.status === 'done').length, total: st.length, hold: st.some(x => x.status === 'hold') };
+}
+
+function ProcessRouteModal({ order, bom, onSave, onClose, assets = [], pmSchedules = [], fmWorkOrders = [] }) {
+  const mt = _mfgType();
+  const def = MFG_ROUTES[mt] || MFG_ROUTES.general;
+  const typeLabel = (MFG_TYPES.find(t => t.id === mt) || { label: 'General manufacturing' }).label;
+  const [stages, setStages] = useState(() => (order.route && order.route.type === mt && order.route.stages && order.route.stages.length === def.length) ? order.route.stages : routeInit(mt));
+  const [open, setOpen] = useState(() => { const i = stages.findIndex(s => s.status !== 'done'); return i < 0 ? 0 : i; });
+  const num = v => parseFloat(v) || 0;
+  const upd = (i, patch) => setStages(prev => prev.map((s, j) => j === i ? { ...s, ...patch } : s));
+  const updF = (i, k, v) => setStages(prev => prev.map((s, j) => j === i ? { ...s, fields: { ...s.fields, [k]: v } } : s));
+  const setQa = (i, qi, v) => setStages(prev => prev.map((s, j) => j === i ? { ...s, qa: { ...s.qa, [qi]: v } } : s));
+  const totScrap = stages.reduce((a, s) => a + num(s.scrap), 0);
+  const first = stages.find(s => num(s.inQty) > 0), lastDone = [...stages].reverse().find(s => num(s.outQty) > 0);
+  const yieldPct = first && lastDone ? num(lastDone.outQty) / num(first.inQty) * 100 : null;
+  const doneCount = stages.filter(s => s.status === 'done').length;
+  const col = { pending: '#888', active: '#2255A0', done: '#1A7A3E', hold: '#B5453A' };
+  function complete(i) {
+    const s = stages[i], qaPts = def[i].qa;
+    const unmarked = qaPts.some((_, qi) => !s.qa[qi]);
+    if (unmarked) { alert('Mark every QA check point (Pass / Fail / N/A) before completing this stage.'); return; }
+    const failed = qaPts.filter((_, qi) => s.qa[qi] === 'fail');
+    if (failed.length) { upd(i, { status: 'hold' }); alert('QA failed: ' + failed.join('; ') + '\n\nStage put on HOLD. Rework / raise a CAPA, then re-check and complete.'); return; }
+    if (num(s.outQty) <= 0 && !window.confirm('Output quantity is empty. Complete the stage anyway?')) return;
+    upd(i, { status: 'done', date: s.date || new Date().toISOString().slice(0, 10) });
+    if (i + 1 < stages.length) setOpen(i + 1);
+  }
+  const inp = { padding: '6px 9px', border: '1px solid #DDD', borderRadius: 7, fontSize: 13, width: '100%', boxSizing: 'border-box' };
+  const lab = { fontSize: 11, color: '#777', display: 'block', marginBottom: 2 };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 12, padding: '10px 14px', background: '#F8F6F0', borderRadius: 8 }}>
+        <span><b>{order.number}</b> · {bom ? bom.name : ''} · {order.quantity} units</span>
+        <span>Route: <b>{typeLabel}</b></span>
+        <span>Stages done: <b>{doneCount}/{stages.length}</b></span>
+        <span>Total scrap: <b>{totScrap}</b></span>
+        <span>Overall yield: <b style={{ color: yieldPct === null ? '#999' : yieldPct >= 95 ? '#1A7A3E' : yieldPct >= 85 ? '#E07B00' : '#B5453A' }}>{yieldPct === null ? '—' : yieldPct.toFixed(1) + '%'}</b></span>
+      </div>
+      {!mt && <div style={{ fontSize: 12, color: '#856404', background: '#FFF8E1', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>Choose the Type of manufacturing in Settings to get the route for your industry. Showing the general route.</div>}
+      {stages.map((s, i) => {
+        const d = def[i], isOpen = open === i, sp = num(s.inQty) > 0 ? num(s.scrap) / num(s.inQty) * 100 : null;
+        return (
+          <div key={i} style={{ border: '1px solid #EAE6DB', borderLeft: '4px solid ' + col[s.status === 'pending' && isOpen ? 'active' : s.status], borderRadius: 8, marginBottom: 8, background: '#fff' }}>
+            <div onClick={() => setOpen(isOpen ? -1 : i)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', cursor: 'pointer' }}>
+              <b style={{ fontSize: 14 }}>{i + 1}. {s.name}</b>
+              <span style={{ fontSize: 12, color: col[s.status], fontWeight: 700 }}>{s.status === 'done' ? '✔ Done' : s.status === 'hold' ? '⚠ QA hold' : 'Pending'}{sp !== null && sp > 0 ? ' · scrap ' + sp.toFixed(1) + '%' : ''}</span>
+            </div>
+            {isOpen && (
+              <div style={{ padding: '4px 14px 14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 10 }}>
+                  <div><label style={lab}>Machine / line</label><input style={inp} list={'mach-list-' + i} value={s.machine} onChange={e => upd(i, { machine: e.target.value })} /><datalist id={'mach-list-' + i}>{(assets || []).map(a => <option key={a.id} value={a.name} />)}</datalist>
+                    {(() => { const a = (assets || []).find(x => _nm(x.name) === _nm(s.machine)); if (!a) return null; const h = machineHealth(a.id, pmSchedules, fmWorkOrders); return (h.pm === 'overdue' || h.open) ? <div style={{ fontSize: 11, color: '#B5453A', fontWeight: 700, marginTop: 2 }}>{h.pm === 'overdue' ? '⚠ PM overdue' : ''}{h.open ? ' · open breakdown' : ''}</div> : h.pm === 'due' ? <div style={{ fontSize: 11, color: '#E07B00', marginTop: 2 }}>PM due soon</div> : null; })()}</div>
+                  <div><label style={lab}>Operator</label><input style={inp} value={s.operator} onChange={e => upd(i, { operator: e.target.value })} /></div>
+                  <div><label style={lab}>Date</label><input type="date" style={inp} value={s.date} onChange={e => upd(i, { date: e.target.value })} /></div>
+                  <div />
+                  <div><label style={lab}>Input qty</label><input type="number" style={inp} value={s.inQty} onChange={e => upd(i, { inQty: e.target.value })} /></div>
+                  <div><label style={lab}>Good output qty</label><input type="number" style={inp} value={s.outQty} onChange={e => upd(i, { outQty: e.target.value })} /></div>
+                  <div><label style={lab}>Scrap / rejected</label><input type="number" style={inp} value={s.scrap} onChange={e => upd(i, { scrap: e.target.value })} /></div>
+                  <div><label style={lab}>Loss (unaccounted)</label><div style={{ ...inp, background: '#F8F6F0', color: '#555' }}>{num(s.inQty) > 0 ? (num(s.inQty) - num(s.outQty) - num(s.scrap)).toFixed(2) : '—'}</div></div>
+                  {d.extra.map(([k, l, ph]) => <div key={k}><label style={lab}>{l}</label><input style={inp} placeholder={ph || ''} value={s.fields[k] || ''} onChange={e => updF(i, k, e.target.value)} /></div>)}
+                </div>
+                {i === stages.length - 1 && (() => {
+                  const U = mfgCfg(mt).unit, drums = s.drums || [], hasGT = U.fields.some(f => f[0] === 'gross') && U.fields.some(f => f[0] === 'tare');
+                  const setDrums = (nd) => setStages(prev => prev.map((x, j) => j === i ? { ...x, drums: nd, outQty: String(Math.round(nd.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000) } : x));
+                  const upD = (k, f, v) => setDrums(drums.map((dr, z) => z === k ? { ...dr, [f]: v } : dr));
+                  const cols = [['drumNo', U.numLabel, 'text'], ['length', U.qtyLabel, 'number'], ...U.fields.map(f => [f[0], f[1], /date/i.test(f[0] + f[1]) ? 'date' : (/rev|drawing/i.test(f[0]) ? 'text' : 'number')])];
+                  return (<div style={{ background: '#F4F8FC', border: '1px solid #DCE6F2', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>{U.plural} from this order ({drums.length}) · {Math.round(drums.reduce((t, dr) => t + (parseFloat(dr.length) || 0), 0) * 1000) / 1000} {U.qtyUnit}</b>
+                      <button onClick={() => setDrums([...drums, { drumNo: '', length: '', date: new Date().toISOString().slice(0, 10), testStatus: 'pending' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add {U.name.toLowerCase()}</button></div>
+                    {drums.length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add each {U.name.toLowerCase()} produced by this order — {U.numLabel.toLowerCase()} and {U.qtyLabel.toLowerCase()}. The final test is done per {U.name.toLowerCase()} in Quality.</div> :
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{[...cols.map(c => c[1]), ...(hasGT ? ['Net kg'] : []), 'Test', ''].map(h => <th key={h} style={{ textAlign: 'left', padding: '3px 6px', fontSize: 11, color: '#777' }}>{h}</th>)}</tr></thead>
+                        <tbody>{drums.map((dr, k) => <tr key={k}>
+                          {cols.map(([f, , ty]) => <td key={f} style={{ padding: '2px 4px' }}><input value={dr[f] || ''} type={ty} onChange={e => upD(k, f, e.target.value)} disabled={dr.testStatus === 'passed'} style={{ ...inp, padding: '4px 6px' }} /></td>)}
+                          {hasGT && <td style={{ padding: '2px 6px' }}>{Math.round(((parseFloat(dr.gross) || 0) - (parseFloat(dr.tare) || 0)) * 1000) / 1000 || ''}</td>}
+                          <td style={{ padding: '2px 6px', fontWeight: 600, color: dr.testStatus === 'passed' ? '#1A7A3E' : dr.testStatus === 'failed' ? '#B5453A' : '#E07B00' }}>{dr.testStatus === 'passed' ? 'Passed' : dr.testStatus === 'failed' ? 'Failed' : 'Pending'}</td>
+                          <td style={{ padding: '2px 4px' }}>{dr.testStatus !== 'passed' && <button onClick={() => setDrums(drums.filter((_, z) => z !== k))} style={{ ...styles.ghostBtn, padding: '2px 8px' }}>✕</button>}</td></tr>)}</tbody></table>}
+                  </div>);
+                })()}
+                {d.qa.length > 0 && <div style={{ background: '#FAF9F5', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>QA check points — {s.name}</div>
+                  {d.qa.map((q, qi) => <div key={qi} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', fontSize: 12.5 }}><span>{q}</span>
+                    <span>{['pass', 'fail', 'na'].map(v => <button key={v} onClick={() => setQa(i, qi, v)} style={{ marginLeft: 4, padding: '2px 9px', borderRadius: 12, fontSize: 11, fontWeight: 600, cursor: 'pointer', border: '1px solid #DDD', background: s.qa[qi] === v ? (v === 'pass' ? '#1A7A3E' : v === 'fail' ? '#B5453A' : '#888') : '#fff', color: s.qa[qi] === v ? '#fff' : '#666' }}>{v === 'na' ? 'N/A' : v.toUpperCase()}</button>)}</span></div>)}
+                </div>}
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <input style={{ ...inp, flex: 1 }} placeholder="Remarks" value={s.remarks} onChange={e => upd(i, { remarks: e.target.value })} />
+                  {s.status !== 'done' ? <button onClick={() => complete(i)} style={styles.primaryBtn}>Complete stage</button> : <button onClick={() => upd(i, { status: 'pending' })} style={styles.ghostBtn}>Re-open</button>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+        <button onClick={onClose} style={styles.ghostBtn}>Close</button>
+        <button onClick={() => onSave({ ...order, route: { type: mt, stages, updatedAt: Date.now() } })} style={styles.primaryBtn}>Save route</button>
+      </div>
+    </div>
+  );
+}
+
+function ProductionOrdersList({ setStoreIssues, stockLedger = [], storeIssues = [], assets = [], pmSchedules = [], fmWorkOrders = [], productionOrders, setProductionOrders, boms, rawMaterials, setRawMaterials, userRole, ownerUid, setStockLedger, items = [], businessInfo }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [printOrder, setPrintOrder] = useState(null);
+  const [routeOrder, setRouteOrder] = useState(null);
   const canCreate = userRole === 'admin' || userRole === 'manager' || userRole === 'sales' || userRole === 'purchase';
   const canApprove = userRole === 'admin';
 
@@ -17270,11 +20429,14 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
         const entries = [];
         (bom.materials || []).forEach(m => {
           const rm = rawMaterials.find(r => r.id === m.materialId);
-          const itm = items.find(i => i.name === (rm ? rm.name : ''));
+          const itm = items.find(i => i.id === m.materialId) || (rm && rm.migratedItemId ? items.find(i => i.id === rm.migratedItemId) : null) || items.find(i => i.name === (rm ? rm.name : (m.name || '')));
           if (!itm) return;
+          const issuedQty = (storeIssues || []).filter(si => si.productionRef && si.productionRef === o.number).reduce((t, si) => t + (si.lines || []).filter(l => l.itemId === itm.id).reduce((u, l) => u + (parseFloat(l.qty) || 0), 0), 0);
+          const consume = Math.max(0, (parseFloat(m.qty) || 0) * factor - issuedQty);
+          if (consume <= 0) return;
           entries.push({
             id: crypto.randomUUID(), date, itemId: itm.id, itemName: itm.name,
-            type: 'out', qty: (parseFloat(m.qty) || 0) * factor, rate: parseFloat(itm.rate) || 0,
+            type: 'out', qty: consume, rate: parseFloat(itm.rate) || 0,
             sourceType: 'production', sourceId: o.id, sourceNumber: o.number, createdAt: now,
           });
         });
@@ -17306,8 +20468,15 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
           <button onClick={() => setCreating(true)} style={styles.primaryBtn}><Plus size={15} /> New Order</button>
         )}
       </div>
+      {(() => { const mt = _mfgType(), rt = MFG_ROUTES[mt], tl = MFG_TYPES.find(t => t.id === mt); return (
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderLeft: '4px solid ' + (rt ? '#C9752A' : '#B5453A'), borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+          {rt ? <>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>Process route — <b>{tl ? tl.label : ''}</b> · open an order and click <b>🧭 Route</b> to record each stage (machine, qty, scrap, QA)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>{rt.map((st, i) => <React.Fragment key={i}><span style={{ background: '#FDF3E7', color: '#8A4B12', border: '1px solid #F0D7B8', borderRadius: 14, padding: '3px 11px', fontSize: 12, fontWeight: 600 }}>{i + 1}. {st.name}</span>{i < rt.length - 1 && <span style={{ color: '#C9752A' }}>→</span>}</React.Fragment>)}</div>
+          </> : <div style={{ fontSize: 13 }}>Type of manufacturing is not set. Go to <b>Settings → Manufacturing → Type of manufacturing</b> to get the process route, raw material datasheets and QA checklists for your industry.</div>}
+        </div>); })()}
       <div style={styles.list}>
-        {productionOrders.length === 0 && <div style={styles.emptyBox}>No production orders yet.</div>}
+        {productionOrders.length === 0 && <div style={styles.emptyBox}>No production orders yet. Click “New Order”, pick a BOM — then use 🧭 Route on the order to track each stage.</div>}
         {productionOrders.map((o) => {
           const bom = boms.find(b => b.id === o.bomId);
           const statusColors = {
@@ -17325,6 +20494,7 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{o.number} — {bom?.name || 'Unknown BOM'}</div>
                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
                   {o.quantity} units · {o.startDate || ''}{o.batchNumber ? ` · Batch: ${o.batchNumber}` : ''}
+                  {(() => { const rp = routeProgress(o); return rp ? <span style={{ marginLeft: 8, fontWeight: 700, color: rp.hold ? '#B5453A' : rp.done === rp.total ? '#1A7A3E' : '#2255A0' }}>· Route {rp.done}/{rp.total}{rp.hold ? ' ⚠ QA hold' : ''}</span> : null; })()}
                 </div>
               </div>
               <span style={{ background: bg, color: col, padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{o.status?.replace(/_/g,' ')}</span>
@@ -17344,6 +20514,19 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
                     → QA
                   </button>
                 )}
+                {setStoreIssues && bom && (bom.materials || []).length > 0 && !(storeIssues || []).some(si => si.productionRef === o.number) && <button onClick={() => {
+                  const fac = (parseFloat(o.quantity) || 1) / (parseFloat(bom.outputQty) || 1), stock = computeStock(stockLedger, items);
+                  const lines = (bom.materials || []).map(m => { const it = items.find(x => x.id === m.materialId) || items.find(x => _nm(x.name) === _nm(m.name)); if (!it) return null; const need = Math.round((parseFloat(m.qty) || 0) * fac * 1000) / 1000, have = stock[it.id] ? stock[it.id].qty : 0; return { id: crypto.randomUUID(), itemId: it.id, itemName: it.name, unit: it.unit || m.unit || '', qtyRequested: need, qty: Math.max(0, Math.min(need, have)), rate: parseFloat(it.purchaseRate ?? it.rate) || 0, remarks: have < need ? 'Short by ' + Math.round((need - have) * 1000) / 1000 : '' }; }).filter(Boolean);
+                  if (!lines.length) { alert('BOM materials are not linked to Item Master items.'); return; }
+                  const short = lines.filter(l => l.qty < l.qtyRequested);
+                  if (!window.confirm('Issue materials for ' + o.number + ' from approved stock?\n\n' + lines.map(l => '• ' + l.itemName + ': ' + l.qty + ' / ' + l.qtyRequested + ' ' + l.unit).join('\n') + (short.length ? '\n\n' + short.length + ' item(s) short — only available approved stock will be issued.' : ''))) return;
+                  const n = Math.max(0, ...(storeIssues || []).map(si => lastNum(si.sivNumber))) + 1, today = new Date().toISOString().slice(0, 10), id = crypto.randomUUID();
+                  const siv = { id, sivNumber: dn('SIV', n, 4), date: today, issuedTo: 'Production', purpose: 'Production order ' + o.number, projectRef: '', productionRef: o.number, orderRef: o.orderRef || null, lines, issuedBy: '', receivedBy: '', notes: 'Auto-issued from BOM', approvalStatus: 'draft', approvalNote: '', bizType: o.bizType || 'manufacturing', updatedAt: Date.now() };
+                  setStoreIssues(prev => [siv, ...(Array.isArray(prev) ? prev : [])]);
+                  setStockLedger(prev => [...(Array.isArray(prev) ? prev : []), ...lines.filter(l => l.qty > 0).map(l => ({ id: crypto.randomUUID(), date: today, itemId: l.itemId, itemName: l.itemName, type: 'out', qty: l.qty, rate: l.rate, sourceType: 'siv', sourceId: id, sourceNumber: siv.sivNumber, createdAt: new Date().toISOString(), bizType: siv.bizType }))]);
+                  alert('✅ ' + siv.sivNumber + ' created for ' + o.number + '.' + (short.length ? '\nShort items remain — raise / follow up the PR.' : ''));
+                }} style={{ ...styles.ghostBtn, fontSize: 11, padding: '4px 10px' }} title="Issue BOM materials from approved stock">📦 Issue materials</button>}
+                <button onClick={() => setRouteOrder(o)} style={{ ...styles.ghostBtn, fontSize: 11, padding: '4px 10px' }} title="Stage-wise process route">🧭 Route</button>
                 <button onClick={() => setPrintOrder(o)} style={styles.iconBtn} title="Print"><Printer size={14} /></button>
                 {o.approvalStatus !== 'submitted' && <button onClick={() => setEditing(o)} style={styles.iconBtn}><Pencil size={14} /></button>}
                 {o.approvalStatus !== 'submitted' && <button onClick={() => deleteOrder(o.id)} style={{ ...styles.iconBtn, color: '#B5453A' }}><Trash2 size={14} /></button>}
@@ -17355,6 +20538,11 @@ function ProductionOrdersList({ productionOrders, setProductionOrders, boms, raw
       {(creating || editing) && (
         <Modal title={editing ? 'Edit Production Order' : 'New Production Order'} onClose={() => { setCreating(false); setEditing(null); }} wide>
           <ProductionOrderForm order={editing} boms={boms} items={items} onSave={(o) => { saveOrder(o); setCreating(false); setEditing(null); }} onClose={() => { setCreating(false); setEditing(null); }} />
+        </Modal>
+      )}
+      {routeOrder && (
+        <Modal title={'Process route — ' + routeOrder.number} onClose={() => setRouteOrder(null)} wide>
+          <ProcessRouteModal order={routeOrder} assets={assets} pmSchedules={pmSchedules} fmWorkOrders={fmWorkOrders} bom={boms.find(b => b.id === routeOrder.bomId)} onSave={(o) => { saveOrder(o); setRouteOrder(null); }} onClose={() => setRouteOrder(null)} />
         </Modal>
       )}
       {printOrder && <ProductionOrderPrint order={printOrder} bom={boms.find(b => b.id === printOrder.bomId)} businessInfo={businessInfo} onClose={() => setPrintOrder(null)} />}
@@ -17409,7 +20597,7 @@ function ProductionOrderForm({ order, boms, items, onSave, onClose }) {
         <label style={styles.label}>BOM / Product *</label>
         <select value={form.bomId} onChange={e => set('bomId', e.target.value)} style={styles.input}>
           <option value="">— Select BOM —</option>
-          {boms.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          {boms.filter(b => !b.orderRef || b.id === form.bomId).map(b => <option key={b.id} value={b.id}>{b.name}{b.rev ? ' · Rev ' + b.rev : ''}</option>)}
         </select>
       </div>
       <div style={styles.formGroup}>
@@ -21318,10 +24506,7 @@ function MEPReportsView({ siteProjects, siteActivities, progressUpdates, employe
       ${lhFooterHtml}
     </body></html>`;
 
-    const w = window.open('', '_blank', 'width=1000,height=700');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => { w.focus(); w.print(); }, 500);
+    printHTML(html);
   }
 
   return (
@@ -22633,7 +25818,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.title ? 'Edit' : 'New'} Variation Order — {editing.voNo}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -22654,7 +25839,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } if (!editing.title) { alert('Enter a description'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -22742,7 +25927,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.remarks || editing.workers ? 'Edit' : 'New'} Manpower Entry</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -22763,7 +25948,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -22911,7 +26096,7 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
   const row = { marginBottom: 12 };
   const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
   return (
-    <div style={styles.modalOverlay} onClick={onClose}>
+    <DockOverlay onClose={onClose}>
       <div style={modalCard} onClick={e => e.stopPropagation()}>
         <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{rec.supersedes ? 'New Revision' : (rec.title ? 'Edit' : 'New')} Document</h3>
         <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -22947,7 +26132,7 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
           <button style={styles.primaryBtn} onClick={() => { if (!form.title) { alert('Enter a title'); return; } if (!form.projectId) { alert('Select a project'); return; } onSave(form); }}>Save</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -25452,7 +28637,7 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.name ? 'Edit' : 'New'} {editing.type} — {editing.code}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -25471,7 +28656,7 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.name) { alert('Enter a name'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -25598,7 +28783,7 @@ function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose
   );
 
   return (
-    <div style={styles.modalOverlay} onClick={onClose}>
+    <DockOverlay onClose={onClose}>
       <div style={modalCard} onClick={e => e.stopPropagation()}>
         <h3 className="serif" style={{ margin: '0 0 4px', color: '#1E2A4A' }}>Rate Analysis</h3>
         <div style={{ fontSize: 12.5, color: '#888', marginBottom: 14 }}>{line.description || 'BOQ item'} — per 1 {line.unit || 'unit'}</div>
@@ -25650,7 +28835,7 @@ function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose
           <button style={styles.primaryBtn} onClick={() => onSave({ components: comps, siteOH: parseFloat(siteOH) || 0, hoOH: parseFloat(hoOH) || 0, contingency: parseFloat(conti) || 0, profit: parseFloat(profit) || 0, direct, costRate, selling })}>Apply to BOQ (Rate = {fmt(selling)})</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -28708,6 +31893,9 @@ export default function App() {
   const [investors,        _setInv]        = useState([]);
   const [profitShares,     _setPS]         = useState([]);
   const [boShortages,      _setBOS]        = useState([]);
+  const [cableDesigns,     _setCD]         = useState([]);
+  const [machineLogs,      _setML]         = useState([]);
+  const [trackRef,         setTrackRef]    = useState('');
   const [fatReports,       _setFAT]        = useState([]);
   const [tdsSheets,        _setTDS]        = useState([]);
   const [notifications,    setNotifications] = useState([]);
@@ -28928,6 +32116,8 @@ export default function App() {
       _setInv(data.investors || []);
       _setPS(data.profitShares || []);
       _setBOS(data.boShortages || []);
+      _setCD(data.cableDesigns || []);
+      _setML(data.machineLogs || []);
       _setFAT(data.fatReports || []);
       _setTDS(data.tdsSheets || []);
     }, (err) => {
@@ -29032,6 +32222,8 @@ export default function App() {
   const setInvestors        = mkSet(_setInv,   'investors');
   const setProfitShares     = mkSet(_setPS,    'profitShares');
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
+  const setCableDesigns     = mkSet(_setCD,    'cableDesigns');
+  const setMachineLogs      = mkSet(_setML,    'machineLogs');
   const setFatReports       = mkSet(_setFAT,   'fatReports');
   const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
@@ -29084,6 +32276,136 @@ export default function App() {
     setView('doceditor');
   }
 
+  // Scope a shared list to the current business; new records get tagged with it.
+  const scopeList = (list, def) => sessionContext ? (list || []).filter(x => (x.bizType || def) === sessionContext) : (list || []);
+  const scopeSet = (setter, def) => !sessionContext ? setter : (v => setter(prev => {
+    const all = Array.isArray(prev) ? prev : [];
+    const mine = all.filter(x => (x.bizType || def) === sessionContext), others = all.filter(x => (x.bizType || def) !== sessionContext);
+    const next = typeof v === 'function' ? v(mine) : v;
+    return [...others, ...(next || []).map(x => x && !x.bizType ? { ...x, bizType: sessionContext } : x)];
+  }));
+
+  function runRmMigration() {
+    const biz = sessionContext || effectiveBizContext || 'manufacturing';
+    const cc0 = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
+    const plan = planRmMigration(rawMaterials, items, biz, businessInfo.taxRate ?? cc0.defaultTaxRate);
+    if (!plan.pending) { alert('Nothing to move — all raw materials are already in the Item Master.'); return; }
+    const msg = 'Move ' + plan.pending + ' raw material(s) into the Item Master?\n\n• New items: ' + plan.created.length + (plan.created.length ? '\n   ' + plan.created.slice(0, 12).join(', ') + (plan.created.length > 12 ? ' …' : '') : '') + '\n• Merged with existing item of the same name: ' + plan.merged.length + (plan.merged.length ? '\n   ' + plan.merged.slice(0, 12).join(', ') + (plan.merged.length > 12 ? ' …' : '') : '') + '\n\nCurrent raw-material stock becomes the item opening stock (new items only). BOM lines are re-pointed to the items. The old list is kept as a backup (marked "moved").\n\nTip: take a backup in Settings first.';
+    if (!window.confirm(msg)) return;
+    const upd = {}; plan.updated.forEach(u => { upd[u.id] = u; });
+    setItems(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] || x).concat(plan.newItems));
+    setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(r => plan.idMap[r.id] ? { ...r, migratedItemId: plan.idMap[r.id], migratedAt: new Date().toISOString() } : r));
+    setBoms(prev => (Array.isArray(prev) ? prev : []).map(b => ({ ...b, materials: (b.materials || []).map(m => plan.idMap[m.materialId] ? { ...m, materialId: plan.idMap[m.materialId], src: 'item' } : m) })));
+    alert('✅ Moved: ' + plan.created.length + ' new item(s), ' + plan.merged.length + ' merged. Item Master → Raw materials tab now shows these items.');
+  }
+
+  function syncDrumDispatch(saved) {
+    const inDoc = new Set((saved.items || []).filter(it => it.drumKey).map(it => it.drumKey));
+    const stamp = saved.number || saved.id, day = new Date().toISOString().slice(0, 10);
+    setProductionOrders(prev => (Array.isArray(prev) ? prev : []).map(o => {
+      if (!o.route || !(o.route.stages || []).some(st => (st.drums || []).length)) return o;
+      let changed = false;
+      const stages = o.route.stages.map((st, si) => ({ ...st, drums: (st.drums || []).map((x, di) => {
+        const key = o.id + '-' + si + '-' + di;
+        if (inDoc.has(key) && !x.dispatched) { changed = true; return { ...x, dispatched: true, dispatchedDoc: stamp, dispatchedDate: day }; }
+        if (!inDoc.has(key) && x.dispatched && x.dispatchedDoc === stamp) { changed = true; return { ...x, dispatched: false, dispatchedDoc: '', dispatchedDate: '' }; }
+        return x;
+      }) }));
+      return changed ? { ...o, route: { ...o.route, stages } } : o;
+    }));
+  }
+
+  function pickDrumsIntoDoc(doc, keys) {
+    const drums = allDrums(productionOrders, boms).filter(d => keys.includes(d.key));
+    const rows = drums.map(d => {
+      const fg = (items || []).find(i => (i.designId && cableDesigns.some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || _nm(i.name) === _nm(d.product));
+      return { ...EMPTY_ITEM_ROW(businessInfo), itemId: fg ? fg.id : '', name: d.product + ' — ' + mfgCfg().unit.name + ' ' + d.drumNo, hsn: fg ? (fg.hsn || (mfgCfg().eng === 'cable' ? '8544' : '')) : (mfgCfg().eng === 'cable' ? '8544' : ''), qty: d.length, unit: mfgCfg().unit.qtyUnit, rate: fg ? (parseFloat(fg.saleRate ?? fg.rate) || 0) : 0, gst: fg && fg.gst !== undefined ? fg.gst : EMPTY_ITEM_ROW(businessInfo).gst, packages: 1, netWeight: d.net || 0, grossWeight: parseFloat(d.gross) || 0, drumNo: d.drumNo, drumKey: d.key, certNo: d.certNo || '' };
+    });
+    const oref = (drums.find(d => d.order && d.order.orderRef) || {}).order;
+    setActiveDoc(a => a ? { ...a, orderRef: a.orderRef || (oref ? oref.orderRef : null), items: [...(a.items || []).filter(it => (it.name || '').trim() || parseFloat(it.rate)), ...rows] } : a);
+  }
+
+  function recalcOrderShortage(doc) {
+    const _its = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
+    const plan = orderShortagePlan({ doc, boms, items: _its, stockMap: computeStock(stockLedger, _its), rawMaterials, purchaseReqs, productionOrders });
+    if (!plan.oBoms.length) { alert('This order has no BOMs yet — use “Convert to BOM & Production” first.'); return; }
+    if (plan.emptyBoms.length && !plan.rows.length) { alert('The order BOMs have no materials yet:\n' + plan.emptyBoms.join('\n') + '\n\nOpen Order BOMs (or save the product in Cable Design / Product Spec Master), add the materials, then recalculate.'); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + doc.number + ' (recalculated)', qty: 1, outputQty: 1, outputUnit: '', date: today, rows: plan.rows, orderRef: { docId: doc.id, docNo: doc.number }, bizType: 'manufacturing', createdAt: new Date().toISOString() };
+    setBoShortages(prev => [report, ...(Array.isArray(prev) ? prev : [])]);
+    if (!plan.toRequest.length) { alert('✅ Shortage recalculated.' + (plan.rows.some(r => r.shortage > 0) ? '\nAll short materials are already on a PR for this order.' : '\nStock covers every material — no PR needed. Use 📦 Issue materials in Production Orders.') + (plan.emptyBoms.length ? '\n\nStill without materials:\n' + plan.emptyBoms.join('\n') : '')); return; }
+    const cnt = (purchaseReqs || []).filter(m => (m.number || '').includes('PR/' + fyNow() + '/')).length + 1;
+    const pr = { id: 'pr-' + doc.id + '-' + Date.now(), number: dn('PR', cnt), bizType: 'manufacturing', type: 'manufacturing', linkId: doc.id, linkName: 'Order ' + doc.number, date: today, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (order shortage)', priority: 'Normal',
+      items: plan.toRequest.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.toRequest, rate: r.rate, hsn: '', purpose: 'Order ' + doc.number + ' · item ' + r.itemNos })),
+      remarks: 'Auto-raised — shortage against order ' + doc.number, orderRef: { docId: doc.id, docNo: doc.number }, approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString() };
+    setPurchaseReqs(prev => [pr, ...(Array.isArray(prev) ? prev : [])]);
+    const link = { ...(doc.mfgLink || {}), prNo: pr.number, prId: pr.id };
+    setDocuments(prev => prev.map(d => d.id === doc.id ? { ...d, mfgLink: link } : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? { ...a, mfgLink: link } : a);
+    if (window.confirm('✅ ' + pr.number + ' raised for ' + plan.toRequest.length + ' short material(s).\n\nOpen Purchase Requisition now to approve it and convert to PO?')) { setActiveDoc(null); setView('purchasereq'); }
+  }
+
+  function autoPOfromPR(pr) {
+    const today = new Date().toISOString().slice(0, 10), bType = pr.bizType || sessionContext || 'manufacturing';
+    const lastVendor = (itemId, name) => { const po = [...(documents || [])].filter(d => d.type === 'purchase' && d.customerId && (d.items || []).some(it => (itemId && it.itemId === itemId) || _nm(it.name) === _nm(name))).sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')))[0]; return po ? po.customerId : ''; };
+    const groups = {};
+    (pr.items || []).filter(it => (it.name || '').trim() && parseFloat(it.qty) > 0).forEach(it => { const vid = lastVendor(it.itemId, it.name); (groups[vid] = groups[vid] || []).push(it); });
+    const keys = Object.keys(groups); if (!keys.length) return;
+    if (!window.confirm(pr.number + ' approved. Create ' + keys.length + ' draft PO(s) automatically' + (keys.some(k => !k) ? ' (lines with no previous vendor go into a PO without vendor — select the vendor there)' : ' to the vendors who last supplied these items') + '?')) return;
+    const first = nextDocNumber('purchase', bType, today), bump = (num, k) => num.replace(/(\d+)(?!.*\d)/, m => String(parseInt(m, 10) + k).padStart(m.length, '0'));
+    const docs = keys.map((vid, k) => { const v = (vendors || []).find(x => x.id === vid);
+      return { ...blankDoc('purchase', businessInfo), bizType: bType, number: bump(first, k), date: today, customerId: vid || '', customerSnapshot: v ? { ...v } : null, status: 'draft',
+        items: groups[vid].map(it => { const m = (items || []).find(x => String(x.id) === String(it.itemId)); const base = EMPTY_ITEM_ROW(businessInfo); return { ...base, itemId: it.itemId || '', name: it.name, qty: parseFloat(it.qty) || 0, unit: it.uom || (m && m.unit) || '', rate: parseFloat(it.rate) || (m ? (parseFloat(m.purchaseRate ?? m.rate) || 0) : 0), hsn: it.hsn || (m && m.hsn) || '', gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst }; }),
+        orderRef: pr.orderRef || null, linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number }, createdAt: Date.now() }; });
+    setDocuments(prev => [...prev, ...docs]);
+    setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, approvalStatus: 'approved', convertedToPO: true, convertedAt: new Date().toISOString(), poNos: docs.map(d => d.number) } : x));
+    alert('✅ Draft PO(s) created: ' + docs.map(d => d.number + (d.customerSnapshot ? ' (' + d.customerSnapshot.name + ')' : ' (select vendor)')).join(', ') + '\nOpen Documents → Purchase Orders to check rates and approve.');
+  }
+
+  if (typeof window !== 'undefined') { const m = {}; (documents || []).forEach(d => { if (d.type === 'quotation' && d.woNo) m[_nm(d.number)] = d.woNo; }); window.__operixWo = m; }
+  useEffect(() => {
+    const won = (documents || []).filter(d => d.type === 'quotation' && d.outcome === 'won' && !d.woNo && d.status !== 'deleted');
+    if (!won.length) return;
+    const byFy = {};
+    (documents || []).forEach(d => { if (d.woNo) { const k = String(d.woNo).split('/').slice(-2, -1)[0] || ''; byFy[k] = (byFy[k] || 0) + 1; } });
+    const fy = typeof fyNow === 'function' ? fyNow() : '';
+    const assign = {};
+    won.slice().sort((a, b) => String(a.outcomeDate || a.date || '').localeCompare(String(b.outcomeDate || b.date || ''))).forEach(d => { byFy[fy] = (byFy[fy] || 0) + 1; assign[d.id] = dn('WO', byFy[fy]); });
+    setDocuments(prev => prev.map(d => assign[d.id] ? { ...d, woNo: assign[d.id], woDate: d.outcomeDate || '' } : d));
+  }, [documents]);
+  function markQuoteOutcome(doc, outcome) {
+    const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
+    let wo = {};
+    if (outcome === 'won' && !doc.woNo) {
+      const fy = typeof fyNow === 'function' ? fyNow() : '';
+      const cnt = (documents || []).filter(d => d.woNo && String(d.woNo).includes('/' + fy + '/')).length + 1;
+      const cref = window.prompt('Order won — Work Order no. will be generated for tracking.\n\nCustomer PO / reference no. (optional):', doc.customerRef || '');
+      wo = { woNo: dn('WO', cnt), woDate: outcomeDate, customerRef: (cref || '').trim() };
+    }
+    const patch = d => ({ ...d, outcome: outcome || null, outcomeDate, ...wo });
+    setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
+    if (wo.woNo) alert('✅ Order won — Work Order ' + wo.woNo + (wo.customerRef ? ' (customer ref ' + wo.customerRef + ')' : '') + '.\nUse this number in every department: production orders, PR, PO, GRN, QA, stores and dispatch carry it, and Order Tracker finds the order by it.');
+  }
+  function convertQuoteToMfg(doc) {
+    if (doc.outcome !== 'won') { alert('Only a won quotation can be converted.'); return; }
+    if (doc.mfgLink) { alert('This quotation is already converted.'); return; }
+    const _its = sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items;
+    const res = buildMfgFromQuote({ doc, boms, rawMaterials, items: _its, stockMap: computeStock(stockLedger, _its), purchaseReqs, productionOrders, bizType: 'manufacturing' });
+    if (res.missingBom.length) { alert('BOM not defined for:\n' + res.missingBom.join('\n') + '\n\nOpen BOM, create the BOM for these product codes, then convert again. (Nothing was created.)'); return; }
+    if (!res.newOrders.length) { alert('No items with a product and quantity to convert.'); return; }
+    const msg = 'Convert ' + doc.number + ':\n\n• ' + res.newOrders.length + ' production order(s) — one per quotation item, using its product BOM\n• Material shortage calculated from the BOM' + (res.pr ? '\n• Purchase requisition for ' + res.pr.items.length + ' short material(s)' : '\n• No shortage — stock covers all materials') + '\n\nContinue?';
+    if (!window.confirm(msg)) return;
+    setProductionOrders(prev => [...res.newOrders, ...(Array.isArray(prev) ? prev : [])]);
+    setBoShortages(prev => [res.report, ...(Array.isArray(prev) ? prev : [])]);
+    if (res.pr) setPurchaseReqs(prev => [res.pr, ...(Array.isArray(prev) ? prev : [])]);
+    const link = { convertedAt: new Date().toISOString(), items: res.newOrders.length, bomIds: res.newOrders.map(o => o.bomId), orderIds: res.newOrders.map(o => o.id), reportId: res.report.id, prId: res.pr ? res.pr.id : '', prNo: res.pr ? res.pr.number : '' };
+    const patch = d => ({ ...d, mfgLink: link });
+    setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
+    setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
+    alert('✅ Done. ' + res.newOrders.length + ' production order(s) created from the product BOMs.' + (res.pr ? '\n' + res.pr.number + ' raised for shortages — approve it in Purchase Requisition (draft PO is created automatically).' : '\nNo PR needed — stock covers all materials.'));
+  }
+
   function convertDoc(srcDoc, newType) {
     // Converted doc must stay in same business activity as source
     const today = new Date().toISOString().slice(0, 10);
@@ -29113,6 +32435,7 @@ export default function App() {
       portOfLoading: srcDoc.portOfLoading || '', portOfDischarge: srcDoc.portOfDischarge || '', vesselFlight: srcDoc.vesselFlight || '',
       blNumber: srcDoc.blNumber || '', countryOfOrigin: srcDoc.countryOfOrigin || '', shippingMarks: srcDoc.shippingMarks || '',
       vehicleNo: srcDoc.vehicleNo || '', vehicleMode: srcDoc.vehicleMode || '', driverName: srcDoc.driverName || '', driverMobile: srcDoc.driverMobile || '',
+      orderRef: srcDoc.orderRef || (srcDoc.type === 'quotation' && srcDoc.outcome === 'won' ? { docId: srcDoc.id, docNo: srcDoc.number, docType: 'quotation', customer: (srcDoc.customerSnapshot && srcDoc.customerSnapshot.name) || '' } : null),
       linkedFrom: { id: srcDoc.id, docType: srcDoc.type, docNumber: srcDoc.number },
     });
     setView('doceditor');
@@ -29128,21 +32451,42 @@ export default function App() {
       ...(status === 'submitted' ? { submittedAt: Date.now() } : {}),
     };
     const isNew = !documents.find((d) => d.id === saved.id);
+    const prevDoc = documents.find((d) => d.id === saved.id);
+    // ── No payment, no dispatch (manufacturing delivery note / packing list)
+    let dispatchOk = true;
+    if (['delivery', 'packing_list'].includes(saved.type) && (saved.bizType || effectiveBizContext) === 'manufacturing' && saved.status !== 'rejected') {
+      const clr = dispatchClearance(saved, { documents, vouchers });
+      saved.clearance = { ...clr, checkedAt: new Date().toISOString() };
+      if (clr.ok) { saved.dispatchCleared = true; saved.dispatchHold = false; saved.clearedValue = clr.value; saved.clearedAt = saved.clearedAt || new Date().toISOString(); }
+      else {
+        dispatchOk = false; saved.dispatchCleared = false; saved.dispatchHold = true;
+        if (saved.status === 'approved' || saved.status === 'submitted') saved.status = 'draft';
+        const f = n => '₹' + Math.round(n).toLocaleString('en-IN');
+        alert('⛔ Dispatch on hold — payment not received.\n\n' + (clr.noValue ? 'This document has no value (add rates, or link it to the won quotation).\n' : '') + (clr.ref ? 'Work Order: ' + woNo(clr.ref) + ' (quotation ' + clr.ref + ')\n' : 'No order reference — checked against the customer.\n') + 'This dispatch: ' + f(clr.value) + '\nAlready dispatched: ' + f(clr.prior) + '\nReceived: ' + f(clr.paid) + '\nShort: ' + f(clr.short) + '\n\nSaved as DRAFT. Stock is not reduced and nothing is marked dispatched.\nRecord the receipt in Vouchers → Receipt, linked to ' + (clr.ref || 'the invoice') + ', then open this document and save again.');
+      }
+    }
     setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
-    if (isNew && ['invoice', 'delivery'].includes(saved.type)) {
+    if (['delivery', 'packing_list'].includes(saved.type) && dispatchOk) syncDrumDispatch(saved);
+    // A delivery made from an invoice must not deduct stock again (the invoice already did).
+    const fromInvoice = saved.type === 'delivery' && saved.linkedFrom && saved.linkedFrom.docType === 'invoice';
+    const releasedNow = saved.type === 'delivery' && dispatchOk && prevDoc && prevDoc.dispatchHold && !prevDoc.stockPosted;
+    if ((isNew || releasedNow) && ['invoice', 'delivery'].includes(saved.type) && !fromInvoice && dispatchOk && !(prevDoc && prevDoc.stockPosted)) {
+      if (saved.type === 'delivery') { saved.stockPosted = true; setDocuments(prev => prev.map(d => d.id === saved.id ? { ...d, stockPosted: true } : d)); }
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
-        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
-        qty: -(it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name, type: 'out', sourceType: saved.type, sourceId: saved.id,
+        qty: Math.abs(parseFloat(it.qty) || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
         bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
     }
-    if (isNew && saved.type === 'purchasebill') {
+    // A purchase bill for a PO that already has a GRN must not add stock again (the GRN did).
+    const grnDone = saved.type === 'purchasebill' && saved.linkedFrom && (grns || []).some(g => g.poId && g.poId === saved.linkedFrom.id);
+    if (isNew && saved.type === 'purchasebill' && !grnDone) {
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
-        docNumber: saved.number, itemId: it.itemId, itemName: it.name,
-        qty: (it.qty || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
+        docNumber: saved.number, itemId: it.itemId, itemName: it.name, type: 'in', sourceType: 'purchasebill', sourceId: saved.id,
+        qty: Math.abs(parseFloat(it.qty) || 0), note: `${DOC_TYPES[saved.type]?.label || saved.type} ${saved.number}`,
         bizType: saved.bizType || 'trading',
       }));
       if (entries.length) setStockLedger((prev) => [...prev, ...entries]);
@@ -29223,7 +32567,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns, machineLogs,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -29298,6 +32642,8 @@ export default function App() {
     if (backup.investors)       setInvestors(backup.investors);
     if (backup.profitShares)    setProfitShares(backup.profitShares);
     if (backup.boShortages)     setBoShortages(backup.boShortages);
+    if (backup.cableDesigns)    setCableDesigns(backup.cableDesigns);
+    if (backup.machineLogs)     setMachineLogs(backup.machineLogs);
     if (backup.fatReports)      setFatReports(backup.fatReports);
     if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
@@ -29331,6 +32677,8 @@ export default function App() {
       ['Investors', investors, setInvestors],
       ['Profit shares', profitShares, setProfitShares],
       ['BO shortages', boShortages, setBoShortages],
+      ['Cable designs', cableDesigns, setCableDesigns],
+      ['Machine logs', machineLogs, setMachineLogs],
       ['FAT/SAT reports', fatReports, setFatReports],
       ['Technical data sheets', tdsSheets, setTdsSheets],
     ];
@@ -29544,6 +32892,15 @@ export default function App() {
           siteProjects={siteProjects}
           progressUpdates={progressUpdates}
           onConvert={convertDoc}
+          onQuoteOutcome={markQuoteOutcome}
+          onTrackOrder={(no) => { setTrackRef(no); setActiveDoc(null); setView('ordertracker'); }}
+          onOrderAction={(act, d) => { if (act === 'recalc') { recalcOrderShortage(d); return; } setActiveDoc(null); setView(act); }}
+          dispatchCheck={activeDoc && ['delivery', 'packing_list'].includes(activeDoc.type) && (activeDoc.bizType || effectiveBizContext) === 'manufacturing' ? dispatchClearance(activeDoc, { documents, vouchers }) : null}
+          costCheck={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (() => { const rts = latestRates(documents, grns, items), cd = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct }; return (activeDoc.items || []).map(it => { const b = (boms || []).find(x => !x.orderRef && (x.materials || []).length && ((it.itemId && x.itemId === it.itemId) || _nm(x.name) === _nm(it.name))); if (!b) return null; const c = bomCosting(b, rts, cd), rate = (parseFloat(it.rate) || 0) * (1 - (parseFloat(it.discount) || 0) / 100); if (!(c.unitCost > 0)) return null; return { name: it.name, cost: c.unitCost, rate, margin: rate > 0 ? (rate - c.unitCost) / c.unitCost * 100 : -100 }; }).filter(Boolean); })() : []}
+          bomMissing={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (activeDoc.items || []).filter(it => (it.name || '').trim() && !(boms || []).some(b => !b.orderRef && (b.materials || []).length && ((it.itemId && b.itemId === it.itemId) || _nm(b.name) === _nm(it.name) || _nm(b.outputItem) === _nm(it.name)))).map(it => it.name) : []}
+          releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => fgAccepted(d) && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
+          onPickDrums={pickDrumsIntoDoc}
+          onConvertToMfg={(activeTypes || []).includes('manufacturing') ? convertQuoteToMfg : null}
           onOpenDoc={(docId) => { const found = documents.find(d => d.id === docId); if (found) openDoc(found); }}
           documents={documents}
           purchaseReqs={purchaseReqs}
@@ -29684,22 +33041,13 @@ export default function App() {
             }}
           />
         );
-      case 'rawmaterials':
-        return (
-          <RawMaterialsList
-            rawMaterials={rawMaterials}
-            setRawMaterials={setRawMaterials}
-            userRole={userRole}
-            ownerUid={ownerUid}
-            businessInfo={businessInfo}
-          />
-        );
-      case 'bom':
+      case 'bom_legacy':
         return (
           <BOMList
             boms={boms}
             setBoms={setBoms}
             rawMaterials={rawMaterials}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             userRole={userRole}
             ownerUid={ownerUid}
             parts={parts}
@@ -29708,6 +33056,12 @@ export default function App() {
       case 'productionorders':
         return (
           <ProductionOrdersList
+            setStoreIssues={setStoreIssues}
+            stockLedger={stockLedger}
+            storeIssues={storeIssues}
+            assets={scopeList(assets, 'fmamc')}
+            pmSchedules={scopeList(pmSchedules, 'fmamc')}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
             productionOrders={productionOrders}
             setProductionOrders={setProductionOrders}
             boms={boms}
@@ -29878,9 +33232,18 @@ export default function App() {
             documents={documents}
           />
         );
+      case 'rawmaterials':
       case 'items':
         return (
           <ItemsList
+            key={view}
+            initialGroup={view === 'rawmaterials' ? 'mat' : ''}
+            rawMaterials={rawMaterials}
+            onMigrate={runRmMigration}
+            boms={boms}
+            stockLedger={stockLedger}
+            setBusinessInfo={setBusinessInfo}
+            onSaveItem={(it) => { const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext }; setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]); return saved; }}
             items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
             setEditing={setEditingItem}
             setItems={setItems}
@@ -30346,22 +33709,22 @@ export default function App() {
       case 'pmaintenance':
         return (
           <PMScheduleView
-            pmSchedules={pmSchedules}
-            setPmSchedules={setPmSchedules}
-            assets={assets}
-            fmWorkOrders={fmWorkOrders}
-            setFmWorkOrders={setFmWorkOrders}
+            pmSchedules={scopeList(pmSchedules, 'fmamc')}
+            setPmSchedules={scopeSet(setPmSchedules, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
+            setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')}
             userRole={userRole}
           />
         );
       case 'fmworkorders':
         return (
           <FMWorkOrderView
-            fmWorkOrders={fmWorkOrders}
-            setFmWorkOrders={setFmWorkOrders}
-            assets={assets}
-            fmSpareParts={fmSpareParts}
-            setFmSpareParts={setFmSpareParts}
+            fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')}
+            setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
+            fmSpareParts={scopeList(fmSpareParts, 'fmamc')}
+            setFmSpareParts={scopeSet(setFmSpareParts, 'fmamc')}
             userRole={userRole}
           />
         );
@@ -30379,9 +33742,9 @@ export default function App() {
       case 'fmspareparts':
         return (
           <FMSparePartsView
-            fmSpareParts={fmSpareParts}
-            setFmSpareParts={setFmSpareParts}
-            assets={assets}
+            fmSpareParts={scopeList(fmSpareParts, 'fmamc')}
+            setFmSpareParts={scopeSet(setFmSpareParts, 'fmamc')}
+            assets={scopeList(assets, 'fmamc')}
             userRole={userRole}
           />
         );
@@ -30416,6 +33779,41 @@ export default function App() {
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             businessInfo={businessInfo}
+          />
+        );
+      case 'insights':
+      case 'calibration':
+        return (
+          <InsightsView
+            key={view}
+            initialTab={view === 'calibration' ? 'qa' : undefined}
+            documents={sessionDocs}
+            customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
+            vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
+            vouchers={sessionVouchers}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
+            employees={sessionEmployees}
+            pettyCash={sessionPettyCash}
+            businessInfo={businessInfo}
+            currentBizType={sessionContext || effectiveBizContext}
+            isMultiBiz={isMultiBiz || !!sessionContext}
+            siteAttendance={siteAttendance}
+            enquiries={sessionContext ? enquiries.filter(x => (x.bizType || bizDefault) === sessionContext) : enquiries}
+            contracts={sessionContext ? contracts.filter(x => (x.bizType || bizDefault) === sessionContext) : contracts}
+            amcContracts={amcContracts}
+            assets={assets}
+            grns={sessionContext ? grns.filter(x => (x.bizType || bizDefault) === sessionContext) : grns}
+            capaRecords={capaRecords}
+            boms={boms}
+            productionOrders={productionOrders}
+            rawMaterials={rawMaterials}
+            pmSchedules={pmSchedules}
+            fmWorkOrders={fmWorkOrders}
+            fmSpareParts={fmSpareParts}
+            setBusinessInfo={setBusinessInfo}
+            setEmployees={setEmployees}
+            userRole={userRole}
           />
         );
       case 'audit':
@@ -30461,9 +33859,72 @@ export default function App() {
             payrollRuns={payrollRuns}
           />
         );
+      case 'stdbom':
+      case 'bom':
+        return <StandardBomView documents={sessionDocs} grns={grns} boms={boms} setBoms={setBoms} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setItems={setItems} cableDesigns={cableDesigns} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
+      case 'productspec':
+        return (
+          <ProductSpecView
+            specs={sessionContext ? cableDesigns.filter(x => (x.bizType || 'manufacturing') === sessionContext) : cableDesigns}
+            setSpecs={setCableDesigns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            setItems={setItems}
+            boms={boms}
+            setBoms={setBoms}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
+      case 'cabledesign':
+        return (
+          <CableDesignView
+            designs={sessionContext ? cableDesigns.filter(x => (x.bizType || 'manufacturing') === sessionContext) : cableDesigns}
+            setDesigns={setCableDesigns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            setItems={setItems}
+            boms={boms}
+            setBoms={setBoms}
+            tdsSheets={tdsSheets}
+            setTdsSheets={setTdsSheets}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
+      case 'incomingqa':
+        return (
+          <IncomingQAView
+            documents={documents}
+            grns={sessionContext ? grns.filter(g => (g.bizType || bizDefault) === sessionContext) : grns}
+            setGrns={setGrns}
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
+            setStockLedger={setStockLedger}
+            businessInfo={businessInfo}
+            userRole={userRole}
+            currentBizType={sessionContext || effectiveBizContext || 'manufacturing'}
+          />
+        );
+      case 'ordertracker':
+        return <OrderTrackerView key={trackRef || 'tracker'} initialRef={trackRef} setView={setView} data={{ documents: sessionDocs, boms, productionOrders: scopeList(productionOrders, 'manufacturing'), purchaseReqs, grns, storeIssues, boShortages, vouchers: sessionVouchers }} />;
+      case 'routinetest':
+        return <RoutineTestView setFatReports={setFatReports} productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} businessInfo={businessInfo} userRole={userRole} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
+      case 'wip':
+        return <WIPView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
+      case 'fgaccept':
+        return <StoresAcceptView productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
+      case 'drumstock':
+        return <>{(() => { const _po = scopeList(productionOrders, 'manufacturing'); return <StoresAcceptView embedded productionOrders={_po} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />; })()}<DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} /></>;
+      case 'metalrecon':
+        return <MetalReconView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} storeIssues={storeIssues} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} stockLedger={stockLedger} setView={setView} />;
+      case 'machinelog':
+        return <MachineLogView logs={scopeList(machineLogs, 'manufacturing')} setLogs={scopeSet(setMachineLogs, 'manufacturing')} assets={scopeList(assets, 'fmamc')} productionOrders={scopeList(productionOrders, 'manufacturing')} setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')} pmSchedules={scopeList(pmSchedules, 'fmamc')} fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')} userRole={userRole} />;
       case 'boshortage':
         return (
           <BOShortageView
+            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
+            stockLedger={stockLedger}
             businessInfo={businessInfo}
             userRole={userRole}
             currentBizType={sessionContext || effectiveBizContext}
@@ -30521,13 +33982,14 @@ export default function App() {
             isMultiBiz={isMultiBiz}
             assets={assets}
             setAssets={setAssets}
+            onAutoPO={autoPOfromPR}
             onConvertToPO={(pr) => {
               const its = (pr.items || []).filter(it => it.name).map(it => {
                 const m = (items || []).find(x => String(x.id) === String(it.itemId));
                 const base = EMPTY_ITEM_ROW(businessInfo);
                 return { ...base, itemId: it.itemId || '', name: it.name + (pr.type === 'capex' ? (it.make ? ' — ' + it.make : '') + (it.spec ? ' (' + it.spec + ')' : '') : ''), qty: parseFloat(it.qty) || 1, hsn: m ? (m.hsn || '') : (it.hsn || base.hsn || ''), rate: m ? (m.purchaseRate ?? m.rate ?? 0) : (parseFloat(it.rate) || base.rate || 0), gst: m && m.gst !== undefined && m.gst !== '' ? m.gst : base.gst };
               });
-              startNewDoc('purchase', pr.bizType || 'trading', { ...(its.length ? { items: its } : {}), linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number, label: pr.type === 'capex' ? 'Capex Requisition' : 'Purchase Requisition', number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
+              startNewDoc('purchase', pr.bizType || 'trading', { ...(its.length ? { items: its } : {}), ...(pr.orderRef ? { orderRef: pr.orderRef } : {}), linkedFrom: { type: 'purchaserequisition', id: pr.id, docType: 'purchaserequisition', docNumber: pr.number, label: pr.type === 'capex' ? 'Capex Requisition' : 'Purchase Requisition', number: pr.number }, notes: 'Against Purchase Requisition ' + pr.number + (pr.linkName ? ' — ' + pr.linkName : '') });
               setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => x.id === pr.id ? { ...x, convertedToPO: true, convertedAt: new Date().toISOString() } : x));
             }}
           />
@@ -30587,6 +34049,9 @@ export default function App() {
         @media print { button { white-space: normal; } }
       `}</style>
       <style>{`
+.dock-panel > div { width: 100% !important; max-width: none !important; max-height: none !important; border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; overflow: visible !important; }
+.dock-panel > div > div:first-child { position: sticky; top: 0; z-index: 3; }
+
         * { box-sizing: border-box; }
         .nav-toggle { display: none; }
         .nav-overlay { display: none; }
@@ -30703,7 +34168,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {wrapViewTools(renderContent())}
+        {wrapViewTools(view === 'doceditor' ? renderContent() : <HubFrame view={view} setView={setView} businessInfo={businessInfo}>{renderContent()}</HubFrame>)}
       </div>
 
       {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
