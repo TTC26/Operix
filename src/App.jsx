@@ -274,7 +274,7 @@ function computeTotals(doc, sellerState, country) {
   const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
   const st = (doc && doc.supplyType) || 'domestic';
   const isExp = cc.splitTax && st !== 'domestic';
-  const zeroRated = isExp && /_lut$/.test(st);
+  const zeroRated = (isExp && /_lut$/.test(st)) || !!(doc && doc.importPurchase && cc.splitTax);
   const _fc = fcInfo(doc), fxm = _fc.on ? _fc.fx : 1;
   const sameState = !isExp && cc.splitTax && sellerState && doc.placeOfSupply &&
     sellerState.trim().toLowerCase() === doc.placeOfSupply.trim().toLowerCase();
@@ -568,7 +568,7 @@ function buildZohoDocPrintOld(o) {
   if (party) {
     pl.push('<div class="zpn">' + esc(party.name) + '</div>');
     if (party.address) pl.push('<div class="zps">' + nl(party.address) + '</div>');
-    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
+    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(partyTaxLabel(party, cc)) + ':</b> ' + esc(tid) + '</div>');
     if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
     if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
   } else pl.push('<div class="zps">' + (isVendorDoc ? 'No vendor selected' : 'No customer selected') + '</div>');
@@ -939,7 +939,7 @@ function buildZohoDocPrint(o) {
   if (party) {
     pl.push('<div class="zpn">' + esc(party.name) + '</div>');
     if (party.address) pl.push('<div class="zps">' + nl(party.address) + '</div>');
-    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(cc.taxIdLabel) + ':</b> ' + esc(tid) + '</div>');
+    const tid = party.gstin || party.taxId; if (tid) pl.push('<div class="zps"><b>' + esc(partyTaxLabel(party, cc)) + ':</b> ' + esc(tid) + '</div>');
     if (party.state) pl.push('<div class="zps"><b>State:</b> ' + esc(party.state) + '</div>');
     if (party.phone) pl.push('<div class="zps"><b>Ph:</b> ' + esc(party.phone) + '</div>');
     { const em = [party.email, party.email2].filter(Boolean).join(', '); if (em) pl.push('<div class="zps"><b>Email:</b> ' + esc(em) + '</div>'); }
@@ -3200,7 +3200,7 @@ function CustomersList({ customers, setEditing, setCustomers, documents, busines
             <div key={c.id} style={styles.recordRow}>
               <div style={{ flex: 1 }}>
                 <div style={styles.docRowTitle}>{c.name}</div>
-                <div style={styles.docRowSub}>{c.address}{c.gstin ? ` · ${c.gstin}` : ''}{c.state ? ` · ${c.state}` : ''}{c.phone ? ` · ${c.phone}` : ''}</div>
+                <div style={styles.docRowSub}>{c.overseas ? '🌍 ' + (c.partyCountry || 'Overseas') + ' · ' : ''}{c.address}{c.gstin ? ` · ${c.gstin}` : ''}{c.overseas && c.taxId ? ` · ${c.taxIdType || 'Tax ID'} ${c.taxId}` : ''}{c.state ? ` · ${c.state}` : ''}{c.phone ? ` · ${c.phone}` : ''}</div>
               </div>
               <div style={styles.muted}>{count} doc{count !== 1 ? 's' : ''}</div>
               <button style={styles.iconBtn} title="Print profile" onClick={() => printCustomerDetail(c, documents, businessInfo)}><Printer size={14} /></button>
@@ -3250,6 +3250,34 @@ function TaxIdVerifyButton({ taxId, country }) {
   );
 }
 
+const OVERSEAS_TAX_IDS = ['VAT No.', 'TRN (UAE / GCC VAT)', 'EIN / Tax ID (USA)', 'ABN (Australia)', 'GST/HST No. (Canada)', 'UEN / GST (Singapore)', 'Company / Tax Reg. No.'];
+const COUNTRY_LIST = ['United Arab Emirates', 'Saudi Arabia', 'Oman', 'Qatar', 'Bahrain', 'Kuwait', 'Sri Lanka', 'Nepal', 'Bangladesh', 'Maldives', 'Singapore', 'Malaysia', 'United Kingdom', 'United States', 'Germany', 'France', 'Netherlands', 'Italy', 'Kenya', 'Nigeria', 'South Africa', 'Tanzania', 'Uganda', 'Australia', 'Canada'];
+const COUNTRY_CUR = { 'United Arab Emirates': 'AED', 'Saudi Arabia': 'SAR', 'Oman': 'OMR', 'Qatar': 'QAR', 'Bahrain': 'BHD', 'Kuwait': 'KWD', 'United Kingdom': 'GBP', 'United States': 'USD', 'Germany': 'EUR', 'France': 'EUR', 'Netherlands': 'EUR', 'Italy': 'EUR', 'Singapore': 'SGD', 'Australia': 'AUD', 'Canada': 'CAD' };
+const partyTaxLabel = (party, cc) => (party && party.overseas) ? (party.taxIdType || 'Tax ID') : ((cc && cc.taxIdLabel) || 'GSTIN');
+// Home-country company: party is either domestic (GSTIN) or overseas (VAT / TRN / Tax ID — no GST on its documents)
+function PartyLocation({ form, setForm, cc, kind }) {
+  if (!cc || !cc.splitTax) return null;
+  const ov = !!form.overseas;
+  const set = (patch) => setForm(p => ({ ...p, ...patch }));
+  return (
+    <div style={{ ...styles.formGroup, background: ov ? '#FBF8EC' : 'transparent', border: ov ? '1px solid #E5DFC9' : 'none', borderRadius: 10, padding: ov ? 10 : 0 }}>
+      <label style={styles.label}>{kind === 'vendor' ? 'Vendor' : 'Customer'} location</label>
+      <div style={{ display: 'flex', gap: 6, marginBottom: ov ? 8 : 0 }}>
+        {[[false, 'India (GST)'], [true, 'Overseas (VAT / Tax ID)']].map(([v, l]) => <button key={String(v)} type="button" onClick={() => set(v ? { overseas: true, taxIdType: form.taxIdType || OVERSEAS_TAX_IDS[0] } : { overseas: false })} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (ov === v ? '#1E2A4A' : '#DDD'), background: ov === v ? '#1E2A4A' : '#fff', color: ov === v ? '#fff' : '#666' }}>{l}</button>)}
+      </div>
+      {ov && <>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div><label style={{ ...styles.label, fontSize: 11.5 }}>Country</label><input list="ov-countries" value={form.partyCountry || ''} onChange={e => { const c = e.target.value; set({ partyCountry: c, ...(COUNTRY_CUR[c] && !form.currency ? { currency: COUNTRY_CUR[c] } : {}) }); }} style={styles.input} placeholder="e.g. United Arab Emirates" /><datalist id="ov-countries">{COUNTRY_LIST.map(c => <option key={c} value={c} />)}</datalist></div>
+          <div><label style={{ ...styles.label, fontSize: 11.5 }}>Currency</label><input list="ov-cur" value={form.currency || ''} onChange={e => set({ currency: e.target.value.toUpperCase() })} style={styles.input} placeholder="USD" /><datalist id="ov-cur">{['USD', 'EUR', 'GBP', 'AED', 'SAR', 'OMR', 'QAR', 'SGD', 'AUD'].map(c => <option key={c} value={c} />)}</datalist></div>
+          <div><label style={{ ...styles.label, fontSize: 11.5 }}>Tax ID type</label><select value={form.taxIdType || OVERSEAS_TAX_IDS[0]} onChange={e => set({ taxIdType: e.target.value })} style={styles.input}>{OVERSEAS_TAX_IDS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+          <div><label style={{ ...styles.label, fontSize: 11.5 }}>{form.taxIdType || 'Tax ID'} number</label><input value={form.taxId || ''} onChange={e => set({ taxId: e.target.value })} style={styles.input} placeholder="e.g. 100XXXXXXXXX003" /></div>
+        </div>
+        <div style={{ fontSize: 11.5, color: '#7A6A2A', marginTop: 6 }}>{kind === 'vendor' ? 'Import purchase: no GST on the PO / bill (IGST is paid at customs on the Bill of Entry).' : 'Sales to this customer are exports: quotation / invoice open as "Export under LUT" (zero-rated, no GST), place of supply 96-Other Countries, in this currency. Change to "Export with IGST" on the document if needed.'}</div>
+      </>}
+    </div>
+  );
+}
+
 function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
   const [form, setForm] = useState(customer);
   const country = businessInfo.country || 'india';
@@ -3257,9 +3285,9 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
   const stateLabel = cc.stateLabel || 'State';
   const fields = [
     { key: 'name',    label: 'Name' },
-    ...(cc.hasTax ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
+    ...(cc.hasTax && !form.overseas ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
     { key: 'address', label: 'Address' },
-    { key: 'state',   label: stateLabel },
+    { key: 'state',   label: form.overseas ? 'State / Province / City' : stateLabel },
     { key: 'phone',   label: 'Phone' },
     { key: 'email',   label: 'Email 1' },
     { key: 'email2',  label: 'Email 2 (optional)' },
@@ -3267,6 +3295,7 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
   ];
   return (
     <Modal onClose={onClose} title={customer.id ? 'Edit customer' : 'Add customer'}>
+      <PartyLocation form={form} setForm={setForm} cc={cc} kind="customer" />
       {fields.map(({ key, label, isTax }) => (
         <div key={key} style={styles.formGroup}>
           <label style={styles.label}>{label}</label>
@@ -3279,7 +3308,7 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
           {isTax && <TaxIdVerifyButton taxId={form[key]} country={country} />}
         </div>
       ))}
-      <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save customer</button>
+      <button onClick={() => onSave(form.overseas ? { ...form, gstin: '' } : form)} style={styles.primaryBtn}>Save customer</button>
     </Modal>
   );
 }
@@ -3402,9 +3431,9 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
   const stateLabel = cc.stateLabel || 'State';
   const fields = [
     { key: 'name',    label: 'Name' },
-    ...(cc.hasTax ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
+    ...(cc.hasTax && !form.overseas ? [{ key: 'gstin', label: cc.taxIdLabel, isTax: true }] : []),
     { key: 'address', label: 'Address' },
-    { key: 'state',   label: stateLabel },
+    { key: 'state',   label: form.overseas ? 'State / Province / City' : stateLabel },
     { key: 'phone',   label: 'Phone' },
     { key: 'email',   label: 'Email 1' },
     { key: 'email2',  label: 'Email 2 (optional)' },
@@ -3412,6 +3441,7 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
   ];
   return (
     <Modal onClose={onClose} title={vendor.id ? 'Edit vendor' : 'Add vendor'}>
+      <PartyLocation form={form} setForm={setForm} cc={cc} kind="vendor" />
       {fields.map(({ key, label, isTax }) => (
         <div key={key} style={styles.formGroup}>
           <label style={styles.label}>{label}</label>
@@ -3419,7 +3449,7 @@ function VendorModal({ vendor, onSave, onClose, businessInfo = {} }) {
           {isTax && <TaxIdVerifyButton taxId={form[key]} country={country} />}
         </div>
       ))}
-      <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save vendor</button>
+      <button onClick={() => onSave(form.overseas ? { ...form, gstin: '' } : form)} style={styles.primaryBtn}>Save vendor</button>
     </Modal>
   );
 }
@@ -6751,12 +6781,12 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
   lines.forEach(({ it, itemNo }) => {
     const tpl = findMaster(it.name, it.itemId);
     const qty = parseFloat(it.qty) || 0;
-    const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust };
+    const ref = { docId: doc.id, docNo: doc.number, docType: doc.type, itemNo, customer: cust, woNo: doc.woNo || '', customerRef: doc.customerRef || '' };
     if (!tpl || !(tpl.materials || []).length) { missing.push(itemNo + '. ' + (it.name || '').trim()); return; }
     poSeq += 1;
     newOrders.push({
       id: 'po-' + doc.id + '-' + itemNo + '-' + Math.random().toString(36).slice(2, 7),
-      number: 'PRO/' + (doc.number || 'Q') + '/' + itemNo, batchNumber: (typeof genBatchNumber === 'function' ? genBatchNumber() : 'BN-' + poSeq),
+      number: (doc.woNo ? doc.woNo : 'PRO/' + (doc.number || 'Q')) + '/' + itemNo, batchNumber: (typeof genBatchNumber === 'function' ? genBatchNumber() : 'BN-' + poSeq),
       bomId: tpl.id, bomRev: tpl.rev || 0, itemId: it.itemId || tpl.itemId || '', quantity: qty, startDate: dt, targetDate: doc.deliveryDate || doc.validUntil || '',
       status: 'planned', notes: 'Auto from won ' + (doc.number || '') + ' · item ' + itemNo + (cust ? ' · ' + cust : ''),
       orderRef: ref, bizType, createdAt: Date.now(), approvalStatus: 'draft', approvalNote: '',
@@ -6770,16 +6800,16 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
     });
   });
   const rows = Object.values(need).map(r => ({ ...r, overall: Math.round(r.overall * 1000) / 1000, perBom: Math.round(r.overall * 1000) / 1000, shortage: Math.max(0, Math.round((r.overall - r.available) * 1000) / 1000), itemNos: r.itemNos.join(', ') }));
-  const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + (doc.number || '') + (cust ? ' — ' + cust : ''), qty: 1, outputQty: 1, outputUnit: '', date: dt, rows, orderRef: { docId: doc.id, docNo: doc.number }, bizType, createdAt: new Date().toISOString() };
+  const report = { id: 'bos-' + doc.id + '-' + Date.now(), bomId: '', bomName: 'Order ' + (doc.number || '') + (cust ? ' — ' + cust : ''), qty: 1, outputQty: 1, outputUnit: '', date: dt, rows, orderRef: { docId: doc.id, docNo: doc.number, woNo: doc.woNo || '' }, bizType, createdAt: new Date().toISOString() };
   const short = rows.filter(r => r.shortage > 0);
   let pr = null;
   if (short.length) {
     const cnt = (purchaseReqs || []).filter(m => (m.number || '').includes('PR/' + (typeof fyNow === 'function' ? fyNow() : '') + '/')).length + 1;
     pr = {
       id: 'pr-' + doc.id + '-' + Date.now(), number: (typeof dn === 'function' ? dn('PR', cnt) : 'PR-' + cnt), bizType,
-      type: 'manufacturing', linkId: doc.id, linkName: 'Order ' + (doc.number || ''), date: dt, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (won quotation)', priority: 'Normal',
-      items: short.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'Order ' + (doc.number || '') + ' · item ' + r.itemNos })),
-      remarks: 'Auto-raised from won quotation ' + (doc.number || '') + ' — shortage against order BOMs', orderRef: { docId: doc.id, docNo: doc.number },
+      type: 'manufacturing', linkId: doc.id, linkName: 'WO ' + (doc.woNo || doc.number || ''), date: dt, requiredBy: doc.deliveryDate || '', requestedBy: 'Auto (won quotation)', priority: 'Normal',
+      items: short.map(r => ({ itemId: r.itemId || '', itemCode: r.itemCode || '', name: r.name, uom: r.unit, qty: r.shortage, rate: r.rate, hsn: '', purpose: 'WO ' + (doc.woNo || doc.number || '') + ' · item ' + r.itemNos })),
+      remarks: 'Auto-raised for WO ' + (doc.woNo || '') + ' (quotation ' + (doc.number || '') + ') — material shortage against the product BOMs', orderRef: { docId: doc.id, docNo: doc.number, woNo: doc.woNo || '', customerRef: doc.customerRef || '' },
       approvalStatus: 'draft', convertedToPO: false, createdAt: new Date().toISOString(),
     };
   }
@@ -7166,7 +7196,7 @@ function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockL
         </div>
         <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16 }}><tbody>
           <tr><td style={{ color: '#888', width: 140 }}>Vendor</td><td style={{ fontWeight: 600 }}>{r.g.vendorName || '—'}</td><td style={{ color: '#888', width: 120 }}>GRN</td><td style={{ fontWeight: 600 }}>{r.g.number} · {r.g.date}</td></tr>
-          <tr><td style={{ color: '#888' }}>Purchase order</td><td style={{ fontWeight: 600 }}>{r.g.poNumber || '—'}</td><td style={{ color: '#888' }}>Order ref</td><td style={{ fontWeight: 600 }}>{(r.g.orderRef && r.g.orderRef.docNo) || '—'}</td></tr>
+          <tr><td style={{ color: '#888' }}>Purchase order</td><td style={{ fontWeight: 600 }}>{r.g.poNumber || '—'}</td><td style={{ color: '#888' }}>Order ref</td><td style={{ fontWeight: 600 }}>{(r.g.orderRef && woNo(r.g.orderRef)) || '—'}</td></tr>
         </tbody></table>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
           <thead><tr>{['Item code', 'Item description', 'Lot / heat', 'Received', 'Accepted', 'Rejected', 'Rate', 'Value'].map(h => <th key={h} style={{ background: '#6BA855', color: '#fff', padding: '6px 8px', textAlign: 'left', border: '1px solid #6BA855' }}>{h}</th>)}</tr></thead>
@@ -7223,7 +7253,7 @@ function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockL
           <thead><tr>{['RTV no.', 'GRN / PO', 'Vendor', 'Item', 'Rejected', 'Action', 'Value', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{rtvRows.map(r => <tr key={r.g.id + '-' + r.idx}>
             <td style={td}>{r.l.rtvNo || '—'}</td>
-            <td style={td}>{r.g.number}<div style={{ fontSize: 11, color: '#888' }}>{r.g.poNumber || 'no PO'}{r.g.orderRef && r.g.orderRef.docNo ? ' · ' + r.g.orderRef.docNo : ''}</div></td>
+            <td style={td}>{r.g.number}<div style={{ fontSize: 11, color: '#888' }}>{r.g.poNumber || 'no PO'}{r.g.orderRef && r.g.orderRef.docNo ? ' · ' + woNo(r.g.orderRef) : ''}</div></td>
             <td style={td}>{r.g.vendorName || ''}</td>
             <td style={td}>{(r.item && r.item.itemCode) ? r.item.itemCode + ' · ' : ''}{(r.item && r.item.name) || r.l.itemName}</td>
             <td style={td}>{r.l.rejectedQty} {r.l.unit || (r.item && r.item.unit) || ''}</td>
@@ -7263,7 +7293,7 @@ const fgFor = (d, items = [], boms = [], cableDesigns = []) => {
   const b = (boms || []).find(x => x.id === d.order.bomId);
   return (b && b.itemId && (items || []).find(i => i.id === b.itemId)) || (items || []).find(i => i.designId && (cableDesigns || []).some(cd => cd.id === i.designId && _nm(cd.name) === _nm(d.product))) || (items || []).find(i => _nm(i.name) === _nm(d.product)) || null;
 };
-function StoresAcceptView({ productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, userRole, currentBizType = 'manufacturing', businessInfo = {} }) {
+function StoresAcceptView({ embedded = false, productionOrders = [], setProductionOrders, boms = [], cableDesigns = [], items = [], setStockLedger, userRole, currentBizType = 'manufacturing', businessInfo = {} }) {
   const U = mfgCfg().unit;
   const canAccept = !['sales', 'accounts', 'purchase'].includes(userRole);
   const iso = new Date().toISOString().slice(0, 10);
@@ -7293,6 +7323,27 @@ function StoresAcceptView({ productionOrders = [], setProductionOrders, boms = [
   const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
   const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0', verticalAlign: 'middle' };
   const inp = { ...styles.input, padding: '5px 8px', fontSize: 12.5, marginBottom: 0 };
+  if (embedded) {
+    if (!queue.length) return null;
+    return (
+      <div style={{ ...styles.page, paddingBottom: 0 }}>
+        <div style={{ background: '#FFF6E5', border: '1px solid #F2D48A', borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ fontWeight: 700, color: '#8A5A00', marginBottom: 8 }}>📥 Forwarded by QA — awaiting stores acceptance ({queue.length})<span style={{ fontWeight: 400, fontSize: 12, color: '#8A6D3B', marginLeft: 8 }}>Check quantity, label and condition → Accept (becomes finished stock, can be dispatched) or send back to QA.</span></div>
+          <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 8 }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>{[U.name + ' no.', 'Product', 'Work Order / item', 'QA released', 'Certificate', 'Qty received', 'Location', 'Received by', ''].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{queue.map(d => { const r = row(d); return <tr key={d.key}>
+              <td style={{ ...td, fontWeight: 700 }}>{d.drumNo}</td><td style={td}>{d.product}</td>
+              <td style={td}>{(d.order.orderRef && woNo(d.order.orderRef)) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
+              <td style={td}>{d.length} {U.qtyUnit}<div style={{ fontSize: 11, color: '#888' }}>{d.testDate}</div></td><td style={td}>{d.certNo || '—'}</td>
+              <td style={td}><input type="number" value={r.qty} onChange={e => setRow(d, 'qty', e.target.value)} style={{ ...inp, width: 90 }} /></td>
+              <td style={td}><input value={r.loc} onChange={e => setRow(d, 'loc', e.target.value)} placeholder="Bay / rack" style={{ ...inp, width: 100 }} /></td>
+              <td style={td}><input value={r.by} onChange={e => setRow(d, 'by', e.target.value)} placeholder="Name" style={{ ...inp, width: 110 }} /></td>
+              <td style={td}>{canAccept && <><button onClick={() => accept(d)} style={styles.primaryBtn}>Accept</button><button onClick={() => backToQa(d)} style={{ ...styles.ghostBtn, marginLeft: 4, color: '#B5453A' }}>Back to QA</button></>}</td>
+            </tr>; })}</tbody>
+          </table></div>
+        </div>
+      </div>);
+  }
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Stores acceptance (finished goods)</h1><p style={styles.muted}>QA-passed {U.plural.toLowerCase()} wait here. Stores checks quantity, label and condition, gives a location and accepts — only then it becomes finished stock and can be dispatched. Mismatch → back to QA.</p></div>
@@ -7305,7 +7356,7 @@ function StoresAcceptView({ productionOrders = [], setProductionOrders, boms = [
           <tbody>{queue.map(d => { const r = row(d); return <tr key={d.key}>
             <td style={{ ...td, fontWeight: 700 }}>{d.drumNo}</td>
             <td style={td}>{d.product}</td>
-            <td style={td}>{(d.order.orderRef && d.order.orderRef.docNo) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
+            <td style={td}>{(d.order.orderRef && woNo(d.order.orderRef)) || d.order.number}{d.order.orderRef && d.order.orderRef.itemNo ? ' · item ' + d.order.orderRef.itemNo : ''}</td>
             <td style={td}>{d.length} {U.qtyUnit}<div style={{ fontSize: 11, color: '#888' }}>{d.testDate}</div></td>
             <td style={td}>{d.certNo || '—'}</td>
             <td style={td}><input type="number" value={r.qty} onChange={e => setRow(d, 'qty', e.target.value)} style={{ ...inp, width: 90 }} /></td>
@@ -7324,7 +7375,7 @@ function StoresAcceptView({ productionOrders = [], setProductionOrders, boms = [
   );
 }
 
-const DRUM_STATUS = { pending: ['Awaiting routine test', '#E07B00'], passed: ['Released (test passed)', '#1A7A3E'], failed: ['Failed — QA hold', '#B5453A'], dispatched: ['Dispatched', '#6B7494'] };
+const DRUM_STATUS = { pending: ['Awaiting routine test', '#E07B00'], withstores: ['QA passed → with stores (awaiting acceptance)', '#B26B00'], passed: ['In finished stock (stores accepted)', '#1A7A3E'], failed: ['Failed — QA hold', '#B5453A'], dispatched: ['Dispatched', '#6B7494'] };
 
 function WIPView({ productionOrders = [], boms = [], setView }) {
   const today = new Date();
@@ -7344,7 +7395,7 @@ function WIPView({ productionOrders = [], boms = [], setView }) {
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{['Order', 'Product', 'Order item', 'Progress', 'Last stage output', 'Bobbin / machine', 'Waiting at', 'Since'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{rows.map(r => <tr key={r.o.id}>
-            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}</td><td style={td}>{r.o.orderRef ? r.o.orderRef.docNo + ' / ' + r.o.orderRef.itemNo : '—'}</td>
+            <td style={td}><b>{r.o.number}</b></td><td style={td}>{r.bom ? r.bom.name : ''}</td><td style={td}>{r.o.orderRef ? woNo(r.o.orderRef) + ' / ' + r.o.orderRef.itemNo : '—'}</td>
             <td style={{ ...td, color: r.hold ? '#B5453A' : '#2255A0', fontWeight: 600 }}>{r.total ? r.done + '/' + r.total : 'Route not started'}{r.hold ? ' ⚠ QA hold' : ''}</td>
             <td style={td}>{r.last ? r.last.name + ': ' + (r.last.outQty || 0) : '—'}</td><td style={td}>{r.refs || '—'}</td>
             <td style={td}>{r.cur ? r.cur.name : (r.total ? 'All stages done' : '—')}</td><td style={{ ...td, color: r.since > 2 ? '#B5453A' : '#666' }}>{r.since === null ? '—' : r.since + ' d'}</td>
@@ -7378,7 +7429,7 @@ function DrumStockView({ productionOrders = [], boms = [], setView }) {
       {tab === 'drums' && (shown.length === 0 ? <div style={styles.emptyBox}>No drums yet. Record drums on the last stage of a production order route (🧭 Route → Drumming).</div> :
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{[U.numLabel, 'Product', 'Order', 'Quote / item', U.qtyLabel, U.fields.some(x => x[0] === 'expiry') ? 'Expiry' : 'Net (kg)', 'Date', 'Status'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>{shown.map(d => { const stt = d.dispatched ? 'dispatched' : (d.testStatus || 'pending'), lab = DRUM_STATUS[stt] || DRUM_STATUS.pending; return <tr key={d.key}>
+          <tbody>{shown.map(d => { const stt = d.dispatched ? 'dispatched' : (d.testStatus === 'passed' && d.awaitStores && !d.storesAccepted) ? 'withstores' : (d.testStatus || 'pending'), lab = DRUM_STATUS[stt] || DRUM_STATUS.pending; return <tr key={d.key}>
             <td style={td}><b>{d.drumNo || '—'}</b>{dupNo[_nm(d.drumNo)] > 1 ? <span style={{ color: '#B5453A', fontSize: 11 }}> duplicate no.</span> : null}</td><td style={td}>{d.product}</td><td style={td}>{d.order.number}</td>
             <td style={td}>{d.order.orderRef ? d.order.orderRef.docNo + ' / ' + d.order.orderRef.itemNo : '—'}</td><td style={td}>{d.length}</td>{U.fields.some(x => x[0] === 'expiry') ? (() => { const dl = d.expiry ? Math.floor((new Date(d.expiry) - new Date()) / 86400000) : null; return <td style={{ ...td, fontWeight: dl !== null && dl <= 30 ? 700 : 400, color: dl === null ? '#999' : dl < 0 ? '#B5453A' : dl <= 30 ? '#E07B00' : '#1A7A3E' }}>{d.expiry ? d.expiry + (dl < 0 ? ' · expired' : ' · ' + dl + ' d') : '—'}</td>; })() : <td style={td}>{d.net || '—'}</td>}<td style={td}>{d.date || ''}</td>
             <td style={{ ...td, color: lab[1], fontWeight: 700 }}>{lab[0]}</td></tr>; })}</tbody></table></div>)}
@@ -7560,7 +7611,7 @@ function RoutineTestView({ setFatReports, productionOrders = [], setProductionOr
       const certNo = cur.certNo || dn('TC', certCount);
       patchDrum(cur, { testStatus: 'passed', testDate: iso, testedBy: t.testedBy, certNo, test, awaitStores: true, storesAccepted: false });
       setCur(null);
-      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.\nHanded over to Stores → "Stores acceptance (FG)". It becomes finished stock when Stores accepts it.');
+      alert('✅ ' + U.name + ' ' + cur.drumNo + ' passed — certificate ' + certNo + '.\nForwarded to Stores (finished stock screen) — it becomes finished stock when Stores accepts it.');
     } else {
       patchDrum(cur, { testStatus: 'failed', testDate: iso, testedBy: t.testedBy, test });
       setCur(null); setReroute({ ...cur, test });
@@ -7805,10 +7856,17 @@ function ProductSpecView({ specs = [], setSpecs, items = [], setItems, boms = []
 }
 
 // ─── Order Tracker — one reference number (won quotation no.) → status of every flowchart step ───
+// The order's common tracking number: Work Order no. given when the quotation is won (falls back to the quotation no.)
+function woNo(ref) {
+  if (!ref) return '';
+  if (typeof ref === 'object') { if (ref.woNo) return ref.woNo; ref = ref.docNo || ''; }
+  const m = (typeof window !== 'undefined' && window.__operixWo) || {};
+  return m[_nm(ref)] || ref;
+}
 function resolveOrderRef(input, { documents = [], productionOrders = [], purchaseReqs = [], grns = [] }) {
   const v = String(input || '').trim(); if (!v) return '';
   const eq = (a) => _nm(a) === _nm(v);
-  const q = documents.find(d => d.type === 'quotation' && eq(d.number)); if (q) return q.number;
+  const q = documents.find(d => d.type === 'quotation' && (eq(d.number) || (d.woNo && eq(d.woNo)) || (d.customerRef && eq(d.customerRef)))); if (q) return q.number;
   const po = productionOrders.find(o => eq(o.number)); if (po && po.orderRef) return po.orderRef.docNo;
   const d = documents.find(x => eq(x.number)); if (d) { if (d.orderRef && d.orderRef.docNo) return d.orderRef.docNo; if (d.linkedFrom && d.linkedFrom.docType === 'quotation') return d.linkedFrom.docNumber; }
   const pr = purchaseReqs.find(x => eq(x.number)); if (pr && pr.orderRef) return pr.orderRef.docNo;
@@ -7886,7 +7944,7 @@ function buildOrderStatus(ref, data) {
     S('issue', 'Stores', 'Issue to production', !orders.length ? 'pending' : sivs.length ? 'done' : 'active', sivs.length ? sivs.map(s => s.sivNumber).join(', ') : 'Not issued yet', 'storeissue'),
     S('prod', 'Production', 'Production (route stages)', !orders.length ? 'pending' : stg.hold ? 'issue' : stg.total && stg.done === stg.total ? 'done' : (stg.done || units.length) ? 'active' : 'pending', orders.length ? orders.length + ' order(s) · stages ' + stg.done + '/' + stg.total + (stg.hold ? ' · ' + stg.hold + ' on hold' : '') : '', 'productionorders'),
     S('test', 'Quality', mfgCfg().test.title + ' & certificate', !units.length ? 'pending' : failed.length ? 'issue' : pendT.length ? 'active' : 'done', units.length ? passed.length + ' passed · ' + pendT.length + ' waiting' + (failed.length ? ' · ' + failed.length + ' failed' : '') + ' (' + U.plural.toLowerCase() + ')' : '', 'routinetest'),
-    S('stacc', 'Stores', 'Stores acceptance (FG receipt)', !passed.length ? 'pending' : awaitSt.length ? 'active' : 'done', passed.length ? accSt.length + ' accepted' + (awaitSt.length ? ' · ' + awaitSt.length + ' waiting for stores' : '') + (units.some(u => u.storesReturn) ? ' · ' + units.filter(u => u.storesReturn).length + ' sent back to QA' : '') : '', 'fgaccept'),
+    S('stacc', 'Stores', 'QA → stores acceptance (FG receipt)', !passed.length ? 'pending' : awaitSt.length ? 'active' : 'done', passed.length ? accSt.length + ' accepted' + (awaitSt.length ? ' · ' + awaitSt.length + ' waiting for stores' : '') + (units.some(u => u.storesReturn) ? ' · ' + units.filter(u => u.storesReturn).length + ' sent back to QA' : '') : '', 'drumstock'),
     S('payclr', 'Accounts', 'Payment received → dispatch clearance', !passed.length ? 'pending' : deliveries.some(d => d.dispatchHold && !d.dispatchCleared) ? 'issue' : deliveries.some(d => d.dispatchCleared) ? 'done' : 'active', (() => { const adv = vouchers.filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && _nm(v.linkedDocNo) === _nm(ref)).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0); const held = deliveries.filter(d => d.dispatchHold && !d.dispatchCleared); return (adv ? 'Advance ₹' + Math.round(adv).toLocaleString('en-IN') : 'No advance received') + (held.length ? ' · on hold: ' + held.map(d => d.number + ' (short ₹' + Math.round((d.clearance && d.clearance.short) || 0).toLocaleString('en-IN') + ')').join(', ') : ''); })(), 'vouchers'),
     S('disp', 'Stores', 'Finished goods & dispatch', !passed.length ? 'pending' : dispatched.length >= passed.length && passed.length === units.length ? 'done' : dispatched.length ? 'active' : 'active', passed.length ? dispatched.length + '/' + passed.length + ' dispatched' + (deliveries.length ? ' · ' + deliveries.map(d => d.number).join(', ') : '') : '', 'drumstock'),
     S('inv', 'Accounts', 'Invoice', !invoices.length ? (dispatched.length ? 'active' : 'pending') : 'done', invoices.length ? invoices.map(d => d.number + ' (' + d.status + ')').join(', ') + ' · ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'documents'),
@@ -7906,14 +7964,14 @@ function OrderTrackerView({ data, setView, initialRef = '' }) {
   const go = () => setRef(resolveOrderRef(input, data));
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Order Tracker</h1><p style={styles.muted}>One reference number for the whole order. Type the won quotation no. — or any production order, PR, PO, GRN, delivery or invoice no. of that order.</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Order Tracker</h1><p style={styles.muted}>One reference number for the whole order. Type the Work Order no. (or customer PO ref / quotation no.) — or any production order, PR, PO, GRN, delivery or invoice no. of that order.</p></div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 14, maxWidth: 640 }}>
-        <div style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') go(); }}><ComboField value={input} onChange={setInput} placeholder="Order reference (won quotation no.)" options={won.map(d => ({ value: d.number, label: d.number, sub: [((d.customerSnapshot && d.customerSnapshot.name) || ''), d.outcomeDate || ''].filter(Boolean).join(' · ') }))} onPick={o => setRef(o.value)} /></div>
+        <div style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') go(); }}><ComboField value={input} onChange={setInput} placeholder="Order reference (won quotation no.)" options={won.map(d => ({ value: d.woNo || d.number, label: (d.woNo || d.number), sub: [d.woNo ? d.number : '', d.customerRef ? 'Cust ' + d.customerRef : '', ((d.customerSnapshot && d.customerSnapshot.name) || ''), d.outcomeDate || ''].filter(Boolean).join(' · ') }))} onPick={o => setRef(o.value)} /></div>
         <button onClick={go} style={styles.primaryBtn}>Track</button>
       </div>
       {st && <>
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '12px 16px', marginBottom: 12, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div><div style={{ fontSize: 11, color: '#888' }}>Order reference</div><div style={{ fontSize: 18, fontWeight: 700 }}>{ref}</div></div>
+          <div><div style={{ fontSize: 11, color: '#888' }}>Work Order</div><div style={{ fontSize: 18, fontWeight: 700 }}>{(st.quote && st.quote.woNo) || woNo(ref)}</div><div style={{ fontSize: 11, color: '#888' }}>Quotation {ref}{st.quote && st.quote.customerRef ? ' · Cust ref ' + st.quote.customerRef : ''}</div></div>
           <div><div style={{ fontSize: 11, color: '#888' }}>Customer</div><div style={{ fontWeight: 600 }}>{(st.quote && st.quote.customerSnapshot && st.quote.customerSnapshot.name) || '—'}</div></div>
           <div><div style={{ fontSize: 11, color: '#888' }}>Now at</div><div style={{ fontWeight: 700, color: st.current ? col[st.current.status][0] : '#1A7A3E' }}>{st.current ? st.current.dept + ' — ' + st.current.title : 'Completed'}</div></div>
           <div style={{ flex: 1, minWidth: 180 }}><div style={{ fontSize: 11, color: '#888' }}>Progress {st.pct}%</div><div style={{ height: 8, background: '#EEE', borderRadius: 4, overflow: 'hidden', marginTop: 4 }}><div style={{ width: st.pct + '%', height: '100%', background: '#1A7A3E' }} /></div></div>
@@ -8189,10 +8247,41 @@ const BIZ_SECTION_VIEWS = {
 const BizTypeCtx = React.createContext(null);
 const SidebarCtx = React.createContext(null);
 
+// Related screens grouped as tabs of one module. Sidebar shows one entry per module; each tab keeps its own screen.
+const VIEW_HUBS = {
+  sales:     { title: 'Customers', tabs: [['customers', 'Customers'], ['enquiries', 'Enquiries'], ['serviceorders', 'SAS', () => !!_mfgType()]] },
+  vendors:   { title: 'Vendors', tabs: [['vendors', 'Vendors'], ['vendoreval', 'Vendor evaluation']] },
+  eng:       { title: 'Engineering', when: () => !!_mfgType(), tabs: [['stdbom', 'BOM (product code)'], ['cabledesign', 'Cable design', () => mfgCfg().eng === 'cable'], ['productspec', 'Product spec', () => mfgCfg().eng !== 'cable'], ['tds', 'Technical data sheet'], ['engdocs', 'Standards & documents']] },
+  planning:  { title: 'Order Tracker', when: () => !!_mfgType(), tabs: [['ordertracker', 'Order tracker (WO)'], ['boshortage', 'Material shortage']] },
+  stock:     { title: 'Stock', tabs: [['stock', 'Stock position'], ['stockledger', 'Stock ledger'], ['bincard', 'Bin card'], ['verticalrack', 'Racks / locations']] },
+  prod:      { title: 'Production', when: () => !!_mfgType(), tabs: [['productionorders', 'Production orders'], ['wip', 'WIP (in process)'], ['machinelog', 'Machine log & downtime'], ['metalrecon', 'Metal reconciliation', () => (mfgCfg().registers || []).includes('metal')]] },
+  maint:     { title: 'Maintenance', when: () => !!_mfgType(), tabs: [['assetregister', 'Machines / equipment'], ['pmschedules', 'Preventive maintenance'], ['fmworkorders', 'Breakdown log'], ['fmspareparts', 'Spares']] },
+  qc:        { title: 'Quality control', when: () => !!_mfgType(), tabs: [['incomingqa', 'Incoming QA'], ['inprocessqa', 'Production QA'], ['routinetest', 'Final test'], ['fatsat', 'FAT / SAT / STP'], ['calibration', 'Calibration']] },
+  qms:       { title: 'ISO 9001 / QMS', when: () => !!_mfgType(), tabs: [['isoprinciples', 'ISO principles'], ['deptprocedures', 'Dept procedures'], ['capa', 'CAPA / NCR'], ['internalaudit', 'Internal audit'], ['mis', 'MIS / management review']] },
+};
+const HUB_OF = {};
+Object.entries(VIEW_HUBS).forEach(([h, d]) => d.tabs.forEach(t => { HUB_OF[t[0]] = h; }));
+const hubTabs = (h) => (VIEW_HUBS[h] ? VIEW_HUBS[h].tabs.filter(t => !t[2] || (() => { try { return t[2](); } catch (e) { return true; } })()) : []);
+function HubFrame({ view, setView, businessInfo, children }) {
+  const h = HUB_OF[view]; const tabs = hubTabs(h);
+  if (!h || tabs.length < 2 || (VIEW_HUBS[h].when && !VIEW_HUBS[h].when())) return children;
+  const label = (tabs.find(t => t[0] === view) || [])[1] || '';
+  return (
+    <div>
+      <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 20, background: '#F7F4EE', borderBottom: '1px solid #E5E0D4', padding: '10px 40px 8px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span className="serif" style={{ fontWeight: 700, color: '#1E2A4A', fontSize: 15, marginRight: 10 }}>{VIEW_HUBS[h].title}</span>
+        {tabs.map(([id, l]) => <button key={id} onClick={() => setView(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (view === id ? '#1E2A4A' : '#DDD'), background: view === id ? '#1E2A4A' : '#fff', color: view === id ? '#fff' : '#555' }}>{l}</button>)}
+        <button onClick={() => printView('.hub-print', businessInfo, { title: VIEW_HUBS[h].title + ' — ' + label })} style={{ ...styles.ghostBtn, marginLeft: 'auto' }} title={'Print ' + label}><Printer size={14} /> Print</button>
+      </div>
+      <div className="hub-print">{children}</div>
+    </div>
+  );
+}
+
 function NavBtn({ id, label, icon: Icon, small }) {
   const { view, setView, setActiveDoc, onBizContextChange } = React.useContext(SidebarCtx);
   const ctxBizType = React.useContext(BizTypeCtx);
-  const active = view === id;
+  const active = view === id || (!!HUB_OF[id] && HUB_OF[id] === HUB_OF[view]);
   return (
     <button
       type="button"
@@ -8457,8 +8546,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
               {bt === 'manufacturing' && <>
                 <SubLabel label="Sales" />
                 <NavBtn id="customers"     label="Customers" icon={Users} />
-                <NavBtn id="enquiries"     label="Enquiries" icon={FileSignature} />
-                <NavBtn id="serviceorders" label="SAS"       icon={Briefcase} />
                 <CreateBtn docKey="quotation"  bizType="manufacturing" />
                 <CreateBtn docKey="invoice"    bizType="manufacturing" />
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
@@ -8466,56 +8553,34 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Purchase" />
                 <NavBtn id="purchasereq" label="Purchase Requisition" icon={FileText} />
                 <NavBtn id="vendors"    label="Vendors"            icon={Truck} />
-                <NavBtn id="vendoreval" label="Vendor Evaluation"  icon={CheckSquare} />
                 <CreateBtn docKey="purchase"     bizType="manufacturing" />
                 <CreateBtn docKey="purchasebill" bizType="manufacturing" />
                 <NavBtn id="grn" label="Goods Receipt (GRN)" icon={Truck} />
 
                 {isCable ? (<>
                 <SubLabel label="Engineering" />
-                <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
-                <NavBtn id="tds"         label="Technical Data Sheet" icon={FileText} />
-                <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
+                <NavBtn id="stdbom" label="Engineering (BOM · design · TDS)" icon={ClipboardList} />
 
                 <SubLabel label="Planning" />
-                <NavBtn id="ordertracker" label="Order Tracker" icon={BarChart2} />
-                <NavBtn id="boshortage" label="BO Shortages → PR"   icon={AlertTriangle} />
+                <NavBtn id="ordertracker" label="Order Tracker (WO)" icon={BarChart2} />
 
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Item Master"          icon={Package} />
                 <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
-                <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />
-                <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />
                 <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}   icon={Package} />
-                <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
-                <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
-                <NavBtn id="bincard"      label="Bin Card"             icon={ClipboardList} />
-                <NavBtn id="verticalrack" label="Vertical Rack"        icon={Layers} />
+                <NavBtn id="stock"        label="Stock (position · ledger · bin card · racks)" icon={ClipboardList} />
                 <CreateBtn docKey="delivery"     bizType="manufacturing" />
                 <CreateBtn docKey="packing_list" bizType="manufacturing" />
 
                 <SubLabel label="Production" />
                 <NavBtn id="productionorders" label="Production Orders"      icon={Factory} />
-                <NavBtn id="machinelog"       label="Machine Log & Downtime" icon={ClipboardList} />
-                {(fc.registers || []).includes('metal') && <NavBtn id="metalrecon" label="Metal Reconciliation" icon={BarChart2} />}
 
                 <SubLabel label="Maintenance" />
-                <NavBtn id="assetregister" label="Machine / Equipment Register" icon={Package} />
-                <NavBtn id="pmschedules"   label="Preventive Maintenance"       icon={ClipboardList} />
-                <NavBtn id="fmworkorders"  label="Breakdown Log"                icon={Wrench} />
-                <NavBtn id="fmspareparts"  label="Maintenance Spares"           icon={Package} />
+                <NavBtn id="assetregister" label="Maintenance (machines · PM · breakdown · spares)" icon={Wrench} />
 
                 <SubLabel label="Quality" />
-                <NavBtn id="incomingqa"     label="Incoming QA"                 icon={CheckSquare} />
-                <NavBtn id="inprocessqa"    label="Production QA"               icon={CheckSquare} />
-                <NavBtn id="routinetest"    label={fc.test.menu} icon={CheckCircle} />
-                <NavBtn id="fatsat"         label="FAT / SAT / STP"             icon={ClipboardList} />
-                <NavBtn id="isoprinciples"  label="ISO Principles"              icon={CheckCircle} />
-                <NavBtn id="deptprocedures" label="Dept Procedures"             icon={BookOpen} />
-                <NavBtn id="capa"           label="CAPA"                        icon={AlertTriangle} />
-                <NavBtn id="calibration"    label="Calibration"                 icon={CheckCircle} />
-                <NavBtn id="internalaudit"  label="Internal Audit"              icon={ClipboardList} />
-                <NavBtn id="mis"            label="MIS / Mgmt Review"           icon={BarChart2} />
+                <NavBtn id="incomingqa"     label="Quality control (incoming · production · final test · FAT)" icon={CheckSquare} />
+                <NavBtn id="isoprinciples"  label="ISO 9001 / QMS (procedures · CAPA · audit · MIS)" icon={CheckCircle} />
                 </>) : (<>
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Items"                icon={Package} />
@@ -8814,7 +8879,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
               {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
-              {isCable && <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />}
               {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
@@ -9401,6 +9465,17 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 
 
 function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+  // Manufacturing: sales documents pick only finished products (and services); purchase documents never pick finished products.
+  const pickItems = (() => {
+    const mfg = (doc.bizType || '') === 'manufacturing';
+    if (!mfg) return items || [];
+    const sale = ['quotation', 'invoice', 'delivery', 'packing_list', 'creditnote', 'proforma'].includes(doc.type);
+    const buy = ['purchase', 'purchasebill', 'purchaseorder'].includes(doc.type);
+    const keep = (m) => (doc.items || []).some(it => it.itemId === m.id);
+    const list = sale ? (items || []).filter(m => FG_CATS.includes(m.category) || m.category === 'Service' || keep(m))
+      : buy ? (items || []).filter(m => !FG_CATS.includes(m.category) || keep(m)) : (items || []);
+    return list.length ? list.slice().sort((x, y) => String(x.itemCode || x.name).localeCompare(String(y.itemCode || y.name))) : (items || []);
+  })();
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -9540,7 +9615,16 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
     if (id === '__new__') { isVendorDoc ? onAddVendor() : onAddCustomer(); return; }
     const c = partyList.find((x) => x.id === id);
     update('customerId', id);
-    setDoc((d) => ({ ...d, customerId: id, customerSnapshot: c || null, placeOfSupply: c ? c.state : d.placeOfSupply }));
+    setDoc((d) => {
+      const n = { ...d, customerId: id, customerSnapshot: c || null, placeOfSupply: c ? c.state : d.placeOfSupply };
+      if (c && c.overseas && cc.splitTax) {
+        if (isVendorDoc) { n.importPurchase = true; n.placeOfSupply = businessInfo.state || n.placeOfSupply; n.items = (n.items || []).map(it => ({ ...it, gst: 0 })); }
+        else { if (!n.supplyType || n.supplyType === 'domestic') n.supplyType = 'export_lut'; n.placeOfSupply = '96-Other Countries'; if (!n.exCurrency && c.currency && c.currency !== 'INR') n.exCurrency = c.currency; }
+      } else if (c && !c.overseas && d.customerSnapshot && d.customerSnapshot.overseas) {
+        n.supplyType = 'domestic'; n.importPurchase = false;
+      }
+      return n;
+    });
   }
 
   const sameDocs = documents.filter(d => d.type === doc.type && d.id !== doc.id && (d.bizType || 'trading') === (doc.bizType || 'trading'))
@@ -9570,7 +9654,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
           )}
           {dispatchCheck && ['delivery', 'packing_list'].includes(doc.type) && (() => { const c = dispatchCheck, f = n => '₹' + Math.round(n || 0).toLocaleString('en-IN'); return (
             <div style={{ width: '100%', margin: '6px 0', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: c.ok ? '#EAF6EE' : '#FDEEEC', border: '1px solid ' + (c.ok ? '#B7DEC4' : '#F2B8AE'), color: c.ok ? '#1A7A3E' : '#B5453A' }}>
-              <b>{c.ok ? '✔ Payment received — dispatch cleared' : '⛔ No payment, no dispatch'}</b>{c.ref ? ' · Order ' + c.ref : ' · customer level'} · This dispatch {f(c.value)} · Already dispatched {f(c.prior)} · Received {f(c.paid)}{!c.ok ? ' · Short ' + f(c.short) + ' — record a receipt linked to ' + (c.ref || 'the invoice') + ', then save.' : ''}
+              <b>{c.ok ? '✔ Payment received — dispatch cleared' : '⛔ No payment, no dispatch'}</b>{c.ref ? ' · WO ' + woNo(c.ref) : ' · customer level'} · This dispatch {f(c.value)} · Already dispatched {f(c.prior)} · Received {f(c.paid)}{!c.ok ? ' · Short ' + f(c.short) + ' — record a receipt linked to ' + (c.ref || 'the invoice') + ', then save.' : ''}
             </div>); })()}
           {doc.type === 'quotation' && costCheck.length > 0 && (() => { const low = costCheck.filter(c => c.rate < c.cost), minM = Math.min(...costCheck.map(c => c.margin)); return (
             <details style={{ position: 'relative' }}>
@@ -9586,9 +9670,10 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
             doc.outcome ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 700, background: doc.outcome === 'won' ? '#D6F0E0' : '#FBEAE7', color: doc.outcome === 'won' ? '#1A5C35' : '#B5453A' }}>{doc.outcome === 'won' ? '✓ Won' : '✗ Lost'}{doc.outcomeDate ? ' · ' + doc.outcomeDate : ''}</span>
+                {doc.outcome === 'won' && doc.woNo && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12.5, fontWeight: 800, background: '#1E2A4A', color: '#fff', letterSpacing: 0.3 }} title="Work Order no. — common tracking number for all departments">{doc.woNo}{doc.customerRef ? ' · Cust ref ' + doc.customerRef : ''}</span>}
                 {!doc.mfgLink && (userRole === 'admin' || userRole === 'manager') && <button onClick={() => { if (window.confirm('Clear the Won / Lost mark?')) onQuoteOutcome(doc, null); }} style={{ ...styles.ghostBtn, padding: '3px 8px', fontSize: 11 }}>Undo</button>}
                 {doc.outcome === 'won' && onConvertToMfg && !doc.mfgLink && <button onClick={() => onConvertToMfg(doc)} style={{ ...styles.primaryBtn, padding: '6px 12px', fontSize: 12.5 }}>⚙ Convert to BOM & Production</button>}
-                {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
+                {doc.mfgLink && onTrackOrder && <button onClick={() => onTrackOrder(doc.woNo || doc.number)} style={{ ...styles.ghostBtn, padding: '4px 10px', fontSize: 12 }}>🔎 Track order</button>}
                 {doc.mfgLink && <span style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: '#E6EEF9', color: '#2255A0' }} title={'Converted ' + (doc.mfgLink.convertedAt || '')}>⚙ {doc.mfgLink.items || 0} production order{(doc.mfgLink.items || 0) === 1 ? '' : 's'}{doc.mfgLink.prNo ? ' · ' + doc.mfgLink.prNo : ''}</span>}
               </span>
             ) : (['draft', 'rejected', 'deleted'].includes(doc.status)
@@ -9747,7 +9832,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
               <input value={doc.placeOfSupply} onChange={(e) => update('placeOfSupply', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
             </div>
           )}
-          {cc.splitTax && doc.type === 'invoice' && (() => {
+          {cc.splitTax && ['invoice', 'quotation', 'proforma'].includes(doc.type) && (() => {
             const ro = isEditable ? {} : styles.inputReadOnly;
             const fld = (label, key, ph, type) => (
               <div style={{ ...styles.formGroup, flex: 1, minWidth: 130 }}>
@@ -10013,7 +10098,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                         style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 4, fontSize: 11, padding: '3px 6px', marginBottom: 5, background: '#fff', color: '#1E2A4A' }}
                       >
                         <option value="">— Select from items master —</option>
-                        {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
                       </select>
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -10283,7 +10368,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                   {/* Buyer + Invoice details */}
                   <div style={{ display: 'flex', borderBottom: bdr }}>
                     <div style={{ flex: 1, padding: '10px 18px', borderRight: bdr }}>
-                      {[['Customer', displayParty?.name],['GSTIN', displayParty?.gstin || displayParty?.taxId],['Address', displayParty?.address],['Mob', displayParty?.phone],['Email', [displayParty?.email, displayParty?.email2].filter(Boolean).join(', ')],['Web', displayParty?.website]].map(([k,v]) => (
+                      {[['Customer', displayParty?.name],[partyTaxLabel(displayParty, cc), displayParty?.gstin || displayParty?.taxId],['Address', displayParty?.address],['Mob', displayParty?.phone],['Email', [displayParty?.email, displayParty?.email2].filter(Boolean).join(', ')],['Web', displayParty?.website]].map(([k,v]) => (
                         <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 3 }}>
                           <span style={{ fontWeight: 700, minWidth: 72 }}>{k}:</span>
                           <span style={{ color: k === 'Email' && v ? '#1A56DB' : '#222' }}>{v || '—'}</span>
@@ -10448,7 +10533,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                 <>
                   <div style={styles.billToName}>{displayParty.name}</div>
                   <div style={styles.previewSmall}>{displayParty.address}</div>
-                  {(displayParty.gstin || displayParty.taxId) && <div style={styles.previewSmall}>{cc.taxIdLabel}: {displayParty.gstin || displayParty.taxId}</div>}
+                  {(displayParty.gstin || displayParty.taxId) && <div style={styles.previewSmall}>{partyTaxLabel(displayParty, cc)}: {displayParty.gstin || displayParty.taxId}</div>}
                   {displayParty.state && <div style={styles.previewSmall}>State: {displayParty.state}</div>}
                   {(displayParty.email || displayParty.email2) && <div style={styles.previewSmall}>Email: {[displayParty.email, displayParty.email2].filter(Boolean).join(', ')}</div>}
                   {displayParty.website && <div style={styles.previewSmall}>Web: {displayParty.website}</div>}
@@ -10543,7 +10628,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                       {isEditable && <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                         <select value={it.itemId} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...styles.inlineSelect, flex: 1, maxWidth: 240 }}>
                           <option value="">Custom item</option>
-                          {items.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                          {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
                         </select>
                         {_gid && <span style={{ fontSize: 10, fontWeight: 700, color: '#1A7A3E', background: '#E7F6EC', borderRadius: 10, padding: '2px 7px', whiteSpace: 'nowrap' }}>{_isHead ? '⑃ group ' + _span : '↳ grouped'}</span>}
                         {_gid && _isHead && <button onClick={() => unmergeGroup(_gid)} style={{ ...styles.ghostBtn, fontSize: 10.5, padding: '2px 7px' }} title="Split group">Unmerge</button>}
@@ -32316,11 +32401,30 @@ export default function App() {
     alert('✅ Draft PO(s) created: ' + docs.map(d => d.number + (d.customerSnapshot ? ' (' + d.customerSnapshot.name + ')' : ' (select vendor)')).join(', ') + '\nOpen Documents → Purchase Orders to check rates and approve.');
   }
 
+  if (typeof window !== 'undefined') { const m = {}; (documents || []).forEach(d => { if (d.type === 'quotation' && d.woNo) m[_nm(d.number)] = d.woNo; }); window.__operixWo = m; }
+  useEffect(() => {
+    const won = (documents || []).filter(d => d.type === 'quotation' && d.outcome === 'won' && !d.woNo && d.status !== 'deleted');
+    if (!won.length) return;
+    const byFy = {};
+    (documents || []).forEach(d => { if (d.woNo) { const k = String(d.woNo).split('/').slice(-2, -1)[0] || ''; byFy[k] = (byFy[k] || 0) + 1; } });
+    const fy = typeof fyNow === 'function' ? fyNow() : '';
+    const assign = {};
+    won.slice().sort((a, b) => String(a.outcomeDate || a.date || '').localeCompare(String(b.outcomeDate || b.date || ''))).forEach(d => { byFy[fy] = (byFy[fy] || 0) + 1; assign[d.id] = dn('WO', byFy[fy]); });
+    setDocuments(prev => prev.map(d => assign[d.id] ? { ...d, woNo: assign[d.id], woDate: d.outcomeDate || '' } : d));
+  }, [documents]);
   function markQuoteOutcome(doc, outcome) {
     const outcomeDate = outcome ? new Date().toISOString().slice(0, 10) : '';
-    const patch = d => ({ ...d, outcome: outcome || null, outcomeDate });
+    let wo = {};
+    if (outcome === 'won' && !doc.woNo) {
+      const fy = typeof fyNow === 'function' ? fyNow() : '';
+      const cnt = (documents || []).filter(d => d.woNo && String(d.woNo).includes('/' + fy + '/')).length + 1;
+      const cref = window.prompt('Order won — Work Order no. will be generated for tracking.\n\nCustomer PO / reference no. (optional):', doc.customerRef || '');
+      wo = { woNo: dn('WO', cnt), woDate: outcomeDate, customerRef: (cref || '').trim() };
+    }
+    const patch = d => ({ ...d, outcome: outcome || null, outcomeDate, ...wo });
     setDocuments(prev => prev.map(d => d.id === doc.id ? patch(d) : d));
     setActiveDoc(a => (a && a.id === doc.id) ? patch(a) : a);
+    if (wo.woNo) alert('✅ Order won — Work Order ' + wo.woNo + (wo.customerRef ? ' (customer ref ' + wo.customerRef + ')' : '') + '.\nUse this number in every department: production orders, PR, PO, GRN, QA, stores and dispatch carry it, and Order Tracker finds the order by it.');
   }
   function convertQuoteToMfg(doc) {
     if (doc.outcome !== 'won') { alert('Only a won quotation can be converted.'); return; }
@@ -32397,7 +32501,7 @@ export default function App() {
         dispatchOk = false; saved.dispatchCleared = false; saved.dispatchHold = true;
         if (saved.status === 'approved' || saved.status === 'submitted') saved.status = 'draft';
         const f = n => '₹' + Math.round(n).toLocaleString('en-IN');
-        alert('⛔ Dispatch on hold — payment not received.\n\n' + (clr.noValue ? 'This document has no value (add rates, or link it to the won quotation).\n' : '') + (clr.ref ? 'Order: ' + clr.ref + '\n' : 'No order reference — checked against the customer.\n') + 'This dispatch: ' + f(clr.value) + '\nAlready dispatched: ' + f(clr.prior) + '\nReceived: ' + f(clr.paid) + '\nShort: ' + f(clr.short) + '\n\nSaved as DRAFT. Stock is not reduced and nothing is marked dispatched.\nRecord the receipt in Vouchers → Receipt, linked to ' + (clr.ref || 'the invoice') + ', then open this document and save again.');
+        alert('⛔ Dispatch on hold — payment not received.\n\n' + (clr.noValue ? 'This document has no value (add rates, or link it to the won quotation).\n' : '') + (clr.ref ? 'Work Order: ' + woNo(clr.ref) + ' (quotation ' + clr.ref + ')\n' : 'No order reference — checked against the customer.\n') + 'This dispatch: ' + f(clr.value) + '\nAlready dispatched: ' + f(clr.prior) + '\nReceived: ' + f(clr.paid) + '\nShort: ' + f(clr.short) + '\n\nSaved as DRAFT. Stock is not reduced and nothing is marked dispatched.\nRecord the receipt in Vouchers → Receipt, linked to ' + (clr.ref || 'the invoice') + ', then open this document and save again.');
       }
     }
     setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
@@ -33850,7 +33954,7 @@ export default function App() {
       case 'fgaccept':
         return <StoresAcceptView productionOrders={scopeList(productionOrders, 'manufacturing')} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />;
       case 'drumstock':
-        return <DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} />;
+        return <>{(() => { const _po = scopeList(productionOrders, 'manufacturing'); return <StoresAcceptView embedded productionOrders={_po} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />; })()}<DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} /></>;
       case 'metalrecon':
         return <MetalReconView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} storeIssues={storeIssues} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} stockLedger={stockLedger} setView={setView} />;
       case 'machinelog':
@@ -34103,7 +34207,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {wrapViewTools(renderContent())}
+        {wrapViewTools(view === 'doceditor' ? renderContent() : <HubFrame view={view} setView={setView} businessInfo={businessInfo}>{renderContent()}</HubFrame>)}
       </div>
 
       {/* Powered-by watermark — trial only; hidden for paid / white-label accounts */}
