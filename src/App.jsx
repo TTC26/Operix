@@ -2145,7 +2145,7 @@ const PART_DATASHEET_PACK = {
 Object.keys(RM_SPEC_PACK).forEach(k => {
   if (k === 'wires_cables' && !RM_SPEC_PACK[k]['Packing / drums']) RM_SPEC_PACK[k]['Packing / drums'] = { unit: 'pcs', fields: _std([['drumSize', 'Drum size / type', 'Wooden 900 mm / steel'], ['returnable', 'Returnable?', 'Yes / No']]) };
 });
-const _mfgType = () => { try { return (window.__operixBI || {}).mfgType || ''; } catch (e) { return ''; } };
+const _mfgType = () => { try { return (window.__operixBI || {}).mfgType || 'general'; } catch (e) { return 'general'; } };
 
 // ── All manufacturing types: process routes + extra packs (merged into the base packs) ──
 const MFG_TYPES_ALL = [
@@ -2384,7 +2384,6 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
   function handleStart() {
     if (!selected.length) { setError('Please select at least one activity to continue.'); return; }
     if (!companyName.trim()) { setError('Please enter your company name.'); return; }
-    if (selected.includes('manufacturing') && !mfgType) { setError('Please choose your type of manufacturing.'); return; }
     const cc = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.other;
     setBusinessInfo(p => ({
       ...p,
@@ -2517,15 +2516,6 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
         </div>
 
         {/* Error */}
-        {selected.includes('manufacturing') && (
-          <div style={{ background: 'rgba(255,255,255,0.07)', border: '2px solid #C9752A', borderRadius: 18, padding: '18px 20px', marginBottom: 20 }}>
-            <div style={{ color: '#fff', fontWeight: 700, marginBottom: 4 }}>What do you manufacture?</div>
-            <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12.5, marginBottom: 12 }}>This sets the manufacturing and QA options for your industry. You can change it later in Business Insights.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, maxHeight: 340, overflowY: 'auto' }}>
-              {MFG_TYPES.map(t => <div key={t.id} onClick={() => { setMfgType(t.id); setError(''); }} style={{ cursor: 'pointer', borderRadius: 12, padding: '10px 14px', background: mfgType === t.id ? '#fff' : 'rgba(255,255,255,0.06)', border: mfgType === t.id ? '2px solid #C9752A' : '1.5px solid rgba(255,255,255,0.15)' }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: mfgType === t.id ? '#1E2A4A' : '#fff' }}>{t.icon} {t.label}</div>
-                <div style={{ fontSize: 11.5, color: mfgType === t.id ? '#666' : 'rgba(255,255,255,0.5)', marginTop: 2 }}>{t.desc}</div></div>)}
-            </div></div>)}
 
         {error && (
           <div style={{ color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginBottom: 10 }}>
@@ -4742,18 +4732,6 @@ function SettingsView({ businessInfo, setBusinessInfo, onExportData, onRestoreBa
               )}
             </div>
 
-            {userRole === 'admin' && ((businessInfo.activeTypes || []).includes('manufacturing') || businessInfo.companyType === 'manufacturing') && (
-              <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #EAE6DB' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#888780', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Manufacturing</div>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Type of manufacturing</div>
-                <div style={{ fontSize: 13, color: '#555', marginBottom: 10 }}>Sets the raw-material categories and datasheet fields (Stores), the product datasheet (Engineering), and the QA checklists and tools for your industry. Existing data is not changed.</div>
-                <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #DDD', fontSize: 14, minWidth: 300 }}>
-                  <option value="">— Choose —</option>
-                  {MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
-                </select>
-                {businessInfo.mfgType && <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>{(MFG_TYPES.find(t => t.id === businessInfo.mfgType) || {}).desc}</div>}
-              </div>
-            )}
 
             {/* ── Danger Zone — owner only ── */}
             {userRole === 'admin' && isOwner && (
@@ -6045,7 +6023,7 @@ function InsTrading({ ctx }) {
 // Manufacturing · MRP shortages, cost per unit, on-time delivery
 function InsMfg({ ctx }) {
   const { fmt, boms, productionOrders, rawMaterials, items, stock, styles, today, dayMs } = ctx;
-  const [sub, setSub] = React.useState('mrp');
+  const [sub, setSub] = React.useState('otd');
   const itemOf = (rm) => items.find(i => i.name === (rm && rm.name));
   const rate = (rm) => { const it = itemOf(rm); return parseFloat((it && (it.purchaseRate ?? it.rate)) ?? rm.rate ?? rm.cost) || 0; };
   const open = (productionOrders || []).filter(o => !['completed', 'cancelled'].includes(o.status));
@@ -6060,8 +6038,7 @@ function InsMfg({ ctx }) {
   const lateOpen = open.filter(o => o.targetDate && new Date(o.targetDate) < today);
   const pill = (id, l) => <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>;
   return (<>
-    <InsMfgTypeBar ctx={ctx} />
-    <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>{pill('mrp', 'MRP shortages')}{pill('cost', 'Cost per unit')}{pill('otd', 'On-time delivery')}</div>
+    <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>Material shortage → Order Tracker · Cost per unit → Engineering › BOM.</div>
     {sub === 'mrp' && <div style={_iCard}><div style={{ fontSize: 12.5, color: '#666', marginBottom: 8 }}>Raw material needed for {open.length} open production order(s) vs stock on hand (matched by item name).</div>
       {mrp.length === 0 ? <div style={{ color: '#999' }}>No open production orders.</div> : <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Material', 'Needed', 'In stock', 'Shortfall', 'For orders'].map((h, i) => <th key={h} style={{ ..._iTh, ...(i > 0 && i < 4 ? _iR : {}) }}>{h}</th>)}</tr></thead><tbody>
         {mrp.map((r, i) => <tr key={i}><td style={_iTd}>{r.rm.name}</td><td style={{ ..._iTd, ..._iR }}>{+r.qty.toFixed(2)} {r.rm.unit || ''}</td><td style={{ ..._iTd, ..._iR }}>{r.tracked ? +r.have.toFixed(2) : 'not in item master'}</td><td style={{ ..._iTd, ..._iR, fontWeight: 700, color: r.short > 0 ? '#B5453A' : '#1A7A3E' }}>{r.tracked ? (r.short > 0 ? +r.short.toFixed(2) : 'OK') : '—'}</td><td style={{ ..._iTd, fontSize: 11.5, color: '#777' }}>{r.orders.join(', ')}</td></tr>)}</tbody></table>}</div>}
@@ -6287,14 +6264,6 @@ function InsFmTech({ ctx }) {
 }
 
 // Manufacturing type strip + industry packs
-function InsMfgTypeBar({ ctx }) {
-  const { businessInfo, setBusinessInfo, canEdit, styles } = ctx;
-  const cur = MFG_TYPES.find(t => t.id === businessInfo.mfgType);
-  return <div style={{ ..._iCard, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderLeft: '4px solid ' + (cur ? '#C9752A' : '#B5453A') }}>
-    <b>Type of manufacturing</b>
-    {setBusinessInfo && !['sales', 'purchase', 'inventory', 'staff', 'foreman', 'engineer', 'viewer'].includes(ctx.userRole) ? <select value={businessInfo.mfgType || ''} onChange={e => setBusinessInfo(p => ({ ...p, mfgType: e.target.value }))} style={{ ...styles.input, width: 270, margin: 0 }}><option value="">— Choose —</option>{MFG_TYPES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}</select> : <span>{cur ? cur.label : 'Not set'}</span>}
-    <span style={{ fontSize: 12, color: '#888' }}>{cur ? cur.desc : 'Choose a type to get the manufacturing and QA options for your industry.'}</span></div>;
-}
 
 function _insPill(sub, setSub, id, l) { return <button key={id} onClick={() => setSub(id)} style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (sub === id ? '#1E2A4A' : '#DDD'), background: sub === id ? '#EEF1F8' : '#fff', color: '#1E2A4A' }}>{l}</button>; }
 
@@ -6387,7 +6356,7 @@ function InsFabPack({ ctx }) {
   </>);
 }
 
-function InsightsView({ initialTab, documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
+function InsightsView({ standalone = '', initialTab, documents = [], customers = [], vendors = [], vouchers = [], items = [], stockLedger = [], employees = [], pettyCash = {}, businessInfo = {}, currentBizType = 'trading', isMultiBiz = false, siteAttendance = [], assets = [], grns = [], capaRecords = [], boms = [], productionOrders = [], rawMaterials = [], pmSchedules = [], fmWorkOrders = [], fmSpareParts = [], enquiries = [], contracts = [], amcContracts = [], setBusinessInfo = null, setEmployees = null, userRole = 'admin' }) {
   const [tab, setTab] = React.useState(initialTab || 'recv');
   const [openCash, setOpenCash] = React.useState('');
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
@@ -6487,7 +6456,12 @@ function InsightsView({ initialTab, documents = [], customers = [], vendors = []
   const ctx = { setBusinessInfo, userRole, mfgType: businessInfo.mfgType || '', assets, sl, grns, capaRecords, boms, productionOrders, rawMaterials, pmSchedules, fmWorkOrders, fmSpareParts, fmt, docs, vch, items, stock, recvRows, payRows, pettyCash, inDiv, today, dayMs, businessInfo, ins, setIns, canEdit, styles, employees, setEmployees: setEmployees || (() => {}), siteAttendance, enquiries, contracts, amcContracts, customers,
     totalOf: tot, taxableOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').taxable || 0, taxOf: d => computeTotals(d, businessInfo.state || '', businessInfo.country || 'india').totalTax || 0 };
   const _isTr = !isMultiBiz || currentBizType === 'trading';
-  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ['qa', '🔬 Quality (QA)'], ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 MRP, cost & on-time delivery'], ['mfgtech', businessInfo.mfgType === 'wires_cables' ? '🧪 Conductor check & usage variance' : '🧪 Material usage variance'], ...(businessInfo.mfgType === 'wires_cables' ? [['cablepack', '🧵 Metal reconciliation & drums']] : []), ...(businessInfo.mfgType === 'fabrication' ? [['fabpack', '🔩 Weight, welders, NDT & DFT']] : [])]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
+  const GROUPS = [['Finance', [['recv', '💰 Receivables'], ['cash', '📈 Cash forecast'], ['bs', '⚖️ Balance sheet & TB'], ['budget', '🎯 Budget vs actual'], ['payplan', '🧾 Vendor pay planner'], ['close', '✅ Month-end check']]], ['Operations', [['reorder', '📦 Reorder planner'], ...((isMultiBiz ? currentBizType === 'manufacturing' : ((businessInfo.activeTypes || []).includes('manufacturing') || businessInfo.companyType === 'manufacturing')) ? [] : [['qa', '🔬 Quality (QA)']]), ['compliance', '📅 Compliance calendar'], ['risk', '🛡️ Risk & SOP']]], ['People', [['payrollchk', '👥 Payroll pre-check'], ['people', '🧑‍💼 Onboarding & appraisal']]], ...((!isMultiBiz || currentBizType === 'service') ? [['MEP engineering', [['mepcalc', '📐 Cable, duct, pipe, HVAC calculators']]]] : []), ...((!isMultiBiz || currentBizType === 'manufacturing') ? [['Manufacturing', [['mfg', '🏭 On-time delivery'], ...(businessInfo.mfgType !== 'wires_cables' ? [['mfgtech', '🧪 Material usage variance']] : []), ...(businessInfo.mfgType === 'fabrication' ? [['fabpack', '🔩 Weight, welders, NDT & DFT']] : [])]]] : []), ...((!isMultiBiz || currentBizType === 'fmamc') ? [['FM / AMC', [['fm', '🔧 PM, work orders & spares'], ['fmtech', '📉 Asset reliability (MTBF / MTTR)']]]] : []), ...(_isTr ? [['Trading', [['trading', '🏪 Credit, margin & top items']]]] : []), ['Sales & Legal', [['custhealth', '❤️ Customer health & renewals'], ['leads', '🔥 Enquiry scoring'], ['contract', '📜 Contract risk']]]];
+  if (standalone === 'qa') return (
+    <div style={styles.page}>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Calibration & inspection</h1><p style={styles.muted}>Calibration register, inspection checklists, supplier quality and CAPA ageing.</p></div>
+      <InsQA ctx={ctx} />
+    </div>);
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}><div><h2 className="serif" style={styles.pageTitle}>Business Insights</h2><div style={{ fontSize: 13, color: '#888780' }}>Receivables, cash forecast, reorder planner and month-end checks — from your approved documents</div></div></div>
@@ -6818,10 +6792,10 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
 
 // Placeholder for Wires & Cables menus that are being built step by step
 const MFG_NEXT = {
-  cabledesign: ['Cable Design Master', 2, 'One record per cable construction: conductor (Cu / Al, size, class, strands), insulation, laying-up, armour, sheath and test plan. Copper / compound / armour kg per km are calculated automatically, and the BOM and Technical Data Sheet are generated from it. A won quotation item matches a design by name.', [['bom', 'Bill of Materials'], ['partsmaster', 'Parts Master (old)']]],
+  cabledesign: ['Product Design', 2, 'One record per cable construction: conductor (Cu / Al, size, class, strands), insulation, laying-up, armour, sheath and test plan. Copper / compound / armour kg per km are calculated automatically, and the BOM and Technical Data Sheet are generated from it. A won quotation item matches a design by name.', [['bom', 'Bill of Materials'], ['partsmaster', 'Parts Master (old)']]],
   incomingqa: ['Incoming QA', 3, 'Queue of every GRN lot waiting for inspection (rod, compound, armour). Accept → lot becomes "Approved" and can be issued; reject → returned to supplier and counted in supplier quality.', [['grn', 'Goods Receipt (GRN)']]],
   wip: ['WIP (Bobbins / Coils)', 4, 'Every bobbin / coil coming out of a stage with its lot numbers, length / weight and the next stage it waits for.', [['storeissue', 'Issue to Production'], ['productionorders', 'Production Orders']]],
-  drumstock: ['Drum Stock & Scrap', 4, 'Finished drums released by QA (drum no., product, length, net weight, order item no., test certificate) plus scrap and offcut stock. Delivery Note and Packing List pick drums from here.', [['stock', 'Stock Position']]],
+  drumstock: ['Finished Goods & Scrap', 4, 'Finished drums released by QA (drum no., product, length, net weight, order item no., test certificate) plus scrap and offcut stock. Delivery Note and Packing List pick drums from here.', [['stock', 'Stock Position']]],
   machinelog: ['Machine Log & Downtime', 4, 'Shift-wise running hours, output and downtime reasons per machine, linked to the Breakdown Log and used for OEE.', [['productionorders', 'Production Orders'], ['fmworkorders', 'Breakdown Log']]],
 };
 // ─── Cable Design Master (Wires & Cables · Engineering) ───────────────────────────────────────────────
@@ -7074,7 +7048,7 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
 
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Cable Design Master</h1><p style={styles.muted}>One record per cable construction. Saving a design creates / updates its finished-good item, master BOM (per 1000 m) and Technical Data Sheet. A won quotation item with the same name picks this BOM automatically.</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Product Design</h1><p style={styles.muted}>One record per cable construction. Saving a design creates / updates its finished-good item, master BOM (per 1000 m) and Technical Data Sheet. A won quotation item with the same name picks this BOM automatically.</p></div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
         {canEdit && <button onClick={() => setEd({ ...CAB_BLANK, name: cableAutoName(CAB_BLANK) })} style={styles.primaryBtn}><Plus size={15} /> New design</button>}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 240 }} />
@@ -7421,7 +7395,7 @@ function DrumStockView({ productionOrders = [], boms = [], setView }) {
   const pill = (id, l) => <button key={id} onClick={() => setTab(id)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{isCab ? 'Drum Stock & Scrap' : 'Finished ' + U.plural + ' & Scrap'}</h1><p style={styles.muted}>{U.plural} are recorded on the last route stage of each production order. They become stock only after the final test / inspection passes ({mfgCfg().test.menu}).</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Finished Goods & Scrap</h1><p style={styles.muted}>{U.plural} are recorded on the last route stage of each production order. They become stock only after the final test / inspection passes ({mfgCfg().test.menu}).</p></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
         {[...(U.fields.some(x => x[0] === 'expiry') ? [['Expired / expiring ≤ 30 d', drums.filter(d => d.expiry && !d.dispatched && (new Date(d.expiry) - new Date()) / 86400000 <= 30).length]] : []), [U.plural + ' recorded', drums.length], ['Released, in stock', inStock.length + ' · ' + r3(inStock.reduce((s, d) => s + d.length, 0)) + ' m'], ['Awaiting test', drums.filter(d => !d.testStatus || d.testStatus === 'pending').length], ['On QA hold', drums.filter(d => d.testStatus === 'failed').length]].map(([l, v]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div></div>)}
       </div>
@@ -7631,7 +7605,7 @@ function RoutineTestView({ setFatReports, productionOrders = [], setProductionOr
   const k = ctx.design && ctx.design.calc;
   return (
     <div style={styles.page}>
-      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>{cfg.test.menu}</h1><p style={styles.muted}>{generic ? 'Inspect every ' + U.name.toLowerCase() + ' before it becomes stock. Pass → certificate + finished stock. Fail → QA hold and re-route.' : 'Test every drum before it becomes stock. Limits come from the cable design (IEC 60228 resistance, minimum thickness, OD). Pass → certificate + finished stock. Fail → QA hold and re-route.'}</p></div>
+      <div style={styles.pageHeader}><h1 className="serif" style={styles.h1}>Final Test & Certificates</h1><p style={styles.muted}>{generic ? 'Inspect every ' + U.name.toLowerCase() + ' before it becomes stock. Pass → certificate + finished stock. Fail → QA hold and re-route.' : 'Test every drum before it becomes stock. Limits come from the cable design (IEC 60228 resistance, minimum thickness, OD). Pass → certificate + finished stock. Fail → QA hold and re-route.'}</p></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
         {[['Drums waiting for test', queue.length, queue.length ? '#E07B00' : '#1A7A3E'], ['Passed', passed.length, '#1A7A3E'], ['On QA hold', failed.length, failed.length ? '#B5453A' : '#1A7A3E'], ['First-pass yield', (passed.length + drums.filter(d => d.testStatus === 'failed').length) ? Math.round(passed.filter(d => !(d.test && d.test.retest)).length / (passed.length + drums.filter(d => d.testStatus === 'failed').length) * 100) + '%' : '—', '#1E2A4A']].map(([l, v, c]) => <div key={l} style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 11, color: '#888' }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div></div>)}
       </div>
@@ -8041,8 +8015,8 @@ function StandardBomView({ documents = [], grns = [], boms = [], setBoms, items 
   function copyFrom(id) { const b = masters.find(x => x.id === id); if (!b) return; if (ed.lines.some(r => r.itemId) && !window.confirm('Replace the current lines with the BOM of ' + b.name + '?')) return; setEd(p => ({ ...p, lines: [...fromBom(b), blankRow()], outputQty: String(b.outputQty || p.outputQty), unit: b.unit || p.unit })); }
   function fillFromDesign() {
     const d = (cableDesigns || []).find(x => !x.deleted && ((ed.itemId && x.itemId === ed.itemId) || _nm(x.name) === _nm(ed.productName || ed.product)));
-    if (!d) { alert('No Cable Design with this product name. Save the design in Cable Design Master first.'); return; }
-    const b = masters.find(x => x.designId === d.id); if (!b) { alert('Open the design in Cable Design Master and save it once to generate its calculated quantities.'); return; }
+    if (!d) { alert('No Cable Design with this product name. Save the design in Product Design first.'); return; }
+    const b = masters.find(x => x.designId === d.id); if (!b) { alert('Open the design in Product Design and save it once to generate its calculated quantities.'); return; }
     setEd(p => ({ ...p, lines: [...fromBom(b), ...p.lines.filter(r => (r.itemId || r.name) && !fromBom(b).some(x => x.itemId && x.itemId === r.itemId)), blankRow()], outputQty: String(b.outputQty || 1000), unit: b.unit || 'm', designId: d.id }));
   }
   function save() {
@@ -8251,7 +8225,7 @@ const SidebarCtx = React.createContext(null);
 const VIEW_HUBS = {
   sales:     { title: 'Customers', tabs: [['customers', 'Customers'], ['enquiries', 'Enquiries'], ['serviceorders', 'SAS', () => !!_mfgType()]] },
   vendors:   { title: 'Vendors', tabs: [['vendors', 'Vendors'], ['vendoreval', 'Vendor evaluation']] },
-  eng:       { title: 'Engineering', when: () => !!_mfgType(), tabs: [['stdbom', 'BOM (product code)'], ['cabledesign', 'Cable design', () => mfgCfg().eng === 'cable'], ['productspec', 'Product spec', () => mfgCfg().eng !== 'cable'], ['tds', 'Technical data sheet'], ['engdocs', 'Standards & documents']] },
+  eng:       { title: 'Engineering', when: () => !!_mfgType(), tabs: [['stdbom', 'BOM (product code)'], ['cabledesign', 'Product design', () => mfgCfg().eng === 'cable'], ['productspec', 'Product design', () => mfgCfg().eng !== 'cable'], ['tds', 'Technical data sheet'], ['engdocs', 'Standards & documents']] },
   planning:  { title: 'Order Tracker', when: () => !!_mfgType(), tabs: [['ordertracker', 'Order tracker (WO)'], ['boshortage', 'Material shortage']] },
   stock:     { title: 'Stock', tabs: [['stock', 'Stock position'], ['stockledger', 'Stock ledger'], ['bincard', 'Bin card'], ['verticalrack', 'Racks / locations']] },
   prod:      { title: 'Production', when: () => !!_mfgType(), tabs: [['productionorders', 'Production orders'], ['wip', 'WIP (in process)'], ['machinelog', 'Machine log & downtime'], ['metalrecon', 'Metal reconciliation', () => (mfgCfg().registers || []).includes('metal')]] },
@@ -8567,7 +8541,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Item Master"          icon={Package} />
                 <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
-                <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}   icon={Package} />
+                <NavBtn id="drumstock"    label="Finished Goods & Scrap"   icon={Package} />
                 <NavBtn id="stock"        label="Stock (position · ledger · bin card · racks)" icon={ClipboardList} />
                 <CreateBtn docKey="delivery"     bizType="manufacturing" />
                 <CreateBtn docKey="packing_list" bizType="manufacturing" />
@@ -8879,7 +8853,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
               {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
-              {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
+              {isCable && <NavBtn id="drumstock"    label="Finished Goods & Scrap"    icon={Package} />}
               <CreateBtn docKey="delivery" />
               <CreateBtn docKey="packing_list" />
               <NavBtn id="stock"       label="Stock Position"       icon={ClipboardList} />
@@ -8935,7 +8909,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* Wires & Cables — process-flow menu */}
           {isCable && (<>
             <Section sectionKey="engineering" label="Engineering">
-              <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Cable Design (calc · TDS)" icon={Wrench} />}
+              <NavBtn id="stdbom" label="BOM (product code)" icon={ClipboardList} />{fc.eng === 'cable' && <NavBtn id="cabledesign" label="Product Design (calc · TDS)" icon={Wrench} />}
               <NavBtn id="tds"         label="Technical Data Sheet"  icon={FileText} />
               <NavBtn id="engdocs"     label="Standards & Documents" icon={BookOpen} />
             </Section>
@@ -19667,7 +19641,7 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
         </div>
 
         {(PART_DATASHEET_PACK[_mfgType()] || null) && (<>
-          <div style={styles.sectionDivider}>Product datasheet — {(MFG_TYPES.find(t => t.id === _mfgType()) || {}).label}</div>
+          <div style={styles.sectionDivider}>Product datasheet</div>
           <SpecsFields specs={form.datasheet || {}} onChange={(d) => set('datasheet', d)} fields={PART_DATASHEET_PACK[_mfgType()]} />
         </>)}
 
@@ -19993,7 +19967,7 @@ function RawMaterialForm({ initial, onSave, ownerUid, existingCats = [] }) {
       </div>
       {pack && (
         <div style={styles.formGroup}>
-          <label style={styles.label}>Material category{mt ? ' (' + ((MFG_TYPES.find(t => t.id === mt) || {}).label || '') + ')' : ''}</label>
+          <label style={styles.label}>Material category</label>
           <select value={form.category || ''} onChange={(e) => { if (e.target.value === '__new') { const c = (window.prompt('New material category name (e.g. Tapes, Lubricants, Safety items):') || '').trim(); if (c) setCat(c); } else setCat(e.target.value); }} style={styles.input}>
             <option value="">— Select category —</option>
             {cats.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -20512,7 +20486,7 @@ function ProductionOrdersList({ setStoreIssues, stockLedger = [], storeIssues = 
           {rt ? <>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>Process route — <b>{tl ? tl.label : ''}</b> · open an order and click <b>🧭 Route</b> to record each stage (machine, qty, scrap, QA)</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>{rt.map((st, i) => <React.Fragment key={i}><span style={{ background: '#FDF3E7', color: '#8A4B12', border: '1px solid #F0D7B8', borderRadius: 14, padding: '3px 11px', fontSize: 12, fontWeight: 600 }}>{i + 1}. {st.name}</span>{i < rt.length - 1 && <span style={{ color: '#C9752A' }}>→</span>}</React.Fragment>)}</div>
-          </> : <div style={{ fontSize: 13 }}>Type of manufacturing is not set. Go to <b>Settings → Manufacturing → Type of manufacturing</b> to get the process route, raw material datasheets and QA checklists for your industry.</div>}
+          </> : <div style={{ fontSize: 13 }}>Process route not defined yet — define the stages on the production order (Process route), raw material datasheets and QA checklists for your industry.</div>}
         </div>); })()}
       <div style={styles.list}>
         {productionOrders.length === 0 && <div style={styles.emptyBox}>No production orders yet. Click “New Order”, pick a BOM — then use 🧭 Route on the order to track each stage.</div>}
@@ -33826,6 +33800,7 @@ export default function App() {
           <InsightsView
             key={view}
             initialTab={view === 'calibration' ? 'qa' : undefined}
+            standalone={view === 'calibration' ? 'qa' : ''}
             documents={sessionDocs}
             customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers}
             vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors}
