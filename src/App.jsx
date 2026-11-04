@@ -3458,9 +3458,27 @@ function matStock(m, { items = [], stockMap = {}, rawMaterials = [] }) {
   if (stockMap[id]) return { id, qty: stockMap[id].qty || 0, item: (items || []).find(i => i.id === id) || null };
   const rm = (rawMaterials || []).find(r => r.id === id) || (rawMaterials || []).find(r => _nm(r.name) === _nm(m.name));
   if (rm && rm.migratedItemId && stockMap[rm.migratedItemId]) return { id: rm.migratedItemId, qty: stockMap[rm.migratedItemId].qty || 0, item: (items || []).find(i => i.id === rm.migratedItemId) || null };
-  const byName = (items || []).find(i => _nm(i.name) === _nm(m.name || (rm && rm.name)));
+  const byId = id ? (items || []).find(i => i.id === id) : null;
+  if (byId) return { id: byId.id, qty: 0, item: byId };
+  const byCode = (m.itemCode || m.code) ? (items || []).find(i => i.itemCode && _nm(i.itemCode) === _nm(m.itemCode || m.code)) : null;
+  if (byCode) return { id: byCode.id, qty: stockMap[byCode.id] ? (stockMap[byCode.id].qty || 0) : 0, item: byCode };
+  const byName = (m.name || (rm && rm.name)) ? (items || []).find(i => _nm(i.name) === _nm(m.name || (rm && rm.name))) : null;
   if (byName && stockMap[byName.id]) return { id: byName.id, qty: stockMap[byName.id].qty || 0, item: byName };
+  if (byName && !rm) return { id: byName.id, qty: 0, item: byName };
   return { id: rm ? rm.id : id, qty: rm ? (parseFloat(rm.stock) || 0) : 0, item: byName || null, legacy: !!rm };
+}
+
+// Item code + description for a BOM / PR line — from the Item Master first, never blank.
+function resolveMatItem(m, items = [], rawMaterials = []) {
+  const id = m.materialId || m.itemId || '';
+  let it = id ? (items || []).find(i => i.id === id) : null;
+  const rm = !it ? ((rawMaterials || []).find(r => r.id === id) || null) : null;
+  if (!it && rm && rm.migratedItemId) it = (items || []).find(i => i.id === rm.migratedItemId) || null;
+  const code = m.itemCode || m.code || '';
+  if (!it && code) it = (items || []).find(i => i.itemCode && _nm(i.itemCode) === _nm(code)) || null;
+  const nm = (m.name && m.name !== '—') ? m.name : '';
+  if (!it && nm) it = (items || []).find(i => _nm(i.name) === _nm(nm)) || null;
+  return { item: it, itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : code, name: (it && it.name) || nm || (rm && rm.name) || (it && it.itemCode) || code || '', unit: m.unit || m.uom || (it && it.unit) || (rm && rm.unit) || '' };
 }
 
 function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], businessInfo = {}, userRole, setEditingItem, onMigrate, setView }) {
@@ -3616,8 +3634,8 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
         </select>
         <span style={{ fontSize:12, color:'#888' }}>{filtered.length} item{filtered.length!==1?'s':''}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: onSaveItem ? 'minmax(0,1fr) minmax(0,1fr)' : '1fr', gap: 16, alignItems: 'start' }}>
-      <div style={{ ...styles.list, marginTop: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ ...styles.list, marginTop: 0, ...(onSaveItem ? { maxHeight: '42vh', overflowY: 'auto', border: '1px solid #EAE6DB', borderRadius: 10, padding: 8, background: '#FCFBF8' } : {}) }}>
         {items.length === 0 && <div style={styles.emptyBox}>No items yet. Add products or services to reuse across documents.</div>}
         {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
         {filtered.map((it) => (<React.Fragment key={it.id}>
@@ -3639,7 +3657,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
           </div>
         </React.Fragment>))}
       </div>
-      {onSaveItem && <div style={{ position: 'sticky', top: 12 }}>
+      {onSaveItem && <div>
         {sel ? (<>
           {sel.id && (() => {
             const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(m => m.materialId === sel.id || _nm(m.name) === _nm(sel.name)));
@@ -3652,7 +3670,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
             </div>);
           })()}
           <ItemModal key={selKey} inline item={sel} businessInfo={businessInfo} items={items} setBusinessInfo={setBusinessInfo} onClose={() => setSel(null)} onSave={(f) => { const saved = onSaveItem(f); setSel(saved || null); setSelKey(k => k + 1); }} />
-        </>) : <div style={{ ...styles.emptyBox, padding: '40px 20px' }}>Select an item on the left to see and edit its details here, or click “Add item”.</div>}
+        </>) : <div style={{ ...styles.emptyBox, padding: '40px 20px' }}>Select an item above to see and edit its details here, or click “Add item”.</div>}
       </div>}
       </div>
 
@@ -6746,8 +6764,8 @@ function buildMfgFromQuote({ doc, boms = [], rawMaterials = [], items = [], stoc
     });
     const fac = qty / (parseFloat(tpl.outputQty) || 1);
     (tpl.materials || []).forEach(m => {
-      const ms = matStock(m, { items, stockMap, rawMaterials }), rm = ms.item ? null : rmFor(m), key = ms.id || norm(m.name);
-      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : '', itemCode: ms.item ? (ms.item.itemCode || '') : '', name: m.name || (ms.item && ms.item.name) || (rm && rm.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || (rm && rm.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : ''), itemNos: [] };
+      const ms = matStock(m, { items, stockMap, rawMaterials }), rm = ms.item ? null : rmFor(m), ri = resolveMatItem(m, items, rawMaterials), key = ms.id || ri.itemId || norm(ri.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : ri.itemId, itemCode: ms.item ? (ms.item.itemCode || '') : ri.itemCode, name: (ms.item && ms.item.name) || ri.name || (rm && rm.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || (rm && rm.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : (rm ? (parseFloat(rm.rate) || '') : ''), itemNos: [] };
       r.overall += (parseFloat(m.qty) || 0) * fac;
       if (!r.itemNos.includes(itemNo)) r.itemNos.push(itemNo);
     });
@@ -7051,6 +7069,20 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
 }
 
 // ─── Incoming QA (Quality) — GRN lots wait here; only accepted qty enters usable stock ───
+// PO balance per line: ordered − (accepted + waiting QA + rejected that was closed by debit note).
+// Rejected qty sent back for REPLACEMENT stays open, so the next GRN brings it in and it goes to Incoming QA again.
+function poBalance(po, grns = [], exceptGrnId) {
+  const k = (id, name) => id || _nm(name);
+  const got = {};
+  (grns || []).filter(g => g && g.poId === po.id && g.status !== 'deleted' && g.status !== 'rejected' && g.id !== exceptGrnId).forEach(g => (g.lines || []).forEach(l => {
+    const rec = parseFloat(l.receivedQty) || 0, acc = parseFloat(l.acceptedQty) || 0, rej = parseFloat(l.rejectedQty) || 0;
+    const qaDone = !!l.qaDate || l.qaStatus === 'accepted' || l.qaStatus === 'ok';
+    const closed = !qaDone ? rec : acc + (l.rejDisposition === 'debit' ? rej : 0) + (l.qaStatus === 'ok' && !l.qaDate ? rec - acc : 0);
+    const key = k(l.itemId, l.itemName); got[key] = (got[key] || 0) + closed;
+  }));
+  return (po.items || []).map(it => { const ord = parseFloat(it.qty) || 0, key = k(it.itemId, it.name), take = Math.min(ord, got[key] || 0); got[key] = (got[key] || 0) - take; return { itemId: it.itemId || '', name: it.name, ordered: ord, closed: Math.round(take * 1000) / 1000, balance: Math.max(0, Math.round((ord - take) * 1000) / 1000), rate: parseFloat(it.rate) || 0 }; });
+}
+
 const iqaPending = (l) => !!l && !!l.itemId && (l.qaPending || !l.qaStatus || l.qaStatus === 'inprocess') && !l.qaDate;
 function iqaTemplate(item, mt) {
   const pack = (MFG_QA_PACK[mt] || MFG_QA_PACK.general || { templates: [] }).templates || [];
@@ -7061,7 +7093,7 @@ function iqaTemplate(item, mt) {
   return inc[0] || pack[0] || ['Incoming material inspection', ['Material as per PO', 'Quantity matches DC / invoice', 'Test certificate available', 'Visual damage check']];
 }
 
-function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
+function IncomingQAView({ documents = [], grns = [], setGrns, items = [], stockLedger = [], setStockLedger, businessInfo = {}, userRole, currentBizType = 'manufacturing' }) {
   const canInspect = ['admin', 'manager', 'qa', 'staff'].includes(userRole) || !['sales', 'purchase', 'accounts'].includes(userRole);
   const [tab, setTab] = useState('queue');
   const [cur, setCur] = useState(null); // { grnId, idx }
@@ -7089,7 +7121,13 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
     const fails = f.points.filter((_, i) => f.results[i] === 'fail');
     if (fails.length && acc > 0 && !window.confirm('Failed: ' + fails.join('; ') + '\n\nAccept ' + acc + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' under deviation anyway?')) return;
     const status = acc <= 0 ? 'rejected' : 'accepted';
-    const patch = { qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, expiry: f.expiry || '', qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
+    let disp = {};
+    if (rej > 0) {
+      const replace = window.confirm('Rejected ' + rej + ' ' + (row.l.unit || (row.item && row.item.unit) || '') + ' of ' + ((row.item && row.item.name) || row.l.itemName) + '.\n\nOK = Return to vendor for REPLACEMENT (PO balance stays open; the next GRN goes to Incoming QA again)\nCancel = Return with DEBIT NOTE (no replacement; PO line closed)');
+      const rtvSeq = (grns || []).reduce((n, g) => n + (g.lines || []).filter(l => l.rtvNo).length, 0) + 1;
+      disp = { rejDisposition: replace ? 'replace' : 'debit', rtvNo: dn('RTV', rtvSeq), rtvDate: iso, rejValue: Math.round(rej * (parseFloat(row.l.rate) || 0) * 100) / 100, rejReason: fails.join('; ') || f.remarks || '' };
+    }
+    const patch = { ...disp, qaStatus: status, acceptedQty: acc, rejectedQty: rej, lotNo: String(f.lotNo).trim(), certNo: f.certNo, expiry: f.expiry || '', qaPending: false, qaDate: iso, qaBy: f.inspector, qaRemarks: f.remarks, qaChecks: { template: f.tpl, points: f.points, results: f.results, readings: f.readings, deviation: !!(fails.length && acc > 0) } };
     setGrns(prev => (Array.isArray(prev) ? prev : []).map(g => g.id !== row.g.id ? g : { ...g, lines: (g.lines || []).map((l, i) => i === row.idx ? { ...l, ...patch } : l) }));
     if (setStockLedger) {
       const posted = (stockLedger || []).filter(e => e.sourceType === 'grn' && e.sourceId === row.g.id && e.itemId === row.l.itemId).reduce((s, e) => s + (e.type === 'in' ? 1 : -1) * (parseFloat(e.qty) || 0), 0);
@@ -7101,9 +7139,49 @@ function IncomingQAView({ grns = [], setGrns, items = [], stockLedger = [], setS
       }]);
     }
     setCur(null);
+    if (disp.rtvNo) alert('Return to vendor ' + disp.rtvNo + ' created (' + (disp.rejDisposition === 'replace' ? 'replacement' : 'debit note ₹' + disp.rejValue.toLocaleString('en-IN')) + ').\nPrint it from the "Rejections (RTV)" tab and send it with the material.');
   }
+  // rejection register: every rejected GRN line, and whether the loop is closed
+  const rtvRows = [];
+  live.forEach(g => (g.lines || []).forEach((l, idx) => { if (!(parseFloat(l.rejectedQty) > 0) || !l.qaDate) return;
+    const po = (documents || []).find(d => d.id === g.poId);
+    const bal = po ? (poBalance(po, grns).find(b => (l.itemId && b.itemId === l.itemId) || _nm(b.name) === _nm(l.itemName)) || null) : null;
+    const repl = l.rejDisposition === 'replace' || !l.rejDisposition;
+    const closed = !repl || (bal ? bal.balance <= 0 : !!l.replacedBy);
+    rtvRows.push({ g, l, idx, po, bal, repl, closed, item: (items || []).find(i => i.id === l.itemId) });
+  }));
+  const rtvOpen = rtvRows.filter(r => !r.closed).length;
+  const [rtvPrint, setRtvPrint] = useState(null);
   const th = { padding: '8px 10px', fontSize: 11, color: '#888', textAlign: 'left', borderBottom: '1px solid #EAE6DB' };
   const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid #F0ECE0' };
+  if (rtvPrint) { const r = rtvPrint, l = r.l; return (
+    <div>
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
+        <button style={styles.ghostBtn} onClick={() => setRtvPrint(null)}><X size={15} /> Close</button>
+        <button style={styles.primaryBtn} onClick={() => printView('.rtv-print', businessInfo)}><Printer size={15} /> Print</button>
+      </div>
+      <div className="rtv-print" style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 999, overflowY: 'auto', padding: '40px 56px' }}>
+        <div style={{ borderBottom: '2px solid #1E2A4A', paddingBottom: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between' }}>
+          <div><div className="serif" style={{ fontSize: 20, fontWeight: 700, color: '#1E2A4A' }}>{businessInfo.name}</div><div style={{ fontSize: 11, color: '#888' }}>{businessInfo.address}</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ fontSize: 16, fontWeight: 700, color: '#B5453A', letterSpacing: '0.06em' }}>{r.repl ? 'RETURN TO VENDOR — REPLACEMENT' : 'RETURN TO VENDOR — DEBIT NOTE'}</div><div style={{ fontSize: 11, color: '#888', marginTop: 3 }}>{l.rtvNo || '—'} · {l.rtvDate || l.qaDate}</div></div>
+        </div>
+        <table style={{ width: '100%', fontSize: 12.5, marginBottom: 16 }}><tbody>
+          <tr><td style={{ color: '#888', width: 140 }}>Vendor</td><td style={{ fontWeight: 600 }}>{r.g.vendorName || '—'}</td><td style={{ color: '#888', width: 120 }}>GRN</td><td style={{ fontWeight: 600 }}>{r.g.number} · {r.g.date}</td></tr>
+          <tr><td style={{ color: '#888' }}>Purchase order</td><td style={{ fontWeight: 600 }}>{r.g.poNumber || '—'}</td><td style={{ color: '#888' }}>Order ref</td><td style={{ fontWeight: 600 }}>{(r.g.orderRef && r.g.orderRef.docNo) || '—'}</td></tr>
+        </tbody></table>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
+          <thead><tr>{['Item code', 'Item description', 'Lot / heat', 'Received', 'Accepted', 'Rejected', 'Rate', 'Value'].map(h => <th key={h} style={{ background: '#6BA855', color: '#fff', padding: '6px 8px', textAlign: 'left', border: '1px solid #6BA855' }}>{h}</th>)}</tr></thead>
+          <tbody><tr>{[(r.item && r.item.itemCode) || '—', (r.item && r.item.name) || l.itemName, l.lotNo || '—', l.receivedQty, l.acceptedQty, l.rejectedQty, l.rate || '—', l.rejValue != null ? l.rejValue.toLocaleString('en-IN') : ((parseFloat(l.rejectedQty) || 0) * (parseFloat(l.rate) || 0)).toLocaleString('en-IN')].map((v, i) => <td key={i} style={{ padding: '6px 8px', border: '1px solid #DDD' }}>{v}</td>)}</tr></tbody>
+        </table>
+        <div style={{ fontSize: 12, marginBottom: 8 }}><b>Reason for rejection:</b> {l.rejReason || l.qaRemarks || (l.qaChecks && (l.qaChecks.points || []).filter((_, i) => (l.qaChecks.results || {})[i] === 'fail').join('; ')) || '—'}</div>
+        <div style={{ fontSize: 12, marginBottom: 30 }}><b>Action required from vendor:</b> {r.repl ? 'Replace the rejected quantity against the same PO. Replacement will be inspected again on receipt.' : 'Accept this debit note for the value above; the PO line is closed for this quantity.'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 50 }}>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />QA inspector</div>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Stores</div>
+          <div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #999', width: 160, marginBottom: 4 }} />Vendor acknowledgement</div>
+        </div>
+      </div>
+    </div>); }
   const pill = (id, l) => <button key={id} onClick={() => { setTab(id); setCur(null); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === id ? '#1E2A4A' : '#DDD'), background: tab === id ? '#1E2A4A' : '#fff', color: tab === id ? '#fff' : '#666' }}>{l}</button>;
   return (
     <div style={styles.page}>
@@ -7659,6 +7737,36 @@ function resolveOrderRef(input, { documents = [], productionOrders = [], purchas
   return v;
 }
 
+// No payment → no dispatch. Received money (advance on the won quotation + receipts on the order's invoices)
+// must cover everything dispatched on the order, including this document.
+function docValue(d) { try { return Math.round((computeTotals(d, d.placeOfSupply || '', 'india').grandTotal || 0) * 100) / 100; } catch (e) { return 0; } }
+function dispatchOrderRef(doc, documents = []) {
+  if (doc.orderRef && doc.orderRef.docNo) return doc.orderRef.docNo;
+  const lf = doc.linkedFrom;
+  if (lf && lf.docType === 'quotation' && lf.docNumber) return lf.docNumber;
+  if (lf && lf.id) { const src = (documents || []).find(x => x.id === lf.id); if (src && src.id !== doc.id) return dispatchOrderRef(src, documents); }
+  return '';
+}
+function dispatchClearance(doc, { documents = [], vouchers = [] }) {
+  const ref = dispatchOrderRef(doc, documents);
+  const live = d => d && d.status !== 'deleted' && d.id !== doc.id;
+  const custName = _nm((doc.customerSnapshot && doc.customerSnapshot.name) || '');
+  const quote = ref ? (documents || []).find(d => d.type === 'quotation' && _nm(d.number) === _nm(ref)) : null;
+  // value of this dispatch: document total; if the dispatch has no rates, value it at the quotation rates
+  let value = docValue(doc);
+  if (!value && quote) {
+    const qt = docValue(quote), qSub = (quote.items || []).reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0), taxF = qSub ? qt / qSub : 1;
+    value = Math.round((doc.items || []).reduce((s, it) => { const ql = (quote.items || []).find(q => (it.itemId && q.itemId === it.itemId) || _nm(String(it.name || '').split(' — ')[0]) === _nm(q.name)); return s + (parseFloat(it.qty) || 0) * (ql ? (parseFloat(ql.rate) || 0) : 0); }, 0) * taxF * 100) / 100;
+  }
+  const sameOrder = d => ref ? _nm(dispatchOrderRef(d, documents)) === _nm(ref) : _nm((d.customerSnapshot && d.customerSnapshot.name) || '') === custName && !dispatchOrderRef(d, documents);
+  const prior = (documents || []).filter(d => live(d) && d.type === 'delivery' && d.dispatchCleared && sameOrder(d)).reduce((s, d) => s + (d.clearedValue != null ? d.clearedValue : docValue(d)), 0);
+  const invNos = (documents || []).filter(d => d.type === 'invoice' && d.status !== 'deleted' && sameOrder(d)).map(d => _nm(d.number));
+  const refs = new Set([...(ref ? [_nm(ref)] : []), ...invNos]);
+  const paid = (vouchers || []).filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && (refs.has(_nm(v.linkedDocNo)) || (ref && v.orderRef && _nm(v.orderRef.docNo || v.orderRef) === _nm(ref)))).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0);
+  const need = Math.round((prior + value) * 100) / 100;
+  return { ok: value > 0 && paid + 0.5 >= need, ref, value, prior: Math.round(prior * 100) / 100, paid: Math.round(paid * 100) / 100, need, short: Math.max(0, Math.round((need - paid) * 100) / 100), noValue: !(value > 0) };
+}
+
 function buildOrderStatus(ref, data) {
   const { documents = [], boms = [], productionOrders = [], purchaseReqs = [], grns = [], storeIssues = [], boShortages = [], vouchers = [] } = data;
   const byRef = (x) => x && x.orderRef && _nm(x.orderRef.docNo) === _nm(ref);
@@ -7696,6 +7804,7 @@ function buildOrderStatus(ref, data) {
     S('issue', 'Stores', 'Issue to production', !orders.length ? 'pending' : sivs.length ? 'done' : 'active', sivs.length ? sivs.map(s => s.sivNumber).join(', ') : 'Not issued yet', 'storeissue'),
     S('prod', 'Production', 'Production (route stages)', !orders.length ? 'pending' : stg.hold ? 'issue' : stg.total && stg.done === stg.total ? 'done' : (stg.done || units.length) ? 'active' : 'pending', orders.length ? orders.length + ' order(s) · stages ' + stg.done + '/' + stg.total + (stg.hold ? ' · ' + stg.hold + ' on hold' : '') : '', 'productionorders'),
     S('test', 'Quality', mfgCfg().test.title + ' & certificate', !units.length ? 'pending' : failed.length ? 'issue' : pendT.length ? 'active' : 'done', units.length ? passed.length + ' passed · ' + pendT.length + ' waiting' + (failed.length ? ' · ' + failed.length + ' failed' : '') + ' (' + U.plural.toLowerCase() + ')' : '', 'routinetest'),
+    S('payclr', 'Accounts', 'Payment received → dispatch clearance', !passed.length ? 'pending' : deliveries.some(d => d.dispatchHold && !d.dispatchCleared) ? 'issue' : deliveries.some(d => d.dispatchCleared) ? 'done' : 'active', (() => { const adv = vouchers.filter(v => v.type === 'receipt' && v.status !== 'rejected' && v.status !== 'deleted' && _nm(v.linkedDocNo) === _nm(ref)).reduce((s, v) => s + (parseFloat(v.amount) || 0), 0); const held = deliveries.filter(d => d.dispatchHold && !d.dispatchCleared); return (adv ? 'Advance ₹' + Math.round(adv).toLocaleString('en-IN') : 'No advance received') + (held.length ? ' · on hold: ' + held.map(d => d.number + ' (short ₹' + Math.round((d.clearance && d.clearance.short) || 0).toLocaleString('en-IN') + ')').join(', ') : ''); })(), 'vouchers'),
     S('disp', 'Stores', 'Finished goods & dispatch', !passed.length ? 'pending' : dispatched.length >= passed.length && passed.length === units.length ? 'done' : dispatched.length ? 'active' : 'active', passed.length ? dispatched.length + '/' + passed.length + ' dispatched' + (deliveries.length ? ' · ' + deliveries.map(d => d.number).join(', ') : '') : '', 'drumstock'),
     S('inv', 'Accounts', 'Invoice', !invoices.length ? (dispatched.length ? 'active' : 'pending') : 'done', invoices.length ? invoices.map(d => d.number + ' (' + d.status + ')').join(', ') + ' · ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'documents'),
     S('pay', 'Accounts', 'Payment received', !invoices.length ? 'pending' : received >= invTotal - 1 ? 'done' : received > 0 ? 'active' : 'active', invoices.length ? '₹' + Math.round(received).toLocaleString('en-IN') + ' of ₹' + Math.round(invTotal).toLocaleString('en-IN') : '', 'vouchers'),
@@ -7922,8 +8031,8 @@ function orderShortagePlan({ doc, boms = [], items = [], stockMap = {}, rawMater
     const qty = b._qty;
     const fac = qty / (parseFloat(b.outputQty) || 1);
     (b.materials || []).forEach(m => {
-      const ms = matStock(m, { items, stockMap, rawMaterials }), key = ms.id || _nm(m.name);
-      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : '', itemCode: ms.item ? (ms.item.itemCode || '') : '', name: m.name || (ms.item && ms.item.name) || '—', unit: m.unit || (ms.item && ms.item.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', itemNos: [] };
+      const ms = matStock(m, { items, stockMap, rawMaterials }), ri = resolveMatItem(m, items, rawMaterials), key = ms.id || ri.itemId || _nm(ri.name);
+      const r = need[key] = need[key] || { materialId: ms.id, itemId: ms.item ? ms.item.id : ri.itemId, itemCode: ms.item ? (ms.item.itemCode || '') : ri.itemCode, name: (ms.item && ms.item.name) || ri.name || '—', unit: m.unit || (ms.item && ms.item.unit) || '', overall: 0, available: ms.qty, rate: ms.item ? (parseFloat(ms.item.purchaseRate ?? ms.item.rate) || '') : '', itemNos: [] };
       r.overall += (parseFloat(m.qty) || 0) * fac; if (!r.itemNos.includes(b.orderRef.itemNo)) r.itemNos.push(b.orderRef.itemNo);
     });
   });
@@ -9209,7 +9318,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 }
 
 
-function DocEditor({ costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   // All hooks MUST come before any conditional returns (React Rules of Hooks)
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -9377,6 +9486,10 @@ function DocEditor({ costCheck = [], bomMissing = [], onOrderAction, onTrackOrde
               {sameDocs.map(d => <option key={d.id} value={d.id}>{d.number} · {d.date}</option>)}
             </select>
           )}
+          {dispatchCheck && ['delivery', 'packing_list'].includes(doc.type) && (() => { const c = dispatchCheck, f = n => '₹' + Math.round(n || 0).toLocaleString('en-IN'); return (
+            <div style={{ width: '100%', margin: '6px 0', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: c.ok ? '#EAF6EE' : '#FDEEEC', border: '1px solid ' + (c.ok ? '#B7DEC4' : '#F2B8AE'), color: c.ok ? '#1A7A3E' : '#B5453A' }}>
+              <b>{c.ok ? '✔ Payment received — dispatch cleared' : '⛔ No payment, no dispatch'}</b>{c.ref ? ' · Order ' + c.ref : ' · customer level'} · This dispatch {f(c.value)} · Already dispatched {f(c.prior)} · Received {f(c.paid)}{!c.ok ? ' · Short ' + f(c.short) + ' — record a receipt linked to ' + (c.ref || 'the invoice') + ', then save.' : ''}
+            </div>); })()}
           {doc.type === 'quotation' && costCheck.length > 0 && (() => { const low = costCheck.filter(c => c.rate < c.cost), minM = Math.min(...costCheck.map(c => c.margin)); return (
             <details style={{ position: 'relative' }}>
               <summary style={{ listStyle: 'none', cursor: 'pointer', padding: '4px 10px', borderRadius: 14, fontSize: 12, fontWeight: 600, background: low.length ? '#FDEEEC' : '#EAF6EE', color: low.length ? '#B5453A' : '#1A7A3E', border: '1px solid ' + (low.length ? '#F2B8AE' : '#B7DFC4') }}>{low.length ? '⚠ ' + low.length + ' below cost' : 'Margin ' + (isFinite(minM) ? minM.toFixed(1) : '—') + '%+'}</summary>
@@ -11170,7 +11283,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
   // Invoices / POs available for linking (receipt → invoices; payment → purchase bills)
   const linkableDocs = documents.filter(d =>
     form.type === 'receipt'
-      ? d.type === 'invoice'
+      ? (d.type === 'invoice' || (d.type === 'quotation' && d.outcome === 'won'))
       : d.type === 'purchasebill' || d.type === 'purchase' || d.type === 'purchaseorder'
   ).filter(d => d.status !== 'deleted');
   const partyOfDoc = (d) => { const list = form.type === 'receipt' ? customers : vendors; const p = (list || []).find(x => x.id === (d.customerId || d.vendorId)); return p ? p.name : ((d.customerSnapshot && d.customerSnapshot.name) || d.vendorName || ''); };
@@ -11192,7 +11305,7 @@ function VoucherForm({ voucher, customers, vendors, documents = [], onSave, onCl
       setLinkError('');
       return true; // manual reference (not in the system) — confirmed on save
     }
-    if (linked.status !== 'approved') {
+    if (linked.status !== 'approved' && !(linked.type === 'quotation' && linked.outcome === 'won')) {
       const label = form.type === 'receipt' ? 'Invoice' : 'Purchase bill / PO';
       setLinkError(`${label} "${form.linkedDocNo}" is not approved yet. Only approved documents can be linked to a voucher.`);
       return false;
@@ -13174,14 +13287,14 @@ function GRNList({ grns: allGrns, setGrns, documents, vendors, items, setStockLe
       </div>
 
       {showForm && (
-        <GRNForm grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
+        <GRNForm allGrns={allGrns} grn={editing} poList={poList} vendors={vendors} items={items} businessInfo={businessInfo} onSave={saveGRN} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {printGrn && <GRNPrint grn={printGrn} businessInfo={businessInfo} onClose={() => setPrintGrn(null)} />}
     </div>
   );
 }
 
-function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose }) {
+function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose, allGrns = [] }) {
   const [form, setForm] = useState({ lines: [], ...grn });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const isTrading = businessInfo?.companyType === 'trading';
@@ -13190,13 +13303,16 @@ function GRNForm({ grn, poList, vendors, items, businessInfo, onSave, onClose })
     const po = poList.find(p => p.id === poId);
     if (!po) { set('poId', poId); return; }
     const vendor = vendors.find(v => v.id === po.customerId);
-    const lines = (po.items || []).map(it => ({
-      itemId: it.itemId || '',
-      itemName: it.name,
-      orderedQty: parseFloat(it.qty) || 0,
-      receivedQty: parseFloat(it.qty) || 0,
-      rate: parseFloat(it.rate) || 0,
+    const bal = poBalance(po, allGrns, form.id);
+    const lines = bal.filter(b => b.balance > 0).map(b => ({
+      itemId: b.itemId,
+      itemName: b.name,
+      orderedQty: b.ordered,
+      receivedQty: b.balance,
+      rate: b.rate,
+      ...(b.closed > 0 ? { balanceNote: 'Balance / replacement — ' + b.closed + ' of ' + b.ordered + ' already closed' } : {}),
     }));
+    if (!lines.length) alert('PO ' + po.number + ' is fully received — nothing pending (rejected quantity closed by debit note is not expected again).');
     setForm(p => ({ ...p, poId, poNumber: po.number, vendorName: vendor ? vendor.name : '', lines, orderRef: po.orderRef || null }));
   }
 
@@ -16039,10 +16155,49 @@ function PurchaseRequisitionView({ onAutoPO, purchaseReqs, setPurchaseReqs, item
   const STATUS_COL = { draft: '#888', pending: '#B5651D', approved: '#2C7A3F', rejected: '#B91C1C' };
   const typeLabel = t => t === 'capex' ? 'Capex (Plant & Machinery)' : t === 'production' ? 'Work / Production' : t === 'customer' ? 'Customer' : 'Project';
 
+  // Fill item code + description on auto-raised lines from the Item Master / the order's product BOM
+  const repairPrLines = (m) => {
+    const used = new Set();
+    let cands = null;
+    const bomCands = () => {
+      if (cands) return cands;
+      cands = [];
+      if (!m.orderRef || !m.orderRef.docNo) return cands;
+      (productionOrders || []).filter(o => o.orderRef && _nm(o.orderRef.docNo) === _nm(m.orderRef.docNo)).forEach(o => {
+        const b = (boms || []).find(x => x.id === o.bomId); if (!b) return;
+        const fac = (parseFloat(o.quantity) || 0) / (parseFloat(b.outputQty) || 1);
+        (b.materials || []).forEach((ml, i) => { const ri = resolveMatItem(ml, items); if (ri.itemId || ri.name) cands.push({ key: o.id + ':' + i, ri, unit: _nm(ml.unit || ri.unit), req: (parseFloat(ml.qty) || 0) * fac }); });
+      });
+      return cands;
+    };
+    let changed = false;
+    const its = (m.items || []).map(it => {
+      if (it.itemId && it.itemCode && it.name && it.name !== '—') return it;
+      let ri = resolveMatItem(it, items);
+      if (!ri.itemId && (!it.name || it.name === '—')) {
+        const q = parseFloat(it.qty) || 0;
+        const pool = bomCands().filter(c => !used.has(c.key) && (!it.uom || !c.unit || c.unit === _nm(it.uom)) && c.req + 0.0005 >= q);
+        pool.sort((a, b) => (a.req - q) - (b.req - q));
+        if (pool[0]) { used.add(pool[0].key); ri = pool[0].ri; }
+      }
+      if (!ri.itemId && !ri.name) return it;
+      const nx = { ...it, itemId: it.itemId || ri.itemId, itemCode: it.itemCode || ri.itemCode, name: (it.name && it.name !== '—') ? it.name : (ri.name || it.name) };
+      if (nx.itemId !== it.itemId || nx.itemCode !== it.itemCode || nx.name !== it.name) changed = true;
+      return nx;
+    });
+    return changed ? { ...m, items: its } : m;
+  };
+  useEffect(() => {
+    if (!setPurchaseReqs || !(purchaseReqs || []).length) return;
+    const fixes = {};
+    (purchaseReqs || []).forEach(m => { if ((m.items || []).some(it => !it.itemCode || !it.name || it.name === '—')) { const f = repairPrLines(m); if (f !== m) fixes[m.id] = f; } });
+    if (Object.keys(fixes).length) setPurchaseReqs(prev => (Array.isArray(prev) ? prev : []).map(x => fixes[x.id] || x));
+  }, [purchaseReqs, items, boms, productionOrders]);
+
   // ── PRINT ──
   if (viewDoc) {
-    const m = viewDoc;
-    const rows = (m.items || []).filter(it => (it.name || '').trim());
+    const m = repairPrLines(viewDoc);
+    const rows = (m.items || []).filter(it => (it.name || it.itemCode || '').trim());
     return (
       <div>
         <div className="no-print" style={{ position: 'fixed', top: 16, right: 24, zIndex: 1001, display: 'flex', gap: 8 }}>
@@ -16068,7 +16223,7 @@ function PurchaseRequisitionView({ onAutoPO, purchaseReqs, setPurchaseReqs, item
             </tbody>
           </table>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 14 }}>
-            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item / Material', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{(m.type === 'capex' ? ['#', 'Machine / Equipment', 'Make / Model', 'Specification', 'Qty', 'Est. cost'] : ['#', 'Item code', 'Item description', 'UOM', 'Qty', 'Purpose']).map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {rows.map((it, i) => m.type === 'capex' ? (
                 <tr key={i}>
@@ -16082,7 +16237,8 @@ function PurchaseRequisitionView({ onAutoPO, purchaseReqs, setPurchaseReqs, item
               ) : (
                 <tr key={i}>
                   <td style={td}>{i + 1}</td>
-                  <td style={td}>{it.name}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 600 }}>{it.itemCode || '—'}</td>
+                  <td style={td}>{it.name || '—'}</td>
                   <td style={td}>{it.uom || '—'}</td>
                   <td style={td}>{it.qty || '—'}</td>
                   <td style={td}>{it.purpose || '—'}</td>
@@ -32236,11 +32392,27 @@ export default function App() {
       ...(status === 'submitted' ? { submittedAt: Date.now() } : {}),
     };
     const isNew = !documents.find((d) => d.id === saved.id);
+    const prevDoc = documents.find((d) => d.id === saved.id);
+    // ── No payment, no dispatch (manufacturing delivery note / packing list)
+    let dispatchOk = true;
+    if (['delivery', 'packing_list'].includes(saved.type) && (saved.bizType || effectiveBizContext) === 'manufacturing' && saved.status !== 'rejected') {
+      const clr = dispatchClearance(saved, { documents, vouchers });
+      saved.clearance = { ...clr, checkedAt: new Date().toISOString() };
+      if (clr.ok) { saved.dispatchCleared = true; saved.dispatchHold = false; saved.clearedValue = clr.value; saved.clearedAt = saved.clearedAt || new Date().toISOString(); }
+      else {
+        dispatchOk = false; saved.dispatchCleared = false; saved.dispatchHold = true;
+        if (saved.status === 'approved' || saved.status === 'submitted') saved.status = 'draft';
+        const f = n => '₹' + Math.round(n).toLocaleString('en-IN');
+        alert('⛔ Dispatch on hold — payment not received.\n\n' + (clr.noValue ? 'This document has no value (add rates, or link it to the won quotation).\n' : '') + (clr.ref ? 'Order: ' + clr.ref + '\n' : 'No order reference — checked against the customer.\n') + 'This dispatch: ' + f(clr.value) + '\nAlready dispatched: ' + f(clr.prior) + '\nReceived: ' + f(clr.paid) + '\nShort: ' + f(clr.short) + '\n\nSaved as DRAFT. Stock is not reduced and nothing is marked dispatched.\nRecord the receipt in Vouchers → Receipt, linked to ' + (clr.ref || 'the invoice') + ', then open this document and save again.');
+      }
+    }
     setDocuments((prev) => isNew ? [...prev, saved] : prev.map((d) => d.id === saved.id ? saved : d));
-    if (['delivery', 'packing_list'].includes(saved.type)) syncDrumDispatch(saved);
+    if (['delivery', 'packing_list'].includes(saved.type) && dispatchOk) syncDrumDispatch(saved);
     // A delivery made from an invoice must not deduct stock again (the invoice already did).
     const fromInvoice = saved.type === 'delivery' && saved.linkedFrom && saved.linkedFrom.docType === 'invoice';
-    if (isNew && ['invoice', 'delivery'].includes(saved.type) && !fromInvoice) {
+    const releasedNow = saved.type === 'delivery' && dispatchOk && prevDoc && prevDoc.dispatchHold && !prevDoc.stockPosted;
+    if ((isNew || releasedNow) && ['invoice', 'delivery'].includes(saved.type) && !fromInvoice && dispatchOk && !(prevDoc && prevDoc.stockPosted)) {
+      if (saved.type === 'delivery') { saved.stockPosted = true; setDocuments(prev => prev.map(d => d.id === saved.id ? { ...d, stockPosted: true } : d)); }
       const entries = (saved.items || []).filter(it => it.itemId && (it.qty || 0) !== 0).map(it => ({
         id: crypto.randomUUID(), date: saved.date, docType: saved.type, docId: saved.id,
         docNumber: saved.number, itemId: it.itemId, itemName: it.name, type: 'out', sourceType: saved.type, sourceId: saved.id,
@@ -32664,6 +32836,7 @@ export default function App() {
           onQuoteOutcome={markQuoteOutcome}
           onTrackOrder={(no) => { setTrackRef(no); setActiveDoc(null); setView('ordertracker'); }}
           onOrderAction={(act, d) => { if (act === 'recalc') { recalcOrderShortage(d); return; } setActiveDoc(null); setView(act); }}
+          dispatchCheck={activeDoc && ['delivery', 'packing_list'].includes(activeDoc.type) && (activeDoc.bizType || effectiveBizContext) === 'manufacturing' ? dispatchClearance(activeDoc, { documents, vouchers }) : null}
           costCheck={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (() => { const rts = latestRates(documents, grns, items), cd = { convPct: businessInfo.mfgConvPct, marginPct: businessInfo.mfgMarginPct }; return (activeDoc.items || []).map(it => { const b = (boms || []).find(x => !x.orderRef && (x.materials || []).length && ((it.itemId && x.itemId === it.itemId) || _nm(x.name) === _nm(it.name))); if (!b) return null; const c = bomCosting(b, rts, cd), rate = (parseFloat(it.rate) || 0) * (1 - (parseFloat(it.discount) || 0) / 100); if (!(c.unitCost > 0)) return null; return { name: it.name, cost: c.unitCost, rate, margin: rate > 0 ? (rate - c.unitCost) / c.unitCost * 100 : -100 }; }).filter(Boolean); })() : []}
           bomMissing={activeDoc && activeDoc.type === 'quotation' && (activeTypes || []).includes('manufacturing') ? (activeDoc.items || []).filter(it => (it.name || '').trim() && !(boms || []).some(b => !b.orderRef && (b.materials || []).length && ((it.itemId && b.itemId === it.itemId) || _nm(b.name) === _nm(it.name) || _nm(b.outputItem) === _nm(it.name)))).map(it => it.name) : []}
           releasedDrums={allDrums(scopeList(productionOrders, 'manufacturing'), boms).filter(d => d.testStatus === 'passed' && (!d.dispatched || (activeDoc && d.dispatchedDoc === activeDoc.number)) && !((activeDoc && activeDoc.items) || []).some(it => it.drumKey === d.key))}
