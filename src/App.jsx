@@ -1796,9 +1796,43 @@ const styles = {
 
 // ─── Modal ─────────────────────────────────────────────────────
 
-function Modal({ children, onClose, title, wide }) {
+function DockOverlay({ children, onClose, dock = true, overlayStyle }) {
+  const isWide = typeof window !== 'undefined' && window.innerWidth >= 900;
+  const [left, setLeft] = useState(() => { try { const m = document.querySelector('.app-main'); return m ? Math.max(0, m.getBoundingClientRect().left) : 0; } catch (e) { return 0; } });
+  const dirty = React.useRef(false);
+  const shield = React.useRef(null);
+  const on = dock && isWide;
+  useEffect(() => {
+    if (!on) return;
+    const measure = () => { try { const m = document.querySelector('.app-main'); setLeft(m ? Math.max(0, m.getBoundingClientRect().left) : 0); } catch (e) {} };
+    measure(); window.addEventListener('resize', measure);
+    const prev = document.body.style.paddingBottom; document.body.style.paddingBottom = '52vh';
+    return () => { window.removeEventListener('resize', measure); document.body.style.paddingBottom = prev; };
+  }, [on]);
+  if (!on) return <div style={overlayStyle || styles.modalOverlay} className="no-print" onClick={overlayStyle ? undefined : undefined}>{children}</div>;
+  // Clicking the list above closes this record and opens what was clicked (asks first if there are unsaved edits).
+  const passClick = (e) => {
+    if (!onClose) return;
+    if (dirty.current && !window.confirm('Discard the unsaved changes in the details panel?')) return;
+    const sh = shield.current, x = e.clientX, y = e.clientY;
+    if (sh) sh.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(x, y);
+    if (sh) sh.style.pointerEvents = '';
+    onClose();
+    if (el) setTimeout(() => { try { if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) el.focus(); el.click(); } catch (err) {} }, 40);
+  };
+  return (<>
+    <div ref={shield} onClick={passClick} className="no-print" style={{ position: 'fixed', top: 0, left, right: 0, bottom: '50vh', zIndex: 99, background: 'transparent', cursor: 'default' }} />
+    <div className="dock-panel no-print" onInputCapture={() => { dirty.current = true; }} onChangeCapture={() => { dirty.current = true; }}
+      style={{ position: 'fixed', left, right: 0, bottom: 0, height: '50vh', zIndex: 100, overflowY: 'auto', overscrollBehavior: 'contain', background: '#F7F4EE', borderTop: '3px solid #C9A24B', boxShadow: '0 -8px 28px rgba(18,28,58,0.18)' }}>
+      {children}
+    </div>
+  </>);
+}
+
+function Modal({ children, onClose, title, wide, dock = true }) {
   return (
-    <div style={styles.modalOverlay} className="no-print">
+    <DockOverlay onClose={onClose} dock={dock}>
       <div style={{ ...styles.modal, width: wide ? 680 : 460 }}>
         <div style={styles.modalHeader}>
           <span className="serif" style={{ fontSize: 17, fontWeight: 600, color: '#fff' }}>{title}</span>
@@ -1806,7 +1840,7 @@ function Modal({ children, onClose, title, wide }) {
         </div>
         <div style={{ padding: '20px 24px 24px' }}>{children}</div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -1944,7 +1978,7 @@ function ScanBillModal({ onApply, onClose }) {
   }
 
   return (
-    <Modal title="📷 Scan Bill / Invoice" onClose={onClose} wide>
+    <Modal dock={false} title="📷 Scan Bill / Invoice" onClose={onClose} wide>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         {/* Left: upload */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3481,7 +3515,10 @@ function resolveMatItem(m, items = [], rawMaterials = []) {
   return { item: it, itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : code, name: (it && it.name) || nm || (rm && rm.name) || (it && it.itemCode) || code || '', unit: m.unit || m.uom || (it && it.unit) || (rm && rm.unit) || '' };
 }
 
-function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], businessInfo = {}, userRole, setEditingItem, onMigrate, setView }) {
+function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], businessInfo = {}, userRole, setEditingItem, onMigrate, setView, onSaveItem, setBusinessInfo, boms = [] }) {
+  const [sel, setSel] = useState(null);
+  const [selKey, setSelKey] = useState(0);
+  const pick = (it) => { if (!onSaveItem) { setEditingItem(it); return; } setSel(it); setSelKey(k => k + 1); };
   const fmt = makeFmt(businessInfo);
   const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
   const canEdit = ['admin', 'manager', 'inventory', 'purchase'].includes(userRole);
@@ -3492,7 +3529,7 @@ function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], busine
   const pending = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
   const rmCats = [...new Set(mats.map(m => m.rmCategory).filter(Boolean))];
   const rows = mats.filter(m => (!cat || m.category === cat || m.rmCategory === cat) && (!q || _nm(m.name).includes(_nm(q)) || _nm(m.itemCode).includes(_nm(q))));
-  const add = () => setEditingItem({ name: '', category: 'Raw Material', unit: 'kg', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0 });
+  const add = () => pick({ name: '', category: 'Raw Material', unit: 'kg', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0 });
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -3514,12 +3551,13 @@ function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], busine
         <span style={{ fontSize: 12, color: '#888' }}>{rows.length} material(s)</span>
         {setView && <button onClick={() => setView('items')} style={{ ...styles.ghostBtn, marginLeft: 'auto' }}>Open full Item Master</button>}
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {rows.length === 0 ? <div style={styles.emptyBox}>{mats.length ? 'No materials match your filter.' : 'No materials yet. Add copper rod, compounds, armour, packing, consumables and misc items here.'}</div> :
-        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'auto', ...(onSaveItem ? { maxHeight: '42vh' } : {}) }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ background: '#F8F6F0' }}>{['Code', 'Material', 'Type', 'Unit', 'Stock', 'Min', 'Rate', 'Grade / standard', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 4 && i <= 6 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: '#F8F6F0' }}>{['Code', 'Material', 'Type', 'Unit', 'Stock', 'Min', 'Rate', 'Grade / standard', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 4 && i <= 6 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB', position: 'sticky', top: 0, background: '#F8F6F0', zIndex: 1 }}>{h}</th>)}</tr></thead>
             <tbody>{rows.map(m => { const st = stock[m.id] ? stock[m.id].qty : (Number(m.openingStock) || 0), low = (Number(m.minStock) || 0) > 0 && st <= Number(m.minStock); return (
-              <tr key={m.id} style={{ borderBottom: '1px solid #F0ECE0' }}>
+              <tr key={m.id} onClick={() => canEdit && pick(m)} style={{ borderBottom: '1px solid #F0ECE0', cursor: canEdit ? 'pointer' : 'default', ...(sel && sel.id === m.id ? { background: '#F5F2EA', boxShadow: 'inset 3px 0 0 #C9A24B' } : {}) }}>
                 <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11.5 }}>{m.itemCode || ''}</td>
                 <td style={{ padding: '8px 10px', fontWeight: 600 }}>{m.name}</td>
                 <td style={{ padding: '8px 10px', fontSize: 12 }}>{m.category}{m.rmCategory ? <span style={{ color: '#888' }}> · {m.rmCategory}</span> : null}</td>
@@ -3528,10 +3566,22 @@ function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], busine
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>{Number(m.minStock) || 0}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(m.purchaseRate ?? m.rate ?? 0)}</td>
                 <td style={{ padding: '8px 10px', fontSize: 12, color: '#666' }}>{m.specs ? [m.specs.grade, m.specs.standard].filter(Boolean).join(' · ') : ''}</td>
-                <td style={{ padding: '8px 10px' }}>{canEdit && <button onClick={() => setEditingItem(m)} style={styles.ghostBtn}>Edit</button>}</td>
+                <td style={{ padding: '8px 10px' }}>{canEdit && <button onClick={(e) => { e.stopPropagation(); pick(m); }} style={styles.ghostBtn}>Edit</button>}</td>
               </tr>); })}</tbody>
           </table>
         </div>}
+      {onSaveItem && (sel ? (<div>
+        {sel.id && (() => {
+          const st = stock[sel.id] ? +stock[sel.id].qty.toFixed(3) : (Number(sel.openingStock) || 0);
+          const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(x => x.materialId === sel.id || _nm(x.name) === _nm(sel.name)));
+          return <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12.5 }}>
+            <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Current stock <b>{st} {sel.unit || ''}</b></span>
+            {usedIn.length > 0 && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Used in BOM: <b>{usedIn.map(b => b.name).join(', ')}</b></span>}
+          </div>;
+        })()}
+        <ItemModal key={selKey} inline item={sel} businessInfo={businessInfo} items={items} setBusinessInfo={setBusinessInfo} onClose={() => setSel(null)} onSave={(f) => { const saved = onSaveItem(f); setSel(saved || null); setSelKey(k => k + 1); }} />
+      </div>) : <div style={{ ...styles.emptyBox, padding: '30px 20px' }}>Select a material above to see and edit its details here, or click “Add material”.</div>)}
+      </div>
     </div>
   );
 }
@@ -3710,7 +3760,7 @@ function ItemPanelWrap({ inline, onClose, title, children }) {
         <span className="serif" style={{ fontSize: 18, fontWeight: 700 }}>{title}</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 18, cursor: 'pointer' }} title="Close">✕</button>
       </div>
-      <div style={{ padding: '14px 18px', background: '#F8F5EE' }}>{children}</div>
+      <div style={{ padding: '14px 18px', background: '#F8F5EE', maxHeight: '48vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>{children}</div>
     </div>
   );
 }
@@ -4022,7 +4072,7 @@ function DeleteAccountModal({ user, ownerUid, isSubscribed, onExportData, onClos
   );
 
   return (
-    <Modal onClose={step < 4 ? onClose : undefined} title={step < 4 ? 'Delete Account' : ''}>
+    <Modal dock={false} onClose={step < 4 ? onClose : undefined} title={step < 4 ? 'Delete Account' : ''}>
       {step === 1 && (
         <>
           <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:16, marginBottom:16 }}>
@@ -9278,7 +9328,7 @@ function HsnSearchModal({ onSelect, onClose }) {
     h.code.startsWith(q) || h.desc.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal onClose={onClose} title="HSN / SAC Code Lookup">
+    <Modal dock={false} onClose={onClose} title="HSN / SAC Code Lookup">
       <div style={{ marginBottom: 10 }}>
         <input
           autoFocus
@@ -9347,7 +9397,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
   }
 
   return (
-    <Modal onClose={onClose} title="📋 Load Activities into Invoice" width={580}>
+    <Modal dock={false} onClose={onClose} title="📋 Load Activities into Invoice" width={580}>
       <div style={{ marginBottom: 12 }}>
         <label style={styles.label}>Project</label>
         <select value={selProject} onChange={e => { setSelProject(e.target.value); setSelected({}); }} style={styles.input}>
@@ -12012,7 +12062,7 @@ function StockView({ items, stockLedger: allSL, setStockLedger, userRole, busine
       </div>
 
       {showAdj && (
-        <Modal title="Manual Stock Adjustment" onClose={() => setShowAdj(false)}>
+        <Modal dock={false} title="Manual Stock Adjustment" onClose={() => setShowAdj(false)}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Item</label>
@@ -19356,7 +19406,7 @@ function QCModal({ order, onSubmit, onClose }) {
   const [result, setResult] = useState('pass');
   const [notes, setNotes] = useState('');
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={styles.modal}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>QC — {order.number}</span>
@@ -19386,7 +19436,7 @@ function QCModal({ order, onSubmit, onClose }) {
           </button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -19547,7 +19597,7 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
   }
 
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={{ ...styles.modal, width: 560, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>{initial ? 'Edit Part' : 'New Part'}</span>
@@ -19629,7 +19679,7 @@ function PartForm({ initial, vendors, ownerUid, onSave, onClose }) {
           <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save Part</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -19754,7 +19804,7 @@ function EngDocForm({ initial, parts, ownerUid, onSave, onClose, DOC_CATS }) {
   }
 
   return (
-    <div style={styles.modalOverlay}>
+    <DockOverlay onClose={onClose}>
       <div style={{ ...styles.modal, width: 520, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={styles.modalHeader}>
           <span style={{ fontWeight: 600 }}>{initial ? 'Edit Document' : 'New Eng. Document'}</span>
@@ -19816,7 +19866,7 @@ function EngDocForm({ initial, parts, ownerUid, onSave, onClose, DOC_CATS }) {
           <button onClick={() => onSave(form)} style={styles.primaryBtn}>Save Document</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -25864,7 +25914,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.title ? 'Edit' : 'New'} Variation Order — {editing.voNo}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -25885,7 +25935,7 @@ function VariationsView({ variations = [], setVariations, siteProjects = [], use
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } if (!editing.title) { alert('Enter a description'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -25973,7 +26023,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.remarks || editing.workers ? 'Edit' : 'New'} Manpower Entry</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -25994,7 +26044,7 @@ function ManpowerView({ manpowerLogs = [], setManpowerLogs, siteProjects = [], s
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.projectId) { alert('Select a project'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -26142,7 +26192,7 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
   const row = { marginBottom: 12 };
   const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 580, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
   return (
-    <div style={styles.modalOverlay} onClick={onClose}>
+    <DockOverlay onClose={onClose}>
       <div style={modalCard} onClick={e => e.stopPropagation()}>
         <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{rec.supersedes ? 'New Revision' : (rec.title ? 'Edit' : 'New')} Document</h3>
         <div style={row}><label style={lbl}>Project</label><select style={styles.input} value={form.projectId} onChange={e => set('projectId', e.target.value)}><option value="">— Select —</option>{siteProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -26178,7 +26228,7 @@ function ProjectDocForm({ rec, siteProjects, cats, subtypes = {}, statuses, onSa
           <button style={styles.primaryBtn} onClick={() => { if (!form.title) { alert('Enter a title'); return; } if (!form.projectId) { alert('Select a project'); return; } onSave(form); }}>Save</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -28683,7 +28733,7 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
         const lbl = { fontSize: 12, color: '#888780', display: 'block', marginBottom: 4 };
         const modalCard = { background: '#fff', borderRadius: 14, padding: 24, width: '92%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
         return (
-          <div style={styles.modalOverlay} onClick={() => setEditing(null)}>
+          <DockOverlay onClose={() => setEditing(null)}>
             <div style={modalCard} onClick={e => e.stopPropagation()}>
               <h3 className="serif" style={{ margin: '0 0 16px', color: '#1E2A4A' }}>{editing.name ? 'Edit' : 'New'} {editing.type} — {editing.code}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -28702,7 +28752,7 @@ function ResourceMasterView({ resources = [], setResources, userRole, businessIn
                 <button style={styles.primaryBtn} onClick={() => { if (!editing.name) { alert('Enter a name'); return; } save(editing); }}>Save</button>
               </div>
             </div>
-          </div>
+          </DockOverlay>
         );
       })()}
     </div>
@@ -28829,7 +28879,7 @@ function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose
   );
 
   return (
-    <div style={styles.modalOverlay} onClick={onClose}>
+    <DockOverlay onClose={onClose}>
       <div style={modalCard} onClick={e => e.stopPropagation()}>
         <h3 className="serif" style={{ margin: '0 0 4px', color: '#1E2A4A' }}>Rate Analysis</h3>
         <div style={{ fontSize: 12.5, color: '#888', marginBottom: 14 }}>{line.description || 'BOQ item'} — per 1 {line.unit || 'unit'}</div>
@@ -28881,7 +28931,7 @@ function RateAnalysisModal({ line, resources = [], businessInfo, onSave, onClose
           <button style={styles.primaryBtn} onClick={() => onSave({ components: comps, siteOH: parseFloat(siteOH) || 0, hoOH: parseFloat(hoOH) || 0, contingency: parseFloat(conti) || 0, profit: parseFloat(profit) || 0, direct, costRate, selling })}>Apply to BOQ (Rate = {fmt(selling)})</button>
         </div>
       </div>
-    </div>
+    </DockOverlay>
   );
 }
 
@@ -33077,6 +33127,9 @@ export default function App() {
             businessInfo={businessInfo}
             userRole={userRole}
             setEditingItem={setEditingItem}
+            boms={boms}
+            setBusinessInfo={setBusinessInfo}
+            onSaveItem={(it) => { const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext }; setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]); return saved; }}
             onMigrate={runRmMigration}
             setView={setView}
           />
@@ -34084,6 +34137,9 @@ export default function App() {
         @media print { button { white-space: normal; } }
       `}</style>
       <style>{`
+.dock-panel > div { width: 100% !important; max-width: none !important; max-height: none !important; border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; overflow: visible !important; }
+.dock-panel > div > div:first-child { position: sticky; top: 0; z-index: 3; }
+
         * { box-sizing: border-box; }
         .nav-toggle { display: none; }
         .nav-overlay { display: none; }
