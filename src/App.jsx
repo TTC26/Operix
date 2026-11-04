@@ -2351,7 +2351,7 @@ function ActivitySelectScreen({ setBusinessInfo, isSubscribed, isTestAccount }) 
       icon: '🏭',
       label: 'Manufacturing',
       sub: 'Production & Quality',
-      desc: 'BOM · Raw Materials · Production Orders · QA Testing · Internal Audit',
+      desc: 'BOM · Item Master · Production Orders · QA Testing · Internal Audit',
       color: '#C9752A',
     },
     {
@@ -3290,7 +3290,7 @@ function CustomerModal({ customer, onSave, onClose, businessInfo = {} }) {
 // p = print, x = export (all tables on the view → Excel sheets), i = import (master data only; handler supplied by App)
 // Data shown is already scoped to the active business, so print/export are isolated per business automatically.
 const VIEW_TOOLS = {
-  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Raw Materials', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
+  grn: { t: 'GRN', x: 1 }, rawmaterials: { t: 'Item Master (materials)', p: 1 }, stock: { t: 'Stock', p: 1, x: 1 }, stockledger: { t: 'Stock Ledger', p: 1, x: 1 },
   storeissue: { t: 'Store Issue', x: 1 }, verticalrack: { t: 'Vertical Rack', p: 1, x: 1 }, vendors: { t: 'Vendors', p: 1, x: 1, i: 1 },
   vendoreval: { t: 'Vendor Evaluation', p: 1, x: 1 }, clientmaterials: { t: 'Client Materials', p: 1, x: 1 }, fmspareparts: { t: 'FM Spare Parts', p: 1, x: 1 },
   isoprinciples: { t: 'ISO Principles', p: 1, x: 1 }, deptprocedures: { t: 'Department Procedures', p: 1, x: 1 }, inprocessqa: { t: 'Inprocess QA', p: 1, x: 1 },
@@ -3515,78 +3515,12 @@ function resolveMatItem(m, items = [], rawMaterials = []) {
   return { item: it, itemId: it ? it.id : '', itemCode: it ? (it.itemCode || '') : code, name: (it && it.name) || nm || (rm && rm.name) || (it && it.itemCode) || code || '', unit: m.unit || m.uom || (it && it.unit) || (rm && rm.unit) || '' };
 }
 
-function MaterialsView({ items = [], stockLedger = [], rawMaterials = [], businessInfo = {}, userRole, setEditingItem, onMigrate, setView, onSaveItem, setBusinessInfo, boms = [] }) {
-  const [sel, setSel] = useState(null);
-  const [selKey, setSelKey] = useState(0);
-  const pick = (it) => { if (!onSaveItem) { setEditingItem(it); return; } setSel(it); setSelKey(k => k + 1); };
-  const fmt = makeFmt(businessInfo);
-  const cc = COUNTRY_CONFIG[businessInfo.country || 'india'] || COUNTRY_CONFIG.india;
-  const canEdit = ['admin', 'manager', 'inventory', 'purchase'].includes(userRole);
-  const [q, setQ] = useState('');
-  const [cat, setCat] = useState('');
-  const mats = (items || []).filter(isMaterialItem);
-  const stock = computeStock(stockLedger, items);
-  const pending = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
-  const rmCats = [...new Set(mats.map(m => m.rmCategory).filter(Boolean))];
-  const rows = mats.filter(m => (!cat || m.category === cat || m.rmCategory === cat) && (!q || _nm(m.name).includes(_nm(q)) || _nm(m.itemCode).includes(_nm(q))));
-  const add = () => pick({ name: '', category: 'Raw Material', unit: 'kg', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate, openingStock: 0, minStock: 0 });
-  return (
-    <div style={styles.page}>
-      <div style={styles.pageHeader}>
-        <h1 className="serif" style={styles.h1}>Raw Materials</h1>
-        <p style={styles.muted}>One record per material in the Item Master — PR, PO, GRN, stock, BOM and production all use the same item.</p>
-      </div>
-      {pending.length > 0 && <div style={{ background: '#FFF8E1', border: '1px solid #F2D48A', borderRadius: 10, padding: '12px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13 }}><b>{pending.length}</b> material(s) are still in the old Raw Materials list. Move them into the Item Master so purchase, GRN and stock stay in sync (same names are merged).</span>
-        {canEdit && onMigrate && <button onClick={onMigrate} style={styles.primaryBtn}>Move to Item Master</button>}
-      </div>}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-        {canEdit && <button onClick={add} style={styles.primaryBtn}><Plus size={15} /> Add material</button>}
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or code…" style={{ ...styles.input, margin: 0, width: 210 }} />
-        <select value={cat} onChange={e => setCat(e.target.value)} style={{ ...styles.input, margin: 0, width: 220 }}>
-          <option value="">All material types</option>
-          {MAT_CATS.map(c => <option key={c} value={c}>{c}</option>)}
-          {rmCats.length > 0 && <optgroup label="Datasheet category">{rmCats.map(c => <option key={c} value={c}>{c}</option>)}</optgroup>}
-        </select>
-        <span style={{ fontSize: 12, color: '#888' }}>{rows.length} material(s)</span>
-        {setView && <button onClick={() => setView('items')} style={{ ...styles.ghostBtn, marginLeft: 'auto' }}>Open full Item Master</button>}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {rows.length === 0 ? <div style={styles.emptyBox}>{mats.length ? 'No materials match your filter.' : 'No materials yet. Add copper rod, compounds, armour, packing, consumables and misc items here.'}</div> :
-        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, overflow: 'auto', ...(onSaveItem ? { maxHeight: '42vh' } : {}) }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ background: '#F8F6F0' }}>{['Code', 'Material', 'Type', 'Unit', 'Stock', 'Min', 'Rate', 'Grade / standard', ''].map((h, i) => <th key={h + i} style={{ padding: '8px 10px', fontSize: 11, color: '#888', textAlign: i >= 4 && i <= 6 ? 'right' : 'left', borderBottom: '1px solid #EAE6DB', position: 'sticky', top: 0, background: '#F8F6F0', zIndex: 1 }}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map(m => { const st = stock[m.id] ? stock[m.id].qty : (Number(m.openingStock) || 0), low = (Number(m.minStock) || 0) > 0 && st <= Number(m.minStock); return (
-              <tr key={m.id} onClick={() => canEdit && pick(m)} style={{ borderBottom: '1px solid #F0ECE0', cursor: canEdit ? 'pointer' : 'default', ...(sel && sel.id === m.id ? { background: '#F5F2EA', boxShadow: 'inset 3px 0 0 #C9A24B' } : {}) }}>
-                <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 11.5 }}>{m.itemCode || ''}</td>
-                <td style={{ padding: '8px 10px', fontWeight: 600 }}>{m.name}</td>
-                <td style={{ padding: '8px 10px', fontSize: 12 }}>{m.category}{m.rmCategory ? <span style={{ color: '#888' }}> · {m.rmCategory}</span> : null}</td>
-                <td style={{ padding: '8px 10px' }}>{m.unit || ''}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: low ? '#B5453A' : '#1E2A4A' }}>{+st.toFixed(3)}{low ? ' ⚠' : ''}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{Number(m.minStock) || 0}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(m.purchaseRate ?? m.rate ?? 0)}</td>
-                <td style={{ padding: '8px 10px', fontSize: 12, color: '#666' }}>{m.specs ? [m.specs.grade, m.specs.standard].filter(Boolean).join(' · ') : ''}</td>
-                <td style={{ padding: '8px 10px' }}>{canEdit && <button onClick={(e) => { e.stopPropagation(); pick(m); }} style={styles.ghostBtn}>Edit</button>}</td>
-              </tr>); })}</tbody>
-          </table>
-        </div>}
-      {onSaveItem && (sel ? (<div>
-        {sel.id && (() => {
-          const st = stock[sel.id] ? +stock[sel.id].qty.toFixed(3) : (Number(sel.openingStock) || 0);
-          const usedIn = (boms || []).filter(b => !b.orderRef && (b.materials || []).some(x => x.materialId === sel.id || _nm(x.name) === _nm(sel.name)));
-          return <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: 12.5 }}>
-            <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Current stock <b>{st} {sel.unit || ''}</b></span>
-            {usedIn.length > 0 && <span style={{ background: '#fff', border: '1px solid #E5E0D4', borderRadius: 8, padding: '5px 10px' }}>Used in BOM: <b>{usedIn.map(b => b.name).join(', ')}</b></span>}
-          </div>;
-        })()}
-        <ItemModal key={selKey} inline item={sel} businessInfo={businessInfo} items={items} setBusinessInfo={setBusinessInfo} onClose={() => setSel(null)} onSave={(f) => { const saved = onSaveItem(f); setSel(saved || null); setSelKey(k => k + 1); }} />
-      </div>) : <div style={{ ...styles.emptyBox, padding: '30px 20px' }}>Select a material above to see and edit its details here, or click “Add material”.</div>)}
-      </div>
-    </div>
-  );
-}
 
-function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [], onSaveItem, setBusinessInfo }) {
+function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stockLedger = [], onSaveItem, setBusinessInfo, initialGroup = '', rawMaterials = [], onMigrate }) {
+  const [group, setGroup] = useState(initialGroup);
+  const ITEM_GROUPS = [['', 'All'], ['mat', 'Raw materials & misc'], ['fg', 'Finished goods'], ['capex', 'Capex / assets'], ['svc', 'Services & others']];
+  const inGroup = (it, g) => !g ? true : g === 'mat' ? isMaterialItem(it) : g === 'fg' ? FG_CATS.includes(it.category) : g === 'capex' ? it.category === 'Capex / Asset' : !isMaterialItem(it) && !FG_CATS.includes(it.category) && it.category !== 'Capex / Asset';
+  const legacyRm = (rawMaterials || []).filter(r => r && (r.name || '').trim() && !r.migratedItemId);
   const [sel, setSel] = useState(null);
   const [selKey, setSelKey] = useState(0);
   const pick = (it) => { setSel(it); setSelKey(k => k + 1); };
@@ -3596,16 +3530,21 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
   const [catFilter, setCatFilter] = useState('');
   const [search, setSearch] = useState('');
   const [showPrint, setShowPrint] = useState(false);
+  const [picked, setPicked] = useState({});
+  const togglePick = (id) => setPicked(p => { const n = { ...p }; if (n[id]) delete n[id]; else n[id] = true; return n; });
   const filtered = items.filter(it => {
-    const matchCat = !catFilter || it.category === catFilter;
+    const matchCat = (!catFilter || it.category === catFilter) && inGroup(it, group);
     const matchSearch = !search || it.name?.toLowerCase().includes(search.toLowerCase()) || (it.itemCode||'').toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSearch;
   });
   const cats = [...new Set(items.map(it=>it.category).filter(Boolean))];
+  const pickedList = items.filter(it => picked[it.id]);
+  const printList = pickedList.length ? pickedList : filtered;
+  const printLabel = pickedList.length ? pickedList.length + ' selected item' + (pickedList.length > 1 ? 's' : '') : [((ITEM_GROUPS.find(g => g[0] === group) || [])[1] || 'All'), catFilter].filter(Boolean).join(' · ');
   const splitTax = cc.splitTax;
   async function exportItemsXlsx() {
     const head = ['Item Code', 'Name', 'Category', ...(splitTax ? ['HSN/SAC'] : []), 'Unit', 'Opening Stock', 'Min Stock', 'Purchase Rate', 'Sale Rate', ...(cc.hasTax ? [cc.taxLabel + ' %'] : [])];
-    const aoa = [head, ...filtered.map(it => [
+    const aoa = [head, ...printList.map(it => [
       it.itemCode || '', it.name || '', it.category || '', ...(splitTax ? [it.hsn || ''] : []),
       it.unit || '', Number(it.openingStock) || 0, Number(it.minStock) || 0,
       Number(it.purchaseRate ?? it.rate) || 0, Number(it.saleRate ?? it.rate) || 0, ...(cc.hasTax ? [Number(it.gst) || 0] : []),
@@ -3670,13 +3609,22 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
     <div style={styles.page}>
       <div style={styles.pageHeader}>
         <h1 className="serif" style={styles.h1}>Items & services</h1>
-        <p style={styles.muted}>Saved items auto-fill price, HSN/SAC code and tax rate on documents.</p>
+        <p style={styles.muted}>One list for every item — raw materials, misc / fasteners / packing, finished goods, capex and services. PR, PO, GRN, stock, BOM, quotation and invoice all use this same item code.</p>
+      </div>
+      {legacyRm.length > 0 && <div style={{ background: '#FFF8E1', border: '1px solid #F2D48A', borderRadius: 10, padding: '10px 14px', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13 }}><b>{legacyRm.length}</b> material(s) are still in the old Raw Materials list. Move them here so purchase, GRN and stock stay in sync (same names are merged).</span>
+        {onMigrate && <button onClick={onMigrate} style={styles.primaryBtn}>Move into Item Master</button>}
+      </div>}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {ITEM_GROUPS.map(([g, l]) => { const n = items.filter(it => inGroup(it, g)).length; return <button key={g || 'all'} onClick={() => { setGroup(g); setCatFilter(''); }} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (group === g ? '#1E2A4A' : '#DDD'), background: group === g ? '#1E2A4A' : '#fff', color: group === g ? '#fff' : '#666' }}>{l} ({n})</button>; })}
       </div>
       <div style={{ display:'flex', gap:10, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
-        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; const blank = { name: '', hsn: '', itemCode:'', category:'', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }; if (onSaveItem) pick(blank); else setEditing(blank); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
+        <button onClick={() => { const cc = COUNTRY_CONFIG[(businessInfo && businessInfo.country)] || COUNTRY_CONFIG.india; const blank = { name: '', hsn: '', itemCode:'', category: group === 'mat' ? 'Raw Material' : group === 'fg' ? 'Finished Good' : group === 'capex' ? 'Capex / Asset' : '', unit: group === 'mat' ? 'kg' : '', purchaseRate: 0, saleRate: 0, gst: businessInfo.taxRate ?? cc.defaultTaxRate }; if (onSaveItem) pick(blank); else setEditing(blank); }} style={styles.primaryBtn}><Plus size={15} /> Add item</button>
         <label style={{ ...styles.ghostBtn, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6 }} title="Import items from an Excel (.xlsx) or CSV file">⬆ Import Excel / CSV<input type="file" accept=".xlsx,.xls,.csv,text/csv,.txt" onChange={handleItemImport} style={{ display:'none' }} /></label>
-        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title="Export to Excel (.xlsx)">⭳ Excel</button>}
-        {items.length > 0 && <button onClick={() => setShowPrint(true)} style={styles.ghostBtn} title="Print / Save as PDF"><Printer size={14} /> Print</button>}
+        {items.length > 0 && <button onClick={exportItemsXlsx} style={styles.ghostBtn} title={'Export ' + printLabel + ' to Excel'}>⭳ Excel</button>}
+        {items.length > 0 && <button onClick={() => { if (!printList.length) { alert('Nothing to print — choose a tab / category with items, or tick items.'); return; } setShowPrint(true); }} style={styles.ghostBtn} title="Prints the ticked items; if none ticked, the current tab / category"><Printer size={14} /> Print {pickedList.length ? '(' + pickedList.length + ' selected)' : '— ' + printLabel}</button>}
+        {filtered.length > 0 && <button onClick={() => setPicked(p => { const all = filtered.every(it => p[it.id]); const n = { ...p }; filtered.forEach(it => { if (all) delete n[it.id]; else n[it.id] = true; }); return n; })} style={{ ...styles.ghostBtn, fontSize: 12 }}>{filtered.every(it => picked[it.id]) ? '☐ Untick shown' : '☑ Tick all shown'}</button>}
+        {pickedList.length > 0 && <button onClick={() => setPicked({})} style={{ ...styles.ghostBtn, fontSize: 12, color: '#B5453A' }}>Clear selection</button>}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or code…" style={{ ...styles.input, margin:0, width:200, fontSize:13 }} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{ ...styles.input, margin:0, width:180, fontSize:13 }}>
           <option value=''>All categories</option>
@@ -3690,6 +3638,7 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
         {items.length > 0 && filtered.length === 0 && <div style={styles.emptyBox}>No items match your filter.</div>}
         {filtered.map((it) => (<React.Fragment key={it.id}>
           <div style={{ ...styles.recordRow, cursor: 'pointer', ...(sel && sel.id === it.id ? { background: '#F5F2EA', borderColor: '#C9A24B' } : {}) }} onClick={() => (onSaveItem ? pick(it) : setEditing(it))}>
+            <input type="checkbox" checked={!!picked[it.id]} onClick={e => e.stopPropagation()} onChange={() => togglePick(it.id)} title="Select for print / Excel" style={{ width: 16, height: 16, marginRight: 10, cursor: 'pointer', flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 {it.itemCode && <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:'#1E2A4A', borderRadius:4, padding:'1px 6px', letterSpacing:0.5 }}>{it.itemCode}</span>}
@@ -3727,11 +3676,11 @@ function ItemsList({ items, setEditing, setItems, businessInfo, boms = [], stock
       {showPrint && (
         <DocPrintOverlay onClose={() => setShowPrint(false)} filename="Item-Master.pdf" businessInfo={businessInfo}>
           <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>ITEM MASTER</div>
-          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}{catFilter ? ' · ' + catFilter : ''} · {new Date().toLocaleDateString('en-IN')}</div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 16 }}>{printLabel} · {printList.length} item{printList.length !== 1 ? 's' : ''} · {new Date().toLocaleDateString('en-IN')}</div>
           <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
             <thead><tr style={{ background: '#F1EFE9' }}>{['Code', 'Name', 'Category', ...(cc.splitTax ? ['HSN'] : []), 'Unit', 'Op.Stock', 'Buy', 'Sell', ...(cc.hasTax ? [cc.taxLabel + '%'] : [])].map(h => <th key={h} style={{ padding: '6px 7px', textAlign: h === 'Name' || h === 'Category' ? 'left' : 'right', borderBottom: '1px solid #CCC', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
             <tbody>
-              {filtered.map(it => (
+              {printList.map(it => (
                 <tr key={it.id}>
                   <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontFamily: 'monospace' }}>{it.itemCode || ''}</td>
                   <td style={{ padding: '5px 7px', borderBottom: '1px solid #EEE', fontWeight: 600 }}>{it.name}</td>
@@ -7065,7 +7014,7 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
             return (<table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}><thead><tr>{['Parameter', 'Calculated', 'Manual value (TDS uses this if filled)'].map(h => <th key={h} style={{ textAlign: 'left', padding: '4px 6px', fontSize: 11, color: '#777', borderBottom: '1px solid #EAE6DB' }}>{h}</th>)}</tr></thead>
               <tbody>{rowsE.map(([kk, l, v]) => <tr key={kk}><td style={{ padding: '4px 6px' }}>{l}</td><td style={{ padding: '4px 6px', fontWeight: 600 }}>{v == null ? '—' : v}</td><td style={{ padding: '3px 6px' }}><input value={m[kk] ?? ''} placeholder="auto" onChange={e => setM(kk, e.target.value)} style={{ ...inp, width: 160, padding: '4px 8px' }} /></td></tr>)}</tbody></table>); })()}
           <div style={{ fontSize: 11, color: '#888', margin: '4px 0 0', lineHeight: 1.5 }}>AC resistance includes skin and proximity effect; reactance from conductor spacing; capacitance uses ε (PVC 8, XLPE 2.5). Short-circuit rating = K·S/√t (Cu XLPE 143, Cu PVC 115, Al XLPE 94, Al PVC 76). Current ratings are indicative from typical manufacturer tables (3-core armoured, standard conditions) — apply your standard / derating factors or type the declared value.</div>
-          {sec('Link materials (from Raw Materials) — used in the BOM, stock and shortages')}
+          {sec('Link materials (from Item Master) — used in the BOM, stock and shortages')}
           {row(<>
             {matPick('cond', 'Conductor rod')}{matPick('ins', 'Insulation compound')}
             {ed.innerType !== 'none' && matPick('inner', 'Inner sheath compound')}
@@ -7826,7 +7775,7 @@ function ProductSpecView({ specs = [], setSpecs, items = [], setItems, boms = []
         <div style={{ fontSize: 12, fontWeight: 700, margin: '14px 0 6px', borderBottom: '1px solid #EAE6DB', paddingBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Bill of materials — quantity per <input type="number" value={ed.basis} onChange={e => set('basis', e.target.value)} style={{ ...inp, width: 80, display: 'inline-block', padding: '3px 6px' }} /> {ed.unit}</span>
           <button onClick={() => set('lines', [...(ed.lines || []), { materialId: '', name: '', qty: '', unit: '', remarks: '' }])} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12 }}>+ Add material</button></div>
-        {(ed.lines || []).length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add the materials (from Raw Materials) used to make this product.</div> :
+        {(ed.lines || []).length === 0 ? <div style={{ fontSize: 12, color: '#888' }}>Add the materials (from Item Master) used to make this product.</div> :
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><tbody>{ed.lines.map((l, i) => <tr key={i}>
             <td style={{ padding: '3px 4px', width: '45%' }}><select value={l.materialId} onChange={e => setLine(i, 'materialId', e.target.value)} style={inp}><option value="">— select material —</option>{mats.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ' (' + m.unit + ')' : ''}</option>)}</select></td>
             <td style={{ padding: '3px 4px', width: 120 }}><input type="number" placeholder="Qty" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} style={inp} /></td>
@@ -8534,7 +8483,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
 
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Item Master"          icon={Package} />
-                <NavBtn id="rawmaterials" label="Raw Material Lots"    icon={Package} />
                 <NavBtn id="storeissue"   label="Issue to Production"  icon={FileMinus} />
                 <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />
                 <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />
@@ -8571,7 +8519,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 </>) : (<>
                 <SubLabel label="Stores" />
                 <NavBtn id="items"        label="Items"                icon={Package} />
-                <NavBtn id="rawmaterials" label="Raw Materials"        icon={Package} />
                 <NavBtn id="stock"        label="Stock Position"       icon={ClipboardList} />
                 <NavBtn id="stockledger"  label="Stock Ledger"         icon={FileText} />
                 <NavBtn id="storeissue"   label="Stores Issue Voucher" icon={FileMinus} />
@@ -8866,7 +8813,6 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {(showTrade || showService || showFMAMC || isCable) && (
             <Section sectionKey="stores" label="Stores">
               <NavBtn id="items" label="Item Master" icon={Package} />
-              {isCable && <NavBtn id="rawmaterials" label="Raw Material Lots"     icon={Package} />}
               {isCable && <NavBtn id="wip"          label={fc.wipLabel || 'WIP (in process)'} icon={Layers} />}
               {isCable && <NavBtn id="fgaccept"     label="Stores acceptance (FG)" icon={CheckCircle} />}
               {isCable && <NavBtn id="drumstock"    label={fc.eng === 'cable' ? 'Drum Stock & Scrap' : 'Finished ' + fc.unit.plural + ' & Scrap'}    icon={Package} />}
@@ -8970,7 +8916,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
           {/* Production */}
           {showProduction && !isCable && (
             <Section sectionKey="production" label="Production">
-              <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+              {!(showTrade || showService || showFMAMC) && <NavBtn id="items" label="Item Master" icon={Package} />}
               <NavBtn id="stdbom"           label="BOM (product code)" icon={ClipboardList} />
               <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
               <NavBtn id="boshortage"       label="BO Shortages"      icon={AlertTriangle} />
@@ -9157,7 +9103,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
       )}
       {showProduction && (
         <Section sectionKey="production" label="Production">
-          <NavBtn id="rawmaterials"     label="Raw Materials"     icon={Package} />
+          {!showTrade && <NavBtn id="items" label="Item Master" icon={Package} />}
           <NavBtn id="productionorders" label="Production Orders" icon={Factory} />
         </Section>
       )}
@@ -19938,94 +19884,6 @@ function DrawingUploader({ files = [], onChange, ownerUid, folder }) {
   );
 }
 
-function RawMaterialsList({ rawMaterials, setRawMaterials, userRole, ownerUid, businessInfo }) {
-  const [editing, setEditing] = useState(null);
-  const canEdit = userRole === 'admin' || userRole === 'manager' || userRole === 'inventory';
-  const fmt = makeFmt(businessInfo);
-
-  function upsert(m) {
-    if (m.id) {
-      setRawMaterials((r) => r.map((x) => (x.id === m.id ? m : x)));
-    } else {
-      setRawMaterials((r) => [...r, { ...m, id: crypto.randomUUID() }]);
-    }
-    setEditing(null);
-  }
-
-  async function downloadRMTemplate() {
-    const aoa = [['Name', 'Unit', 'Current Stock', 'Min Stock', 'Rate'], ['STEEL ROD 10MM', 'kg', 500, 50, 65], ['COPPER WIRE 2.5SQMM', 'm', 1200, 100, 18], ['PVC GRANULES', 'kg', 300, 40, 95]];
-    try { const XLSX = await loadXLSX(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 13 }, { wch: 10 }, { wch: 10 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'RawMaterials'); XLSX.writeFile(wb, 'RawMaterials-Import-Template.xlsx'); }
-    catch (err) { const csv = aoa.map(r => r.join(',')).join('\n'); const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })); const el = document.createElement('a'); el.href = url; el.download = 'RawMaterials-Import-Template.csv'; el.click(); URL.revokeObjectURL(url); }
-  }
-  async function importRMXlsx(e) {
-    const file = e.target.files && e.target.files[0]; if (!file) return;
-    const nm = (file.name || '').toLowerCase();
-    if (!/\.(xlsx|xls|csv|tsv|txt)$/i.test(nm)) { alert('Please import an Excel (.xlsx) or CSV file. Download the ⬇ Template, fill it, and import that.'); e.target.value = ''; return; }
-    try {
-      let rows = [];
-      if (nm.endsWith('.xlsx') || nm.endsWith('.xls')) { const XLSX = await loadXLSX(); const buf = await file.arrayBuffer(); const wb = XLSX.read(buf, { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false }); }
-      else { const text = await file.text(); if (text.slice(0, 5) === '%PDF-' || text.slice(0, 2) === 'PK') { alert('This looks like a PDF/binary, not a CSV. Use the Template.'); e.target.value = ''; return; } rows = text.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(/,|;|\t/).map(c => c.replace(/^"|"$/g, ''))); }
-      const r2 = rows.filter(r => (r || []).some(c => String(c || '').trim())); if (!r2.length) { alert('Empty file.'); e.target.value = ''; return; }
-      const head = (r2[0] || []).map(c => String(c || '').trim().toLowerCase());
-      const find = (...ks) => head.findIndex(h => ks.some(k => h.includes(k)));
-      const hasHeader = head.some(h => /name|material|unit|stock|rate|min/.test(h));
-      let idx, start;
-      if (hasHeader) { start = 1; idx = { name: find('name', 'material', 'item'), unit: find('unit', 'uom'), stock: find('current stock', 'stock', 'qty', 'opening'), min: find('min'), rate: find('rate', 'price', 'cost') }; }
-      else { start = 0; idx = { name: 0, unit: 1, stock: 2, min: 3, rate: 4 }; }
-      const g = (c, i) => (i >= 0 && i < c.length) ? String(c[i] || '').trim() : '';
-      const num = (v) => parseFloat(String(v).replace(/[^0-9.]/g, '')) || 0;
-      const existing = Array.isArray(rawMaterials) ? rawMaterials : [];
-      const added = []; let updated = 0;
-      r2.slice(start).forEach(c => {
-        const name = g(c, idx.name); if (!name || /^(name|material|item)$/i.test(name)) return;
-        const rec = { name, unit: g(c, idx.unit), stock: num(g(c, idx.stock)), minStock: num(g(c, idx.min)), rate: num(g(c, idx.rate)) };
-        const match = existing.find(x => (x.name || '').trim().toLowerCase() === name.toLowerCase());
-        if (match) { updated++; match._upd = rec; } else { added.push({ ...rec, id: crypto.randomUUID() }); }
-      });
-      if (!added.length && !updated) { alert('No rows with a Name found. Check the Name column.'); e.target.value = ''; return; }
-      setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(x => x._upd ? { ...x, ...x._upd, _upd: undefined } : x).concat(added));
-      alert('✅ Imported ' + added.length + ' new material(s)' + (updated ? ' and updated ' + updated + ' existing (stock/rate refreshed).' : '.'));
-    } catch (err) { alert('Import failed: ' + (err.message || err)); }
-    e.target.value = '';
-  }
-
-  return (
-    <div style={styles.page}>
-      <div style={styles.pageHeader}>
-        <h1 className="serif" style={styles.h1}>Raw Materials</h1>
-        <p style={styles.muted}>Track your raw material inventory and stock levels.</p>
-      </div>
-      {canEdit && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
-        <button onClick={() => setEditing({ name: '', unit: '', stock: 0, minStock: 0, rate: 0 })} style={styles.primaryBtn}><Plus size={15} /> Add material</button>
-        <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }} title="Bulk-import from Excel/CSV — Name, Unit, Current Stock, Min Stock, Rate">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importRMXlsx} /></label>
-        <button type="button" onClick={downloadRMTemplate} style={styles.ghostBtn} title="Download import template">⬇ Template</button>
-      </div>}
-      <div style={{ ...styles.list, marginTop: 16 }}>
-        {rawMaterials.length === 0 && <div style={styles.emptyBox}>No raw materials yet. Add materials to use in Bill of Materials.</div>}
-        {rawMaterials.map((m) => (
-          <div key={m.id} style={styles.recordRow}>
-            <div style={{ flex: 1 }}>
-              <div style={styles.docRowTitle}>{m.name}</div>
-              <div style={styles.docRowSub}>{m.category ? <b>{m.category} · </b> : null}Unit: {m.unit || '—'} · Rate: {fmt(m.rate || 0)} · Min stock: {m.minStock || 0}{m.specs && (m.specs.grade || m.specs.standard) ? ' · ' + (m.specs.grade || '') + ' ' + (m.specs.standard || '') : ''}</div>
-            </div>
-            <div style={{ textAlign: 'right', minWidth: 80 }}>
-              <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: (m.stock <= m.minStock) ? '#B5453A' : '#1E2A4A' }}>{m.stock}</div>
-              <div style={{ fontSize: 11, color: '#888780' }}>{m.unit}</div>
-            </div>
-            {(m.stock <= m.minStock) && <span style={{ ...styles.badge, background: '#FBEAE7', color: '#B5453A' }}>Low stock</span>}
-            {canEdit && <button onClick={() => setEditing(m)} style={styles.ghostBtn}>Edit</button>}
-            {canEdit && <button onClick={() => setRawMaterials((r) => r.filter((x) => x.id !== m.id))} style={styles.iconBtn}><Trash2 size={15} color="#B5453A" /></button>}
-          </div>
-        ))}
-      </div>
-      {editing && (
-        <Modal onClose={() => setEditing(null)} title={editing.id ? 'Edit material' : 'Add raw material'}>
-          <RawMaterialForm initial={editing} onSave={upsert} ownerUid={ownerUid} existingCats={[...new Set((rawMaterials || []).map(r => r.category).filter(Boolean))]} />
-        </Modal>
-      )}
-    </div>
-  );
-}
 
 function RawMaterialForm({ initial, onSave, ownerUid, existingCats = [] }) {
   const [form, setForm] = useState({ specs: {}, drawings: [], ...initial });
@@ -20199,7 +20057,7 @@ function BOMForm({ initial, rawMaterials, items = [], onSave, ownerUid, parts = 
       if (!added.length) { alert('No rows with a Material name found. Check the Material column.'); e.target.value = ''; return; }
       const unmatched = added.filter(a => !a.materialId).length;
       setForm((f) => ({ ...f, materials: [...(f.materials || []), ...added] }));
-      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Raw Materials — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
+      alert('✅ Imported ' + added.length + ' material(s).' + (unmatched ? '\n\n⚠ ' + unmatched + ' not found in Item Master — they were added by name. Add them to Raw Materials (with stock) so shortage/stock calculations work.' : ''));
     } catch (err) { alert('Import failed: ' + (err.message || err)); }
     e.target.value = '';
   }
@@ -20246,7 +20104,7 @@ function BOMForm({ initial, rawMaterials, items = [], onSave, ownerUid, parts = 
         <button onClick={addMaterial} style={{ ...styles.ghostBtn, fontSize: 13 }}><Plus size={14} /> Add material</button>
         <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13 }} title="Bulk-import materials from Excel/CSV — columns: Material, Unit, Qty">⬆ Import Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={importBomXlsx} /></label>
         <button type="button" onClick={downloadBomTemplate} style={{ ...styles.ghostBtn, fontSize: 13 }} title="Download the import template">⬇ Template</button>
-        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Raw Materials by name)</span>
+        <span style={{ fontSize: 11, color: '#B0AC9F' }}>Columns: Material · Unit · Qty (matched to Item Master by name)</span>
       </div>
       <div style={styles.sectionDivider}>Engineering Specifications</div>
       <SpecsFields
@@ -32392,7 +32250,7 @@ export default function App() {
     setItems(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] || x).concat(plan.newItems));
     setRawMaterials(prev => (Array.isArray(prev) ? prev : []).map(r => plan.idMap[r.id] ? { ...r, migratedItemId: plan.idMap[r.id], migratedAt: new Date().toISOString() } : r));
     setBoms(prev => (Array.isArray(prev) ? prev : []).map(b => ({ ...b, materials: (b.materials || []).map(m => plan.idMap[m.materialId] ? { ...m, materialId: plan.idMap[m.materialId], src: 'item' } : m) })));
-    alert('✅ Moved: ' + plan.created.length + ' new item(s), ' + plan.merged.length + ' merged. Raw Materials now shows these items.');
+    alert('✅ Moved: ' + plan.created.length + ' new item(s), ' + plan.merged.length + ' merged. Item Master → Raw materials tab now shows these items.');
   }
 
   function syncDrumDispatch(saved) {
@@ -33118,22 +32976,6 @@ export default function App() {
             }}
           />
         );
-      case 'rawmaterials':
-        return (
-          <MaterialsView
-            items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items}
-            stockLedger={stockLedger}
-            rawMaterials={rawMaterials}
-            businessInfo={businessInfo}
-            userRole={userRole}
-            setEditingItem={setEditingItem}
-            boms={boms}
-            setBusinessInfo={setBusinessInfo}
-            onSaveItem={(it) => { const saved = it.id ? it : { ...it, id: Date.now().toString(), bizType: sessionContext || effectiveBizContext }; setItems(prev => it.id ? prev.map(x => x.id === it.id ? saved : x) : [...prev, saved]); return saved; }}
-            onMigrate={runRmMigration}
-            setView={setView}
-          />
-        );
       case 'bom_legacy':
         return (
           <BOMList
@@ -33325,9 +33167,14 @@ export default function App() {
             documents={documents}
           />
         );
+      case 'rawmaterials':
       case 'items':
         return (
           <ItemsList
+            key={view}
+            initialGroup={view === 'rawmaterials' ? 'mat' : ''}
+            rawMaterials={rawMaterials}
+            onMigrate={runRmMigration}
             boms={boms}
             stockLedger={stockLedger}
             setBusinessInfo={setBusinessInfo}
