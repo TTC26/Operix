@@ -410,7 +410,10 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = fal
   const cur = (cc) => (COUNTRY_CONFIG[businessInfo?.country] || COUNTRY_CONFIG.other).currency || '';
   return (
     <>
-      {autoWide && <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
+      {autoWide && <style>{`
+.doc-preview-mode .print-area .no-print { display: none !important; }
+.doc-preview-mode .print-area input, .doc-preview-mode .print-area select, .doc-preview-mode .print-area textarea { pointer-events: none; border-color: transparent !important; background: transparent !important; box-shadow: none !important; resize: none; appearance: none; -webkit-appearance: none; }
+@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
       {/* Letterhead edge-to-edge + footer pinned to page bottom (same rules as the
          main document editor, so every print across the app looks identical). */}
       {useLH && !autoWide && <style>{`@media print {
@@ -9439,6 +9442,7 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 
 
 function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
+  const [docPreview, setDocPreview] = useState(false);
   // Manufacturing: sales documents pick only finished products (and services); purchase documents never pick finished products.
   const pickItems = (() => {
     const mfg = (doc.bizType || '') === 'manufacturing';
@@ -9605,7 +9609,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
     .sort((a, b) => (b.number || '').localeCompare(a.number || ''));
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, maxWidth: 1400 }}>
       <div style={styles.editorTopBar} className="no-print">
         <button onClick={onCancel} style={styles.ghostBtn}><X size={15} /> Cancel</button>
         <div style={styles.editorTitle}>
@@ -9757,6 +9761,13 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
       </div>
 
       {/* Linked-from banner */}
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ display: 'inline-flex', border: '1.5px solid #1E2A4A', borderRadius: 20, overflow: 'hidden' }}>
+          {[[false, '✏️ Edit'], [true, '👁 Preview']].map(([v, l]) => <button key={String(v)} type="button" onClick={() => setDocPreview(v)} style={{ padding: '6px 16px', fontSize: 12.5, fontWeight: 700, border: 'none', cursor: 'pointer', background: docPreview === v ? '#1E2A4A' : '#fff', color: docPreview === v ? '#fff' : '#1E2A4A' }}>{l}</button>)}
+        </div>
+        {doc._savedAt && (() => { const m = { approved: ['✓ Approved', '#1A7A3E', '#EAF6EE'], submitted: ['⏳ Saved & forwarded for approval', '#2255A0', '#E6EEF9'], verified: ['✓ Verified & saved', '#2255A0', '#E6EEF9'], rejected: ['✗ Rejected & saved', '#B5453A', '#FBEAE7'] }[doc._savedMsg] || ['✓ Saved' + (doc.status === 'draft' ? ' as draft' : ''), '#1A7A3E', '#EAF6EE']; return <span style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 700, color: m[1], background: m[2], border: '1px solid ' + m[1] + '33' }}>{m[0]} · {doc.number} · {new Date(doc._savedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>; })()}
+        {!doc._savedAt && doc.status && doc.status !== 'draft' && <span style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 700, color: '#555', background: '#F3F1EC' }}>Status: {doc.status}</span>}
+      </div>
       {doc.linkedFrom && (
         <div style={{ background: '#F0EEF9', border: '1px solid #C8C0E8', borderRadius: 8, padding: '10px 16px', marginBottom: 12, fontSize: 13, color: '#4A3F8A', display: 'flex', alignItems: 'center', gap: 8 }} className="no-print">
           🔗 <span>Based on <strong>{DOC_TYPES[doc.linkedFrom.docType]?.label || doc.linkedFrom.label || 'Document'}</strong> — {doc.linkedFrom.docNumber}</span>
@@ -9784,8 +9795,8 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
         </div>
       )}
 
-      <div style={styles.editorLayout}>
-        <div style={styles.editorForm} className="no-print">
+      <div style={docPreview ? { display: 'block' } : { display: 'flex', flexDirection: 'column', gap: 18 }} className={docPreview ? 'doc-preview-mode' : ''}>
+        {!docPreview && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '2px 22px', alignItems: 'start', background: '#FBFAF6', border: '1px solid #EAE6DB', borderRadius: 12, padding: '16px 18px' }} className="no-print">
           <div style={styles.formGroup}>
             <label style={styles.label}>Document number</label>
             <input value={doc.number} onChange={(e) => update('number', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} />
@@ -10124,9 +10135,9 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
               </select>
             </div>
           )}
-        </div>
+        </div>}
 
-        <div style={styles.preview} className="print-area">
+        <div style={{ ...styles.preview, maxWidth: 1000, width: '100%', margin: docPreview ? '0 auto' : 0, boxSizing: 'border-box' }} className="print-area">
           <DocFontStyle businessInfo={businessInfo} />
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
           {useLH && <LetterheadHeader bi={businessInfo} />}
@@ -32456,8 +32467,9 @@ export default function App() {
 
   function handleSaveDoc(status, rejectionNote) {
     if (activeDoc && activeDoc.status === 'deleted') { setActiveDoc(null); setView('documents'); return; }
+    const { _savedAt: _sa, _savedMsg: _sm, ..._cleanDoc } = activeDoc || {};
     const saved = {
-      ...activeDoc,
+      ..._cleanDoc,
       status: status || activeDoc.status || 'draft',
       ...(rejectionNote !== undefined ? { rejectionNote, rejectedAt: Date.now() } : {}),
       ...(status === 'approved' ? { approvedAt: Date.now() } : {}),
@@ -32544,8 +32556,8 @@ export default function App() {
       };
       setNotifications(prev => [notif, ...prev]);
     }
-    setActiveDoc(null);
-    setView('documents');
+    // stay on the same document; the bar on top shows Saved / Forwarded / Approved
+    setActiveDoc({ ...saved, _savedAt: Date.now(), _savedMsg: status || saved.status });
   }
 
   // Soft delete (admin only): the document number stays in the list, marked DELETED and read-only.
