@@ -824,39 +824,40 @@ function printLetterFromHtml(html, biz, opts) {
     // Flow content at the finest sensible grain so long clauses / tables break across pages (tables row by row,
     // header row repeated) instead of jumping whole to the next page or being cut off by the footer.
     let _tid = 0;
-    const flat = (el, out) => {
+    const flat = (el, out, ori0) => {
+      const ori = (el.getAttribute && el.getAttribute('data-ori') === 'L') ? 'L' : (ori0 || '');
       if (el.tagName === 'TABLE') {
         _tid++;
         const thead = el.querySelector('thead');
         const head = thead ? thead.outerHTML : '';
         let trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
         if (!trs.length) trs = Array.from(el.querySelectorAll(':scope > tr'));
-        if (!trs.length) { out.push({ t: '', h: el.outerHTML }); return; }
+        if (!trs.length) { out.push({ t: '', h: el.outerHTML, ...(ori ? { ori } : {}) }); return; }
         const open = '<table style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
         let i = 0;
         while (i < trs.length) {
           let span = 1;
           trs[i].querySelectorAll('[rowspan]').forEach(c => { span = Math.max(span, parseInt(c.getAttribute('rowspan')) || 1); });
-          out.push({ t: 'trow', id: _tid, o: open, th: head, h: trs.slice(i, i + span).map(r => r.outerHTML).join('') });
+          out.push({ t: 'trow', id: _tid, o: open, th: head, h: trs.slice(i, i + span).map(r => r.outerHTML).join(''), ...(ori ? { ori } : {}) });
           i += span;
         }
         return;
       }
       const ke = Array.from(el.children);
       if (el.tagName === 'DIV' && ke.length >= 2 && el.style.display !== 'flex' && el.style.display !== 'grid' && !/(^|\s)(sig|sig-box|zco)(\s|$)/.test(el.className || '') && (el.querySelector('table') || (el.textContent || '').length > 500)) {
-        ke.forEach(k => flat(k, out)); return;
+        ke.forEach(k => flat(k, out, ori)); return;
       }
-      out.push({ t: '', h: el.outerHTML });
+      out.push({ t: '', h: el.outerHTML, ...(ori ? { ori } : {}) });
     };
     let _head = null;
     Array.from(page.children).forEach(el => {
       if (/^H[23]$/.test(el.tagName)) { if (_head) blocks.push({ t: '', h: _head }); _head = el.outerHTML; return; }
       const out = []; flat(el, out);
-      if (_head) { if (out.length && out[0].t === '') out[0].h = '<div>' + _head + out[0].h + '</div>'; else blocks.push({ t: '', h: _head }); _head = null; }
+      if (_head) { if (out.length && out[0].t === '') out[0].h = '<div>' + _head + out[0].h + '</div>'; else blocks.push({ t: '', h: _head, ...(out[0] && out[0].ori ? { ori: out[0].ori } : {}) }); _head = null; }
       out.forEach(b => blocks.push(b));
     });
     if (_head) blocks.push({ t: '', h: _head });
-    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS, letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape), fitOne: !!(opts && opts.fitOne) });
+    return printPaginated(null, biz, { blocks, thead: '', tblOpen: '', css: LETTER_CSS + (opts && opts.wide ? '.bd{left:6mm !important;right:6mm !important;padding:4mm 3mm 0 !important;}' : ''), letter: true, watermark: (opts && opts.watermark !== undefined) ? opts.watermark : _wm, landscape: !!(opts && opts.landscape), fitOne: !!(opts && opts.fitOne) });
   } catch (e) { console.error(e); printHTML(html); }
 }
 
@@ -1405,6 +1406,9 @@ async function printPaginated(sel, bi, pre, gen) {
       if (lhFtrUrl) lhFtrUrl = await fitLetterheadWide(lhFtrUrl, 297 / 210);
     }
     const WM = (pre && pre.watermark) || (gen && src && src.querySelector('.draft-watermark') ? 'DRAFT' : '');
+    const MIXED = !LS && !!(pre && Array.isArray(pre.blocks) && pre.blocks.some(b => b && b.ori === 'L'));
+    let lhHdrUrlL = '', lhFtrUrlL = '';
+    if (MIXED) { if (lhHdrUrl) lhHdrUrlL = await fitLetterheadWide(lhHdrUrl, 297 / 210); if (lhFtrUrl) lhFtrUrlL = await fitLetterheadWide(lhFtrUrl, 297 / 210); }
     const HDRMM = lhHdrUrl ? _hdrBandMm : ((pre || gen) ? 8 : 0);
     const FTRMM = lhFtrUrl ? _ftrBandMm : ((pre || gen) ? 12 : 0);
 
@@ -1584,19 +1588,21 @@ async function printPaginated(sel, bi, pre, gen) {
     }
     const hdHtml = lhHdrUrl ? '<img src="' + lhHdrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
     const ftHtml = lhFtrUrl ? '<img src="' + lhFtrUrl + '" style="width:100%;height:100%;object-fit:fill;display:block">' : '';
+    const hdHtmlL = lhHdrUrlL ? '<img src="' + lhHdrUrlL + '" style="width:100%;height:100%;object-fit:fill;display:block">' : hdHtml;
+    const ftHtmlL = lhFtrUrlL ? '<img src="' + lhFtrUrlL + '" style="width:100%;height:100%;object-fit:fill;display:block">' : ftHtml;
 
     const script = '(function(){'
-      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var bd,curBody;var TAIL=[];var PGF=typeof PGFT==="string"?PGFT:"";var WMT=typeof WM==="string"?WM:"";'
-      + 'function np(){var s=document.createElement("div");s.className="sheet";var h=document.createElement("div");h.className="hd";h.innerHTML=hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);if(WMT){var w=document.createElement("div");w.className="wm";w.textContent=WMT;s.appendChild(w);}out.appendChild(s);bd=b;curBody=null;}'
+      + 'var out=document.getElementById("out");var hd=document.getElementById("hdtpl").innerHTML;var ft=document.getElementById("fttpl").innerHTML;var hdL=document.getElementById("hdtplL").innerHTML;var ftL=document.getElementById("fttplL").innerHTML;var CUR="P";var bd,curBody;var TAIL=[];var PGF=typeof PGFT==="string"?PGFT:"";var WMT=typeof WM==="string"?WM:"";'
+      + 'function np(o){if(o)CUR=o;var s=document.createElement("div");s.className="sheet"+(CUR==="L"?" land":"");var h=document.createElement("div");h.className="hd";h.innerHTML=CUR==="L"?hdL:hd;var b=document.createElement("div");b.className="bd";var f=document.createElement("div");f.className="ft";f.innerHTML=CUR==="L"?ftL:ft;s.appendChild(h);s.appendChild(b);s.appendChild(f);if(WMT){var w=document.createElement("div");w.className="wm";w.textContent=WMT;s.appendChild(w);}out.appendChild(s);bd=b;curBody=null;}'
       + 'var curTid=0;function startTbl(Bk){var w=document.createElement("div");w.innerHTML=(Bk&&Bk.o?Bk.o:TBLOPEN)+(Bk&&Bk.o?Bk.th:THEADHTML)+"<tbody></tbody></table>";var t=w.firstElementChild;bd.appendChild(t);curBody=t.querySelector("tbody");curTid=Bk&&Bk.id?Bk.id:0;}'
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
       + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
       + 'var zst=document.createElement("style");document.head.appendChild(zst);var RSV="";function setZ(z){zst.textContent=(z<1?".bd>*{zoom:"+z+"}":"")+RSV;}'
-      + 'function LAY(){out.innerHTML="";TAIL.length=0;np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
+      + 'function LAY(){out.innerHTML="";TAIL.length=0;CUR="P";np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
-      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;'
+      + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;var BO=B.ori==="L"?"L":"P";if(BO!==CUR){curBody=null;if(bd.children.length){np(BO);}else{CUR=BO;var sh0=out.lastElementChild;sh0.className="sheet"+(BO==="L"?" land":"");sh0.querySelector(".hd").innerHTML=BO==="L"?hdL:hd;sh0.querySelector(".ft").innerHTML=BO==="L"?ftL:ft;}}'
       + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;LB=B;curBody.insertAdjacentHTML("beforeend",B.h);'
       + 'var mv=false;if(fits()&&i===LASTROW&&TH>0&&used()+TH>bd.clientHeight){var rh=curBody.lastChild.offsetHeight;mv=(bd.clientHeight-(used()-rh))<140;}if(!fits()||mv){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",B.h);} }'
       + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;placeNode(node);}'
@@ -1627,6 +1633,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + '@page{size:' + (LS ? 'A4 landscape' : 'A4') + ';margin:0;}html,body{margin:0;padding:0;}'
       + 'body{font-family:Georgia,"Times New Roman",serif;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
       + '.sheet{position:relative;width:' + SW + 'mm;height:' + SH + 'mm;overflow:hidden;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;}'
+      + (MIXED ? '@page land{size:A4 landscape;margin:0;}.sheet.land{width:297mm;height:209mm;page:land;}' : '')
       + '.hd{position:absolute;top:0;left:0;right:0;height:' + HDRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.ft{position:absolute;bottom:0;left:0;right:0;height:' + FTRMM + 'mm;overflow:hidden;background:#fff;}'
       + '.pgf{position:absolute;left:0;right:0;bottom:' + (FTRMM + 1) + 'mm;text-align:center;font-size:9px;color:#666;font-family:Arial,sans-serif;}'
@@ -1646,6 +1653,8 @@ async function printPaginated(sel, bi, pre, gen) {
       + '<div id="out"></div>'
       + '<div id="hdtpl" style="display:none">' + hdHtml + '</div>'
       + '<div id="fttpl" style="display:none">' + ftHtml + '</div>'
+      + '<div id="hdtplL" style="display:none">' + hdHtmlL + '</div>'
+      + '<div id="fttplL" style="display:none">' + ftHtmlL + '</div>'
       + '<scr' + 'ipt>var BLOCKS=' + JSON.stringify(blocks) + ';var TBLOPEN=' + JSON.stringify(tblOpen) + ';var THEADHTML=' + JSON.stringify(theadHTML) + ';var WM=' + JSON.stringify(WM || '') + ';var FITONE=' + ((pre && pre.fitOne) || (typeof window !== 'undefined' && window.__fitOn) ? 'true' : 'false') + ';var FITSOFT=' + (pre && pre.fitOne ? 'false' : 'true') + ';var QRH=' + JSON.stringify(QRH) + ';var PGFT=' + JSON.stringify(PGFTXT) + ';' + script + '</scr' + 'ipt>'
       + '</body></html>';
 
@@ -21674,7 +21683,7 @@ function ContractList({ contracts, setContracts, customers, vendors, documents, 
   );
 
   if (printing) return (
-    <ContractPrint contract={printing} businessInfo={businessInfo} termsLibrary={termsLibrary} onBack={() => setPrinting(null)} />
+    <ContractPrint contract={printing} businessInfo={businessInfo} termsLibrary={termsLibrary} onBack={() => setPrinting(null)} onSaveLand={(keys) => { setContracts(prev => (prev || []).map(x => x.id === printing.id ? { ...x, landscapeClauses: keys } : x)); setPrinting(pp => pp ? { ...pp, landscapeClauses: keys } : pp); }} />
   );
 
   return (
@@ -22043,7 +22052,11 @@ function ContractEditor({ contract, customers, vendors, documents, termsLibrary,
   );
 }
 
-function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) {
+function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack, onSaveLand }) {
+  const landKeys = c.landscapeClauses || [];
+  const landKey = (item, i) => (item.title || '') + '#' + i;
+  const isLand = (item, i) => landKeys.includes(landKey(item, i));
+  const toggleLand = (item, i) => { if (!onSaveLand) return; const k = landKey(item, i); onSaveLand(isLand(item, i) ? landKeys.filter(x => x !== k) : [...landKeys, k]); };
   const clauses   = termsLibrary?.clauses   || [];
   const templates = termsLibrary?.templates || [];
   const fmt = makeFmt(bi);
@@ -22184,7 +22197,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     const termsHTML = terms.items.length > 0 ? `
       <h3>Terms &amp; Conditions</h3>
       ${terms.items.map((item,i)=>`
-        <div style="font-size:12px;line-height:1.8;">
+        <div style="font-size:12px;line-height:1.8;"${orient !== 'landscape' && isLand(item, i) ? ' data-ori="L"' : ''}>
           ${item.title ? `<div style="font-weight:700;color:#1E2A4A;margin:12px 0 6px;">${item.title}</div>` : ''}
           ${clauseHTML(item.text, item.title ? 14 : 0)}
         </div>`).join('')}
@@ -22233,7 +22246,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
     </div>`;
     printLetterFromHtml('<!DOCTYPE html><html><body>' + inner + '</body></html>',
       { ...bi, ...(useLH ? {} : { printHeader: 'logo' }), ...(useSeal ? {} : { printSeal: false }) },
-      { landscape: orient === 'landscape', watermark: isDraft ? 'DRAFT' : '' });
+      { landscape: orient === 'landscape', watermark: isDraft ? 'DRAFT' : '', wide: true });
   }
 
   return (
@@ -22346,7 +22359,8 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14, color: '#1E2A4A', textTransform: 'uppercase' }}>Terms & Conditions</div>
             {terms.items.map((item, i) => {
               return (
-                <div key={i} style={{ marginBottom: 14 }}>
+                <div key={i} style={{ marginBottom: 14, ...(isLand(item, i) && orient !== 'landscape' ? { borderLeft: '3px solid #C9752A', paddingLeft: 10, background: '#FFF8F0' } : {}) }}>
+                  {onSaveLand && orient !== 'landscape' && <label className="no-print" style={{ float: 'right', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: isLand(item, i) ? '#C9752A' : '#999', cursor: 'pointer', border: '1px solid ' + (isLand(item, i) ? '#C9752A' : '#DDD'), borderRadius: 14, padding: '2px 10px', background: '#fff' }} title="Print this clause on its own A4 landscape page(s)"><input type="checkbox" checked={isLand(item, i)} onChange={() => toggleLand(item, i)} /> ⤢ Landscape page</label>}
                   {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{i + 1}. {item.title}</div>}
                   <div style={{ marginLeft: item.title ? 16 : 0, lineHeight: 1.9 }}>
                     <ClauseBody text={item.text} prefix={!item.title ? `${i+1}. ` : ''} />
