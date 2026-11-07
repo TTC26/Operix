@@ -21188,6 +21188,15 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
   const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
   const [libFilter, setLibFilter] = useState('All');
+  const [picked, setPicked] = useState({});
+  function bulkDelete(ids, what) {
+    if (!ids.length) return;
+    if (!window.confirm('Delete ' + ids.length + ' clause' + (ids.length > 1 ? 's' : '') + (what ? ' — ' + what : '') + '?\n\nTemplates that use them will no longer include them. This cannot be undone.')) return;
+    const kill = new Set(ids);
+    saveClauses(prev => prev.filter(c => !kill.has(c.id)));
+    if (typeof saveTemplates === 'function') saveTemplates(prev => (prev || []).map(t => ({ ...t, clauseIds: (t.clauseIds || []).filter(id => !kill.has(id)) })));
+    setPicked({});
+  }
   const [importOpen, setImportOpen] = useState(false);
 
   const clauses   = termsLibrary.clauses   || [];
@@ -21340,10 +21349,23 @@ function TermsLibraryView({ termsLibrary, setTermsLibrary, userRole }) {
               </button>
             ))}
           </div>
+          {canEdit && filteredClauses.length > 0 && (() => {
+            const shownIds = filteredClauses.map(c => c.id), selIds = shownIds.filter(id => picked[id]), allOn = selIds.length === shownIds.length;
+            const scope = [libFilter !== 'All' ? 'library "' + libFilter + '"' : 'all libraries', filterCat !== 'All' ? 'category "' + filterCat + '"' : '', search ? 'search "' + search + '"' : ''].filter(Boolean).join(', ');
+            return (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, background: '#FFF8F6', border: '1px solid #F3D5CF', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}><input type="checkbox" checked={allOn} onChange={() => setPicked(p => { const n = { ...p }; shownIds.forEach(id => { if (allOn) delete n[id]; else n[id] = true; }); return n; })} /> Select all shown ({shownIds.length})</label>
+                <span style={{ color: '#888' }}>{selIds.length} selected</span>
+                <button disabled={!selIds.length} onClick={() => bulkDelete(selIds, 'selected')} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 12px', background: selIds.length ? '#B5453A' : '#fff', color: selIds.length ? '#fff' : '#C9A0A0', fontSize: 12, fontWeight: 600, cursor: selIds.length ? 'pointer' : 'default' }}>🗑 Delete selected ({selIds.length})</button>
+                <button onClick={() => bulkDelete(shownIds, scope)} style={{ border: '1px solid #F3C5C5', borderRadius: 6, padding: '5px 12px', background: '#fff', color: '#B5453A', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>🗑 Delete all in {filterCat !== 'All' ? '"' + filterCat + '"' : libFilter !== 'All' ? '"' + libFilter + '"' : 'this view'} ({shownIds.length})</button>
+                {selIds.length > 0 && <button onClick={() => setPicked({})} style={{ border: 'none', background: 'none', color: '#888', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Clear</button>}
+              </div>);
+          })()}
           {filteredClauses.length === 0 && <div style={{ color: '#999', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>No clauses yet. Add your first reusable clause above.</div>}
           {filteredClauses.map(c => (
             <div key={c.id} style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                {canEdit && <input type="checkbox" checked={!!picked[c.id]} onChange={() => setPicked(p => { const n = { ...p }; if (n[c.id]) delete n[c.id]; else n[c.id] = true; return n; })} style={{ width: 17, height: 17, marginRight: 12, marginTop: 2, cursor: 'pointer', flexShrink: 0 }} title="Select" />}
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 14, color: '#1E2A4A' }}>{c.title}</span>
