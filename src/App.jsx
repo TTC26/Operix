@@ -411,6 +411,8 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = fal
   return (
     <>
       {autoWide && <style>{`
+@media print { .doc-offscreen { position: static !important; left: auto !important; width: auto !important; } }
+
 .doc-preview-mode .print-area .no-print { display: none !important; }
 .doc-preview-mode .print-area input, .doc-preview-mode .print-area select, .doc-preview-mode .print-area textarea { pointer-events: none; border-color: transparent !important; background: transparent !important; box-shadow: none !important; resize: none; appearance: none; -webkit-appearance: none; }
 @media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
@@ -1265,13 +1267,13 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
   const ro = isEditable ? {} : styles.inputReadOnly;
   const lbl = { ...styles.label, fontSize: 11.5 };
   const f = (k, label, ph, type) => (
-    <div style={{ ...styles.formGroup, flex: 1 }}>
+    <div style={{ ...styles.formGroup, flex: '1 1 220px', minWidth: 200 }}>
       <label style={lbl}>{label}</label>
       <input type={type || 'text'} value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} placeholder={ph || ''} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
     </div>
   );
   const ta = (k, label, rows) => (
-    <div style={styles.formGroup}>
+    <div style={{ ...styles.formGroup, flex: '1 1 100%' }}>
       <label style={lbl}>{label}</label>
       <textarea value={doc[k] || ''} onChange={(e) => upd(k, e.target.value)} style={{ ...styles.input, minHeight: rows || 60, resize: 'vertical', ...ro }} readOnly={!isEditable} />
     </div>
@@ -1289,8 +1291,8 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
         🌍 Overseas / Export quotation (Commercial Offer format)
       </label>
       {doc.overseas && (<>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ ...styles.formGroup, flex: 1 }}>
+<div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px', alignItems: 'flex-end' }}>
+          <div style={{ ...styles.formGroup, flex: '1 1 220px', minWidth: 200 }}>
             <label style={lbl}>Currency</label>
             <select value={doc.ovCurrency || 'INR'} onChange={(e) => {
               const nc = e.target.value, oc = doc.ovCurrency || 'INR';
@@ -1302,6 +1304,10 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
             </select>
           </div>
           {f('ovUnit', 'Default unit', 'm')}
+          {f('ovRevision', 'Revision', 'Rev. 1')}{f('ovValidUntil', 'Valid until', '', 'date')}
+          {f('ovKindAttn', 'Kind Attention', 'Mr. …')}
+          {f('ovSubject', 'Subject', 'Offer for supply of …')}
+          {f('ovReference', 'Reference', 'Your enquiry dated …')}
         </div>
         {(doc.ovCurrency || 'INR') !== 'INR' && (() => {
           const cur = doc.ovCurrency || 'INR';
@@ -1325,13 +1331,11 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
             </div>
           );
         })()}
-        <div style={{ display: 'flex', gap: 10 }}>{f('ovRevision', 'Revision', 'Rev. 1')}{f('ovValidUntil', 'Valid until', '', 'date')}</div>
-        {f('ovKindAttn', 'Kind Attention', 'Mr. …')}
-        {f('ovSubject', 'Subject', 'Offer for supply of …')}
-        {f('ovReference', 'Reference', 'Your enquiry dated …')}
+<div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px', alignItems: 'flex-end' }}>
         {ta('ovIntro', 'Introduction paragraph', 80)}
         {f('ovBasis', 'Price basis note (under "Price Schedule")')}
         {ta('ovPriceVar', 'Price variation clause (one paragraph per line)', 90)}
+        </div>
         <div style={styles.formGroup}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <label style={{ ...lbl, marginBottom: 0 }}>Commercial terms &amp; conditions <span style={{ background: '#E1E8F7', borderRadius: 10, padding: '1px 8px', fontSize: 11 }}>{terms.length}</span></label>
@@ -1340,22 +1344,24 @@ function OverseasQuoteFields({ doc, setDoc, isEditable, businessInfo }) {
               <button type="button" onClick={() => { if (window.confirm('Reset all terms to the standard list?')) upd('ovTerms', OV_DEFAULT_TERMS.map(([k, v]) => ({ k, v: v.replace('{CUR}', doc.ovCurrency || 'INR') }))); }} style={{ ...styles.ghostBtn, fontSize: 11.5, padding: '4px 10px' }}>Reset</button>
             </div>)}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {terms.map((t, i) => (
-              <div key={i} style={{ background: '#fff', border: '1px solid #E3E8F4', borderRadius: 6, padding: 6 }}>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+              <div key={i} style={{ background: '#fff', border: '1px solid #E3E8F4', borderRadius: 6, padding: 6, display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: '0 1 280px', minWidth: 220 }}>
                   <span style={{ fontSize: 11, color: '#999', minWidth: 16 }}>{i + 1}</span>
                   <input value={t.k} onChange={(e) => setTerm(i, 'k', e.target.value)} placeholder="Heading" readOnly={!isEditable} style={{ ...styles.input, padding: '4px 8px', fontSize: 12, fontWeight: 600, flex: 1 }} />
                   {isEditable && <button type="button" onClick={() => upd('ovTerms', terms.filter((_, j) => j !== i))} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>}
                 </div>
-                <textarea value={t.v} onChange={(e) => setTerm(i, 'v', e.target.value)} placeholder="Term text" readOnly={!isEditable} style={{ ...styles.input, minHeight: 48, resize: 'vertical', fontSize: 12, padding: '4px 8px' }} />
+                <textarea value={t.v} onChange={(e) => setTerm(i, 'v', e.target.value)} placeholder="Term text" readOnly={!isEditable} style={{ flex: '1 1 420px', ...styles.input, minHeight: 48, resize: 'vertical', fontSize: 12, padding: '4px 8px' }} />
               </div>
             ))}
           </div>
         </div>
+<div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px', alignItems: 'flex-end' }}>
         {ta('ovEnclosures', 'Enclosures (one per line)', 60)}
-        <div style={{ display: 'flex', gap: 10 }}>{f('ovSignName', 'Signatory name (optional)')}{f('ovSignDesig', 'Designation', 'MD')}</div>
+        {f('ovSignName', 'Signatory name (optional)')}{f('ovSignDesig', 'Designation', 'MD')}
         {f('ovSignContact', 'Mobile number', '+91 …')}
+        </div>
       </>)}
     </div>
   );
@@ -9820,7 +9826,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
           {cc.splitTax && ['invoice', 'quotation', 'proforma'].includes(doc.type) && (() => {
             const ro = isEditable ? {} : styles.inputReadOnly;
             const fld = (label, key, ph, type) => (
-              <div style={{ ...styles.formGroup, flex: 1, minWidth: 130 }}>
+              <div style={{ ...styles.formGroup, flex: '1 1 200px', minWidth: 180 }}>
                 <label style={styles.label}>{label}</label>
                 <input type={type || 'text'} value={doc[key] || ''} placeholder={ph || ''} onChange={(e) => update(key, e.target.value)} style={{ ...styles.input, ...ro }} readOnly={!isEditable} />
               </div>
@@ -9836,9 +9842,9 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
               });
             };
             return (
-              <div style={styles.formGroup}>
+              <div style={{ ...styles.formGroup, ...(isExportDoc(doc) ? { gridColumn: '1 / -1' } : {}) }}>
                 <label style={styles.label}>Supply type (GST)</label>
-                <select value={doc.supplyType || 'domestic'} onChange={(e) => isEditable && setSupply(e.target.value)} style={{ ...styles.input, ...ro }} disabled={!isEditable}>
+                <select value={doc.supplyType || 'domestic'} onChange={(e) => isEditable && setSupply(e.target.value)} style={{ ...styles.input, ...ro, ...(isExportDoc(doc) ? { maxWidth: 520 } : {}) }} disabled={!isEditable}>
                   {SUPPLY_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </select>
                 {isExportDoc(doc) && (
@@ -9846,17 +9852,13 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                     <div style={{ fontSize: 11.5, color: '#7A6A2A', marginBottom: 6 }}>
                       {/_lut$/.test(doc.supplyType) ? 'Zero-rated: GST is not charged on this invoice (item GST % is ignored).' : 'IGST is charged on the full taxable value (claim refund of IGST paid).'}
                     </div>
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '2px 14px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                       {/_lut$/.test(doc.supplyType) && fld('LUT / Bond No.', 'lutNo', 'AD330…')}
                       {/_lut$/.test(doc.supplyType) && fld('LUT date', 'lutDate', '', 'date')}
                       {/_lut$/.test(doc.supplyType) && fld('LUT ARN', 'lutArn')}
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {fld('Shipping bill no.', 'shipBillNo')}
                       {fld('Shipping bill date', 'shipBillDate', '', 'date')}
                       {fld('Port code', 'portCode', 'INMAA1')}
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {fld('Destination country', 'destCountry')}
                       {fld('Incoterm', 'incoterm', 'FOB / CIF / EXW')}
                       {fld('Currency', 'exCurrency', 'USD')}
@@ -10016,14 +10018,14 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
             </>);
           })()}
 
-          {doc.type === 'quotation' && <OverseasQuoteFields doc={doc} setDoc={setDoc} isEditable={isEditable} businessInfo={businessInfo} />}
+          {doc.type === 'quotation' && <div style={{ gridColumn: '1 / -1' }}><OverseasQuoteFields doc={doc} setDoc={setDoc} isEditable={isEditable} businessInfo={businessInfo} /></div>}
 
-          <div style={styles.formGroup}>
+          <div style={{ ...styles.formGroup, gridColumn: '1 / -1', order: 3 }}>
             <label style={styles.label}>Notes</label>
-            <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 60, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="Additional notes for this document…" />
+            <textarea value={doc.notes} onChange={(e) => update('notes', e.target.value)} style={{ ...styles.input, minHeight: 70, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="Additional notes for this document…" />
           </div>
 
-          <div style={styles.formGroup}>
+          <div style={{ ...styles.formGroup, gridColumn: '1 / -1', order: 3 }}>
             <label style={styles.label}>
               Terms &amp; Conditions
               <span style={{ marginLeft: 8, fontSize: 11, color: '#B0AC9F', fontWeight: 400 }}>per document</span>
@@ -10031,7 +10033,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
             <textarea
               value={doc.terms || ''}
               onChange={(e) => update('terms', e.target.value)}
-              style={{ ...styles.input, minHeight: 70, resize: 'vertical', ...(isEditable ? {} : styles.inputReadOnly) }}
+              style={{ ...styles.input, minHeight: 160, resize: 'vertical', lineHeight: 1.5, ...(isEditable ? {} : styles.inputReadOnly) }}
               readOnly={!isEditable}
               placeholder={businessInfo.terms || 'e.g. Payment due within 30 days. Goods once sold cannot be returned.'}
             />
@@ -10048,10 +10050,10 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
 
           {/* Items shortcut — Add line button in left panel */}
           {doc.type !== 'packing_list' && (
-            <div style={{ borderTop: '1px solid #EAE6DB', paddingTop: 12, marginTop: 4 }}>
+            <div style={{ gridColumn: '1 / -1', order: 2, borderTop: '1px solid #EAE6DB', paddingTop: 14, marginTop: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ ...styles.label, marginBottom: 0 }}>
-                  Line items <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600, marginLeft: 6 }}>{doc.items.length}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: '#1E2A4A' }}>Line items</span> <span style={{ background: '#EAE6DB', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600, marginLeft: 6 }}>{doc.items.length}</span>
                 </label>
                 {isEditable && (
                   <div style={{ display:'flex', gap:8, alignItems:'center' }}>
@@ -10073,55 +10075,61 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                   </div>
                 )}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                {doc.items.map((it, i) => (
-                  <div key={it.id} style={{ background: '#FAFAF8', borderRadius: 6, padding: '6px 8px', fontSize: 12 }}>
-                    {isEditable && items.length > 0 && doc.bizType !== 'service' && (
-                      <select
-                        value={it.itemId || ''}
-                        onChange={(e) => selectItem(it.id, e.target.value)}
-                        style={{ width: '100%', border: '1px solid #DDD8CE', borderRadius: 4, fontSize: 11, padding: '3px 6px', marginBottom: 5, background: '#fff', color: '#1E2A4A' }}
-                      >
-                        <option value="">— Select from items master —</option>
-                        {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
-                      </select>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ color: '#B0AC9F', minWidth: 18, fontSize: 11 }}>{i + 1}</span>
-                      <input
-                        value={it.name}
-                        onChange={(e) => updateItem(it.id, 'name', e.target.value)}
-                        placeholder="Item description"
-                        readOnly={!isEditable}
-                        style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 12, color: '#1E2A4A', outline: 'none', cursor: isEditable ? 'text' : 'default' }}
-                      />
-                      <input
-                        type="number"
-                        value={it.qty}
-                        onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)}
-                        readOnly={!isEditable}
-                        style={{ width: 36, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
-                        title="Qty"
-                      />
-                      <span style={{ color: '#ccc', fontSize: 10 }}>×</span>
-                      <input
-                        type="number"
-                        value={it.rate}
-                        onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)}
-                        readOnly={!isEditable}
-                        style={{ width: 64, border: 'none', background: 'transparent', fontSize: 11, color: '#888780', textAlign: 'right', outline: 'none' }}
-                        title="Rate"
-                      />
-                      {doc.overseas && doc.type === 'quotation' && (<input value={(it.unit && it.unit !== 'pcs') ? it.unit : ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} title="Unit" placeholder={doc.ovUnit || 'm'} style={{ width: 34, border: '1px solid #E3E8F4', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1F3A7A', textAlign: 'center', outline: 'none', padding: '2px 3px' }} />)}
-                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="Discount %" placeholder="D%" style={{ width: 42, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#B5453A', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
-                      {cc.hasTax && !(doc.overseas && doc.type === 'quotation') && (<input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} title="GST %" placeholder="GST%" style={{ width: 46, border: '1px solid #F0ECE0', borderRadius: 4, background: isEditable ? '#fff' : 'transparent', fontSize: 11, color: '#1A7A3E', textAlign: 'right', outline: 'none', padding: '2px 4px' }} />)}
-                      {isEditable && (
-                        <button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 2 }}><Trash2 size={12} color="#B5453A" /></button>
-                      )}
+              {(() => {
+                const ovq = doc.overseas && doc.type === 'quotation', showTax = cc.hasTax && !ovq;
+                const th = { padding: '8px 8px', fontSize: 11, color: '#888780', textTransform: 'uppercase', letterSpacing: 0.4, textAlign: 'left', borderBottom: '2px solid #EAE6DB', background: '#F6F3EC', whiteSpace: 'nowrap' };
+                const td = { padding: '6px 6px', borderBottom: '1px solid #F0ECE0', verticalAlign: 'top' };
+                const inp = { width: '100%', boxSizing: 'border-box', border: '1px solid #DDD8CE', borderRadius: 6, padding: '7px 8px', fontSize: 13, background: isEditable ? '#fff' : '#F6F5F1', color: '#1E2A4A' };
+                const num = { ...inp, textAlign: 'right' };
+                const amt = (it) => { const a0 = (Number(it.qty) || 0) * (Number(it.rate) || 0); return a0 - a0 * (Number(it.discount) || 0) / 100; };
+                return (
+                  <div style={{ overflowX: 'auto', border: '1px solid #EAE6DB', borderRadius: 10, background: '#fff' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
+                      <thead><tr>
+                        <th style={{ ...th, width: 34 }}>#</th>
+                        <th style={{ ...th, minWidth: 300 }}>Item (code · description)</th>
+                        {cc.splitTax && <th style={{ ...th, width: 90 }}>HSN</th>}
+                        <th style={{ ...th, width: 90, textAlign: 'right' }}>Qty</th>
+                        <th style={{ ...th, width: 70 }}>Unit</th>
+                        <th style={{ ...th, width: 110, textAlign: 'right' }}>Rate</th>
+                        {showTax && <th style={{ ...th, width: 70, textAlign: 'right' }}>Disc %</th>}
+                        {showTax && <th style={{ ...th, width: 70, textAlign: 'right' }}>GST %</th>}
+                        <th style={{ ...th, width: 120, textAlign: 'right' }}>Amount</th>
+                        {isEditable && <th style={{ ...th, width: 36 }}></th>}
+                      </tr></thead>
+                      <tbody>
+                        {doc.items.map((it, i) => (
+                          <tr key={it.id}>
+                            <td style={{ ...td, color: '#888', paddingTop: 12 }}>{i + 1}</td>
+                            <td style={td}>
+                              {isEditable && items.length > 0 && doc.bizType !== 'service' && (
+                                <select value={it.itemId || ''} onChange={(e) => selectItem(it.id, e.target.value)} style={{ ...inp, marginBottom: 6, fontWeight: 600 }}>
+                                  <option value="">— Select from Item Master (or type below) —</option>
+                                  {pickItems.map((m) => <option key={m.id} value={m.id}>{m.itemCode ? m.itemCode + ' · ' : ''}{m.name}</option>)}
+                                </select>
+                              )}
+                              <textarea value={it.name} onChange={(e) => updateItem(it.id, 'name', e.target.value)} placeholder="Item description" readOnly={!isEditable} rows={Math.min(6, Math.max(1, String(it.name || '').split('\n').length))} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
+                            </td>
+                            {cc.splitTax && <td style={td}><input value={it.hsn || ''} onChange={(e) => updateItem(it.id, 'hsn', e.target.value)} readOnly={!isEditable} style={inp} /></td>}
+                            <td style={td}><input type="number" value={it.qty} onChange={(e) => updateItem(it.id, 'qty', parseFloat(e.target.value) || 0)} readOnly={!isEditable} style={num} /></td>
+                            <td style={td}><input value={it.unit || ''} onChange={(e) => updateItem(it.id, 'unit', e.target.value)} readOnly={!isEditable} style={inp} /></td>
+                            <td style={td}><input type="number" value={it.rate} onChange={(e) => updateItem(it.id, 'rate', parseFloat(e.target.value) || 0)} readOnly={!isEditable} style={num} /></td>
+                            {showTax && <td style={td}><input type="number" value={it.discount ?? 0} onChange={(e) => updateItem(it.id, 'discount', parseFloat(e.target.value) || 0)} readOnly={!isEditable} style={num} /></td>}
+                            {showTax && <td style={td}><input type="number" value={it.gst ?? 0} onChange={(e) => updateItem(it.id, 'gst', parseFloat(e.target.value) || 0)} readOnly={!isEditable} style={num} /></td>}
+                            <td style={{ ...td, textAlign: 'right', fontWeight: 700, paddingTop: 13, whiteSpace: 'nowrap' }}>{fmt(amt(it))}</td>
+                            {isEditable && <td style={{ ...td, paddingTop: 10 }}><button onClick={() => removeRow(it.id)} style={{ ...styles.iconBtn, padding: 4 }} title="Remove line"><Trash2 size={14} color="#B5453A" /></button></td>}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 22, padding: '10px 14px', borderTop: '1px solid #EAE6DB', background: '#FBFAF6', fontSize: 13, flexWrap: 'wrap' }}>
+                      <span>Subtotal <b>{fmt(totals.taxable ?? totals.subtotal)}</b></span>
+                      {cc.hasTax && <span>Tax <b>{fmt(totals.totalTax || 0)}</b></span>}
+                      <span style={{ fontSize: 15 }}>Grand total <b style={{ color: '#1E2A4A' }}>{fmt(totals.grandTotal)}</b></span>
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
           )}
 
@@ -10137,6 +10145,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
           )}
         </div>}
 
+        <div className={docPreview ? '' : 'doc-offscreen'} style={docPreview ? {} : { position: 'absolute', left: -20000, top: 0, width: 1000, pointerEvents: 'none' }} aria-hidden={!docPreview}>
         <div style={{ ...styles.preview, maxWidth: 1000, width: '100%', margin: docPreview ? '0 auto' : 0, boxSizing: 'border-box' }} className="print-area">
           <DocFontStyle businessInfo={businessInfo} />
           {useLH && (businessInfo?.letterhead || businessInfo?.letterheadHtml || businessInfo?.letterheadFooter) && <LetterpadPrintStyle />}
@@ -10787,6 +10796,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
             </div>
           )}
           </>)}
+        </div>
         </div>
       </div>
       {hsnSearchRow && (
