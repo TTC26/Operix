@@ -6977,7 +6977,7 @@ function CableDesignView({ designs = [], setDesigns, items = [], setItems, boms 
       hasInner: d.innerType !== 'none', innerMethod: d.innerType === 'taped' ? 'TAPE WRAPPED' : 'EXTRUDED', innerDia: k.D1 ? String(k.D1) : '', innerMin: String(d.innerT || ''),
       hasArmour: d.armour !== 'none', armMat: d.armour === 'none' ? '' : (d.armMat === 'Al' ? 'ALUMINIUM' : 'GALVANISED STEEL') + (d.armour === 'strip' ? ' FORMED WIRE (FLAT STRIP)' : ' ROUND WIRE'), armType: d.armour === 'strip' ? 'FLAT STRIP' : d.armour === 'wire' ? 'ROUND WIRE' : '', armDim: d.armour === 'strip' ? (d.armW + ' X ' + d.armT) : d.armour === 'wire' ? String(d.armDia) : '', armDia: d.armour !== 'none' ? String(k.D2) : '',
       outMat: (d.sheathMat === 'HFFR' ? 'HFFR' : 'PVC TYPE ST-' + (d.insMat === 'XLPE' ? '2' : '1')) + (d.fr ? ' ' + d.fr : ''), outColour: (d.sheathColour || '').toUpperCase(), outNom: String(d.sheathT), outDia: String(k.D3), outMin: String(k.sheathMin), overall: k.D4 + ' ± ' + Math.max(1, Math.round(k.D4 * 0.1)), drum: String(d.drumLen || ''), hasFR: !!d.fr, acRes: pick('acRes', E.rac), react: pick('react', E.x), cap: pick('cap', E.c), scRating: pick('scRating', E.sc), ground: pick('ground', E.ground), air: pick('air', E.air), dcRes: pick('rdc20', k.maxR || E.r20) };
-    const tds = { ...(oldT || { id: 'tds-' + id, number: dn('TDS', cnt), docNo: 'TDS/IMS/F01', customer: 'MARKET', customerId: '', refDoc: '', createdAt: now }), date: now.slice(0, 10), designId: id, bizType: currentBizType, updatedAt: now, v: { ...((oldT || {}).v || {}), ...v } };
+    const tds = { ...(oldT || { id: 'tds-' + id, number: dn('TDS', cnt), docNo: withCo('TDS/IMS/F01'), customer: 'MARKET', customerId: '', refDoc: '', createdAt: now }), date: now.slice(0, 10), designId: id, bizType: currentBizType, updatedAt: now, v: { ...((oldT || {}).v || {}), ...v } };
     setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === tds.id) ? a.map(x => x.id === tds.id ? tds : x) : [tds, ...a]; });
     // 4) the design itself
     const rec = { ...d, id, calc: { ...k, elec: E }, itemId: fgId, bomId: bom.id, tdsId: tds.id, rev: (parseInt(d.rev) || 0) + (d.id ? 1 : 0), bizType: currentBizType, updatedAt: now, createdAt: d.createdAt || now };
@@ -9281,7 +9281,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-C</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-E</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -16858,7 +16858,7 @@ function tdsImpSizes(text) {
   const i0 = text.search(/cable\s*size/i);
   if (i0 < 0) return out;
   const chunk = text.slice(i0, i0 + 300).split(/\n\s*\d+(\.\d+)?\s+[A-Za-z]/)[0];
-  const re = /(\d+)\s*C(?:ORE)?\s*[xX×]\s*([\d.]+)\s*(?:mm2|mm²|sq)/g; let m;
+  const re = /(\d+)\s*C(?:ORE)?\s*[xX×]\s*(\d+(?:\.\d+)?)(?!\d)/g; let m;
   while ((m = re.exec(chunk))) { const k = m[1] + 'x' + m[2]; if (!seen[k]) { seen[k] = 1; out.push({ cores: m[1], area: m[2] }); } }
   return out;
 }
@@ -16871,6 +16871,16 @@ function parseTdsPages(pages) {
     const second = text.indexOf('CABLE SIZE', text.indexOf('CABLE SIZE') + 10); // some PDFs repeat the page text
     if (second > 0) text = text.slice(0, second);
     let sizes = tdsImpSizes(text);
+    if (sizes.length < 2) { // fallback: several sizes side by side → read them from the "Number of Cores" / "Nominal area" rows
+      const cm = text.match(/number[ \t]*of[ \t]*cores[^\n\d]*((?:[ \t]*\d+){2,})[ \t]*(?:\n|$)/i);
+      if (cm) {
+        const cnt = cm[1].trim().split(/\s+/);
+        const am = text.match(/nominal[ \t]*(cross[ \t]*sectional[ \t]*)?area[^\n\d]*((?:[ \t]*\d+(?:\.\d+)?)+)[ \t]*(?:\n|$)/i);
+        const ar = am ? am[2].trim().split(/\s+/) : [];
+        const sizeArea = (sizes[0] && sizes[0].area) || '';
+        sizes = cnt.map((c, k) => ({ cores: c, area: ar.length >= cnt.length ? ar[k] : (ar[0] || sizeArea) }));
+      }
+    }
     const pageFR = /fr.?\s*lsh/i.test(text);
     const nCols = Math.max(1, sizes.length);
     const cols = sizes.length ? sizes.map(() => ({ v: {}, imp: [] })) : (carry ? [carry] : [{ v: {}, imp: [] }]);
@@ -17028,11 +17038,12 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         const preset = Object.values(TDS_PRESETS).find(pv => pv.cores && r.v.cores && pv.cores.replace(/\s/g, '').toUpperCase() === r.v.cores.replace(/\s/g, '').toUpperCase() && (!r.v.code || !pv.code || pv.code === r.v.code)) || {};
         const v = { ...TDS_BASE, ...preset, ...r.v, _imp: r.imp, _src: file.name };
         if (!r.v.innerMat && !r.v.innerMin && !r.v.innerDia && preset.hasInner === undefined) v.hasInner = TDS_BASE.hasInner;
-        return { id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: 'TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v, imported: true, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
+        return { id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: withCo('TDS/IMS/F01'), date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v, imported: true, importBatch: file.name, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
       });
       if (recs.length === 1) { setEditing(recs[0]); return; }
       setTdsSheets(prev => [...recs, ...(Array.isArray(prev) ? prev : [])]);
-      alert('✅ ' + recs.length + ' TDS created from ' + file.name + ':\n\n' + found.map((r, i) => '• ' + recs[i].number + ' — ' + r.label).join('\n') + '\n\nYellow fields came from the PDF. Open each one, check the values and press Save.');
+      setPicked(() => { const n = {}; recs.forEach(r => { n[r.id] = true; }); return n; });
+      alert('✅ ' + recs.length + ' TDS created from ' + file.name + ' — one TDS per cable size, each with its own TDS No.:\n\n' + found.map((r, i) => '• ' + recs[i].number + ' — ' + r.label).join('\n') + '\n\nThey are ticked in the list: use “Print selected — one document” to print all ' + recs.length + ' together.\nYellow fields came from the PDF. Open each one, check the values and press Save.');
       setEditing(recs[0]);
     } catch (e) { console.error(e); setImpBusy(''); alert('Could not read this PDF: ' + (e && e.message ? e.message : e)); }
   }
@@ -17044,7 +17055,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   const quotes = (documents || []).filter(d => d.type === 'quotation' && d.status !== 'deleted');
   function fy() { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return String(y).slice(2) + '-' + String(y + 1).slice(2); }
   function nextNo() { const n = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length + 1; return dn('TDS', n); }
-  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: 'TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
+  function blank() { return { id: Date.now().toString(), number: nextNo(), docNo: withCo('TDS/IMS/F01'), date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v: { ...TDS_BASE, ...Object.values(TDS_PRESETS)[0] } }; }
   const setV = (k, val) => setEditing(e => ({ ...e, v: { ...e.v, [k]: val } }));
   function pickPreset(name) { if (!name) return; setEditing(e => ({ ...e, v: { ...TDS_BASE, ...TDS_PRESETS[name] } })); }
   function pickQuote(id) {
@@ -17054,6 +17065,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   }
   function save() {
     if (!editing.v.title) { alert('Enter the sheet title.'); return; }
+    if (!String(editing.number || '').trim()) { alert('Enter the TDS No. (or press ↺ Auto).'); return; }
+    if (all.some(x => !x.deleted && x.id !== editing.id && String(x.number || '').trim().toLowerCase() === String(editing.number).trim().toLowerCase()) && !window.confirm('TDS No. ' + editing.number + ' is already used by another TDS. Save anyway?')) return;
     const { _imp, _src, ...vClean } = editing.v || {};
     const rec = { ...editing, v: vClean, imported: false, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
     setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
@@ -17077,8 +17090,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         {Array.isArray(v._imp) && v._imp.length > 0 && <div style={{ background: '#FFF8DC', border: '1px solid #E0B84C', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13 }}>📄 <b>{v._imp.length} values</b> were read from <b>{v._src || 'the PDF'}</b> — shown in <span style={{ background: '#FFF1B8', padding: '0 6px', borderRadius: 4 }}>yellow</span>. Other fields are from the standard preset. Check every value against the PDF, then press <b>Save</b>.</div>}
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-            <div><label style={lbl}>TDS No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
-            <div><label style={lbl}>Document No.</label><input style={inp} value={e.docNo} onChange={ev => setEditing(p => ({ ...p, docNo: ev.target.value }))} /></div>
+            <div><label style={lbl}>TDS No. <span style={{ fontWeight: 400, color: '#999' }}>(auto · editable)</span></label><div style={{ display: 'flex', gap: 6 }}><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /><button type="button" title="Next automatic number" onClick={() => setEditing(p => ({ ...p, number: nextNo() }))} style={{ ...styles.ghostBtn, padding: '4px 10px', whiteSpace: 'nowrap' }}>↺ Auto</button></div></div>
+            <div><label style={lbl}>Document No. <span style={{ fontWeight: 400, color: '#999' }}>(auto · editable)</span></label><div style={{ display: 'flex', gap: 6 }}><input style={inp} value={e.docNo} onChange={ev => setEditing(p => ({ ...p, docNo: ev.target.value }))} /><button type="button" title="Standard form number" onClick={() => setEditing(p => ({ ...p, docNo: withCo('TDS/IMS/F01') }))} style={{ ...styles.ghostBtn, padding: '4px 10px', whiteSpace: 'nowrap' }}>↺ Auto</button></div></div>
             <div><label style={lbl}>Date</label><input type="date" style={inp} value={e.date} onChange={ev => setEditing(p => ({ ...p, date: ev.target.value }))} /></div>
             <div><label style={lbl}>Customer</label>
               <input style={inp} list="tds-cust" value={e.customer} onChange={ev => { const c = (customers || []).find(x => x.name === ev.target.value); setEditing(p => ({ ...p, customer: ev.target.value, customerId: c ? c.id : '' })); }} placeholder="Customer name (or MARKET)" />
