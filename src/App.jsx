@@ -794,6 +794,7 @@ const ZOHO_GEN_CSS =
 // HR letters (offer / warning / termination): same letterhead-or-logo header on every page, letter body flowed across pages.
 const LETTER_CSS =
   '.bd{border:none !important;padding:6mm 16mm 0 !important;font-size:13px;line-height:1.7;}'
+  + '.bd table{width:100% !important;max-width:100% !important;table-layout:auto;}.bd td,.bd th{overflow-wrap:anywhere;word-break:break-word;white-space:normal !important;}.bd img{max-width:100%;}'
   + '.bd p{line-height:1.75;margin:0 0 12px;}.bd h2{text-align:center;color:#1E2A4A;font-size:15px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 20px;}'
   + '.bd h3{color:#1E2A4A;font-size:13.5px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid #ccc;text-transform:uppercase;letter-spacing:.4px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
   + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
@@ -828,6 +829,11 @@ function printLetterFromHtml(html, biz, opts) {
       const ori = (el.getAttribute && el.getAttribute('data-ori') === 'L') ? 'L' : (ori0 || '');
       if (el.tagName === 'TABLE') {
         _tid++;
+        // fit the page width: drop fixed / minimum widths that come from imported Word tables
+        try {
+          el.querySelectorAll('colgroup, col').forEach(n => n.remove());
+          [el, ...el.querySelectorAll('th, td, tr')].forEach(n => { n.removeAttribute('width'); if (n.style) { n.style.removeProperty('width'); n.style.removeProperty('min-width'); n.style.removeProperty('max-width'); n.style.removeProperty('white-space'); } });
+        } catch (e) {}
         const thead = el.querySelector('thead');
         const head = thead ? thead.outerHTML : '';
         let trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
