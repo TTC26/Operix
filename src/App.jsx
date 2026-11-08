@@ -9281,7 +9281,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-B</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-C</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -16781,6 +16781,203 @@ function tdsRows(v) {
     }) };
   });
 }
+// ─── TDS import: read a customer / supplier TDS PDF and build Technical Data Sheet records ───
+const TDS_IMP_RULES = [
+  // [sections (null = any), regex on label, key, kind]   kind: n = number, t = text, f = free text (kept as written)
+  [null, /no\.?\s*of\s*cores\s*(and|&)\s*nominal\s*area/i, 'cores', 't'],
+  [null, /cable\s*code/i, 'code', 't'],
+  [null, /type\s*of\s*cable/i, '_type', 't'],
+  [null, /voltage\s*grade|rated\s*voltage/i, 'voltage', 't'],
+  [null, /number\s*of\s*cores/i, '_ncores', 'n'],
+  [null, /applicable\s*standard/i, '_std', 't'],
+  [['conductor'], /^material/i, 'condMat', 't'],
+  [['conductor'], /reference\s*specification|reference\s*spec\S*/i, 'condSpec', 't'],
+  [['conductor'], /shape(\s*of\s*(the\s*)?conductor)?/i, 'condShape', 't'],
+  [['conductor', 'general'], /nominal\s*(cross\s*sectional\s*)?area/i, 'area', 'n'],
+  [['conductor'], /min(imum)?\.?\s*(number|no\.?)\s*of\s*wires(\s*in\s*(the\s*)?conductor)?/i, 'minWires', 'n'],
+  [null, /d\.?\s?c\.?\s*resistance/i, 'dcRes', 'n'],
+  [['insulation'], /^material/i, 'insMat', 't'],
+  [['insulation'], /reference\s*specification|reference\s*spec\S*/i, 'insSpec', 't'],
+  [['insulation'], /colou?r\s*of\s*(the\s*)?(insulation|cores?)|core\s*identification|colou?r/i, 'insColour', 't'],
+  [['insulation'], /min(imum)?\s*at\s*a\s*point|minimum\s*thickness/i, 'insMin', 'n'],
+  [['insulation'], /nominal(\s*thickness)?/i, 'insNom', 'n'],
+  [['inner'], /^material/i, 'innerMat', 't'],
+  [['inner'], /method\s*of\s*application|method/i, 'innerMethod', 't'],
+  [['inner'], /reference\s*specification|reference\s*spec\S*/i, 'innerSpec', 't'],
+  [['inner'], /laid.?up\s*diameter/i, 'innerDia', 'n'],
+  [['inner'], /(minimum|approx\.?(imate)?|nominal)?\s*thickness(\s*of\s*(inner\s*)?(sheath|cover(ing)?))?/i, 'innerMin', 'n'],
+  [['armour'], /^material/i, 'armMat', 't'],
+  [['armour'], /reference\s*specification|reference\s*spec\S*/i, 'armSpec', 't'],
+  [['armour'], /diameter\s*over\s*inner/i, 'armDia', 'n'],
+  [['armour'], /type\s*of\s*armou?r/i, 'armType', 't'],
+  [['armour'], /tolerance(\s*on\s*dimension\s*of\s*armou?r)?/i, 'armTol', 'f'],
+  [['armour'], /(nominal\s*)?(dimensions?\s*of\s*(the\s*)?(armou?r|strips?|wires?)|diameter\s*of\s*wires?|size\s*of\s*(wires?|strips?)|dimensions?)/i, 'armDim', 'f'],
+  [['outer'], /^material/i, 'outMat', 't'],
+  [['outer'], /reference\s*specification|reference\s*spec\S*/i, 'outSpec', 't'],
+  [['outer'], /colou?r(\s*of\s*(the\s*)?outer\s*sheath)?/i, 'outColour', 't'],
+  [['outer'], /diameter\s*over\s*armou?r/i, 'outDia', 'n'],
+  [['outer', 'finished', 'electrical'], /(approx\.?(imate)?\s*)?overall\s*diameter(\s*of\s*(the\s*)?cable)?/i, 'overall', 'f'],
+  [['outer'], /min(imum)?\s*at\s*a\s*point|minimum\s*thickness/i, 'outMin', 'n'],
+  [['outer'], /nominal(\s*thickness)?/i, 'outNom', 'n'],
+  [null, /a\.?\s?c\.?\s*resistance/i, 'acRes', 'n'],
+  [null, /reactance/i, 'react', 'n'],
+  [null, /capacitance/i, 'cap', 'n'],
+  [null, /normal\s*working|continuous\s*operation/i, 'tNorm', 'n'],
+  [null, /short\s*circuit\s*(operation|condition)/i, 'tSC', 'n'],
+  [null, /short\s*circuit\s*(rating|current)|permissible\s*short\s*circuit/i, 'scRating', 'n'],
+  [null, /in\s*ground/i, 'ground', 'n'],
+  [null, /in\s*air/i, 'air', 'n'],
+  [['current'], /reference\s*specification|reference\s*spec\S*/i, 'ampSpec', 't'],
+  [null, /oxygen\s*index/i, 'coi', 'n'],
+  [null, /temperature\s*index/i, 'ti', 'n'],
+  [null, /smoke\s*density/i, 'sd', 'n'],
+  [null, /halogen/i, 'hag', 'n'],
+  [null, /flammability(\s*test)?/i, 'flame', 'f'],
+  [null, /tolerance\s*on\s*drum(\s*length)?/i, 'drumTol', 'f'],
+  [null, /(standard\s*)?drum\s*length(\s*with\s*tolerance)?/i, 'drum', 'f'],
+  [null, /(recommended\s*)?(minimum\s*)?bending\s*radius/i, 'bend', 'f'],
+  [null, /(when\s*pulled\s*with|pulled\s*by)?\s*stocking/i, 'pull1', 'f'],
+  [null, /(when\s*pulled\s*with|pulled\s*by)?\s*pulling\s*eyes?/i, 'pull2', 'f'],
+];
+const TDS_IMP_SECTION = [
+  [/^conductor\b/i, 'conductor'], [/^insulation\b/i, 'insulation'], [/^inner\s*(sheath|covering|cover)\b/i, 'inner'],
+  [/^armou?r(ing)?\b/i, 'armour'], [/^outer\s*sheath\b/i, 'outer'], [/^electrical/i, 'electrical'],
+  [/^continuous\s*current|current\s*carrying/i, 'current'], [/^maximum\s*conductor\s*temperature\s*$/i, 'electrical'],
+  [/^fr.?\s*lsh|^frlsh/i, 'fr'], [/^finished\s*cable|^additional\s*features/i, 'finished'], [/^general\b/i, 'general'],
+];
+const TDS_IMP_STOP = /document\s*no|tds\s*no\.|computer\s*generated|^\*|cables?\s*limited|wires\s*india\s*limited|survey\s*no|^tel[:\s]|technical\s*data\s*sheet|customer\s*:|^date\s*:|^particulars|^s\.?\s*no\.?\b|^(conductor|xlpe insulation|armour|inner sheath|outer sheath)$/i;
+const TDS_UNIT_RE = /^\s*(no\s*&\s*sq\.?\s*mm|sq\.?\s*mm|mm2|mm²|mm\s*\/\s*%|mm|ω\s*-?\s*cm|ω\s*\/\s*km|ohm\s*\/\s*km|amps?|ka|°\s*c|◦\s*c|deg\.?\s*c|%|volts?|kv|hz|nos?|mfd\s*\/\s*km|mtrs?|metres|meters|newtons?|n\s*\/\s*mm2|n|sec|minimum|specified)(?![a-z])\.?\s*/i;
+
+function tdsImpClean(rest) {
+  let r = String(rest || '').replace(/for\s*\d+\s*sec(ond)?s?(\s*duration)?/gi, ' ').replace(/\bat\s*[\d.]+\s*(°|◦|º|deg\.?)\s*c\b/gi, ' ').replace(/^\s*[\d.]+\s*(°|◦|º)\s*c\b/i, ' ').replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < 4; i++) { const n = r.replace(TDS_UNIT_RE, ''); if (n === r) break; r = n.trim(); }
+  return r.replace(/^[:\-–]\s*/, '').trim();
+}
+function tdsImpSizes(text) {
+  const out = [], seen = {};
+  const i0 = text.search(/cable\s*size/i);
+  if (i0 < 0) return out;
+  const chunk = text.slice(i0, i0 + 300).split(/\n\s*\d+(\.\d+)?\s+[A-Za-z]/)[0];
+  const re = /(\d+)\s*C(?:ORE)?\s*[xX×]\s*([\d.]+)\s*(?:mm2|mm²|sq)/g; let m;
+  while ((m = re.exec(chunk))) { const k = m[1] + 'x' + m[2]; if (!seen[k]) { seen[k] = 1; out.push({ cores: m[1], area: m[2] }); } }
+  return out;
+}
+// pages: array of plain-text pages (one line per text row). Returns [{ v, imp, label }]
+function parseTdsPages(pages) {
+  const results = [];
+  let carry = null; // sheet continued on the next page (e.g. Orbit page 2)
+  (pages || []).forEach((raw, pi) => {
+    let text = String(raw || '').replace(/\r/g, '').replace(/Ɵ/g, 'ti').replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff').replace(/◦/g, '°');
+    const second = text.indexOf('CABLE SIZE', text.indexOf('CABLE SIZE') + 10); // some PDFs repeat the page text
+    if (second > 0) text = text.slice(0, second);
+    let sizes = tdsImpSizes(text);
+    const pageFR = /fr.?\s*lsh/i.test(text);
+    const nCols = Math.max(1, sizes.length);
+    const cols = sizes.length ? sizes.map(() => ({ v: {}, imp: [] })) : (carry ? [carry] : [{ v: {}, imp: [] }]);
+    // 1) logical lines: numbered items; continuation lines joined (single-size sheets only)
+    const items = []; let sec = carry ? carry._sec || '' : '';
+    text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+      if (TDS_IMP_STOP.test(l)) { items.push({ stop: true }); return; }
+      const m = l.match(/^(\d+(?:\s*\.\s*\d+)*)\.?\s+(.+)$/);
+      if (m && /[A-Za-z]/.test(m[2].slice(0, 3))) { items.push({ body: m[2] }); return; }
+      const last = items[items.length - 1];
+      const ruleHit = /^(critical\s*)?oxygen\s*index|^temperature\s*index|^smoke\s*density|^halogen|^flammab/i.test(l);
+      if (ruleHit) { items.push({ body: l }); return; }
+      if (nCols === 1 && last && !last.stop) last.body += ' ' + l;
+    });
+    // 2) map items to fields
+    items.forEach(it => {
+      if (it.stop || !it.body) return;
+      const body = it.body.trim();
+      const s = TDS_IMP_SECTION.find(([re]) => re.test(body) && !/\d/.test(body.replace(/^[^\d]*\b(60502|8130|7098)\b.*/, '')) && body.length < 70);
+      if (s && !TDS_IMP_RULES.some(r => r[0] === null && r[1].test(body) && /\d/.test(body))) { sec = s[1]; return; }
+      let rule = null, mm = null;
+      TDS_IMP_RULES.forEach(r => { if (r[0] && !r[0].includes(sec)) return; const m0 = body.match(r[1]); if (m0 && (!mm || m0.index < mm.index)) { rule = r; mm = m0; } });
+      if (!rule) return;
+      const key = rule[2], kind = rule[3];
+      const raw0 = body.slice(mm.index + mm[0].length).replace(/astm\s*d\s*-?\s*\d+|iec\s*-?\s*754\s*-?\s*1/gi, ' ');
+      let rest = tdsImpClean(key === 'flame' ? raw0 : raw0.replace(/as\s*per\s*iec\s*60332-1/gi, ' '));
+      if (key === 'ti') { const tm = raw0.match(/([\d.]+)\s*(°|º)\s*c/i); if (tm) rest = tm[1]; }
+      if (!rest) return;
+      const nums = rest.match(/\d+(?:\.\d+)?/g) || [];
+      cols.forEach((c, k) => {
+        let val = '';
+        if (nCols > 1) {
+          if (kind === 't') { if (['_type', 'voltage', '_std', 'code'].includes(key)) val = rest; }
+          else if (kind === 'f') { if (['armDim', 'overall', 'armTol'].includes(key) && nums.length >= nCols && !/x/i.test(rest)) val = nums[k]; }
+          else if (nums.length >= nCols) val = nums[k];
+          else if (nums.length === 1) val = nums[0];
+        } else {
+          if (kind === 'n') val = nums.length ? nums[0] : '';
+          else val = rest;
+        }
+        if (val === '' || val == null || c.v[key]) return;
+        c.v[key] = String(val).trim(); if (!c.imp.includes(key)) c.imp.push(key);
+      });
+    });
+    cols.forEach((c, k) => {
+      if (sizes[k]) { c.v._ncores = c.v._ncores || sizes[k].cores; c.v.area = c.v.area || sizes[k].area; }
+      c._sec = sec; if (pageFR) c.v._fr = '1';
+      if (!results.includes(c)) results.push(c);
+    });
+    carry = (!sizes.length && cols.length === 1) ? cols[0] : null;
+  });
+  // 3) finish each sheet
+  return results.map(c => {
+    const v = { ...c.v }, imp = c.imp.slice();
+    const cm = String(v.cores || '').match(/(\d+)\s*(?:c|core)?\s*[x×]\s*([\d.]+)/i);
+    const n = v._ncores || (cm && cm[1]) || '', area = v.area || (cm && cm[2]) || '';
+    if (v._type) { if (/^[0-9]?[A-Z][A-Za-z]{1,5}$/.test(v._type.trim()) && !v.code) v.code = v._type.trim(); else v.cableType = v._type; if (!imp.includes(v.code ? 'code' : 'cableType')) imp.push(v.code ? 'code' : 'cableType'); }
+    if (n && area) { v.cores = n + ' CORE X ' + area; v.area = area; if (!imp.includes('cores')) imp.push('cores'); }
+    if (/kv/i.test(String(v.voltage || '')) === false && /^0\.6\s*\/\s*1(\.0)?$/.test(String(v.voltage || '').trim())) v.voltage = '0.6/1.0 kV';
+    const code = String(v.code || '').trim();
+    const xlpe = /2x/i.test(code) || /xlpe/i.test(String(v.insMat || '') + String(v._type || ''));
+    const fr = /fr.?\s*lsh/i.test(JSON.stringify(v)) || !!v.coi || !!v._fr; delete v._fr;
+    if (!v.drumTol && /±\s*([\d.]+)\s*%/.test(String(v.drum || ''))) { v.drumTol = '±' + String(v.drum).match(/±\s*([\d.]+)/)[1]; imp.push('drumTol'); }
+    if (v.drum) v.drum = String(v.drum).replace(/\(.*$/, '').replace(/±.*$/, '').trim() || v.drum;
+    v.hasFR = fr; v.hasArmour = !!(v.armMat || v.armDim || /w|f/i.test(code.replace(/^2x/i, '')));
+    v.title = (n ? n + ' CORE ' : '') + (xlpe ? 'XLPE' : 'PVC') + (v.hasArmour ? ' ARMOURED' : '') + ' CABLE — ' + (n ? n + 'C x ' + area + ' sq.mm' : '') + (code ? ' (' + code + ')' : '') + (fr ? ' FR-LSH' : '');
+    delete v._type; delete v._ncores; delete v._std;
+    return { v, imp: imp.filter(k => !k.startsWith('_')), label: (n ? n + 'C x ' + area : 'sheet') + (code ? ' ' + code : '') };
+  });
+}
+
+
+// PDF → plain text pages (one row per line). Digital PDFs via pdf.js; scanned pages fall back to OCR (Tesseract).
+async function pdfToTextPages(file, onStatus) {
+  const say = (m) => { try { onStatus && onStatus(m); } catch (e) {} };
+  if (!window.pdfjsLib) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    say('Reading page ' + i + ' of ' + pdf.numPages + '…');
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    let txt = '';
+    if (tc.items.some(it => it.hasEOL)) txt = tc.items.map(it => (it.str || '') + (it.hasEOL ? '\n' : (it.str && !/\s$/.test(it.str) ? ' ' : ''))).join('');
+    else {
+      const rows = {};
+      tc.items.forEach(it => { const y = Math.round((it.transform ? it.transform[5] : 0) / 3); (rows[y] = rows[y] || []).push(it); });
+      txt = Object.keys(rows).map(Number).sort((a, b) => b - a).map(y => rows[y].sort((a, b) => a.transform[4] - b.transform[4]).map(it => it.str).join(' ')).join('\n');
+    }
+    if (txt.replace(/\s/g, '').length < 40) { // scanned page → OCR
+      say('Page ' + i + ' is scanned — running OCR (this can take a minute)…');
+      const vp = page.getViewport({ scale: 2.2 });
+      const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      if (!window.Tesseract) await loadScript('https://unpkg.com/tesseract.js@5/dist/tesseract.min.js');
+      const r = await window.Tesseract.recognize(cv, 'eng');
+      txt = (r && r.data && r.data.text) || '';
+    }
+    pages.push(txt);
+  }
+  return pages;
+}
+
 function TDSPrintBody({ rec }) {
   const secs = tdsRows(rec.v || {});
   const th = { border: '1px solid #444', padding: '5px 6px', fontSize: 11.5, background: '#E9EEF7', color: '#1E2A4A', textAlign: 'left' };
@@ -16817,6 +17014,28 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   const [editing, setEditing] = React.useState(null);
   const [printRec, setPrintRec] = React.useState(null);
   const [picked, setPicked] = React.useState({});
+  const [impBusy, setImpBusy] = React.useState('');
+  async function importPdf(file) {
+    if (!file) return;
+    try {
+      setImpBusy('Opening ' + file.name + '…');
+      const pages = await pdfToTextPages(file, setImpBusy);
+      const found = parseTdsPages(pages).filter(r => r.imp.length >= 3);
+      setImpBusy('');
+      if (!found.length) { alert('Could not find TDS values in this PDF.\n\nIt may be an image with poor quality, or a layout the reader does not know yet. Create the TDS with “New TDS” and a preset instead.'); return; }
+      const base0 = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length;
+      const recs = found.map((r, i) => {
+        const preset = Object.values(TDS_PRESETS).find(pv => pv.cores && r.v.cores && pv.cores.replace(/\s/g, '').toUpperCase() === r.v.cores.replace(/\s/g, '').toUpperCase() && (!r.v.code || !pv.code || pv.code === r.v.code)) || {};
+        const v = { ...TDS_BASE, ...preset, ...r.v, _imp: r.imp, _src: file.name };
+        if (!r.v.innerMat && !r.v.innerMin && !r.v.innerDia && preset.hasInner === undefined) v.hasInner = TDS_BASE.hasInner;
+        return { id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: 'TDS/IMS/F01', date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v, imported: true, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
+      });
+      if (recs.length === 1) { setEditing(recs[0]); return; }
+      setTdsSheets(prev => [...recs, ...(Array.isArray(prev) ? prev : [])]);
+      alert('✅ ' + recs.length + ' TDS created from ' + file.name + ':\n\n' + found.map((r, i) => '• ' + recs[i].number + ' — ' + r.label).join('\n') + '\n\nYellow fields came from the PDF. Open each one, check the values and press Save.');
+      setEditing(recs[0]);
+    } catch (e) { console.error(e); setImpBusy(''); alert('Could not read this PDF: ' + (e && e.message ? e.message : e)); }
+  }
   const [q, setQ] = React.useState('');
   const all = Array.isArray(tdsSheets) ? tdsSheets : [];
   const list = all.filter(r => !r.deleted).filter(r => !isMultiBiz || (r.bizType || 'manufacturing') === currentBizType)
@@ -16835,7 +17054,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   }
   function save() {
     if (!editing.v.title) { alert('Enter the sheet title.'); return; }
-    const rec = { ...editing, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const { _imp, _src, ...vClean } = editing.v || {};
+    const rec = { ...editing, v: vClean, imported: false, bizType: currentBizType, createdAt: editing.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
     setTdsSheets(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
     setEditing(null);
   }
@@ -16850,10 +17070,11 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       <div style={styles.page}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
           <button onClick={() => setEditing(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
-          <h2 className="serif" style={{ ...styles.h1, flex: 1 }}>Technical Data Sheet — {e.number}</h2>
+          <h2 className="serif" style={{ ...styles.h1, flex: 1 }}>Technical Data Sheet — {e.number}{e.imported ? <span style={{ fontSize: 12, fontWeight: 700, color: '#8A5A00', background: '#FFF3C4', borderRadius: 12, padding: '3px 10px', marginLeft: 10, verticalAlign: 'middle' }}>not yet verified</span> : null}</h2>
           <button onClick={() => setPrintRec(e)} style={styles.ghostBtn}><Printer size={14} /> Preview / Print</button>
           <button onClick={save} style={styles.primaryBtn}>Save</button>
         </div>
+        {Array.isArray(v._imp) && v._imp.length > 0 && <div style={{ background: '#FFF8DC', border: '1px solid #E0B84C', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13 }}>📄 <b>{v._imp.length} values</b> were read from <b>{v._src || 'the PDF'}</b> — shown in <span style={{ background: '#FFF1B8', padding: '0 6px', borderRadius: 4 }}>yellow</span>. Other fields are from the standard preset. Check every value against the PDF, then press <b>Save</b>.</div>}
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 18, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
             <div><label style={lbl}>TDS No.</label><input style={inp} value={e.number} onChange={ev => setEditing(p => ({ ...p, number: ev.target.value }))} /></div>
@@ -16883,7 +17104,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
             {(!gr.toggle || v[gr.toggle]) && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
                 {gr.fields.map(([k, label, wide]) => (
-                  <div key={k} style={wide ? { gridColumn: '1 / -1' } : null}><label style={lbl}>{label}</label><input style={inp} value={v[k] || ''} onChange={ev => setV(k, ev.target.value)} /></div>
+                  <div key={k} style={wide ? { gridColumn: '1 / -1' } : null}><label style={lbl}>{label}{(v._imp || []).includes(k) ? <span style={{ color: '#B07D00', fontWeight: 700, marginLeft: 6 }} title="Read from the PDF — verify">● PDF</span> : null}</label><input style={(v._imp || []).includes(k) ? { ...inp, background: '#FFF8DC', borderColor: '#E0B84C' } : inp} value={v[k] || ''} onChange={ev => setV(k, ev.target.value)} /></div>
                 ))}
               </div>)}
           </div>
@@ -16905,8 +17126,10 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 className="serif" style={{ ...styles.h1, flex: 1, margin: 0 }}>Technical Data Sheets</h2>
         <input style={{ ...inp, width: 220 }} placeholder="Search TDS / customer…" value={q} onChange={ev => setQ(ev.target.value)} />
+        {canEdit && <label style={{ ...styles.ghostBtn, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Upload a TDS / customer specification PDF — a new TDS is created from its values">📄 New TDS from PDF<input type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={ev => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; importPdf(f); }} /></label>}
         {canEdit && <button onClick={() => setEditing(blank())} style={styles.primaryBtn}><Plus size={14} /> New TDS</button>}
       </div>
+      {impBusy && <div style={{ background: '#FFF8E1', border: '1px solid #F2D48A', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13 }}>⏳ {impBusy}</div>}
       {list.length > 0 && (() => { const sel = list.filter(r => picked[r.id]), allOn = sel.length === list.length; return (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, background: '#F5F8FE', border: '1px solid #C9D6F0', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}><input type="checkbox" checked={allOn} onChange={() => setPicked(p => { const n = { ...p }; list.forEach(r => { if (allOn) delete n[r.id]; else n[r.id] = true; }); return n; })} /> Select all shown ({list.length})</label>
@@ -16920,7 +17143,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: picked[r.id] ? '#F5F8FE' : '#fff', border: '1px solid ' + (picked[r.id] ? '#9FB4E0' : '#EAE6DB'), borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
             <input type="checkbox" checked={!!picked[r.id]} onChange={() => setPicked(p => { const n = { ...p }; if (n[r.id]) delete n[r.id]; else n[r.id] = true; return n; })} style={{ width: 17, height: 17, cursor: 'pointer' }} title="Select for combined print" />
             <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5, color: '#1E2A4A' }}>{(r.v || {}).title}</div>
+              <div style={{ fontWeight: 600, fontSize: 13.5, color: '#1E2A4A' }}>{(r.v || {}).title}{r.imported ? <span style={{ fontSize: 11, fontWeight: 700, color: '#8A5A00', background: '#FFF3C4', borderRadius: 10, padding: '1px 8px', marginLeft: 8 }}>from PDF · verify</span> : null}</div>
               <div style={{ fontSize: 12, color: '#777' }}><span style={{ fontFamily: 'monospace', color: '#C9A24B' }}>{r.number}</span> · {r.customer || 'MARKET'}{r.refDoc ? ' · Ref ' + r.refDoc : ''} · {r.date}</div>
             </div>
             <button style={styles.iconBtn} title="Print" onClick={() => setPrintRec(r)}><Printer size={15} /></button>
