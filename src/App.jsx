@@ -1619,7 +1619,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'function fits(){return bd.scrollHeight<=bd.clientHeight+1;}'
       + 'function used(){var l=bd.lastElementChild;return l?l.offsetTop+l.offsetHeight:0;}'
       + 'function flowKids(nd){var kids=Array.prototype.slice.call(nd.children);var prev=null,prevBd=null,prevSmall=false;for(var z=0;z<kids.length;z++){var k=kids[z];var n0=out.children.length;placeNode(k);if(prev&&prevSmall&&prevBd&&prev.parentNode===prevBd&&out.children.length>n0){prevBd.removeChild(prev);bd.insertBefore(prev,bd.firstChild);}prev=k;prevBd=k.parentNode;prevSmall=!!(k.parentNode&&k.offsetHeight<70&&z<kids.length-1);}}'
-      + 'function placeNode(nd){bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
+      + 'function placeNode(nd){if(nd.className==="pgbrk"){if(bd.children.length)np();return;}bd.appendChild(nd);if(fits())return;var hh=nd.offsetHeight;var cs=nd.children.length>1&&/^(DIV|SECTION|ARTICLE)$/.test(nd.tagName);if(cs&&hh>bd.clientHeight*0.8){bd.removeChild(nd);flowKids(nd);return;}bd.removeChild(nd);if(bd.children.length)np();bd.appendChild(nd);if(fits())return;if(cs){bd.removeChild(nd);flowKids(nd);}}'
       + 'var zst=document.createElement("style");document.head.appendChild(zst);var RSV="";function setZ(z){zst.textContent=(z<1?".bd>*{zoom:"+z+"}":"")+RSV;}'
       + 'function LAY(){out.innerHTML="";TAIL.length=0;CUR="P";np();var LASTROW=-1,TH=0,LB=null;for(var k0=0;k0<BLOCKS.length;k0++){if(BLOCKS[k0].t==="tail")TAIL.push(BLOCKS[k0].h);else if(BLOCKS[k0].t==="trow")LASTROW=k0;}'
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
@@ -16816,6 +16816,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   const today = new Date().toISOString().slice(0, 10);
   const [editing, setEditing] = React.useState(null);
   const [printRec, setPrintRec] = React.useState(null);
+  const [picked, setPicked] = React.useState({});
   const [q, setQ] = React.useState('');
   const all = Array.isArray(tdsSheets) ? tdsSheets : [];
   const list = all.filter(r => !r.deleted).filter(r => !isMultiBiz || (r.bizType || 'manufacturing') === currentBizType)
@@ -16906,10 +16907,18 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         <input style={{ ...inp, width: 220 }} placeholder="Search TDS / customer…" value={q} onChange={ev => setQ(ev.target.value)} />
         {canEdit && <button onClick={() => setEditing(blank())} style={styles.primaryBtn}><Plus size={14} /> New TDS</button>}
       </div>
+      {list.length > 0 && (() => { const sel = list.filter(r => picked[r.id]), allOn = sel.length === list.length; return (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, background: '#F5F8FE', border: '1px solid #C9D6F0', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}><input type="checkbox" checked={allOn} onChange={() => setPicked(p => { const n = { ...p }; list.forEach(r => { if (allOn) delete n[r.id]; else n[r.id] = true; }); return n; })} /> Select all shown ({list.length})</label>
+          <span style={{ color: '#666' }}>{sel.length} selected</span>
+          <button disabled={!sel.length} onClick={() => setPrintRec(sel)} style={{ ...styles.primaryBtn, opacity: sel.length ? 1 : 0.5 }}><Printer size={14} /> Print selected ({sel.length}) — one document</button>
+          {sel.length > 0 && <button onClick={() => setPicked({})} style={{ border: 'none', background: 'none', color: '#888', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}>Clear</button>}
+        </div>); })()}
       {list.length === 0 && <div style={{ color: '#888780', padding: 30, textAlign: 'center', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12 }}>No technical data sheets yet. Click “New TDS”, pick a standard cable preset and edit the values.</div>}
       <div style={{ display: 'grid', gap: 8 }}>
         {list.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: picked[r.id] ? '#F5F8FE' : '#fff', border: '1px solid ' + (picked[r.id] ? '#9FB4E0' : '#EAE6DB'), borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+            <input type="checkbox" checked={!!picked[r.id]} onChange={() => setPicked(p => { const n = { ...p }; if (n[r.id]) delete n[r.id]; else n[r.id] = true; return n; })} style={{ width: 17, height: 17, cursor: 'pointer' }} title="Select for combined print" />
             <div style={{ flex: 1, minWidth: 220 }}>
               <div style={{ fontWeight: 600, fontSize: 13.5, color: '#1E2A4A' }}>{(r.v || {}).title}</div>
               <div style={{ fontSize: 12, color: '#777' }}><span style={{ fontFamily: 'monospace', color: '#C9A24B' }}>{r.number}</span> · {r.customer || 'MARKET'}{r.refDoc ? ' · Ref ' + r.refDoc : ''} · {r.date}</div>
@@ -16922,8 +16931,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         ))}
       </div>
       {printRec && (
-        <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
-          <TDSPrintBody rec={printRec} />
+        <DocPrintOverlay onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+          {Array.isArray(printRec) ? printRec.map((r, i) => <React.Fragment key={r.id}>{i > 0 && <div className="pgbrk" style={{ height: 0, borderTop: '2px dashed #C9D6F0', margin: '18px 0' }} />}<TDSPrintBody rec={r} /></React.Fragment>) : <TDSPrintBody rec={printRec} />}
         </DocPrintOverlay>
       )}
     </div>
