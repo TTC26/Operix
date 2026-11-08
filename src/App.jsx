@@ -794,7 +794,7 @@ const ZOHO_GEN_CSS =
 // HR letters (offer / warning / termination): same letterhead-or-logo header on every page, letter body flowed across pages.
 const LETTER_CSS =
   '.bd{border:none !important;padding:6mm 16mm 0 !important;font-size:13px;line-height:1.7;}'
-  + '.bd table{width:100% !important;max-width:100% !important;table-layout:auto;}.bd td,.bd th{overflow-wrap:anywhere;word-break:break-word;white-space:normal !important;}.bd img{max-width:100%;}'
+  + '.bd table{width:100% !important;max-width:100% !important;table-layout:auto;font-size:11.5px;}.bd td,.bd th{overflow-wrap:break-word;word-break:normal;hyphens:manual;white-space:normal !important;vertical-align:top;line-height:1.5;}.bd th{vertical-align:middle;}.bd img{max-width:100%;}'
   + '.bd p{line-height:1.75;margin:0 0 12px;}.bd h2{text-align:center;color:#1E2A4A;font-size:15px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 20px;}'
   + '.bd h3{color:#1E2A4A;font-size:13.5px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid #ccc;text-transform:uppercase;letter-spacing:.4px;}.bd .ref{display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:16px;}'
   + '.bd table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}.bd th{background:var(--thbg);color:var(--thfg);padding:7px 10px;text-align:left;border:1px solid var(--gl);}'
@@ -834,12 +834,25 @@ function printLetterFromHtml(html, biz, opts) {
           el.querySelectorAll('colgroup, col').forEach(n => n.remove());
           [el, ...el.querySelectorAll('th, td, tr')].forEach(n => { n.removeAttribute('width'); if (n.style) { n.style.removeProperty('width'); n.style.removeProperty('min-width'); n.style.removeProperty('max-width'); n.style.removeProperty('white-space'); } });
         } catch (e) {}
+        // professional column widths: short columns (Yes/No, qty, standard) sized to their longest word,
+        // long text columns share the rest — words are never split mid-word
+        try {
+          const rows = Array.from(el.querySelectorAll('tr')).filter(r => r.children.length);
+          const nCol = Math.max(0, ...rows.map(r => Array.from(r.children).reduce((a, c) => a + (parseInt(c.getAttribute('colspan')) || 1), 0)));
+          if (nCol > 1 && nCol <= 12) {
+            const maxW = new Array(nCol).fill(0), sum = new Array(nCol).fill(0), cnt = new Array(nCol).fill(0);
+            rows.forEach(r => { let ci = 0; Array.from(r.children).forEach(c => { const sp = parseInt(c.getAttribute('colspan')) || 1; if (sp === 1 && ci < nCol) { const t = (c.textContent || '').replace(/\s+/g, ' ').trim(); const lw = Math.max(0, ...t.split(' ').map(w => w.length)); maxW[ci] = Math.max(maxW[ci], lw); sum[ci] += t.length; cnt[ci]++; } ci += sp; }); });
+            const want = maxW.map((m, i) => Math.max(m + 2, Math.min(70, cnt[i] ? sum[i] / cnt[i] : m)));
+            const tot = want.reduce((a, b) => a + b, 0) || 1;
+            el.setAttribute('data-cols', '<colgroup>' + want.map(w => '<col style="width:' + (w / tot * 100).toFixed(1) + '%">').join('') + '</colgroup>');
+          }
+        } catch (e) {}
         const thead = el.querySelector('thead');
         const head = thead ? thead.outerHTML : '';
         let trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
         if (!trs.length) trs = Array.from(el.querySelectorAll(':scope > tr'));
         if (!trs.length) { out.push({ t: '', h: el.outerHTML, ...(ori ? { ori } : {}) }); return; }
-        const open = '<table style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+        const open = '<table style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">' + (el.getAttribute('data-cols') || '');
         let i = 0;
         while (i < trs.length) {
           let span = 1;
