@@ -9281,7 +9281,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-B</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
