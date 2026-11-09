@@ -9136,6 +9136,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
             {!showService && <NavBtn id="channelpartners" label="Channel Partners" icon={Briefcase} />}
             {showProduction && <NavBtn id="serviceorders" label="SAS" icon={Briefcase} />}
             <CreateBtn docKey="quotation" />
+            {(showProduction || showTrade) && <NavBtn id="exportorders" label="Export Orders (0.1% GST)" icon={Truck} />}
           </Section>
 
           {/* Accounts */}
@@ -9377,6 +9378,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
         <NavBtn id="items"     label="Items"         icon={Package} />
         <NavBtn id="documents" label="My Documents"  icon={FileText} />
         <CreateBtn docKey="quotation" />
+        <NavBtn id="exportorders" label="Export Orders (0.1% GST)" icon={Truck} />
         <CreateBtn docKey="invoice" />
         <CreateBtn docKey="delivery" />
         <CreateBtn docKey="packing_list" />
@@ -9555,7 +9557,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-A</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-B</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
