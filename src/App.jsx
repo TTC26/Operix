@@ -389,7 +389,7 @@ function TaxSummaryBox({ subtotal, taxRate, cc, placeOfSupply, sellerState, onCh
 }
 
 // ─── Shared Print Overlay (used by Tender, RA Bill, AMC, Sub WO, PTW, Handover)
-function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = false }) {
+function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = false, pgf = '' }) {
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [useLH, setUseLH] = React.useState(!!(businessInfo?.letterhead||businessInfo?.letterheadHtml));
   const [autoWide, setAutoWide] = React.useState(false);
@@ -433,7 +433,7 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = fal
         <button style={{ ...styles.ghostBtn, background:'#fff' }} onClick={async()=>{ setPdfLoading(true); await downloadDocPDF('.doc-print-area', filename||'document.pdf'); setPdfLoading(false); }}>
           {pdfLoading?'⏳':'⬇'} {pdfLoading?'Generating...':'Download PDF'}
         </button>
-        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, wide ? { wide: true } : undefined)}><Printer size={15}/> Print</button>
+        <SealToggle businessInfo={businessInfo} /><button style={styles.primaryBtn} onClick={() => printView('.doc-print-area', useLH ? businessInfo : { ...businessInfo, printHeader: 'logo' }, (wide || pgf) ? { ...(wide ? { wide: true } : {}), ...(pgf ? { pgf } : {}) } : undefined)}><Printer size={15}/> Print</button>
       </div>
       <div className="doc-print-area print-area" style={{ position:'fixed', inset:0, background:'#fff', zIndex:999, overflowY:'auto', fontFamily:'Georgia, serif' }}>
         <DocFontStyle businessInfo={businessInfo} />
@@ -1514,7 +1514,8 @@ async function printPaginated(sel, bi, pre, gen) {
           const trs = Array.from(el.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr'));
           const trs2 = trs.length ? trs : Array.from(el.querySelectorAll(':scope > tr'));
           const cls = (isData ? 'gdata ' : 'gplain ') + (el.className || '');
-          const open = '<table class="' + cls + '" style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">';
+          const cg = el.querySelector(':scope > colgroup');
+          const open = '<table class="' + cls + '" style="' + (el.getAttribute('style') || '') + ';width:100%;border-collapse:collapse;">' + (cg ? cg.outerHTML : '');
           let i = 0;
           while (i < trs2.length) {
             let span = 1;
@@ -9596,7 +9597,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-M</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-O</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17512,7 +17513,7 @@ function TDSPrintBody({ rec, part = 'single' }) {
       {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff', textAlign: 'center' }}>{v.picture && !v.useGenerated ? <img src={v.picture} alt="Cable cross-section" style={{ maxWidth: '100%', maxHeight: 230, display: 'inline-block' }} /> : <TDSCableSVG v={v} height={170} />}</div>}
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup><col style={{ width: '7%' }} /><col style={{ width: '41%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '33%' }} /></colgroup>
-        <thead><tr><th style={th}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, textAlign: 'center' }}>Specified</th><th style={{ ...th, textAlign: 'center' }}>Unit</th><th style={{ ...th, textAlign: 'center' }}>Committed Values</th></tr></thead>
+        <thead><tr><th style={{ ...th, width: '7%' }}>S. No.</th><th style={{ ...th, width: '41%' }}>Parameter / Characteristic</th><th style={{ ...th, textAlign: 'center', width: '9%' }}>Specified</th><th style={{ ...th, textAlign: 'center', width: '10%' }}>Unit</th><th style={{ ...th, textAlign: 'center', width: '33%' }}>Committed Values</th></tr></thead>
         <tbody>
           {secs.map(s => (
             <React.Fragment key={s.n}>
@@ -17750,7 +17751,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         ))}
       </div>
       {printRec && (
-        <DocPrintOverlay onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+        <DocPrintOverlay pgf={Array.isArray(printRec) && printRec.length > 1 ? [businessInfo.name, 'Technical Data Sheets (' + printRec.length + ') — ' + printRec.map(r => r.number).join(', ').slice(0, 90), 'Page {p} of {n}'].filter(Boolean).join(' | ') : ''} onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
           {Array.isArray(printRec) ? (printRec.length > 1 ? <TDSCombinedPrint recs={printRec} /> : <TDSPrintBody rec={printRec[0]} />) : <TDSPrintBody rec={printRec} />}
         </DocPrintOverlay>
       )}
