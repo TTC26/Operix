@@ -9596,7 +9596,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-G</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-H</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17168,8 +17168,8 @@ const TDS_IMP_RULES = [
   [null, /normal\s*working|continuous\s*operation/i, 'tNorm', 'n'],
   [null, /short\s*circuit\s*(operation|condition)/i, 'tSC', 'n'],
   [null, /short\s*circuit\s*(rating|current)|permissible\s*short\s*circuit/i, 'scRating', 'n'],
-  [null, /in\s*ground/i, 'ground', 'n'],
-  [null, /in\s*air/i, 'air', 'n'],
+  [null, /in\s*(the\s*)?ground/i, 'ground', 'n'],
+  [null, /in\s*(the\s*)?air/i, 'air', 'n'],
   [['current'], /reference\s*specification|reference\s*spec\S*/i, 'ampSpec', 't'],
   [null, /oxygen\s*index/i, 'coi', 'n'],
   [null, /temperature\s*index/i, 'ti', 'n'],
@@ -17215,8 +17215,8 @@ function parseTdsPages(pages) {
     if (second > 0) text = text.slice(0, second);
     let sizes = tdsImpSizes(text);
     if (sizes.length < 2) { // fallback: several sizes side by side → read them from the "Number of Cores" / "Nominal area" rows
-      const cm = text.match(/number[ \t]*of[ \t]*cores[^\n\d]*((?:[ \t]*\d+){2,})[ \t]*(?:\n|$)/i);
-      if (cm) {
+      const cm = text.match(/number[ \t]*of[ \t]*cores[^\n\d]*(\d+(?:[ \t]+\d+)+)[ \t]*(?:\n|$)/i);
+      if (cm && cm[1].trim().split(/\s+/).length >= 2) {
         const cnt = cm[1].trim().split(/\s+/);
         const am = text.match(/nominal[ \t]*(cross[ \t]*sectional[ \t]*)?area[^\n\d]*((?:[ \t]*\d+(?:\.\d+)?)+)[ \t]*(?:\n|$)/i);
         const ar = am ? am[2].trim().split(/\s+/) : [];
@@ -17226,7 +17226,12 @@ function parseTdsPages(pages) {
     }
     const pageFR = /fr.?\s*lsh/i.test(text);
     const nCols = Math.max(1, sizes.length);
-    const cols = sizes.length ? sizes.map(() => ({ v: {}, imp: [] })) : (carry ? [carry] : [{ v: {}, imp: [] }]);
+    // one-size-per-sheet layout: the size is a heading near the top of the page (e.g. "3C X 6 mm²"); pages with the same heading continue one sheet
+    const ps = !sizes.length ? (text.match(/^[ \t]*(\d+)\s*C(?:ORE)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm\s*[²2]?|sq\.?\s*mm)[ \t]*$/im) || text.split('\n').slice(0, 25).join('\n').match(/^\s*(\d+)\s*C(?:ORE)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm|sq)/im)) : null;
+    const pKey = ps ? ps[1] + 'x' + ps[2] : '';
+    const cols = sizes.length ? sizes.map(() => ({ v: {}, imp: [] }))
+      : pKey ? ((carry && carry._pk === pKey) ? [carry] : [{ v: { _ncores: ps[1], area: ps[2] }, imp: [], _pk: pKey }])
+      : (carry ? [carry] : [{ v: {}, imp: [] }]);
     // 1) logical lines: numbered items; continuation lines joined (single-size sheets only)
     const items = []; let sec = carry ? carry._sec || '' : '';
     text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
@@ -17380,7 +17385,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       const recs = found.map((r, i) => {
         const preset = Object.values(TDS_PRESETS).find(pv => pv.cores && r.v.cores && pv.cores.replace(/\s/g, '').toUpperCase() === r.v.cores.replace(/\s/g, '').toUpperCase() && (!r.v.code || !pv.code || pv.code === r.v.code)) || {};
         const v = { ...TDS_BASE, ...preset, ...r.v, _imp: r.imp, _src: file.name };
-        if (!r.v.innerMat && !r.v.innerMin && !r.v.innerDia && preset.hasInner === undefined) v.hasInner = TDS_BASE.hasInner;
+        v.hasInner = !!(r.v.innerMat || r.v.innerMin || r.v.innerDia) || (!!r.v.hasArmour && preset.hasInner !== false);
         return { id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: withCo('TDS/IMS/F01'), date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v, imported: true, importBatch: file.name, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
       });
       if (recs.length === 1) { setEditing(recs[0]); return; }
