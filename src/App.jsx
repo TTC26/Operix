@@ -9596,7 +9596,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-H</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-J</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17058,7 +17058,8 @@ const TDS_FIELD_GROUPS = [
   { title: 'Electrical Parameters', fields: [['acRes','Max AC Resistance @90°C (Ohm/Km)'],['react','Calculated Reactance (Ohm/Km)'],['cap','Capacitance (Mfd/Km)'],['tNorm','Max Conductor Temp — Normal (°C)'],['tSC','Max Conductor Temp — Short Circuit (°C)'],['scRating','Short Circuit Rating 1 sec (kA)']] },
   { title: 'Current Carrying Capacity', fields: [['ground','In Ground at 30°C (Amp)'],['air','In Air at 40°C (Amp)'],['ampSpec','Reference Specification']] },
   { title: 'FR-LSH Properties', toggle: 'hasFR', fields: [['coi','Critical Oxygen Index (%)'],['ti','Temperature Index (°C)'],['sd','Smoke Density Rating (%)'],['hag','Halogen Acid Gas Generation (%)'],['flame','Flammability Test',2]] },
-  { title: 'Finished Cable', fields: [['overall','Approx Overall Diameter (mm)'],['drum','Standard Drum Length (Meters)'],['drumTol','Tolerance on Drum Length (%)'],['bend','Bending Radius'],['pull1','Safe Pulling Force — with Stocking',2],['pull2','Safe Pulling Force — with pulling eyes',2]] },
+  { title: 'Finished Cable', fields: [['overall','Approx Overall Diameter (mm)'],['drum','Standard Drum Length (Meters)'],['drumTol','Tolerance on Drum Length (%)'],['bend','Bending Radius'],['pull1','Safe Pulling Force — with Stocking',2],['pull2','Safe Pulling Force — with pulling eyes',2],['seqMark','Sequential Marking',2],['emboss','Embossing / Printing on Outer Sheath',2]] },
+  { title: 'Other particulars (printed only when filled)', fields: [['std','Applicable Standard'],['freq','Frequency (Hz)'],['variation','Permissible Voltage / Frequency Variation'],['insRes','Specific Insulation Resistance (Ω-cm)',2],['duct','Current — In Duct at 30°C (Amp)'],['scDur','Short-circuit duration (sec)']] },
 ];
 const TDS_BASE = {
   hasInner: true, hasArmour: true, hasFR: true, voltage: '1100',
@@ -17085,13 +17086,14 @@ function tdsSpecQ(label, sec) {
   const L = String(label || '');
   if (/no of cores/i.test(L)) return '';
   if (/tolerance/i.test(L)) return '±';
+  if (/insulation resistance|resistivity/i.test(L)) return 'Min.';
   if (/resistance/i.test(L)) return 'Max.';
   if (/^nominal$/i.test(L) || /dimension of armour|nominal area/i.test(L)) return 'Nom.';
   if (/minimum at a point|minimum thickness|minimum number of wires/i.test(L)) return 'Min.';
   if (/calculated|approx|reactance|capacitance/i.test(L)) return 'Approx.';
   if (/tolerance/i.test(L)) return '±';
   if (/short circuit rating|maximum conductor temperature/i.test(L)) return 'Max.';
-  if (/^in (ground|air)/i.test(L)) return 'Rated';
+  if (/^in (ground|air|duct)/i.test(L)) return 'Rated';
   if (/voltage grade/i.test(L)) return 'Rated';
   if (/critical oxygen index|temperature index/i.test(L)) return 'Min.';
   if (/smoke density|halogen/i.test(L)) return 'Max.';
@@ -17104,16 +17106,24 @@ function tdsRows(v) {
   const g = (k) => (v[k] === undefined || v[k] === null || v[k] === '') ? '—' : String(v[k]);
   const secs = [];
   const add = (title, rows) => secs.push({ title, rows });
-  add('GENERAL', [['Type of Cable', '', g('cableType')], ['Voltage Grade', 'Volts', g('voltage')], ['No of Cores and Nominal Area', 'No & sq.mm', g('cores')], ['Cable Code', '', g('code')]]);
+  const opt = (rows) => rows.filter(r => r[2] !== '—');
+  add('GENERAL', [['Type of Cable', '', g('cableType')], ...opt([['Applicable Standard', '', g('std')]]), ['Voltage Grade', /kv/i.test(String(v.voltage || '')) ? 'kV' : 'Volts', g('voltage').replace(/\s*kv\s*$/i, '')], ...opt([['Frequency', 'Hz', g('freq')], ['Permissible Voltage / Frequency Variation', '%', g('variation')]]), ['No of Cores and Nominal Area', 'No & sq.mm', g('cores')], ['Cable Code', '', g('code')]]);
   add('CONDUCTOR', [['Material', '', g('condMat')], ['Reference Specification', '', g('condSpec')], ['Shape of Conductor', '', g('condShape')], ['Nominal Area of Conductor', 'Sq.mm', g('area')], ['Minimum Number of Wires in Conductor', 'Nos', g('minWires'), 'Minimum'], ['Diameter of Wires in Conductor', 'mm', 'Wires are so chosen so that the required Conductor Resistance requirements are achieved'], ['Maximum D.C. Resistance at 20 Deg C', 'Ohm/Km', g('dcRes')]]);
-  add('INSULATION', [['Material', '', g('insMat')], ['Reference Specification', '', g('insSpec')], ['Colour of Insulation', '', g('insColour')], ['Thickness of Insulation', '', ''], ['Nominal', 'mm', g('insNom'), '', 1], ['Minimum at a Point', 'mm', g('insMin'), '', 1]]);
+  add('INSULATION', [['Material', '', g('insMat')], ['Reference Specification', '', g('insSpec')], ['Colour of Insulation', '', g('insColour')], ['Thickness of Insulation', '', ''], ['Nominal', 'mm', g('insNom'), '', 1], ['Minimum at a Point', 'mm', g('insMin'), '', 1], ...opt([['Specific Insulation Resistance (volume resistivity)', 'Ω-cm', g('insRes')]])]);
   if (v.hasInner) add('INNER SHEATH', [['Material', '', g('innerMat')], ['Method of Application', '', g('innerMethod')], ['Reference Specification', '', g('innerSpec')], ['Calculated Laid-up Diameter', 'mm', g('innerDia')], ['Minimum Thickness of Sheath', 'mm', g('innerMin')]]);
   if (v.hasArmour) add('ARMOURING', [['Material', '', g('armMat')], ['Reference Specification', '', g('armSpec')], ['Calculated Diameter over Inner Sheath', 'mm', g('armDia')], ['Type of Armour', '', g('armType')], ['Dimension of Armour', 'mm', g('armDim')], ['Tolerance on Dimension of Armour', 'mm / %', g('armTol')]]);
-  add('OUTER SHEATH', [['Material', '', g('outMat')], ['Reference Specification', '', g('outSpec')], ['Colour of Outer Sheath', '', g('outColour')], ['Calculated Diameter over Armour', 'mm', g('outDia')], ['Thickness of Outer Sheath', '', ''], ['Nominal', 'mm', g('outNom'), '', 1], ['Minimum at a Point', 'mm', g('outMin'), '', 1]]);
-  add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for 1 second duration', 'kA', g('scRating')]]);
-  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
+  add('OUTER SHEATH', [['Material', '', g('outMat')], ['Reference Specification', '', g('outSpec')], ['Colour of Outer Sheath', '', g('outColour')], ...(v.hasArmour ? [['Calculated Diameter over Armour', 'mm', g('outDia')]] : []), ['Thickness of Outer Sheath', '', ''], ['Nominal', 'mm', g('outNom'), '', 1], ['Minimum at a Point', 'mm', g('outMin'), '', 1]]);
+  add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for ' + (v.scDur && !/^one$|^1$/i.test(String(v.scDur).trim()) ? v.scDur + ' second' : '1 second') + ' duration', 'kA', g('scRating')]]);
+  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ...opt([['In Duct at 30°C', 'Amp', g('duct'), '', 1]]), ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
   if (v.hasFR) add('FR-LSH PROPERTIES', [['Critical Oxygen Index', '%', g('coi')], ['Temperature Index', 'Deg C', g('ti')], ['Smoke Density Rating', '%', g('sd')], ['Halogen Acid Gas Generation', '%', g('hag')], ['Flammability Test', '', g('flame')]]);
-  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'Newtons', g('pull1'), '', 1], ['When pulled with pulling eyes', 'Newton', g('pull2'), '', 1]]);
+  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'N', g('pull1'), '', 1], ['When pulled with pulling eyes', /mm/i.test(String(v.pull2 || '')) ? '' : 'N', g('pull2'), '', 1], ...opt([['Sequential Marking', '', g('seqMark')], ['Embossing / Printing on Outer Sheath', '', g('emboss')]])]);
+  // print only rows that carry a value (unless "show blank rows" is ticked); a heading row stays only if one of its sub-rows stays
+  if (!v.showBlank) secs.forEach(sc => {
+    const keep = sc.rows.map(r => r[2] !== '—');
+    sc.rows.forEach((r, i) => { if (r[2] === '' && !r[4]) { let j = i + 1, any = false; while (j < sc.rows.length && sc.rows[j][4]) { if (keep[j]) any = true; j++; } keep[i] = any || !(sc.rows[i + 1] && sc.rows[i + 1][4]); } });
+    sc.rows = sc.rows.filter((r, i) => keep[i]);
+  });
+  for (let i = secs.length - 1; i >= 0; i--) if (!secs[i].rows.length) secs.splice(i, 1);
   return secs.map((s, i) => {
     const n = i + 1; let m = 0, sub = 0;
     return { n, title: s.title, rows: s.rows.map(r => {
@@ -17132,7 +17142,14 @@ const TDS_IMP_RULES = [
   [null, /type\s*of\s*cable/i, '_type', 't'],
   [null, /voltage\s*grade|rated\s*voltage/i, 'voltage', 't'],
   [null, /number\s*of\s*cores/i, '_ncores', 'n'],
-  [null, /applicable\s*standard/i, '_std', 't'],
+  [null, /applicable\s*standard/i, 'std', 't'],
+  [null, /^frequency/i, 'freq', 'n'],
+  [null, /permissible\s*voltage\s*\/?\s*frequency\s*variation/i, 'variation', 't'],
+  [null, /specific\s*insulation\s*resistance|volume\s*resistivity/i, 'insRes', 'f'],
+  [null, /in\s*(a\s*)?duct/i, 'duct', 'n'],
+  [null, /^duration/i, 'scDur', 't'],
+  [null, /sequential\s*marking(\s*\(by\s*printing\))?/i, 'seqMark', 'f'],
+  [null, /embossing\s*\/?\s*printing(\s*on\s*outer\s*sheath)?|^printing/i, 'emboss', 'f'],
   [['conductor'], /^material/i, 'condMat', 't'],
   [['conductor'], /reference\s*specification|reference\s*spec\S*/i, 'condSpec', 't'],
   [['conductor'], /shape(\s*of\s*(the\s*)?conductor)?/i, 'condShape', 't'],
@@ -17189,7 +17206,7 @@ const TDS_IMP_SECTION = [
   [/^fr.?\s*lsh|^frlsh/i, 'fr'], [/^finished\s*cable|^additional\s*features/i, 'finished'], [/^general\b/i, 'general'],
 ];
 const TDS_IMP_STOP = /document\s*no|tds\s*no\.|computer\s*generated|^\*|cables?\s*limited|wires\s*india\s*limited|survey\s*no|^tel[:\s]|technical\s*data\s*sheet|customer\s*:|^date\s*:|^particulars|^s\.?\s*no\.?\b|^(conductor|xlpe insulation|armour|inner sheath|outer sheath)$/i;
-const TDS_UNIT_RE = /^\s*(no\s*&\s*sq\.?\s*mm|sq\.?\s*mm|mm2|mm²|mm\s*\/\s*%|mm|ω\s*-?\s*cm|ω\s*\/\s*km|ohm\s*\/\s*km|amps?|ka|°\s*c|◦\s*c|deg\.?\s*c|%|volts?|kv|hz|nos?|mfd\s*\/\s*km|mtrs?|metres|meters|newtons?|n\s*\/\s*mm2|n|sec|minimum|specified)(?![a-z])\.?\s*/i;
+const TDS_UNIT_RE = /^\s*(no\s*&\s*sq\.?\s*mm|sq\.?\s*mm|mm2|mm²|mm\s*\/\s*%|mm|ω\s*-?\s*cm|ω\s*\/\s*km|ohm\s*\/\s*km|amps?|ka|°\s*c|◦\s*c|deg\.?\s*c|%|volts?|kv|hz|nos?|mfd\s*\/\s*km|mtrs?|metres|meters|newtons?|n\s*\/\s*mm\s*[²2]|n|sec|minimum|specified)(?![a-z])\.?\s*/i;
 
 function tdsImpClean(rest) {
   let r = String(rest || '').replace(/for\s*\d+\s*sec(ond)?s?(\s*duration)?/gi, ' ').replace(/\bat\s*[\d.]+\s*(°|◦|º|deg\.?)\s*c\b/gi, ' ').replace(/^\s*[\d.]+\s*(°|◦|º)\s*c\b/i, ' ').replace(/\s+/g, ' ').trim();
@@ -17256,12 +17273,14 @@ function parseTdsPages(pages) {
       const raw0 = body.slice(mm.index + mm[0].length).replace(/astm\s*d\s*-?\s*\d+|iec\s*-?\s*754\s*-?\s*1/gi, ' ');
       let rest = tdsImpClean(key === 'flame' ? raw0 : raw0.replace(/as\s*per\s*iec\s*60332-1/gi, ' '));
       if (key === 'ti') { const tm = raw0.match(/([\d.]+)\s*(°|º)\s*c/i); if (tm) rest = tm[1]; }
+      if (key === 'insRes') rest = raw0.replace(/^\s*[ωΩ\u2126]\s*-?\s*cm\s*/i, '').replace(/\s+/g, ' ').trim();
+      if (key === 'pull2' && /n\s*\/\s*mm/i.test(raw0) && /^[\d.]+$/.test(rest)) rest = rest + ' N/mm²';
       if (!rest) return;
       const nums = rest.match(/\d+(?:\.\d+)?/g) || [];
       cols.forEach((c, k) => {
         let val = '';
         if (nCols > 1) {
-          if (kind === 't') { if (['_type', 'voltage', '_std', 'code'].includes(key)) val = rest; }
+          if (kind === 't') { if (['_type', 'voltage', 'std', 'code', 'variation'].includes(key)) val = rest; }
           else if (kind === 'f') { if (['armDim', 'overall', 'armTol'].includes(key) && nums.length >= nCols && !/x/i.test(rest)) val = nums[k]; }
           else if (nums.length >= nCols) val = nums[k];
           else if (nums.length === 1) val = nums[0];
@@ -17295,7 +17314,18 @@ function parseTdsPages(pages) {
     if (v.drum) v.drum = String(v.drum).replace(/\(.*$/, '').replace(/±.*$/, '').trim() || v.drum;
     v.hasFR = fr; v.hasArmour = !!(v.armMat || v.armDim || /w|f/i.test(code.replace(/^2x/i, '')));
     v.title = (n ? n + ' CORE ' : '') + (xlpe ? 'XLPE' : 'PVC') + (v.hasArmour ? ' ARMOURED' : '') + ' CABLE — ' + (n ? n + 'C x ' + area + ' sq.mm' : '') + (code ? ' (' + code + ')' : '') + (fr ? ' FR-LSH' : '');
-    delete v._type; delete v._ncores; delete v._std;
+    // reference specification taken from "… to IEC 60228:2004" in the material text (never the IS defaults on an IEC sheet)
+    const refOf = (t) => { const m = String(t || '').match(/\b(?:to|as per|conforming to)\s+((?:IEC|IS|BS|EN|ASTM)[^,;]*?)(?:\s+with\b|[,;]|$)/i); return m ? m[1].trim() : ''; };
+    [['condMat', 'condSpec'], ['insMat', 'insSpec'], ['innerMat', 'innerSpec'], ['armMat', 'armSpec'], ['outMat', 'outSpec']].forEach(([mk, sk]) => { const r0 = refOf(v[mk]); if (r0 && !v[sk]) { v[sk] = r0; imp.push(sk); } });
+    const iec = /\bIEC\b/.test([v.std, v.condMat, v.insMat, v.outMat].join(' '));
+    if (iec && !v.ampSpec) { v.ampSpec = 'As per IEC 60287 / manufacturer data'; }
+    if (!v.cableType) {
+      const c = String(v.code || '').trim(), ins = /^2x/i.test(c) || /xlpe/i.test(String(v.insMat || '')) ? 'XLPE INSULATED' : 'PVC INSULATED';
+      const arm = /fa/i.test(c.replace(/^2x/i, '')) ? 'ALUMINIUM STRIP ARMOURED' : /wa/i.test(c.replace(/^2x/i, '')) ? 'ALUMINIUM WIRE ARMOURED' : /w/i.test(c.replace(/^2x/i, '')) ? 'GALVANISED STEEL ROUND WIRE ARMOURED' : /f/i.test(c.replace(/^2x/i, '')) ? 'GALVANISED STEEL STRIP ARMOURED' : 'UNARMOURED';
+      v.cableType = ins + ', ' + arm + ', PVC SHEATHED CABLE'; imp.push('cableType');
+    }
+    if (v.scDur && /^one$/i.test(String(v.scDur).trim())) v.scDur = '1';
+    delete v._type; delete v._ncores;
     return { v, imp: imp.filter(k => !k.startsWith('_')), label: (n ? n + 'C x ' + area : 'sheet') + (code ? ' ' + code : '') };
   });
 }
@@ -17336,33 +17366,133 @@ async function pdfToTextPages(file, onStatus) {
   return pages;
 }
 
-function TDSPrintBody({ rec }) {
-  const secs = tdsRows(rec.v || {});
-  const th = { border: '1px solid #444', padding: '5px 6px', fontSize: 11.5, background: '#E9EEF7', color: '#1E2A4A', textAlign: 'left' };
-  const td = { border: '1px solid #666', padding: '4px 6px', fontSize: 11.5, verticalAlign: 'top' };
+// ─── Cable cross-section drawing generated from the TDS values (drawing not to scale) ───
+const TDS_CORE_COLOURS = { red: '#C62828', yellow: '#F2C200', blue: '#1F5FBF', black: '#222', grey: '#8C8C8C', gray: '#8C8C8C', natural: '#EFE9DC', brown: '#7A4A21', green: '#2E7D32', white: '#F7F7F7', orange: '#E8761C' };
+function tdsCoreColours(txt, n) {
+  const t = String(txt || '').toLowerCase();
+  const found = [];
+  t.replace(/red|yellow|blue|black|grey|gray|natural|brown|green|white|orange/g, (m) => { found.push(TDS_CORE_COLOURS[m]); return m; });
+  if (/grey|gray/.test(t) && /number/.test(t)) return Array(n).fill(TDS_CORE_COLOURS.grey);
+  if (!found.length) return Array(n).fill('#EFE9DC');
+  return Array.from({ length: n }, (_, i) => found[i % found.length]);
+}
+// core centre positions (unit = one insulated core diameter) and the laid-up diameter
+function tdsLayout(n) {
+  if (n <= 1) return { pts: [[0, 0]], D: 1 };
+  if (n <= 5) { const R = 0.5 / Math.sin(Math.PI / n); return { pts: Array.from({ length: n }, (_, i) => [R * Math.cos(-Math.PI / 2 + i * 2 * Math.PI / n), R * Math.sin(-Math.PI / 2 + i * 2 * Math.PI / n)]), D: 2 * R + 1 }; }
+  const pts = [[0, 0]]; let ring = 1, left = n - 1, D = 1;
+  while (left > 0) { const cap = 6 * ring, k = Math.min(cap, left); for (let i = 0; i < k; i++) pts.push([ring * Math.cos(i * 2 * Math.PI / k), ring * Math.sin(i * 2 * Math.PI / k)]); D = 2 * ring + 1; left -= k; ring++; }
+  return { pts, D };
+}
+function TDSCableSVG({ v = {}, height = 190 }) {
+  const n = Math.max(1, parseInt(String(v.cores || '').match(/^\s*(\d+)/)?.[1] || v.area && 1 || 1, 10) || 1);
+  const area = parseFloat(v.area) || parseFloat(String(v.cores || '').split(/x/i)[1]) || 2.5;
+  const ins = parseFloat(v.insNom) || 0.8, sh = parseFloat(v.outNom) || parseFloat(v.outMin) || 1.8;
+  const dc = Math.sqrt(4 * area / Math.PI) * 1.15;                     // conductor dia (mm, stranded)
+  const dCore = dc + 2 * ins;
+  const lay = tdsLayout(n);
+  const laid = lay.D * dCore;
+  const hasInner = !!v.hasInner && n > 1, hasArm = !!v.hasArmour;
+  const inner = hasInner ? Math.max(0.6, parseFloat(v.innerMin) || 0.6) : 0;
+  const armT = hasArm ? (parseFloat(String(v.armDim || '').match(/[\d.]+/g)?.slice(-1)[0]) || 1.4) : 0;
+  const rLaid = laid / 2, rInner = rLaid + inner, rArm = rInner + armT, rOut = rArm + sh;
+  // drawing scale: fit the overall diameter into the box, keep thin layers visible
+  const box = height - 20, k = box / (2 * rOut);
+  const vis = (mm, min) => Math.max(mm * k, min);
+  const cx = height / 2 + 4, cy = height / 2;
+  const RO = rOut * k, RA = RO - vis(sh, 7), RI = hasArm ? RA - vis(armT, 6) : RA, RL = hasInner ? RI - vis(inner, 5) : RI;
+  const s = Math.min(k, (RL * 2) / (lay.D * dCore)) ;           // cores fill the laid-up circle
+  const rc = (dCore / 2) * s, rcond = Math.max((dc / 2) * s, rc - Math.max(ins * s, 2.2));
+  const cols = tdsCoreColours(v.insColour, n);
+  const strip = /strip|flat|formed/i.test(String(v.armType || '') + String(v.armMat || '') + String(v.code || ''));
+  const alu = /alu/i.test(String(v.armMat || '') + String(v.code || '').replace(/^2x/i, ''));
+  const armColour = alu ? '#B8BEC6' : '#8E99A6';
+  const nArm = Math.max(12, Math.round((2 * Math.PI * (RI + (RA - RI) / 2)) / Math.max(4, RA - RI)));
+  const labels = [
+    ['Conductor', [/alu/i.test(String(v.condMat || '')) ? 'Aluminium' : 'Copper', (String(v.condMat || '').match(/class\s*\d/i) || [''])[0], (v.condShape || '').toLowerCase()].filter(Boolean).join(', '), RL ? [cx + (lay.pts[0][0] * dCore * s), cy + lay.pts[0][1] * dCore * s] : [cx, cy]],
+    ['Insulation', [(/xlpe/i.test(String(v.insMat || '')) || /^2x/i.test(String(v.code || '').trim()) ? 'XLPE' : 'PVC'), v.insNom ? v.insNom + ' mm nom.' : '', v.insColour || ''].filter(Boolean).join(' · '), [cx + (lay.pts[0][0] * dCore * s) + rc * 0.75, cy + lay.pts[0][1] * dCore * s - rc * 0.55]],
+    hasInner ? ['Inner sheath', [(String(v.innerMat || '').match(/pvc|thermoplastic|polymeric/i) || ['PVC'])[0].toUpperCase(), v.innerMethod ? String(v.innerMethod).toLowerCase() : ''].filter(Boolean).join(', '), [cx + (RI + RL) / 2 * 0.71, cy - (RI + RL) / 2 * 0.71]] : null,
+    hasArm ? ['Armour', [alu ? 'Aluminium' : 'Galvanised steel', strip ? 'strip' : 'round wire', v.armDim ? v.armDim + ' mm' : ''].filter(Boolean).join(' '), [cx + (RA + RI) / 2 * 0.71, cy - (RA + RI) / 2 * 0.71]] : null,
+    ['Outer sheath', [(String(v.outMat || '').match(/ST-?\d|PVC|LSZH|HDPE/ig) || ['PVC']).slice(0, 2).join(' '), v.outNom && v.outNom !== 'N.A.' ? v.outNom + ' mm nom.' : (v.outMin ? v.outMin + ' mm min.' : ''), v.outColour || '', v.hasFR ? 'FR-LSH' : ''].filter(Boolean).join(' · '), [cx + (RO + RA) / 2 * 0.71, cy - (RO + RA) / 2 * 0.71]],
+  ].filter(Boolean);
+  const W = 640, lx = height + 60;
   return (
-    <div>
-      <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#1E2A4A', letterSpacing: 0.5 }}>TECHNICAL DATA SHEET</div>
-      <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, margin: '4px 0 8px' }}>{(rec.v || {}).title}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11.5, marginBottom: 8, flexWrap: 'wrap' }}>
-        <span><b>Document No.:</b> {rec.docNo}</span><span><b>TDS No.:</b> {rec.number}</span><span><b>Customer:</b> {rec.customer || 'MARKET'}</span>
-        {rec.refDoc ? <span><b>Ref:</b> {rec.refDoc}</span> : null}<span><b>Date:</b> {rec.date}</span>
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr><th style={{ ...th, width: 44 }}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, width: 62 }}>Specified</th><th style={{ ...th, width: 70 }}>Unit</th><th style={{ ...th, width: '32%' }}>Committed Values</th></tr></thead>
+    <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', maxHeight: height }} xmlns="http://www.w3.org/2000/svg">
+      <circle cx={cx} cy={cy} r={RO} fill="#2B2B2B" />
+      {hasArm && (strip
+        ? <circle cx={cx} cy={cy} r={(RA + RI) / 2} fill="none" stroke={armColour} strokeWidth={Math.max(2, RA - RI - 1)} strokeDasharray="10 1.5" />
+        : <g>{Array.from({ length: nArm }, (_, i) => { const a = i * 2 * Math.PI / nArm, rr = (RA + RI) / 2; return <circle key={i} cx={cx + rr * Math.cos(a)} cy={cy + rr * Math.sin(a)} r={Math.max(1.6, (RA - RI) / 2 - 0.3)} fill={armColour} stroke="#5F6B78" strokeWidth="0.4" />; })}</g>)}
+      {hasArm && <circle cx={cx} cy={cy} r={RI} fill="#2B2B2B" />}
+      {hasInner && <circle cx={cx} cy={cy} r={RI} fill="#6E6E6E" />}
+      <circle cx={cx} cy={cy} r={RL} fill={hasInner ? '#9A9A9A' : '#3A3A3A'} />
+      {lay.pts.map(([px, py], i) => { const x = cx + px * dCore * s, y = cy + py * dCore * s; return (
+        <g key={i}>
+          <circle cx={x} cy={y} r={rc} fill={cols[i]} stroke="#333" strokeWidth="0.6" />
+          <circle cx={x} cy={y} r={rcond} fill="#C9792B" stroke="#8A4E16" strokeWidth="0.5" />
+          {rcond > 4 && <circle cx={x} cy={y} r={rcond * 0.55} fill="none" stroke="#E7A764" strokeWidth="0.6" />}
+          {/number/i.test(String(v.insColour || '')) && rc > 6 && <text x={x} y={y + 3} fontSize={Math.min(8, rc * 0.7)} textAnchor="middle" fill="#fff" fontFamily="Arial" fontWeight="700">{i + 1}</text>}
+        </g>); })}
+      {labels.map(([t, d, [px, py]], i) => { const ty = 16 + i * ((height - 44) / Math.max(1, labels.length - 1 || 1)); return (
+        <g key={t}>
+          <circle cx={px} cy={py} r="2" fill="#C62828" />
+          <polyline points={`${px},${py} ${lx - 14},${ty} ${lx - 4},${ty}`} fill="none" stroke="#555" strokeWidth="0.7" />
+          <text x={lx} y={ty - 1} fontSize="11" fontFamily="Arial" fontWeight="700" fill="#1E2A4A">{i + 1}. {t}</text>
+          <text x={lx} y={ty + 11} fontSize="9.5" fontFamily="Arial" fill="#444">{String(d).slice(0, 70)}</text>
+        </g>); })}
+      <text x={W - 4} y={height - 3} fontSize="8.5" textAnchor="end" fontFamily="Arial" fill="#888">{(v.cores || '') + (v.code ? ' · ' + v.code : '')} · cross-section, drawing not to scale</text>
+    </svg>
+  );
+}
+
+function TDSPrintBody({ rec, part = 'single' }) {
+  // part: 'single' = stand-alone sheet; 'section' = one cable inside a combined TDS document (no repeated main heading)
+  const v = rec.v || {}, secs = tdsRows(v);
+  const th = { border: '1px solid #3E4C6B', padding: '4px 6px', fontSize: 10.5, background: '#1E2A4A', color: '#fff', textAlign: 'left', fontWeight: 700 };
+  const td = { border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5, verticalAlign: 'top', lineHeight: 1.35 };
+  const meta = [['TDS No.', rec.number], ['Document No.', rec.docNo], ['Customer', rec.customer || 'MARKET'], rec.refDoc ? ['Reference', rec.refDoc] : null, ['Date', rec.date]].filter(Boolean);
+  return (
+    <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#111' }}>
+      {part === 'single' && <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 6 }}>TECHNICAL DATA SHEET</div>}
+      <div style={{ background: '#F1F4FA', border: '1px solid #9AA3B5', borderLeft: '4px solid #1E2A4A', padding: '5px 8px', fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>{v.title}</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6, tableLayout: 'fixed' }}><tbody><tr>{meta.map(([k, val]) => <td key={k} style={{ border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5 }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}</tr></tbody></table>
+      {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff' }}><TDSCableSVG v={v} height={170} /></div>}
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup><col style={{ width: '7%' }} /><col style={{ width: '41%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '33%' }} /></colgroup>
+        <thead><tr><th style={th}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, textAlign: 'center' }}>Specified</th><th style={{ ...th, textAlign: 'center' }}>Unit</th><th style={{ ...th, textAlign: 'center' }}>Committed Values</th></tr></thead>
         <tbody>
           {secs.map(s => (
             <React.Fragment key={s.n}>
-              <tr><td style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#F4F6FA' }}>{s.title}</td></tr>
+              <tr><td style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A', letterSpacing: 0.4 }}>{s.title}</td></tr>
               {s.rows.map(r => (
-                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 18 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, textAlign: 'center' }}>{r.val}</td></tr>
+                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 16 : 6 }}>{r.label}</td><td style={{ ...td, textAlign: 'center' }}>{r.spec}</td><td style={{ ...td, textAlign: 'center' }}>{r.unit}</td><td style={{ ...td, textAlign: 'center', fontWeight: r.val && /^[\d.±\s/-]+$/.test(r.val) ? 700 : 400 }}>{r.val}</td></tr>
               ))}
             </React.Fragment>
           ))}
         </tbody>
       </table>
-      {rec.notes ? <div style={{ marginTop: 8, fontSize: 11.5 }}><b>Notes:</b> {rec.notes}</div> : null}
-      <div style={{ textAlign: 'center', fontSize: 11, color: '#555', marginTop: 12 }}>* This is a computer generated document. No signature is required *</div>
+      {rec.notes ? <div style={{ marginTop: 6, fontSize: 10.5 }}><b>Notes:</b> {rec.notes}</div> : null}
+      {part === 'single' && <div style={{ textAlign: 'center', fontSize: 10, color: '#555', marginTop: 8 }}>* Values indicated as "Approx." are for guidance only. This is a computer generated document; no signature is required. *</div>}
+    </div>
+  );
+}
+// Combined TDS document: one heading + index, then one section per cable (each on a new page)
+function TDSCombinedPrint({ recs = [] }) {
+  const f = recs[0] || {};
+  const th = { border: '1px solid #3E4C6B', padding: '4px 6px', fontSize: 10.5, background: '#1E2A4A', color: '#fff', textAlign: 'left' };
+  const td = { border: '1px solid #9AA3B5', padding: '4px 6px', fontSize: 10.5 };
+  return (
+    <div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
+      <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}>TECHNICAL DATA SHEETS</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, tableLayout: 'fixed' }}><tbody><tr>
+        {[['Document No.', f.docNo], ['Customer', f.customer || 'MARKET'], ['Reference', f.refDoc || '—'], ['Date', f.date], ['No. of sheets', recs.length]].map(([k, val]) => <td key={k} style={td}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
+      </tr></tbody></table>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup><col style={{ width: '7%' }} /><col style={{ width: '22%' }} /><col style={{ width: '71%' }} /></colgroup>
+        <thead><tr><th style={th}>Sl.</th><th style={th}>TDS No.</th><th style={th}>Cable</th></tr></thead>
+        <tbody>{recs.map((r, i) => <tr key={r.id}><td style={td}>{i + 1}</td><td style={td}>{r.number}</td><td style={td}>{(r.v || {}).title}</td></tr>)}</tbody>
+      </table>
+      <div style={{ textAlign: 'center', fontSize: 10, color: '#555', marginTop: 8 }}>* Values indicated as "Approx." are for guidance only. This is a computer generated document; no signature is required. *</div>
+      {recs.map(r => <React.Fragment key={r.id}><div className="pgbrk" style={{ height: 0, borderTop: '2px dashed #C9D6F0', margin: '18px 0' }} /><TDSPrintBody rec={r} part="section" /></React.Fragment>)}
     </div>
   );
 }
@@ -17472,6 +17602,11 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         ))}
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+            <div style={{ width: '100%', border: '1px solid #EAE6DB', borderRadius: 10, padding: '8px 10px', marginBottom: 10, background: '#FCFBF8' }}>
+              <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}><input type="checkbox" checked={!v.hideDrawing} onChange={ev => setV('hideDrawing', !ev.target.checked)} /> Print cable cross-section drawing (generated from cores, size, insulation, sheath, armour and colours above)</label>
+              {!v.hideDrawing && <TDSCableSVG v={v} height={170} />}
+            </div>
+            <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: '#1E2A4A', width: '100%', marginBottom: 4 }}><input type="checkbox" checked={!!v.showBlank} onChange={ev => setV('showBlank', ev.target.checked)} /> Print rows that have no value (shown as “—”). Off = only filled rows are printed.</label>
             <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>“Specified” column — limit type</div>
             <span style={{ fontSize: 12, color: '#888' }}>Max. / Min. / Nom. / Approx. / Rated — filled automatically; change any row if needed.</span>
             {v.specQ && Object.keys(v.specQ).length > 0 && <button type="button" onClick={() => setV('specQ', {})} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }}>↺ Reset to standard</button>}
@@ -17531,7 +17666,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       </div>
       {printRec && (
         <DocPrintOverlay onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
-          {Array.isArray(printRec) ? printRec.map((r, i) => <React.Fragment key={r.id}>{i > 0 && <div className="pgbrk" style={{ height: 0, borderTop: '2px dashed #C9D6F0', margin: '18px 0' }} />}<TDSPrintBody rec={r} /></React.Fragment>) : <TDSPrintBody rec={printRec} />}
+          {Array.isArray(printRec) ? (printRec.length > 1 ? <TDSCombinedPrint recs={printRec} /> : <TDSPrintBody rec={printRec[0]} />) : <TDSPrintBody rec={printRec} />}
         </DocPrintOverlay>
       )}
     </div>
