@@ -7608,6 +7608,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
     return { val, inr: fx ? val * fx : 0, supVal, gst, intra, cgst: intra ? gst / 2 : 0, igst: intra ? 0 : gst, supTotal: supVal + gst };
   };
   const m2 = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const mF = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const cur = (r) => r.currency || 'USD';
   const fmtDate = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '-' + m[2] + '-' + m[1] : (d || ''); };
 
@@ -7622,24 +7623,26 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
   const KV = ({ rows, cols = 1 }) => { const rr = rows.filter(r => r[1]); if (!rr.length) return null; if (cols === 2) { const pairs = []; for (let i = 0; i < rr.length; i += 2) pairs.push([rr[i], rr[i + 1]]); return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{pairs.map((pr, i) => <tr key={i}>{pr.map((c, j) => c ? <React.Fragment key={j}><td style={{ ...td, width: '17%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{c[0]}</td><td style={{ ...td, width: '33%' }}>{c[1]}</td></React.Fragment> : <td key={j} colSpan={2} style={td} />)}</tr>)}</tbody></table>; } return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{rr.map(([k, v]) => <tr key={k}><td style={{ ...td, width: '30%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>; };
   const Party = ({ blocks }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody><tr>{blocks.map(([title, lines], i) => <td key={i} style={{ ...td, verticalAlign: 'top', padding: '7px 9px' }}><div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6D3B', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 3 }}>{title}</div>{lines.filter(Boolean).map((l, k) => <div key={k} style={{ fontSize: 11.5, fontWeight: k === 0 ? 700 : 400, lineHeight: 1.45 }}>{l}</div>)}</td>)}</tr></tbody></table>;
   const Sec = ({ t }) => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: 0.6, borderBottom: '1px solid #9AA6BF', padding: '2px 0', margin: '10px 0 6px' }}>{t}</div>;
-  const Sign = ({ forName, left }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 26 }}><tbody><tr><td style={{ width: '50%', fontSize: 11.5, verticalAlign: 'bottom', color: '#444' }}>{left || ''}</td><td style={{ textAlign: 'center', fontSize: 12, verticalAlign: 'bottom' }}><div style={{ height: 46 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4, display: 'inline-block', minWidth: 230 }}>For <b>{forName}</b><br />Authorised Signatory</div></td></tr></tbody></table>;
+  const Sign = ({ forName, left }) => <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 22, fontSize: 12 }}><div style={{ fontSize: 11.5, color: '#444', paddingBottom: 4 }}>{left || ''}</div><div style={{ textAlign: 'center', minWidth: 230 }}><div style={{ height: 44 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For <b>{forName}</b><br />Authorised Signatory</div></div></div>;
   const Cond = ({ title, items }) => <div style={{ fontSize: 11.5, lineHeight: 1.55 }}><Sec t={title} /><ol style={{ margin: '0 0 0 18px', padding: 0 }}>{items.map((x, i) => <li key={i} style={{ marginBottom: 3, textAlign: 'justify' }}>{x}</li>)}</ol></div>;
   function DocBody({ r, kind }) {
     const t = tot(r), bn = businessInfo.name || '';
     const exporterRows = [['Exporter', bn + ', ' + (businessInfo.address || '')], ['GSTIN', businessInfo.gstin], ['IEC', prof.iec], ['Export Promotion Council', [prof.epc, prof.epcNo].filter(Boolean).join(' — Reg. No. ')], ['AD Code', prof.adCode]];
-    if (kind === 'pi') return (<div>
+    if (kind === 'pi') return (<div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <H t="Export Proforma Invoice" no={r.piNo} date={r.piDate} noLabel="PI No." />
       <Party blocks={[['Exporter', [bn, businessInfo.address, businessInfo.gstin && 'GSTIN: ' + businessInfo.gstin, prof.iec && 'IEC: ' + prof.iec, (prof.epc || prof.epcNo) && [prof.epc, prof.epcNo].filter(Boolean).join(' · RCMC ')]], ['Buyer (Consignee)', [r.buyer, r.buyerAddress, r.buyerCountry, r.buyerTaxId && 'Tax ID: ' + r.buyerTaxId]]]} />
       <KV cols={2} rows={[['Buyer PO / Ref', r.buyerPO], ['Our Ref', [r.woNo, r.quoteNo].filter(Boolean).join(' / ')], ['Port of Loading', r.portLoad], ['Port of Discharge', r.portDischarge], ['Final Destination', r.finalDest || r.buyerCountry], ['Incoterm 2020', r.incoterm], ['Payment Terms', r.payTerms], ['Delivery', r.delivery], ['Country of Origin', 'India'], ['Currency', cur(r)]]} />
       <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Description of goods', 'HS Code', 'Qty', 'Unit', 'Rate (' + cur(r) + ')', 'Amount (' + cur(r) + ')'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.rate))}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.rate))}</td></tr>)}
-          <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total {r.incoterm} value ({cur(r)})</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(t.val)}</td></tr></tbody></table>
+        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{mF(expN(it.rate))}</td><td style={{ ...td, textAlign: 'right' }}>{mF(expN(it.qty) * expN(it.rate))}</td></tr>)}
+          <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total {r.incoterm} value ({cur(r)})</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{mF(t.val)}</td></tr></tbody></table>
       <div><div style={{ fontSize: 11.5, marginTop: 8, padding: '6px 8px', border: '1px solid #9AA6BF', background: '#FAFBFD' }}><b>Amount in words:</b> {cur(r)} {typeof numToWordsIntl === 'function' ? numToWordsIntl(Math.round(t.val)) : ''} only</div>
-      <KV rows={[['Beneficiary bank', [businessInfo.bankName, businessInfo.bankBranch].filter(Boolean).join(', ')], ['Account no.', businessInfo.bankAccount], ['IFSC / SWIFT', [businessInfo.ifsc, prof.swift].filter(Boolean).join(' / ')], ['AD code', prof.adCode]]} />
+      <div style={{ border: '1px solid #9AA6BF', borderTop: 'none', padding: '6px 8px', fontSize: 11.5, display: 'grid', gridTemplateColumns: '140px 1fr 140px 1fr', gap: '3px 8px', marginBottom: 8 }}>
+        {[['Beneficiary bank', [businessInfo.bankName, businessInfo.bankBranch].filter(Boolean).join(', ')], ['Account no.', businessInfo.bankAccount], ['IFSC / SWIFT', [businessInfo.ifsc, prof.swift].filter(Boolean).join(' / ')], ['AD code', prof.adCode]].filter(x => x[1]).map(([k, v]) => <React.Fragment key={k}><b style={{ color: '#1E2A4A' }}>{k}</b><span>{v}</span></React.Fragment>)}
+      </div>
       <div style={{ fontSize: 11, color: '#444', textAlign: 'justify' }}>Supply meant for export. This proforma invoice is not a tax invoice; the commercial invoice will be issued at the time of shipment.{r.notes ? ' ' + r.notes : ''}</div>
       <Sign forName={bn} left="Accepted by Buyer: ____________________" /></div>
     </div>);
-    if (kind === 'po') return (<div>
+    if (kind === 'po') return (<div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <H t="Purchase Order — Supply for Export (Concessional GST 0.1%)" no={r.poNo} date={r.poDate} noLabel="PO No." />
       <Party blocks={[['Supplier', [r.supplier || '________________________', r.supplierAddress, r.supplierGstin && 'GSTIN: ' + r.supplierGstin]], ['Buyer — Merchant Exporter', [bn, businessInfo.address, businessInfo.gstin && 'GSTIN: ' + businessInfo.gstin, prof.iec && 'IEC: ' + prof.iec, (prof.epc || prof.epcNo) && [prof.epc, prof.epcNo].filter(Boolean).join(' · RCMC ')]]]} />
       <KV cols={2} rows={[['Export order', r.number], ['WO / PI', [r.woNo, r.piNo].filter(Boolean).join(' / ')], ['Deliver directly to', r.portLoad], ['Delivery by', r.poDelivery ? fmtDate(r.poDelivery) : ''], ['CHA / Forwarder', [r.cha, r.chaAddress].filter(Boolean).join(', ')], ['GST', t.intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%']]} />
@@ -7657,7 +7660,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
           'A copy of this purchase order is being provided to your jurisdictional GST officer.']} />
       <Sign forName={bn} left="Supplier acceptance: ____________________" /></div>
     </div>);
-    if (kind === 'letter') return (<div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+    if (kind === 'letter') return (<div style={{ fontSize: 12.5, lineHeight: 1.7, fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <H t="Intimation to Jurisdictional GST Officer" no={r.poNo + '/GST'} date={r.poDate} noLabel="Ref" />
       <div style={{ marginTop: 4 }}>To,<br /><b>{r.supplierOfficer || 'The Jurisdictional GST Officer'}</b><br />{r.supplierJurisdiction || '(Range / Division / Commissionerate of the supplier)'}</div>
       <div style={{ marginTop: 12, padding: '6px 9px', borderLeft: '3px solid #1E2A4A', background: '#F4F6FA' }}><b>Sub:</b> Intimation of purchase order for procurement of goods at concessional GST rate for export — supplier {r.supplier || '________'} (GSTIN {r.supplierGstin || '________'})</div>
@@ -7671,7 +7674,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
       <div>Thanking you,<br />Yours faithfully,</div>
       <Sign forName={bn} left={'Encl.: Copy of purchase order No. ' + r.poNo} />
     </div>);
-    if (kind === 'dispatch') return (<div>
+    if (kind === 'dispatch') return (<div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <H t="Dispatch Instructions — Direct to Port" no={r.poNo + '/DI'} date={today} noLabel="Ref" />
       <Party blocks={[['To (Supplier)', [r.supplier || '________________________', r.supplierAddress, r.supplierGstin && 'GSTIN: ' + r.supplierGstin]], ['Deliver to (Port / CHA)', [r.portLoad, r.cha && 'c/o ' + r.cha, r.chaAddress, r.chaContact]]]} />
       <KV cols={2} rows={[['Against PO', r.poNo + ' dt. ' + fmtDate(r.poDate)], ['Export order', [r.number, r.woNo].filter(Boolean).join(' / ')], ['Final buyer', r.buyer], ['Destination', r.finalDest || r.buyerCountry || r.portDischarge], ['Marks & numbers', r.marks], ['Packing', r.packing], ['Deliver by', r.poDelivery ? fmtDate(r.poDelivery) : ''], ['GST on invoice', tot(r).intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%']]} />
@@ -9593,7 +9596,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-E</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-G</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17077,6 +17080,26 @@ const TDS_PRESETS = {
   '7C x 2.5 sq.mm (2XWY) FR-LSH': { title: '7 CORE XLPE CABLE — 7C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE ARMOURED CABLE', cores: '7 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'GREY WITH NUMBERING', insNom: '0.70', insMin: '0.63', innerDia: '9.60', armMat: 'GALVANISED STEEL FORMED WIRE', armDia: '10.20', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040 %', outDia: '13.00', outMin: '1.24', acRes: '9.44', react: '0.100', cap: '0.10', scRating: '0.358', ground: '34', air: '30', overall: '15.50 ± 3.00', drum: '500/1000' },
   '2C x 2.5 sq.mm (2XWY) FR-LSH': { title: '2 CORE XLPE ARMOURED CABLE — 2C x 2.5 sq.mm (2XWY) FR-LSH', cableType: 'XLPE LT ARMOURED CABLE', cores: '2 CORE X 2.5', code: '2XWY', condShape: 'STRANDED CIRCULAR', area: '2.5', minWires: '3', dcRes: '7.41', insColour: 'RED AND BLACK', insNom: '0.90', insMin: '0.71', innerDia: '6.40', armMat: 'GALVANISED STEEL ROUND WIRE', armDia: '7.00', armType: 'ROUND WIRE', armDim: '1.40', armTol: '± 0.040', outDia: '9.80', outMin: '1.24', acRes: '9.49', react: '0.100', cap: '0.10', scRating: '0.3575', ground: '41', air: '36', overall: '12.50 ± 3' },
 };
+// "Specified" column: how the committed value is to be read (limit type), per IS 7098 / IEC 60502 practice
+function tdsSpecQ(label, sec) {
+  const L = String(label || '');
+  if (/no of cores/i.test(L)) return '';
+  if (/tolerance/i.test(L)) return '±';
+  if (/resistance/i.test(L)) return 'Max.';
+  if (/^nominal$/i.test(L) || /dimension of armour|nominal area/i.test(L)) return 'Nom.';
+  if (/minimum at a point|minimum thickness|minimum number of wires/i.test(L)) return 'Min.';
+  if (/calculated|approx|reactance|capacitance/i.test(L)) return 'Approx.';
+  if (/tolerance/i.test(L)) return '±';
+  if (/short circuit rating|maximum conductor temperature/i.test(L)) return 'Max.';
+  if (/^in (ground|air)/i.test(L)) return 'Rated';
+  if (/voltage grade/i.test(L)) return 'Rated';
+  if (/critical oxygen index|temperature index/i.test(L)) return 'Min.';
+  if (/smoke density|halogen/i.test(L)) return 'Max.';
+  if (/standard drum length/i.test(L)) return 'Nom.';
+  if (/bending radius/i.test(L)) return 'Min.';
+  if (/when pulled/i.test(L)) return 'Max.';
+  return '';
+}
 function tdsRows(v) {
   const g = (k) => (v[k] === undefined || v[k] === null || v[k] === '') ? '—' : String(v[k]);
   const secs = [];
@@ -17094,8 +17117,10 @@ function tdsRows(v) {
   return secs.map((s, i) => {
     const n = i + 1; let m = 0, sub = 0;
     return { n, title: s.title, rows: s.rows.map(r => {
-      if (r[4]) { sub++; return { no: n + '.' + m + '.' + sub, label: r[0], unit: r[1], val: r[2], spec: r[3], indent: true }; }
-      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec: r[3] || '' };
+      const qk = s.title + '|' + r[0] + (r[4] ? '|' + m : ''), ov = (v.specQ || {})[qk];
+      const spec = ov !== undefined ? ov : (r[2] === '' ? '' : tdsSpecQ(r[0], s.title));
+      if (r[4]) { sub++; return { no: n + '.' + m + '.' + sub, label: r[0], unit: r[1], val: r[2], spec, qk, indent: true }; }
+      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec, qk };
     }) };
   });
 }
@@ -17440,6 +17465,21 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
               </div>)}
           </div>
         ))}
+        <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>“Specified” column — limit type</div>
+            <span style={{ fontSize: 12, color: '#888' }}>Max. / Min. / Nom. / Approx. / Rated — filled automatically; change any row if needed.</span>
+            {v.specQ && Object.keys(v.specQ).length > 0 && <button type="button" onClick={() => setV('specQ', {})} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }}>↺ Reset to standard</button>}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '6px 14px' }}>
+            {tdsRows(v).flatMap(sc => sc.rows.filter(r => r.val !== '' && r.unit).map(r => (
+              <div key={r.qk} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <span style={{ flex: 1, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sc.title + ' — ' + r.label}>{r.no} {r.label}</span>
+                <input list="tds-specq" value={r.spec} onChange={ev => setV('specQ', { ...(v.specQ || {}), [r.qk]: ev.target.value })} style={{ ...inp, width: 80, padding: '4px 6px' }} />
+              </div>)))}
+          </div>
+          <datalist id="tds-specq">{['Max.', 'Min.', 'Nom.', 'Approx.', 'Rated', '±', 'Typical'].map(x => <option key={x} value={x} />)}</datalist>
+        </div>
         <div style={{ background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16 }}>
           <label style={lbl}>Notes (printed below the table)</label>
           <textarea style={{ ...inp, minHeight: 60 }} value={e.notes || ''} onChange={ev => setEditing(p => ({ ...p, notes: ev.target.value }))} />
