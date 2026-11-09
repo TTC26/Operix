@@ -1637,14 +1637,18 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(parts.length-j===1&&j>1)j--;'
       + 'if(j>0){var tA=mk(parts.slice(0,j));bd.appendChild(tA);var tAh=tA.offsetHeight;bd.removeChild(tA);fillAbove(tAh);bd.appendChild(tA);}'
       + 'var rest=parts.slice(j);if(rest.length){np();bd.appendChild(mk(rest));}}}'
-      + '}setZ(1);LAY();var P0=out.children.length;if(typeof FITONE!=="undefined"&&FITONE&&(!FITSOFT||P0===2)){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}if(FITSOFT&&out.children.length>1){setZ(1);LAY();}}'
+      + '}function RUN(){setZ(1);LAY();var P0=out.children.length;if(typeof FITONE!=="undefined"&&FITONE&&(!FITSOFT||P0===2)){for(var zz=0.95;zz>=0.62&&out.children.length>1;zz-=0.03){setZ(zz);LAY();}if(FITSOFT&&out.children.length>1){setZ(1);LAY();}}'
       + 'function qrPlace(){var lb=out.lastElementChild.querySelector(".bd");if(!lb)return false;var le2=lb.lastElementChild;var us2=le2?le2.offsetTop+le2.offsetHeight:0;var fr2=lb.clientHeight-us2;var sz=Math.min(112,fr2-34);if(sz<64)return false;var qw=document.createElement("div");qw.style.cssText="position:absolute;right:5mm;bottom:1.5mm;";qw.innerHTML=QRH;var sv=qw.querySelector("svg");if(sv){sv.setAttribute("width",sz);sv.setAttribute("height",sz);}lb.appendChild(qw);return true;}'
       + 'if(QRH&&out.lastElementChild&&!qrPlace()){var cb=parseFloat(getComputedStyle(out.querySelector(".bd")).bottom)||0;RSV=".bd{bottom:"+(cb+118)+"px !important}";setZ(1);LAY();if(typeof FITONE!=="undefined"&&FITONE){for(var zq=0.95;zq>=0.62&&out.children.length>1;zq-=0.03){setZ(zq);LAY();}}'
       + 'var ls=out.lastElementChild;var qw2=document.createElement("div");qw2.style.cssText="position:absolute;right:5mm;bottom:"+cb+"px;";qw2.innerHTML=QRH;var sv2=qw2.querySelector("svg");if(sv2){sv2.setAttribute("width",104);sv2.setAttribute("height",104);}ls.appendChild(qw2);}'
       + 'if(PGF){var shs=document.querySelectorAll(".sheet");for(var pi=0;pi<shs.length;pi++){var pg=document.createElement("div");pg.className="pgf";pg.textContent=PGF.replace("{p}",pi+1).replace("{n}",shs.length);shs[pi].appendChild(pg);}}'
-      + 'var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
+      + '}'
+      + 'function PRINTNOW(){var imgs=Array.prototype.slice.call(document.images);var n=imgs.length;'
       + 'function pr(){try{window.focus();window.onafterprint=function(){try{if(window.frameElement)window.frameElement.remove();}catch(e){}};window.print();}catch(e){}}'
-      + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}'
+      + 'if(n===0){setTimeout(pr,60);}else{var c=0;imgs.forEach(function(im){function k(){c++;if(c===n)setTimeout(pr,80);}if(im.complete&&im.naturalWidth)k();else{im.onload=k;im.onerror=k;}});}}'
+      + 'var SRCS=[],RX=/<img[^>]+src="([^"]+)"/g,ALLH=BLOCKS.map(function(b){return (b.h||"")+(b.o||"")+(b.th||"");}).join("")+hd+ft+hdL+ftL,MM;while((MM=RX.exec(ALLH)))SRCS.push(MM[1]);'
+      + 'var PEND=SRCS.length,DONE=false;function GO(){if(DONE)return;DONE=true;RUN();PRINTNOW();}'
+      + 'if(!PEND){GO();}else{setTimeout(GO,5000);SRCS.forEach(function(u){var im=new Image();im.onload=im.onerror=function(){PEND--;if(PEND<=0)GO();};im.src=u;});}'
       + '})();';
 
     const html = '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Print</title><style>'
@@ -9597,7 +9601,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-O</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-S</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17117,7 +17121,7 @@ function tdsRows(v) {
   add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for ' + (v.scDur && !/^one$|^1$/i.test(String(v.scDur).trim()) ? v.scDur + ' second' : '1 second') + ' duration', 'kA', g('scRating')]]);
   add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ...opt([['In Duct at 30°C', 'Amp', g('duct'), '', 1]]), ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
   if (v.hasFR) add('FR-LSH PROPERTIES', [['Critical Oxygen Index', '%', g('coi')], ['Temperature Index', 'Deg C', g('ti')], ['Smoke Density Rating', '%', g('sd')], ['Halogen Acid Gas Generation', '%', g('hag')], ['Flammability Test', '', g('flame')]]);
-  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'N', g('pull1'), '', 1], ['When pulled with pulling eyes', /mm/i.test(String(v.pull2 || '')) ? '' : 'N', g('pull2'), '', 1], ...opt([['Sequential Marking', '', g('seqMark')], ['Embossing / Printing on Outer Sheath', '', g('emboss')]])]);
+  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'N', g('pull1'), '', 1], ['When pulled with pulling eyes', /mm/i.test(String(v.pull2 || '')) ? '' : 'N', g('pull2'), '', 1]]);
   // print only rows that carry a value (unless "show blank rows" is ticked); a heading row stays only if one of its sub-rows stays
   if (!v.showBlank) secs.forEach(sc => {
     const keep = sc.rows.map(r => r[2] !== '—');
@@ -17149,8 +17153,9 @@ const TDS_IMP_RULES = [
   [null, /specific\s*insulation\s*resistance|volume\s*resistivity/i, 'insRes', 'f'],
   [null, /in\s*(a\s*)?duct/i, 'duct', 'n'],
   [null, /^duration/i, 'scDur', 't'],
-  [null, /sequential\s*marking(\s*\(by\s*printing\))?/i, 'seqMark', 'f'],
-  [null, /embossing\s*\/?\s*printing(\s*on\s*outer\s*sheath)?|^printing/i, 'emboss', 'f'],
+  [null, /sequential\s*marking(\s*\(by\s*printing\))?/i, '_seqMark', 'f'],
+  [null, /embossing\s*\/?\s*printing(\s*on\s*outer\s*sheath)?|^printing/i, '_emboss', 'f'],
+  [null, /manufacture(r)?\s*(&|and)\s*country|name\s*of\s*manufacturer/i, '_mfr', 't'],
   [['conductor'], /^material/i, 'condMat', 't'],
   [['conductor'], /reference\s*specification|reference\s*spec\S*/i, 'condSpec', 't'],
   [['conductor'], /shape(\s*of\s*(the\s*)?conductor)?/i, 'condShape', 't'],
@@ -17296,6 +17301,9 @@ function parseTdsPages(pages) {
     cols.forEach((c, k) => {
       if (sizes[k]) { c.v._ncores = c.v._ncores || sizes[k].cores; c.v.area = c.v.area || sizes[k].area; }
       c._sec = sec; if (pageFR) c.v._fr = '1';
+      const hb = (text.match(/^\s*([A-Z][A-Za-z&. ]{1,40}?)\s+(?:CABLES?|WIRES?)\s+(?:LIMITED|LTD|PVT|PRIVATE)/m) || [])[1];
+      const qb = (text.match(/"([A-Z][A-Z0-9&. -]{1,25})"/) || [])[1];
+      c._brands = [...new Set([...(c._brands || []), ...[hb, qb].filter(Boolean).map(x => x.trim()).filter(x => x.length > 2)])];
       if (!results.includes(c)) results.push(c);
     });
     carry = (!sizes.length && cols.length === 1) ? cols[0] : null;
@@ -17326,6 +17334,12 @@ function parseTdsPages(pages) {
       v.cableType = ins + ', ' + arm + ', PVC SHEATHED CABLE'; imp.push('cableType');
     }
     if (v.scDur && /^one$/i.test(String(v.scDur).trim())) v.scDur = '1';
+    // traded product: strip the manufacturer's name / brand from every text value
+    const brands = new Set();
+    String(v._mfr || '').split(/[,;]/)[0].replace(/\b(cables?|wires?|limited|ltd\.?|pvt\.?|private|india|industries|industry|company|co\.?|corporation|&)\b/gi, ' ').split(/\s+/).filter(w => w.length > 2).forEach(w => brands.add(w));
+    (c._brands || []).forEach(w => brands.add(w));
+    if (brands.size) { const rx = new RegExp('["“”]?\\b(' + [...brands].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b["“”]?(\\s*(cables?|wires?)\\s*(limited|ltd\\.?)?)?', 'gi'); Object.keys(v).forEach(k => { if (typeof v[k] === 'string' && k !== 'picture') v[k] = v[k].replace(rx, '').replace(/\s{2,}/g, ' ').replace(/^[\s,;:–-]+|[\s,;:–-]+$/g, '').trim(); }); }
+    delete v._seqMark; delete v._emboss; delete v._mfr;
     delete v._type; delete v._ncores;
     return { page: c._page, v, imp: imp.filter(k => !k.startsWith('_')), label: (n ? n + 'C x ' + area : 'sheet') + (code ? ' ' + code : '') };
   });
@@ -17504,22 +17518,23 @@ function TDSPrintBody({ rec, part = 'single' }) {
   const v = rec.v || {}, secs = tdsRows(v);
   const th = { border: '1px solid #3E4C6B', padding: '4px 6px', fontSize: 10.5, background: '#1E2A4A', color: '#fff', textAlign: 'left', fontWeight: 700 };
   const td = { border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5, verticalAlign: 'top', lineHeight: 1.35 };
-  const meta = [['TDS No.', rec.number], ['Document No.', rec.docNo], ['Customer', rec.customer || 'MARKET'], rec.refDoc ? ['Reference', [rec.woNo, rec.refDoc].filter(Boolean).join(' / ')] : null, ['Date', rec.date]].filter(Boolean);
+  const meta = [['TDS No.', rec.number, '16%'], ['Document No.', rec.docNo, '17%'], ['Customer', rec.customer || 'MARKET', '27%'], rec.refDoc ? ['Reference', <>{rec.woNo ? <>WO: {rec.woNo}<br /></> : null}Quote: {rec.refDoc}</>, '27%'] : null, ['Date', rec.date, '13%']].filter(Boolean);
   return (
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#111' }}>
       {part === 'single' && <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 6 }}>TECHNICAL DATA SHEET</div>}
       <div style={{ background: '#F1F4FA', border: '1px solid #9AA3B5', borderLeft: '4px solid #1E2A4A', padding: '5px 8px', fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>{v.title}</div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6, tableLayout: 'fixed' }}><tbody><tr>{meta.map(([k, val]) => <td key={k} style={{ border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5 }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}</tr></tbody></table>
-      {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff', textAlign: 'center' }}>{v.picture && !v.useGenerated ? <img src={v.picture} alt="Cable cross-section" style={{ maxWidth: '100%', maxHeight: 230, display: 'inline-block' }} /> : <TDSCableSVG v={v} height={170} />}</div>}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6, tableLayout: 'fixed' }}><tbody><tr>{meta.map(([k, val, w]) => <td key={k} style={{ border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5, width: w, verticalAlign: 'top' }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}</tr></tbody></table>
+      {rec._qName ? <div style={{ fontSize: 10.5, margin: '-2px 0 6px', padding: '3px 6px', border: '1px solid #9AA3B5', borderTop: 'none' }}><span style={{ color: '#5A6478' }}>Product as per quotation:</span> <b>{rec._qName}</b></div> : null}
+      {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff', textAlign: 'center' }}>{v.picture && !v.useGenerated ? <div style={{ height: 210, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={v.picture} alt="Cable cross-section" style={{ height: 200, maxWidth: '100%', objectFit: 'contain', display: 'block', margin: '0 auto' }} /></div> : <div style={{ height: 172 }}><TDSCableSVG v={v} height={170} /></div>}</div>}
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-        <colgroup><col style={{ width: '7%' }} /><col style={{ width: '41%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '33%' }} /></colgroup>
-        <thead><tr><th style={{ ...th, width: '7%' }}>S. No.</th><th style={{ ...th, width: '41%' }}>Parameter / Characteristic</th><th style={{ ...th, textAlign: 'center', width: '9%' }}>Specified</th><th style={{ ...th, textAlign: 'center', width: '10%' }}>Unit</th><th style={{ ...th, textAlign: 'center', width: '33%' }}>Committed Values</th></tr></thead>
+        <colgroup><col style={{ width: '6%' }} /><col style={{ width: '36%' }} /><col style={{ width: '8%' }} /><col style={{ width: '8%' }} /><col style={{ width: '42%' }} /></colgroup>
+        <thead><tr><th style={{ ...th, width: '6%' }}>S.No.</th><th style={{ ...th, width: '36%' }}>Parameter / Characteristic</th><th style={{ ...th, width: '8%' }}>Spec.</th><th style={{ ...th, width: '8%' }}>Unit</th><th style={{ ...th, width: '42%' }}>Committed Values</th></tr></thead>
         <tbody>
           {secs.map(s => (
             <React.Fragment key={s.n}>
               <tr><td style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A', letterSpacing: 0.4 }}>{s.title}</td></tr>
               {s.rows.map(r => (
-                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 16 : 6 }}>{r.label}</td><td style={{ ...td, textAlign: 'center' }}>{r.spec}</td><td style={{ ...td, textAlign: 'center' }}>{r.unit}</td><td style={{ ...td, textAlign: 'center', fontWeight: r.val && /^[\d.±\s/-]+$/.test(r.val) ? 700 : 400 }}>{r.val}</td></tr>
+                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 16 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, fontWeight: r.val && /^[\d.±\s/-]+$/.test(r.val) ? 700 : 400 }}>{r.val}</td></tr>
               ))}
             </React.Fragment>
           ))}
@@ -17539,12 +17554,12 @@ function TDSCombinedPrint({ recs = [] }) {
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}>TECHNICAL DATA SHEETS</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, tableLayout: 'fixed' }}><tbody><tr>
-        {[['Document No.', f.docNo], ['Customer', f.customer || 'MARKET'], ['Reference', [f.woNo, f.refDoc].filter(Boolean).join(' / ') || '—'], ['Date', f.date], ['No. of sheets', recs.length]].map(([k, val]) => <td key={k} style={td}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
+        {[['Document No.', f.docNo, '17%'], ['Customer', f.customer || 'MARKET', '27%'], ['Reference', f.refDoc ? <>{f.woNo ? <>WO: {f.woNo}<br /></> : null}Quote: {f.refDoc}</> : '—', '30%'], ['Date', f.date, '13%'], ['No. of products', recs.length, '13%']].map(([k, val, w]) => <td key={k} style={{ ...td, width: w, verticalAlign: 'top' }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
       </tr></tbody></table>
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-        <colgroup><col style={{ width: '7%' }} /><col style={{ width: '22%' }} /><col style={{ width: '71%' }} /></colgroup>
-        <thead><tr><th style={th}>Sl.</th><th style={th}>TDS No.</th><th style={th}>Cable</th></tr></thead>
-        <tbody>{recs.map((r, i) => <tr key={r.id}><td style={td}>{i + 1}</td><td style={td}>{r.number}</td><td style={td}>{(r.v || {}).title}</td></tr>)}</tbody>
+        <colgroup><col style={{ width: '5%' }} /><col style={{ width: '17%' }} /><col style={{ width: '44%' }} /><col style={{ width: '34%' }} /></colgroup>
+        <thead><tr><th style={{ ...th, width: '5%' }}>Sl.</th><th style={{ ...th, width: '17%' }}>TDS No.</th><th style={{ ...th, width: '44%' }}>Product (as per quotation)</th><th style={{ ...th, width: '34%' }}>Cable construction</th></tr></thead>
+        <tbody>{recs.map((r, i) => <tr key={r.id}><td style={td}>{i + 1}</td><td style={td}>{r.number}</td><td style={td}>{r._qName || '—'}</td><td style={td}>{(r.v || {}).title}</td></tr>)}</tbody>
       </table>
       <div style={{ textAlign: 'center', fontSize: 10, color: '#555', marginTop: 8 }}>* Values indicated as "Approx." are for guidance only. This is a computer generated document; no signature is required. *</div>
       {recs.map(r => <React.Fragment key={r.id}><div className="pgbrk" style={{ height: 0, borderTop: '2px dashed #C9D6F0', margin: '18px 0' }} /><TDSPrintBody rec={r} part="section" /></React.Fragment>)}
@@ -17605,6 +17620,13 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
     setEditing(e => ({ ...e, ...quoteLink(d) }));
   }
   // quotation → TDS: reference (WO / quotation no.) and customer name, taken from the quotation itself
+  // product name exactly as written in the linked quotation (same cable size)
+  function withQName(r) {
+    const q = quotes.find(x => r.refDoc && x.number === r.refDoc) || null;
+    const z = cableSizeOf((r.v || {}).cores) || null;
+    const it = q && z ? (q.items || []).find(i => { const c = cableSizeOf(i.name); return c && c.cores === z.cores && Math.abs(c.area - z.area) < 0.01; }) : null;
+    return { ...r, _qName: it ? String(it.name || '').trim() : '' };
+  }
   function quoteLink(d) {
     const c = (customers || []).find(x => x.id === d.customerId);
     const name = (c && c.name) || (d.customerSnapshot && d.customerSnapshot.name) || d.customerName || '';
@@ -17710,7 +17732,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         </div>
         {printRec && (
           <DocPrintOverlay onClose={() => setPrintRec(null)} filename={'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
-            <TDSPrintBody rec={printRec} />
+            <TDSPrintBody rec={withQName(printRec)} />
           </DocPrintOverlay>
         )}
       </div>
@@ -17752,7 +17774,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       </div>
       {printRec && (
         <DocPrintOverlay pgf={Array.isArray(printRec) && printRec.length > 1 ? [businessInfo.name, 'Technical Data Sheets (' + printRec.length + ') — ' + printRec.map(r => r.number).join(', ').slice(0, 90), 'Page {p} of {n}'].filter(Boolean).join(' | ') : ''} onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
-          {Array.isArray(printRec) ? (printRec.length > 1 ? <TDSCombinedPrint recs={printRec} /> : <TDSPrintBody rec={printRec[0]} />) : <TDSPrintBody rec={printRec} />}
+          {Array.isArray(printRec) ? (printRec.length > 1 ? <TDSCombinedPrint recs={printRec.map(withQName)} /> : <TDSPrintBody rec={withQName(printRec[0])} />) : <TDSPrintBody rec={withQName(printRec)} />}
         </DocPrintOverlay>
       )}
     </div>
