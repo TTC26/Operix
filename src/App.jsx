@@ -811,6 +811,9 @@ function printLetterFromHtml(html, biz, opts) {
     const hasLH = !!(biz.letterhead || biz.letterheadFooter) && biz.printHeader !== 'logo';
     const blocks = [];
     if (!hasLH) blocks.push({ t: '', h: '<div class="zco">' + (biz.logo ? '<img src="' + biz.logo + '">' : '') + '<div><div class="zconame">' + e2(biz.name) + '</div><div class="zcosm">' + e2(biz.address) + '</div><div class="zcosm">' + (biz.gstin ? 'GSTIN: ' + e2(biz.gstin) : '') + (biz.phone ? ' · ' + e2(biz.phone) : '') + (biz.email ? ' · ' + e2(biz.email) : '') + '</div></div></div>' });
+    if (!((biz.seal || biz.signature) && biz.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false))) {
+      page.querySelectorAll('.sig-box').forEach(b2 => { if (b2.firstElementChild) { b2.firstElementChild.style.height = '66px'; } });
+    }
     if ((biz.seal || biz.signature) && biz.printSeal !== false && (typeof window === 'undefined' || window.__sealOn !== false)) {
       const sb = page.querySelector('.sig-box');
       const sp = sb && sb.firstElementChild;
@@ -1082,8 +1085,8 @@ function buildZohoDocPrint(o) {
   const terms = String(doc.terms || bi.terms || '').split('\n').map(s => s.trim()).filter(Boolean);
   if (terms.length) TL('<div style="padding:6px 0;border-top:1px solid var(--gl);border-left:var(--sb);border-right:var(--sb)">' + terms.map((line, k) => '<div class="ztc">' + (k === 0 ? '<div class="h">Terms &amp; Conditions</div>' : '') + (k + 1) + '. ' + esc(line) + '</div>').join('') + '</div>');
 
-  const sealHtml = ((bi.seal || bi.signature) && bi.printSeal !== false) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '';
-  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln"' + (sealHtml ? ' style="margin-top:2px"' : '') + '>' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
+  const sealHtml = ((bi.seal || bi.signature) && bi.printSeal !== false) ? '<div style="height:66px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:2px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:64px;max-width:90px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:44px;max-width:110px;object-fit:contain">' : '') + '</div>' : '<div style="height:66px;margin-top:2px"></div>';
+  TL('<div class="zsig"><div><div class="ln">Customer Signature</div></div><div><div style="font-weight:700">For ' + esc(bi.name) + '</div>' + sealHtml + '<div class="ln" style="margin-top:2px">' + esc(bi.signatory || 'Authorised Signatory') + '</div></div></div>');
   return { blocks, thead, tblOpen, watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
 }
 
@@ -1261,7 +1264,7 @@ function buildOverseasQuotePrint(o) {
   // signature block: mobile number only — any e-mail address is stripped from the contact line
   const _sigContact = String(doc.ovSignContact || '').split('|').map(x => x.trim()).filter(x => x && x.indexOf('@') < 0).join(' | ').replace(/^(mob(ile)?\.?\s*:?\s*)/i, '');
   const sealOn = (bi.seal || bi.signature) && bi.printSeal !== false;
-  const sealHtml = sealOn ? '<div style="height:54px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:52px;max-width:80px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:38px;max-width:100px;object-fit:contain">' : '') + '</div>' : '<div style="height:34px"></div>';
+  const sealHtml = sealOn ? '<div style="height:54px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:52px;max-width:80px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:38px;max-width:100px;object-fit:contain">' : '') + '</div>' : '<div style="height:54px"></div>';
   B('<div class="ov-sign"><div class="ov-p">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + '<div style="font-weight:700">Authorized Signatory</div>' + (doc.ovSignName ? '<div>' + esc(doc.ovSignName) + '</div>' : '') + '<div>' + esc(doc.ovSignDesig || 'MD') + '</div>' + (_sigContact ? '<div>Mob: ' + esc(_sigContact) + '</div>' : '') + '</div>');
 
   return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:3mm 14mm 0 !important;font-size:10.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
@@ -1485,7 +1488,7 @@ async function printPaginated(sel, bi, pre, gen) {
             if (prev0 && !blank(prev0) && /solid|dashed|dotted/.test((prev0.style && prev0.style.borderTop) || '') && prev0.parentNode === el.parentNode) anchor = prev0;
             const prev = anchor.previousElementSibling;
             const _mb = parseFloat(anchor.style && anchor.style.marginBottom) || 0;
-            if (blank(prev)) prev.replaceWith(node);
+            if (blank(prev)) { const ph = parseFloat(prev.style && prev.style.height) || 0; if (ph >= 36) { node.style.height = ph + 'px'; node.querySelectorAll('img').forEach(im => { im.style.maxHeight = (ph - 2) + 'px'; }); } prev.replaceWith(node); } // same height as the blank signing space → layout identical with / without seal
             else if (_mb >= 20 && anchor.parentNode) { anchor.style.marginBottom = '2px'; anchor.parentNode.insertBefore(node, anchor.nextSibling); } // label, gap, line  ->  label, seal, line
             else if (anchor.parentNode) anchor.parentNode.insertBefore(node, anchor);
             const box = anchor.parentElement, cont = box && box.parentElement;
@@ -7628,7 +7631,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
   const KV = ({ rows, cols = 1 }) => { const rr = rows.filter(r => r[1]); if (!rr.length) return null; if (cols === 2) { const pairs = []; for (let i = 0; i < rr.length; i += 2) pairs.push([rr[i], rr[i + 1]]); return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{pairs.map((pr, i) => <tr key={i}>{pr.map((c, j) => c ? <React.Fragment key={j}><td style={{ ...td, width: '17%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{c[0]}</td><td style={{ ...td, width: '33%' }}>{c[1]}</td></React.Fragment> : <td key={j} colSpan={2} style={td} />)}</tr>)}</tbody></table>; } return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{rr.map(([k, v]) => <tr key={k}><td style={{ ...td, width: '30%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>; };
   const Party = ({ blocks }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody><tr>{blocks.map(([title, lines], i) => <td key={i} style={{ ...td, verticalAlign: 'top', padding: '7px 9px' }}><div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6D3B', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 3 }}>{title}</div>{lines.filter(Boolean).map((l, k) => <div key={k} style={{ fontSize: 11.5, fontWeight: k === 0 ? 700 : 400, lineHeight: 1.45 }}>{l}</div>)}</td>)}</tr></tbody></table>;
   const Sec = ({ t }) => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: 0.6, borderBottom: '1px solid #9AA6BF', padding: '2px 0', margin: '10px 0 6px' }}>{t}</div>;
-  const Sign = ({ forName, left }) => <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 22, fontSize: 12 }}><div style={{ fontSize: 11.5, color: '#444', paddingBottom: 4 }}>{left || ''}</div><div style={{ textAlign: 'center', minWidth: 230 }}><div style={{ height: 44 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For <b>{forName}</b><br />Authorised Signatory</div></div></div>;
+  const Sign = ({ forName, left }) => <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 22, fontSize: 12 }}><div style={{ fontSize: 11.5, color: '#444', paddingBottom: 4 }}>{left || ''}</div><div style={{ textAlign: 'center', minWidth: 230 }}><div style={{ height: 66 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For <b>{forName}</b><br />Authorised Signatory</div></div></div>;
   const Cond = ({ title, items }) => <div style={{ fontSize: 11.5, lineHeight: 1.55 }}><Sec t={title} /><ol style={{ margin: '0 0 0 18px', padding: 0 }}>{items.map((x, i) => <li key={i} style={{ marginBottom: 3, textAlign: 'justify' }}>{x}</li>)}</ol></div>;
   function DocBody({ r, kind }) {
     const t = tot(r), bn = businessInfo.name || '';
@@ -9601,7 +9604,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-S</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-U</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17506,19 +17509,26 @@ function cableSizeOf(txt) {
   return null;
 }
 // the customer quotation that contains this cable (won first, then latest)
+const tdsSize = (v) => cableSizeOf((v || {}).cores) || ((v || {}).area ? { cores: +(String(v.cores || '').match(/\d+/) || [0])[0], area: +v.area } : null);
+const quoteHas = (q, z) => !!z && (q.items || []).some(it => { const c = cableSizeOf(it.name); return c && c.cores === z.cores && Math.abs(c.area - z.area) < 0.01; });
+const qNewer = (a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.number || '').localeCompare(String(a.number || ''), undefined, { numeric: true });
 function quoteForTds(v, quotes = []) {
-  const z = cableSizeOf(v.cores) || (v.area ? { cores: +(String(v.cores || '').match(/\d+/) || [0])[0], area: +v.area } : null);
-  if (!z || !z.cores || !z.area) return null;
-  const hits = (quotes || []).filter(q => q && q.status !== 'deleted' && (q.items || []).some(it => { const c = cableSizeOf(it.name); return c && c.cores === z.cores && Math.abs(c.area - z.area) < 0.01; }));
-  hits.sort((a, b) => ((b.outcome === 'won') - (a.outcome === 'won')) || String(b.date || '').localeCompare(String(a.date || '')));
-  return hits[0] || null;
+  const z = tdsSize(v); if (!z || !z.cores || !z.area) return null;
+  return (quotes || []).filter(q => q && q.status !== 'deleted' && quoteHas(q, z)).sort(qNewer)[0] || null;
+}
+// a set of TDS (one supplier PDF / one selection) belongs to ONE quotation: the one that contains most of its cables, latest first
+function quoteForTdsSet(vs, quotes = []) {
+  const zs = vs.map(tdsSize).filter(z => z && z.cores && z.area);
+  const scored = (quotes || []).filter(q => q && q.status !== 'deleted').map(q => ({ q, n: zs.filter(z => quoteHas(q, z)).length })).filter(x => x.n > 0);
+  scored.sort((a, b) => (b.n - a.n) || qNewer(a.q, b.q));
+  return scored[0] ? scored[0].q : null;
 }
 function TDSPrintBody({ rec, part = 'single' }) {
   // part: 'single' = stand-alone sheet; 'section' = one cable inside a combined TDS document (no repeated main heading)
   const v = rec.v || {}, secs = tdsRows(v);
   const th = { border: '1px solid #3E4C6B', padding: '4px 6px', fontSize: 10.5, background: '#1E2A4A', color: '#fff', textAlign: 'left', fontWeight: 700 };
   const td = { border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5, verticalAlign: 'top', lineHeight: 1.35 };
-  const meta = [['TDS No.', rec.number, '16%'], ['Document No.', rec.docNo, '17%'], ['Customer', rec.customer || 'MARKET', '27%'], rec.refDoc ? ['Reference', <>{rec.woNo ? <>WO: {rec.woNo}<br /></> : null}Quote: {rec.refDoc}</>, '27%'] : null, ['Date', rec.date, '13%']].filter(Boolean);
+  const meta = [['TDS No.', rec.number, '16%'], ['Document No.', rec.docNo, '17%'], ['Customer', rec.customer || 'MARKET', '27%'], rec.refDoc ? ['Quotation Ref.', rec.refDoc, '27%'] : null, ['Date', rec.date, '13%']].filter(Boolean);
   return (
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#111' }}>
       {part === 'single' && <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 6 }}>TECHNICAL DATA SHEET</div>}
@@ -17554,7 +17564,7 @@ function TDSCombinedPrint({ recs = [] }) {
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}>TECHNICAL DATA SHEETS</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, tableLayout: 'fixed' }}><tbody><tr>
-        {[['Document No.', f.docNo, '17%'], ['Customer', f.customer || 'MARKET', '27%'], ['Reference', f.refDoc ? <>{f.woNo ? <>WO: {f.woNo}<br /></> : null}Quote: {f.refDoc}</> : '—', '30%'], ['Date', f.date, '13%'], ['No. of products', recs.length, '13%']].map(([k, val, w]) => <td key={k} style={{ ...td, width: w, verticalAlign: 'top' }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
+        {[['Document No.', f.docNo, '17%'], ['Customer', f.customer || 'MARKET', '27%'], ['Quotation Ref.', f.refDoc || '—', '30%'], ['Date', f.date, '13%'], ['No. of products', recs.length, '13%']].map(([k, val, w]) => <td key={k} style={{ ...td, width: w, verticalAlign: 'top' }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
       </tr></tbody></table>
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup><col style={{ width: '5%' }} /><col style={{ width: '17%' }} /><col style={{ width: '44%' }} /><col style={{ width: '34%' }} /></colgroup>
@@ -17589,11 +17599,12 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       setImpBusy('');
       if (!found.length) { alert('Could not find TDS values in this PDF.\n\nIt may be an image with poor quality, or a layout the reader does not know yet. Create the TDS with “New TDS” and a preset instead.'); return; }
       const base0 = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length;
+      const setQ = quoteForTdsSet(found.map(r => r.v), quotes);
       const recs = found.map((r, i) => {
         const preset = Object.values(TDS_PRESETS).find(pv => pv.cores && r.v.cores && pv.cores.replace(/\s/g, '').toUpperCase() === r.v.cores.replace(/\s/g, '').toUpperCase() && (!r.v.code || !pv.code || pv.code === r.v.code)) || {};
         const v = { ...TDS_BASE, ...preset, ...r.v, _imp: r.imp, _src: file.name };
         v.hasInner = !!(r.v.innerMat || r.v.innerMin || r.v.innerDia) || (!!r.v.hasArmour && preset.hasInner !== false);
-        const q = quoteForTds(v, quotes);
+        const q = (setQ && quoteHas(setQ, tdsSize(v))) ? setQ : quoteForTds(v, quotes);
         const lk = q ? quoteLink(q) : {};
         return { ...lk, id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: withCo('TDS/IMS/F01'), date: today, customer: lk.customer || 'MARKET', customerId: lk.customerId || '', refDoc: lk.refDoc || '', woNo: lk.woNo || '', notes: '', v, imported: true, importBatch: file.name, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
       });
@@ -17752,7 +17763,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}><input type="checkbox" checked={allOn} onChange={() => setPicked(p => { const n = { ...p }; list.forEach(r => { if (allOn) delete n[r.id]; else n[r.id] = true; }); return n; })} /> Select all shown ({list.length})</label>
           <span style={{ color: '#666' }}>{sel.length} selected</span>
           <button disabled={!sel.length} onClick={() => setPrintRec(sel)} style={{ ...styles.primaryBtn, opacity: sel.length ? 1 : 0.5 }}><Printer size={14} /> Print selected ({sel.length}) — one document</button>
-          {canEdit && <button onClick={() => { const tgt = (sel.length ? sel : list.filter(r => !r.refDoc || !r.customer || r.customer === 'MARKET')); let n = 0; const upd = {}; tgt.forEach(r => { const q = quoteForTds(r.v || {}, quotes); if (q) { upd[r.id] = quoteLink(q); n++; } }); if (!n) { alert('No quotation found containing these cable sizes.'); return; } setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] ? { ...x, ...upd[x.id] } : x)); alert('✅ ' + n + ' of ' + tgt.length + ' TDS linked to the customer quotation that contains the same cable size.'); }} style={styles.ghostBtn} title="Find the quotation that has the same cable (cores × size) and set its customer, quotation no. and WO">🔗 Auto-link to customer quotation{sel.length ? ' (' + sel.length + ')' : ''}</button>}
+          {canEdit && <button onClick={() => { const tgt = (sel.length ? sel : list.filter(r => !r.refDoc || !r.customer || r.customer === 'MARKET')); let n = 0; const upd = {}; const setQ = quoteForTdsSet(tgt.map(r => r.v || {}), quotes); tgt.forEach(r => { const q = (setQ && quoteHas(setQ, tdsSize(r.v))) ? setQ : quoteForTds(r.v || {}, quotes); if (q) { upd[r.id] = quoteLink(q); n++; } }); if (!n) { alert('No quotation found containing these cable sizes.'); return; } setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] ? { ...x, ...upd[x.id] } : x)); alert('✅ ' + n + ' of ' + tgt.length + ' TDS linked to the customer quotation that contains the same cable size.'); }} style={styles.ghostBtn} title="Find the quotation that has the same cable (cores × size) and set its customer, quotation no. and WO">🔗 Auto-link to customer quotation{sel.length ? ' (' + sel.length + ')' : ''}</button>}
           {sel.length > 0 && canEdit && <select value="" onChange={ev => linkPicked(ev.target.value)} style={{ ...inp, width: 'auto', minWidth: 260 }} title="Set quotation / WO reference and customer on the ticked TDS"><option value="">🔗 Link selected to quotation…</option>{quotes.map(d => <option key={d.id} value={d.id}>{(d.woNo ? d.woNo + ' · ' : '') + d.number + ' · ' + ((d.customerSnapshot && d.customerSnapshot.name) || '')}</option>)}</select>}
           {sel.length > 0 && <button onClick={() => setPicked({})} style={{ border: 'none', background: 'none', color: '#888', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}>Clear</button>}
         </div>); })()}
@@ -23080,7 +23091,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack, on
       <div style="margin-top:48px;border-top:1px solid #ccc;padding-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:60px;font-size:12px;">
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.buyerRole||'Buyer'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${bi?.name||bi?.companyName||''}</div>${sealImgs}
+          <div style="font-size:11px;color:#555;margin-bottom:4px;">${bi?.name||bi?.companyName||''}</div>${sealImgs || '<div style="height:66px;margin-bottom:2px"></div>'}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryOurName||'Authorised Signatory'}</b>
             ${c.signatoryOurDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryOurDesignation}</div>` : ''}
@@ -23089,7 +23100,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack, on
         </div>
         <div>
           <div style="font-weight:700;color:#1E2A4A;margin-bottom:4px;font-size:13px;">For the ${c.supplierRole||'Supplier'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:${sealImgs ? '4px' : '36px'};">${c.customerSnapshot?.name||''}</div>${sealImgs ? '<div style="height:66px;margin-bottom:2px"></div>' : ''}
+          <div style="font-size:11px;color:#555;margin-bottom:4px;">${c.customerSnapshot?.name||''}</div>${true ? '<div style="height:66px;margin-bottom:2px"></div>' : ''}
           <div style="border-top:1px solid #333;padding-top:6px;">
             <b>${c.signatoryClientName||'Authorised Signatory'}</b>
             ${c.signatoryClientDesignation ? `<div style="color:#888;font-size:11px">${c.signatoryClientDesignation}</div>` : ''}
