@@ -1625,7 +1625,7 @@ async function printPaginated(sel, bi, pre, gen) {
       + 'if(TAIL.length){var tw0=document.createElement("div");tw0.style.display="flow-root";tw0.innerHTML=TAIL.join("");bd.appendChild(tw0);TH=tw0.offsetHeight+6;bd.removeChild(tw0);}'
       + 'for(var i=0;i<BLOCKS.length;i++){var B=BLOCKS[i];if(B.t==="tail")continue;var BO=B.ori==="L"?"L":"P";if(BO!==CUR){curBody=null;if(bd.children.length){np(BO);}else{CUR=BO;var sh0=out.lastElementChild;sh0.className="sheet"+(BO==="L"?" land":"");sh0.querySelector(".hd").innerHTML=BO==="L"?hdL:hd;sh0.querySelector(".ft").innerHTML=BO==="L"?ftL:ft;}}'
       + 'if(B.t==="trow"){if(curBody&&B.id&&curTid!==B.id)curBody=null;if(!curBody)startTbl(B);var before=curBody.children.length;LB=B;curBody.insertAdjacentHTML("beforeend",B.h);'
-      + 'var mv=false;if(fits()&&i===LASTROW&&TH>0&&used()+TH>bd.clientHeight){var rh=curBody.lastChild.offsetHeight;mv=(bd.clientHeight-(used()-rh))<140;}if(!fits()||mv){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",B.h);} }'
+      + 'var mv=false;if(fits()&&i===LASTROW&&TH>0&&used()+TH>bd.clientHeight){var rh=curBody.lastChild.offsetHeight;mv=(bd.clientHeight-(used()-rh))<140;}if(!fits()||mv){while(curBody.children.length>before)curBody.removeChild(curBody.lastChild);var KN="";while(before>1){var pkn=curBody.children[before-1];if(!(pkn&&pkn.getAttribute&&pkn.getAttribute("data-kn")))break;KN=pkn.outerHTML+KN;curBody.removeChild(pkn);before--;}if(!before){var emp=curBody.parentNode;if(emp&&emp.parentNode)emp.parentNode.removeChild(emp);}np();startTbl(B);curBody.insertAdjacentHTML("beforeend",KN+B.h);} }'
       + 'else{curBody=null;var w=document.createElement("div");w.innerHTML=B.h;var node=w.firstElementChild;if(!node)continue;placeNode(node);}'
       + '}'
       + 'if(!TAIL.length&&out.children.length>1&&!bd.querySelector("table")&&bd.children.length<=2){var pb=out.children[out.children.length-2].querySelector(".bd");var plast=pb?pb.lastElementChild:null;'
@@ -9604,7 +9604,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-U</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-V</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17096,7 +17096,7 @@ function tdsSpecQ(label, sec) {
   if (/tolerance/i.test(L)) return '±';
   if (/insulation resistance|resistivity/i.test(L)) return 'Min.';
   if (/resistance/i.test(L)) return 'Max.';
-  if (/^nominal$/i.test(L) || /dimension of armour|nominal area/i.test(L)) return 'Nom.';
+  if (/^nominal$/i.test(L) || /^nominal thickness/i.test(L) || /dimension of armour|nominal area/i.test(L)) return 'Nom.';
   if (/minimum at a point|minimum thickness|minimum number of wires/i.test(L)) return 'Min.';
   if (/calculated|approx|reactance|capacitance/i.test(L)) return 'Approx.';
   if (/tolerance/i.test(L)) return '±';
@@ -17122,14 +17122,26 @@ function tdsRows(v) {
   if (v.hasArmour) add('ARMOURING', [['Material', '', g('armMat')], ['Reference Specification', '', g('armSpec')], ['Calculated Diameter over Inner Sheath', 'mm', g('armDia')], ['Type of Armour', '', g('armType')], ['Dimension of Armour', 'mm', g('armDim')], ['Tolerance on Dimension of Armour', 'mm / %', g('armTol')]]);
   add('OUTER SHEATH', [['Material', '', g('outMat')], ['Reference Specification', '', g('outSpec')], ['Colour of Outer Sheath', '', g('outColour')], ...(v.hasArmour ? [['Calculated Diameter over Armour', 'mm', g('outDia')]] : []), ['Thickness of Outer Sheath', '', ''], ['Nominal', 'mm', g('outNom'), '', 1], ['Minimum at a Point', 'mm', g('outMin'), '', 1]]);
   add('ELECTRICAL PARAMETERS', [['Maximum AC Resistance at 90°C', 'Ohm/Km', g('acRes')], ['Calculated Cable Reactance', 'Ohm/Km', g('react')], ['Cable Capacitance', 'Mfd/Km', g('cap')], ['Maximum Conductor Temperature Under Normal Working Conditions', 'Deg C', g('tNorm')], ['Maximum Conductor Temperature Under Short Circuit Condition', 'Deg C', g('tSC')], ['Short Circuit Rating for ' + (v.scDur && !/^one$|^1$/i.test(String(v.scDur).trim()) ? v.scDur + ' second' : '1 second') + ' duration', 'kA', g('scRating')]]);
-  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['Continuous Current Carrying Capacity', '', ''], ['In Ground at 30°C', 'Amp', g('ground'), '', 1], ...opt([['In Duct at 30°C', 'Amp', g('duct'), '', 1]]), ['In Air at 40°C', 'Amp', g('air'), '', 1], ['Reference Specification', '', g('ampSpec')]]);
+  add('CONTINUOUS CURRENT CARRYING CAPACITY', [['In Ground at 30°C', 'Amp', g('ground')], ...opt([['In Duct at 30°C', 'Amp', g('duct')]]), ['In Air at 40°C', 'Amp', g('air')], ['Reference Specification', '', g('ampSpec').replace(/\s*\/\s*manufacturer('s)?\s*data/i, '')]]);
   if (v.hasFR) add('FR-LSH PROPERTIES', [['Critical Oxygen Index', '%', g('coi')], ['Temperature Index', 'Deg C', g('ti')], ['Smoke Density Rating', '%', g('sd')], ['Halogen Acid Gas Generation', '%', g('hag')], ['Flammability Test', '', g('flame')]]);
-  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'N', g('pull1'), '', 1], ['When pulled with pulling eyes', /mm/i.test(String(v.pull2 || '')) ? '' : 'N', g('pull2'), '', 1]]);
+  add('FINISHED CABLE', [['Approx Overall Diameter of Cable', 'mm', g('overall')], ['Standard Drum Length', 'Meters', g('drum')], ['Tolerance on Drum Length', '%', g('drumTol')], ['Bending Radius', 'mm', g('bend')], ['Safe Pulling Force', '', ''], ['When pulled with Stocking', 'N', g('pull1'), '', 1], ['When pulled with pulling eyes', /mm/i.test(String(v.pull2 || '')) ? 'N/mm²' : 'N', g('pull2').replace(/\s*N\s*\/\s*mm\s*[²2]?\s*$/i, ''), '', 1]]);
   // print only rows that carry a value (unless "show blank rows" is ticked); a heading row stays only if one of its sub-rows stays
   if (!v.showBlank) secs.forEach(sc => {
     const keep = sc.rows.map(r => r[2] !== '—');
     sc.rows.forEach((r, i) => { if (r[2] === '' && !r[4]) { let j = i + 1, any = false; while (j < sc.rows.length && sc.rows[j][4]) { if (keep[j]) any = true; j++; } keep[i] = any || !(sc.rows[i + 1] && sc.rows[i + 1][4]); } });
     sc.rows = sc.rows.filter((r, i) => keep[i]);
+  });
+  secs.forEach(sc => {
+    const out = [];
+    for (let i = 0; i < sc.rows.length; i++) {
+      const r = sc.rows[i];
+      if (r[2] === '' && !r[4]) {
+        let j = i + 1; while (j < sc.rows.length && sc.rows[j][4]) j++;
+        if (j - i === 2) { const c = sc.rows[i + 1]; const lbl = /^minimum at a point$/i.test(c[0]) ? 'Minimum ' + r[0] + ' at a Point' : c[0] + ' ' + r[0]; out.push([lbl, c[1], c[2], c[3]]); i++; continue; }
+      }
+      out.push(r);
+    }
+    sc.rows = out;
   });
   for (let i = secs.length - 1; i >= 0; i--) if (!secs[i].rows.length) secs.splice(i, 1);
   return secs.map((s, i) => {
@@ -17138,7 +17150,7 @@ function tdsRows(v) {
       const qk = s.title + '|' + r[0] + (r[4] ? '|' + m : ''), ov = (v.specQ || {})[qk];
       const spec = ov !== undefined ? ov : (r[2] === '' ? '' : tdsSpecQ(r[0], s.title));
       if (r[4]) { sub++; return { no: n + '.' + m + '.' + sub, label: r[0], unit: r[1], val: r[2], spec, qk, indent: true }; }
-      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec, qk };
+      m++; sub = 0; return { no: n + '.' + m, label: r[0], unit: r[1], val: r[2], spec, qk, head: r[2] === '' };
     }) };
   });
 }
@@ -17330,7 +17342,7 @@ function parseTdsPages(pages) {
     const refOf = (t) => { const m = String(t || '').match(/\b(?:to|as per|conforming to)\s+((?:IEC|IS|BS|EN|ASTM)[^,;]*?)(?:\s+with\b|[,;]|$)/i); return m ? m[1].trim() : ''; };
     [['condMat', 'condSpec'], ['insMat', 'insSpec'], ['innerMat', 'innerSpec'], ['armMat', 'armSpec'], ['outMat', 'outSpec']].forEach(([mk, sk]) => { const r0 = refOf(v[mk]); if (r0 && !v[sk]) { v[sk] = r0; imp.push(sk); } });
     const iec = /\bIEC\b/.test([v.std, v.condMat, v.insMat, v.outMat].join(' '));
-    if (iec && !v.ampSpec) { v.ampSpec = 'As per IEC 60287 / manufacturer data'; }
+    if (iec && !v.ampSpec) { v.ampSpec = 'As per IEC 60287'; }
     if (!v.cableType) {
       const c = String(v.code || '').trim(), ins = /^2x/i.test(c) || /xlpe/i.test(String(v.insMat || '')) ? 'XLPE INSULATED' : 'PVC INSULATED';
       const arm = /fa/i.test(c.replace(/^2x/i, '')) ? 'ALUMINIUM STRIP ARMOURED' : /wa/i.test(c.replace(/^2x/i, '')) ? 'ALUMINIUM WIRE ARMOURED' : /w/i.test(c.replace(/^2x/i, '')) ? 'GALVANISED STEEL ROUND WIRE ARMOURED' : /f/i.test(c.replace(/^2x/i, '')) ? 'GALVANISED STEEL STRIP ARMOURED' : 'UNARMOURED';
@@ -17407,6 +17419,8 @@ async function cropTdsPicture(pdf, pageIdx, m) {
     const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    ctx.fillStyle = '#fff';
+    L.forEach(l => { if (l.top >= top - 2 && l.bottom <= bot + 2 && /shown|source\s*:|manufactur|gloster/i.test(l.text)) ctx.fillRect(l.x0 * sc - 4, l.top * sc - 3, (l.x1 - l.x0) * sc + 8, (l.bottom - l.top) * sc + 6); });
     const y0 = Math.max(0, Math.floor(top * sc)), y1 = Math.min(cv.height, Math.ceil(bot * sc)), hh = y1 - y0;
     const data = ctx.getImageData(0, y0, cv.width, hh).data;
     let minX = cv.width, maxX = -1, minY = hh, maxY = -1;
@@ -17542,19 +17556,20 @@ function TDSPrintBody({ rec, part = 'single' }) {
         <tbody>
           {secs.map(s => (
             <React.Fragment key={s.n}>
-              <tr><td style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A', letterSpacing: 0.4 }}>{s.title}</td></tr>
+              <tr data-kn="1"><td style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A' }}>{s.n}</td><td colSpan={4} style={{ ...td, fontWeight: 700, background: '#E4E9F3', color: '#1E2A4A', letterSpacing: 0.4 }}>{s.title}</td></tr>
               {s.rows.map(r => (
-                <tr key={r.no}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 16 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, fontWeight: r.val && /^[\d.±\s/-]+$/.test(r.val) ? 700 : 400 }}>{r.val}</td></tr>
+                <tr key={r.no} data-kn={r.head ? '1' : undefined}><td style={td}>{r.no}</td><td style={{ ...td, paddingLeft: r.indent ? 16 : 6 }}>{r.label}</td><td style={td}>{r.spec}</td><td style={td}>{r.unit}</td><td style={{ ...td, fontWeight: r.val && /^[\d.±\s/-]+$/.test(r.val) ? 700 : 400 }}>{r.val}</td></tr>
               ))}
             </React.Fragment>
           ))}
         </tbody>
       </table>
       {rec.notes ? <div style={{ marginTop: 6, fontSize: 10.5 }}><b>Notes:</b> {rec.notes}</div> : null}
-      {part === 'single' && <div style={{ textAlign: 'center', fontSize: 10, color: '#555', marginTop: 8 }}>* Values indicated as "Approx." are for guidance only. This is a computer generated document; no signature is required. *</div>}
+      {part === 'single' && <TDSNotes />}
     </div>
   );
 }
+function TDSNotes() { return <div style={{ marginTop: 10, fontSize: 10, color: '#333', border: '1px solid #9AA3B5', padding: '5px 8px', lineHeight: 1.5 }}><b>Notes:</b><br />1. Drum length: 500/1000 m with ±5% tolerance; 5% of the ordered quantity may be supplied in non-standard lengths (NSL), with a minimum length of 100 m.<br />2. Values indicated as "Approx." are for guidance only.<br />3. In case of any typographical error or discrepancy, the relevant standards shall prevail.</div>; }
 // Combined TDS document: one heading + index, then one section per cable (each on a new page)
 function TDSCombinedPrint({ recs = [] }) {
   const f = recs[0] || {};
@@ -17571,8 +17586,8 @@ function TDSCombinedPrint({ recs = [] }) {
         <thead><tr><th style={{ ...th, width: '5%' }}>Sl.</th><th style={{ ...th, width: '17%' }}>TDS No.</th><th style={{ ...th, width: '44%' }}>Product (as per quotation)</th><th style={{ ...th, width: '34%' }}>Cable construction</th></tr></thead>
         <tbody>{recs.map((r, i) => <tr key={r.id}><td style={td}>{i + 1}</td><td style={td}>{r.number}</td><td style={td}>{r._qName || '—'}</td><td style={td}>{(r.v || {}).title}</td></tr>)}</tbody>
       </table>
-      <div style={{ textAlign: 'center', fontSize: 10, color: '#555', marginTop: 8 }}>* Values indicated as "Approx." are for guidance only. This is a computer generated document; no signature is required. *</div>
       {recs.map(r => <React.Fragment key={r.id}><div className="pgbrk" style={{ height: 0, borderTop: '2px dashed #C9D6F0', margin: '18px 0' }} /><TDSPrintBody rec={r} part="section" /></React.Fragment>)}
+      <TDSNotes />
     </div>
   );
 }
@@ -17784,7 +17799,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         ))}
       </div>
       {printRec && (
-        <DocPrintOverlay pgf={Array.isArray(printRec) && printRec.length > 1 ? [businessInfo.name, 'Technical Data Sheets (' + printRec.length + ') — ' + printRec.map(r => r.number).join(', ').slice(0, 90), 'Page {p} of {n}'].filter(Boolean).join(' | ') : ''} onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
+        <DocPrintOverlay pgf={Array.isArray(printRec) && printRec.length > 1 ? [businessInfo.name, 'Technical Data Sheets (' + printRec.length + ') — ' + (() => { const ns = printRec.map(r => String(r.number || '')).filter(Boolean).sort(); if (ns.length < 2) return ns[0] || ''; const a = ns[0], b = ns[ns.length - 1]; let k = 0; while (k < a.length && a[k] === b[k]) k++; k = a.lastIndexOf('/', k) + 1; return a + ' to ' + b.slice(k); })(), 'Page {p} of {n}'].filter(Boolean).join(' | ') : ''} onClose={() => setPrintRec(null)} filename={Array.isArray(printRec) ? 'TDS-set-' + printRec.length + '.pdf' : 'TDS-' + (printRec.number || '').replace(/[^0-9A-Za-z]+/g, '-') + '.pdf'} businessInfo={businessInfo}>
           {Array.isArray(printRec) ? (printRec.length > 1 ? <TDSCombinedPrint recs={printRec.map(withQName)} /> : <TDSPrintBody rec={withQName(printRec[0])} />) : <TDSPrintBody rec={withQName(printRec)} />}
         </DocPrintOverlay>
       )}
