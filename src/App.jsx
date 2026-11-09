@@ -67,14 +67,14 @@ const PLAN_MODULES = {
     'stock','bincard','grn','storeissue','stockledger','verticalrack','insights',
   ],
   trading: [
-    'hr','payroll','employees','siteattendance',
+    'hr','payroll','employees','siteattendance','exportorders',
   ],
   manufacturing: ['stdbom','ordertracker','productspec','routinetest',
     'assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration',
     'hr','payroll','siteattendance',
     'rawmaterials','bom','production','qualitycheck','parts','engdocs',
     'scopeofwork','isoprocs','deptprocedures','inprocessqa','qatesting',
-    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds',
+    'pdv','internalaudit','capa','vendoreval','mis','investors','boshortage','fatsat','tds','exportorders',
   ],
   service: [
     'hr','payroll','serviceorders',
@@ -7510,6 +7510,278 @@ function machineHealth(machineId, pmSchedules = [], fmWorkOrders = [], days = 90
 }
 const PM_LABEL = { overdue: ['PM overdue', '#B5453A'], due: ['PM due ≤ 7 d', '#E07B00'], ok: ['PM ok', '#1A7A3E'], none: ['No PM plan', '#999'] };
 
+// ─── Export Orders (merchant export): Export PI · Supplier PO @0.1% GST · GST officer letter · Dispatch instructions · Checklist & 90-day register ───
+const EXP_CHECKLIST = [
+  ['piSent', 'Export Proforma Invoice sent to buyer'],
+  ['advance', 'Advance / LC received (payment terms met)'],
+  ['poSent', 'Supplier PO (0.1% GST) issued to supplier'],
+  ['poOfficer', 'Copy of supplier PO given to supplier\'s jurisdictional GST officer'],
+  ['supInv', 'Supplier tax invoice received (0.1% GST, ELCAB GSTIN, export declaration)'],
+  ['eway', 'E-way bill — supplier to port (goods moved directly to port / registered warehouse)'],
+  ['portAck', 'Goods received at port — acknowledgement from CHA'],
+  ['sb', 'Shipping bill filed — shows supplier GSTIN and supplier invoice no.'],
+  ['leo', 'Let Export Order (LEO) received'],
+  ['egm', 'EGM filed / bill of lading issued'],
+  ['proofSup', 'Proof of export (shipping bill + EGM) sent to supplier'],
+  ['proofOfficer', 'Proof of export sent to supplier\'s jurisdictional GST officer'],
+  ['brc', 'Export proceeds realised — e-BRC / FIRC received'],
+];
+const EXP_DOCS = [['pi', 'Export Proforma Invoice'], ['po', 'Supplier PO — 0.1% GST'], ['letter', 'GST Officer Submission Letter'], ['dispatch', 'Dispatch Instructions — Direct to Port'], ['check', 'Export Checklist']];
+const expDays = (d) => { if (!d) return null; const t = new Date(d); if (isNaN(t)) return null; const due = new Date(t.getTime() + 90 * 86400000); return { due: due.toISOString().slice(0, 10), left: Math.ceil((due - new Date()) / 86400000) }; };
+const expN = (v) => parseFloat(v) || 0;
+
+function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], customers = [], vendors = [], items = [], businessInfo = {}, setBusinessInfo, userRole }) {
+  const canEdit = !['viewer'].includes(userRole);
+  const today = new Date().toISOString().slice(0, 10);
+  const [tab, setTab] = React.useState('orders');
+  const [ed, setEd] = React.useState(null);
+  const [doc, setDoc] = React.useState(null); // { rec, kind }
+  const prof = businessInfo.exportProfile || {};
+  const setProf = (k, v) => setBusinessInfo && setBusinessInfo(p => ({ ...p, exportProfile: { ...(p.exportProfile || {}), [k]: v } }));
+  const list = (Array.isArray(exportOrders) ? exportOrders : []).filter(x => !x.deleted).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const won = (documents || []).filter(d => d.type === 'quotation' && d.outcome === 'won' && d.status !== 'deleted');
+  const own = (businessInfo.state || '').trim().toLowerCase();
+  const inp = { width: '100%', border: '1px solid #DDD', borderRadius: 6, padding: '7px 9px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl = { fontSize: 11.5, color: '#666', fontWeight: 600, display: 'block', marginBottom: 3 };
+  const card = { background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12, padding: 16, marginBottom: 12 };
+  const row = { display: 'flex', flexWrap: 'wrap', gap: '6px 14px' };
+  const F = (label, val, on, extra = {}) => <div style={{ flex: extra.wide ? '1 1 100%' : '1 1 200px', minWidth: 180 }}><label style={lbl}>{label}</label>{extra.area ? <textarea style={{ ...inp, minHeight: 56, resize: 'vertical' }} value={val || ''} onChange={e => on(e.target.value)} /> : <input type={extra.type || 'text'} list={extra.list} style={inp} value={val || ''} onChange={e => on(e.target.value)} placeholder={extra.ph || ''} />}</div>;
+
+  function nextNo(prefix, field) { const n = list.filter(x => String(x[field] || '').includes('/' + fyNow() + '/')).length + 1; return dn(prefix, n); }
+  function blank() {
+    return { id: 'exp-' + Date.now(), number: nextNo('EXP', 'number'), date: today, status: 'open', quoteNo: '', woNo: '', buyer: '', buyerAddress: '', buyerCountry: '', buyerTaxId: '', buyerPO: '', currency: 'USD', fx: '', incoterm: 'FOB', portLoad: prof.port || 'Nhava Sheva (JNPT), Mumbai — INNSA1', portDischarge: '', finalDest: '', payTerms: '', delivery: '', piNo: nextNo('EPI', 'piNo'), piDate: today, items: [{ id: 'l1', desc: '', hsn: '8544', qty: '', unit: 'm', rate: '', supRate: '' }], supplierId: '', supplier: '', supplierGstin: '', supplierAddress: '', supplierState: '', supplierJurisdiction: '', supplierOfficer: '', poNo: nextNo('MPO', 'poNo'), poDate: today, poDelivery: '', cha: prof.cha || '', chaAddress: '', chaContact: '', marks: '', packing: 'Export-worthy wooden drums, ends sealed', supInvNo: '', supInvDate: '', ewayNo: '', sbNo: '', sbDate: '', leoDate: '', egmNo: '', egmDate: '', blNo: '', blDate: '', brcNo: '', brcDate: '', check: {}, checkDate: {}, notes: '', createdAt: new Date().toISOString() };
+  }
+  function fromQuote(id) {
+    const q = won.find(d => d.id === id); if (!q) return;
+    const c = (customers || []).find(x => x.id === q.customerId) || q.customerSnapshot || {};
+    setEd(p => ({ ...p, quoteNo: q.number, woNo: q.woNo || '', buyer: c.name || '', buyerAddress: c.address || '', buyerCountry: c.partyCountry || q.destCountry || '', buyerTaxId: c.taxId || '', buyerPO: q.customerRef || '',
+      currency: q.ovCurrency && q.ovCurrency !== 'INR' ? q.ovCurrency : (q.exCurrency || c.currency || p.currency), fx: q.ovFx || q.exRate || p.fx, incoterm: q.incoterm || p.incoterm, payTerms: p.payTerms || (q.terms || '').split('\n')[0] || '',
+      items: (q.items || []).filter(it => (it.name || '').trim()).map((it, i) => ({ id: 'l' + i + Date.now(), desc: it.name, hsn: it.hsn || '8544', qty: it.qty, unit: it.unit || 'm', rate: it.rate, supRate: '' })) }));
+  }
+  function pickSupplier(name) {
+    const v = (vendors || []).find(x => x.name === name);
+    setEd(p => ({ ...p, supplier: name, supplierId: v ? v.id : '', supplierGstin: v ? (v.gstin || p.supplierGstin) : p.supplierGstin, supplierAddress: v ? (v.address || p.supplierAddress) : p.supplierAddress, supplierState: v ? (v.state || p.supplierState) : p.supplierState }));
+  }
+  const setF = (k, v) => setEd(p => ({ ...p, [k]: v }));
+  const setItem = (id, k, v) => setEd(p => ({ ...p, items: p.items.map(it => it.id === id ? { ...it, [k]: v } : it) }));
+  function save(close) {
+    if (!ed.buyer.trim()) { alert('Enter the buyer.'); return; }
+    const rec = { ...ed, updatedAt: new Date().toISOString() };
+    setExportOrders(prev => { const a = Array.isArray(prev) ? prev : []; return a.some(x => x.id === rec.id) ? a.map(x => x.id === rec.id ? rec : x) : [rec, ...a]; });
+    setEd(rec); if (close) setEd(null);
+  }
+  const tot = (r) => {
+    const fx = expN(r.fx), intra = own && (r.supplierState || '').trim().toLowerCase() === own;
+    const val = (r.items || []).reduce((s, it) => s + expN(it.qty) * expN(it.rate), 0);
+    const supVal = (r.items || []).reduce((s, it) => s + expN(it.qty) * expN(it.supRate), 0);
+    const gst = Math.round(supVal * 0.001 * 100) / 100;
+    return { val, inr: fx ? val * fx : 0, supVal, gst, intra, cgst: intra ? gst / 2 : 0, igst: intra ? 0 : gst, supTotal: supVal + gst };
+  };
+  const m2 = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const cur = (r) => r.currency || 'USD';
+
+  // ── print documents ──
+  const th = { border: '1px solid #555', padding: '5px 7px', background: '#EEF1F7', fontSize: 11.5, textAlign: 'left' };
+  const td = { border: '1px solid #777', padding: '5px 7px', fontSize: 11.5, verticalAlign: 'top' };
+  const H = ({ t, no, date }) => <div style={{ marginBottom: 10 }}><div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>{t}</div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 6 }}><span><b>No.:</b> {no}</span><span><b>Date:</b> {date}</span></div></div>;
+  const KV = ({ rows }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}><tbody>{rows.filter(r => r[1]).map(([k, v]) => <tr key={k}><td style={{ ...td, width: '34%', fontWeight: 700, background: '#FAFAF7' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>;
+  const Sign = ({ forName }) => <div style={{ marginTop: 34, display: 'flex', justifyContent: 'flex-end' }}><div style={{ textAlign: 'center', minWidth: 220, fontSize: 12 }}><div style={{ height: 44 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {forName}<br />Authorised Signatory</div></div></div>;
+  function DocBody({ r, kind }) {
+    const t = tot(r), bn = businessInfo.name || '';
+    const exporterRows = [['Exporter', bn + ', ' + (businessInfo.address || '')], ['GSTIN', businessInfo.gstin], ['IEC', prof.iec], ['Export Promotion Council', [prof.epc, prof.epcNo].filter(Boolean).join(' — Reg. No. ')], ['AD Code', prof.adCode]];
+    if (kind === 'pi') return (<div>
+      <H t="EXPORT PROFORMA INVOICE" no={r.piNo} date={r.piDate} />
+      <KV rows={[...exporterRows, ['Buyer', [r.buyer, r.buyerAddress, r.buyerCountry].filter(Boolean).join(', ')], ['Buyer Tax ID', r.buyerTaxId], ['Buyer PO / Ref', r.buyerPO], ['Our Ref (WO / Quotation)', [r.woNo, r.quoteNo].filter(Boolean).join(' / ')], ['Port of Loading', r.portLoad], ['Port of Discharge', r.portDischarge], ['Final Destination', r.finalDest || r.buyerCountry], ['Incoterm (2020)', r.incoterm], ['Payment Terms', r.payTerms], ['Delivery', r.delivery]]} />
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Description of goods', 'HS Code', 'Qty', 'Unit', 'Rate (' + cur(r) + ')', 'Amount (' + cur(r) + ')'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.rate))}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.rate))}</td></tr>)}
+          <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total {r.incoterm} value ({cur(r)})</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(t.val)}</td></tr></tbody></table>
+      <div style={{ fontSize: 11.5, marginTop: 8 }}>Amount in words: {typeof numToWordsIntl === 'function' ? numToWordsIntl(Math.round(t.val)) : ''} {cur(r)} only.</div>
+      <div style={{ fontSize: 11.5, marginTop: 8 }}><b>Bank details:</b> {businessInfo.bankName || ''} {businessInfo.bankAccount ? '· A/c ' + businessInfo.bankAccount : ''} {businessInfo.ifsc ? '· IFSC ' + businessInfo.ifsc : ''} {prof.swift ? '· SWIFT ' + prof.swift : ''}</div>
+      <div style={{ fontSize: 11.5, marginTop: 6 }}>Supply meant for export. Country of origin of goods: India. This proforma invoice is not a tax invoice.</div>
+      {r.notes ? <div style={{ fontSize: 11.5, marginTop: 6 }}><b>Notes:</b> {r.notes}</div> : null}
+      <Sign forName={bn} />
+    </div>);
+    if (kind === 'po') return (<div>
+      <H t="PURCHASE ORDER — SUPPLY FOR EXPORT (CONCESSIONAL GST 0.1%)" no={r.poNo} date={r.poDate} />
+      <KV rows={[['To (Supplier)', [r.supplier, r.supplierAddress].filter(Boolean).join(', ')], ['Supplier GSTIN', r.supplierGstin], ['Buyer (Merchant Exporter)', bn + ', ' + (businessInfo.address || '')], ['Merchant Exporter GSTIN', businessInfo.gstin], ['IEC', prof.iec], ['Registered with (EPC / Board)', [prof.epc, prof.epcNo].filter(Boolean).join(' — Reg. No. ')], ['Export Order Ref', [r.number, r.woNo, r.piNo].filter(Boolean).join(' / ')], ['Deliver directly to', r.portLoad + (r.cha ? ' — c/o ' + r.cha + (r.chaAddress ? ', ' + r.chaAddress : '') : '')], ['Delivery date', r.poDelivery]]} />
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Description', 'HSN', 'Qty', 'Unit', 'Rate (₹)', 'Taxable value (₹)'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.supRate))}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.supRate))}</td></tr>)}
+          <tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>Taxable value</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.supVal)}</td></tr>
+          {t.intra ? <><tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>CGST @ 0.05%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.cgst)}</td></tr><tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>SGST @ 0.05%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.cgst)}</td></tr></> : <tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>IGST @ 0.1%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.igst)}</td></tr>}
+          <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total (₹)</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(t.supTotal)}</td></tr></tbody></table>
+      <div style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}><b>Conditions (concessional rate for supply to merchant exporter):</b>
+        <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
+          <li>Supply is at the concessional rate of {t.intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%'} for export by the merchant exporter named above.</li>
+          <li>Your tax invoice must be raised on {bn} (GSTIN {businessInfo.gstin || '—'}) and must state that the goods are supplied for export at the concessional rate.</li>
+          <li>Goods must be moved <b>directly from your premises to {r.portLoad}</b> (or a registered warehouse as advised) — not to our premises.</li>
+          <li>Please send copies of your tax invoice and e-way bill to us immediately on dispatch; your GSTIN and invoice number will be shown in our shipping bill.</li>
+          <li>We will export the goods within 90 days of your tax invoice and send you proof of export (shipping bill and EGM details).</li>
+          <li>A copy of this purchase order is being provided to your jurisdictional GST officer.</li>
+        </ol></div>
+      <Sign forName={bn} />
+    </div>);
+    if (kind === 'letter') return (<div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ref: {r.poNo}/GST</span><span>Date: {r.poDate}</span></div>
+      <div style={{ marginTop: 12 }}>To,<br />{r.supplierOfficer || 'The Jurisdictional GST Officer'}<br />{r.supplierJurisdiction || '(Range / Division / Commissionerate of the supplier)'}</div>
+      <div style={{ marginTop: 12 }}><b>Sub: Intimation of purchase order for procurement of goods at concessional GST rate for export — supplier {r.supplier || ''} (GSTIN {r.supplierGstin || '—'})</b></div>
+      <div style={{ marginTop: 10 }}>Sir / Madam,</div>
+      <p>We, {bn} (GSTIN {businessInfo.gstin || '—'}, IEC {prof.iec || '—'}), registered with {prof.epc || '—'}{prof.epcNo ? ' under Reg. No. ' + prof.epcNo : ''}, are a merchant exporter. We have placed the enclosed purchase order No. {r.poNo} dated {r.poDate} on {r.supplier || 'the supplier'}, {r.supplierAddress || ''}, for procurement of the goods listed below at the concessional rate of GST for export.</p>
+      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 10px' }}><thead><tr>{['Sl', 'Description', 'HSN', 'Qty', 'Taxable value (₹)'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty} {it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.supRate))}</td></tr>)}</tbody></table>
+      <p>The goods will be moved directly from the supplier's place of business to {r.portLoad} for export, and will be exported within 90 days from the date of the supplier's tax invoice. The supplier's GSTIN and tax invoice number will be indicated in the shipping bill, and a copy of the shipping bill with proof of export will be furnished to the supplier and to your office.</p>
+      <p>This is submitted for your kind information and records.</p>
+      <div style={{ marginTop: 8 }}>Encl.: Copy of purchase order No. {r.poNo}</div>
+      <Sign forName={bn} />
+    </div>);
+    if (kind === 'dispatch') return (<div>
+      <H t="DISPATCH INSTRUCTIONS — DIRECT TO PORT" no={r.poNo + '/DI'} date={today} />
+      <div style={{ fontSize: 12, marginBottom: 8 }}>To: <b>{r.supplier}</b>, {r.supplierAddress}</div>
+      <KV rows={[['Against our PO', r.poNo + ' dt. ' + r.poDate], ['Export order', [r.number, r.woNo].filter(Boolean).join(' / ')], ['Deliver to (port)', r.portLoad], ['CHA / Forwarder (consignee at port)', [r.cha, r.chaAddress].filter(Boolean).join(', ')], ['CHA contact', r.chaContact], ['Final buyer / destination', [r.buyer, r.finalDest || r.buyerCountry].filter(Boolean).join(' — ')], ['Marks & numbers', r.marks], ['Packing', r.packing]]} />
+      <div style={{ fontSize: 12, lineHeight: 1.7 }}><b>Instructions:</b>
+        <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
+          <li>Dispatch the goods <b>directly to the port / CHA above</b>. Do not send them to {bn}'s premises.</li>
+          <li>Raise the tax invoice on {bn} (GSTIN {businessInfo.gstin || '—'}) at {tot(r).intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%'}, stating "Supply for export at concessional rate".</li>
+          <li>The e-way bill must show the place of delivery as the port address; ship-to = CHA / port, bill-to = {bn}.</li>
+          <li>Send to us and to the CHA, by e-mail on the day of dispatch: tax invoice, e-way bill, packing list, LR / transport receipt and test certificates.</li>
+          <li>Each drum / package must carry the marks & numbers above and the drum number as per the packing list.</li>
+        </ol></div>
+      <Sign forName={bn} />
+    </div>);
+    // checklist
+    const dd = expDays(r.supInvDate);
+    return (<div>
+      <H t="EXPORT DOCUMENT CHECKLIST" no={r.number} date={today} />
+      <KV rows={[['Buyer', r.buyer + (r.buyerCountry ? ', ' + r.buyerCountry : '')], ['Export PI', r.piNo], ['Supplier / PO', r.supplier + ' / ' + r.poNo], ['Supplier invoice', [r.supInvNo, r.supInvDate].filter(Boolean).join(' dt. ')], ['90-day export deadline', dd ? dd.due + ' (' + (dd.left >= 0 ? dd.left + ' days left' : Math.abs(dd.left) + ' days overdue') + ')' : 'starts from supplier invoice date'], ['Shipping bill', [r.sbNo, r.sbDate].filter(Boolean).join(' dt. ')], ['LEO / EGM', [r.leoDate, r.egmNo, r.egmDate].filter(Boolean).join(' / ')], ['Bill of lading', [r.blNo, r.blDate].filter(Boolean).join(' dt. ')], ['e-BRC / FIRC', [r.brcNo, r.brcDate].filter(Boolean).join(' dt. ')]]} />
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Step', 'Done', 'Date'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{EXP_CHECKLIST.map(([k, l], i) => <tr key={k}><td style={td}>{i + 1}</td><td style={td}>{l}</td><td style={{ ...td, textAlign: 'center', fontWeight: 700, color: (r.check || {})[k] ? '#1A7A3E' : '#B5453A' }}>{(r.check || {})[k] ? '✔' : '—'}</td><td style={td}>{(r.checkDate || {})[k] || ''}</td></tr>)}</tbody></table>
+    </div>);
+  }
+
+  if (doc) {
+    const titles = Object.fromEntries(EXP_DOCS);
+    return <DocPrintOverlay onClose={() => setDoc(null)} filename={(titles[doc.kind] || 'Export') .replace(/[^A-Za-z0-9]+/g, '-') + '-' + String(doc.rec.number || '').replace(/[^A-Za-z0-9]+/g, '-') + '.pdf'} businessInfo={businessInfo}><DocBody r={doc.rec} kind={doc.kind} /></DocPrintOverlay>;
+  }
+
+  if (ed) {
+    const t = tot(ed), dd = expDays(ed.supInvDate);
+    return (
+      <div style={styles.page}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+          <button onClick={() => setEd(null)} style={styles.ghostBtn}><X size={14} /> Back</button>
+          <h2 className="serif" style={{ ...styles.h1, flex: 1, margin: 0 }}>Export Order — {ed.number}</h2>
+          {canEdit && <button onClick={() => save(false)} style={styles.primaryBtn}>Save</button>}
+        </div>
+        <div style={{ ...card, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: '#F5F8FE', borderColor: '#C9D6F0' }}>
+          <b style={{ fontSize: 13, color: '#1F3A7A', marginRight: 6 }}>Documents:</b>
+          {EXP_DOCS.map(([k, l]) => <button key={k} onClick={() => { save(false); setDoc({ rec: ed, kind: k }); }} style={{ ...styles.ghostBtn, background: '#fff' }}><Printer size={13} /> {l}</button>)}
+        </div>
+        {dd && <div style={{ ...card, padding: '10px 14px', background: dd.left < 0 ? '#FDEEEC' : dd.left <= 15 ? '#FFF6E5' : '#EAF6EE', borderColor: dd.left < 0 ? '#F2B8AE' : dd.left <= 15 ? '#F2D48A' : '#B7DEC4', fontSize: 13 }}><b>90-day export deadline: {dd.due}</b> — {dd.left >= 0 ? dd.left + ' days left' : Math.abs(dd.left) + ' days OVERDUE'} (from supplier invoice {ed.supInvDate}){(ed.sbNo && ed.egmNo) ? ' · exported ✔' : ''}</div>}
+
+        <div style={card}><div style={{ fontWeight: 700, marginBottom: 8, color: '#1E2A4A' }}>Buyer & order</div>
+          <div style={row}>
+            <div style={{ flex: '1 1 260px' }}><label style={lbl}>Fill from won quotation</label><select style={inp} value="" onChange={e => fromQuote(e.target.value)}><option value="">— select won quotation —</option>{won.map(q => <option key={q.id} value={q.id}>{(q.woNo ? q.woNo + ' · ' : '') + q.number + ' · ' + ((q.customerSnapshot || {}).name || '')}</option>)}</select></div>
+            {F('Export order no.', ed.number, v => setF('number', v))}{F('Date', ed.date, v => setF('date', v), { type: 'date' })}{F('WO no.', ed.woNo, v => setF('woNo', v))}
+            {F('Buyer', ed.buyer, v => setF('buyer', v), { list: 'exp-cust' })}<datalist id="exp-cust">{(customers || []).map(c => <option key={c.id} value={c.name} />)}</datalist>
+            {F('Buyer country', ed.buyerCountry, v => setF('buyerCountry', v))}{F('Buyer VAT / Tax ID', ed.buyerTaxId, v => setF('buyerTaxId', v))}{F('Buyer PO / Ref', ed.buyerPO, v => setF('buyerPO', v))}
+            {F('Buyer address', ed.buyerAddress, v => setF('buyerAddress', v), { wide: true })}
+            {F('Currency', ed.currency, v => setF('currency', v.toUpperCase()))}{F('Exchange rate (₹ per 1)', ed.fx, v => setF('fx', v), { type: 'number' })}{F('Incoterm', ed.incoterm, v => setF('incoterm', v), { ph: 'FOB / CIF / CFR' })}
+            {F('Port of loading', ed.portLoad, v => setF('portLoad', v))}{F('Port of discharge', ed.portDischarge, v => setF('portDischarge', v))}{F('Final destination', ed.finalDest, v => setF('finalDest', v))}
+            {F('Payment terms', ed.payTerms, v => setF('payTerms', v))}{F('Delivery', ed.delivery, v => setF('delivery', v))}{F('Export PI no.', ed.piNo, v => setF('piNo', v))}{F('PI date', ed.piDate, v => setF('piDate', v), { type: 'date' })}
+          </div></div>
+
+        <div style={card}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}><b style={{ color: '#1E2A4A' }}>Items</b>{canEdit && <button onClick={() => setEd(p => ({ ...p, items: [...p.items, { id: 'l' + Date.now(), desc: '', hsn: '8544', qty: '', unit: 'm', rate: '', supRate: '' }] }))} style={styles.primaryBtn}><Plus size={13} /> Add item</button>}</div>
+          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}><thead><tr>{['#', 'Description', 'HSN', 'Qty', 'Unit', 'Export rate (' + cur(ed) + ')', 'Amount (' + cur(ed) + ')', 'Supplier rate (₹)', 'Supplier value (₹)', ''].map(h => <th key={h} style={{ ...th, fontSize: 11 }}>{h}</th>)}</tr></thead>
+            <tbody>{ed.items.map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td>
+              <td style={td}><textarea style={{ ...inp, minHeight: 34 }} value={it.desc} onChange={e => setItem(it.id, 'desc', e.target.value)} list="exp-items" /></td>
+              <td style={{ ...td, width: 80 }}><input style={inp} value={it.hsn} onChange={e => setItem(it.id, 'hsn', e.target.value)} /></td>
+              <td style={{ ...td, width: 80 }}><input type="number" style={{ ...inp, textAlign: 'right' }} value={it.qty} onChange={e => setItem(it.id, 'qty', e.target.value)} /></td>
+              <td style={{ ...td, width: 60 }}><input style={inp} value={it.unit} onChange={e => setItem(it.id, 'unit', e.target.value)} /></td>
+              <td style={{ ...td, width: 100 }}><input type="number" style={{ ...inp, textAlign: 'right' }} value={it.rate} onChange={e => setItem(it.id, 'rate', e.target.value)} /></td>
+              <td style={{ ...td, textAlign: 'right', width: 100 }}>{m2(expN(it.qty) * expN(it.rate))}</td>
+              <td style={{ ...td, width: 100 }}><input type="number" style={{ ...inp, textAlign: 'right' }} value={it.supRate} onChange={e => setItem(it.id, 'supRate', e.target.value)} /></td>
+              <td style={{ ...td, textAlign: 'right', width: 110 }}>{m2(expN(it.qty) * expN(it.supRate))}</td>
+              <td style={{ ...td, width: 30 }}>{canEdit && <button onClick={() => setEd(p => ({ ...p, items: p.items.filter(x => x.id !== it.id) }))} style={styles.iconBtn}><Trash2 size={13} color="#B5453A" /></button>}</td></tr>)}</tbody></table></div>
+          <div style={{ display: 'flex', gap: 20, justifyContent: 'flex-end', flexWrap: 'wrap', fontSize: 13, marginTop: 8 }}>
+            <span>Export value <b>{cur(ed)} {m2(t.val)}</b>{t.inr ? ' (₹ ' + m2(t.inr) + ')' : ''}</span>
+            <span>Supplier value <b>₹ {m2(t.supVal)}</b> + {t.intra ? 'CGST+SGST' : 'IGST'} 0.1% <b>₹ {m2(t.gst)}</b> = <b>₹ {m2(t.supTotal)}</b></span>
+            {t.inr > 0 && t.supTotal > 0 && <span>Gross margin <b style={{ color: t.inr - t.supTotal >= 0 ? '#1A7A3E' : '#B5453A' }}>₹ {m2(t.inr - t.supTotal)} ({((t.inr - t.supTotal) / t.inr * 100).toFixed(1)}%)</b></span>}
+          </div></div>
+
+        <div style={card}><div style={{ fontWeight: 700, marginBottom: 8, color: '#1E2A4A' }}>Supplier (0.1% GST) & port</div>
+          <div style={row}>
+            {F('Supplier', ed.supplier, pickSupplier, { list: 'exp-vend' })}<datalist id="exp-vend">{(vendors || []).map(v => <option key={v.id} value={v.name} />)}</datalist>
+            {F('Supplier GSTIN', ed.supplierGstin, v => setF('supplierGstin', v))}{F('Supplier state', ed.supplierState, v => setF('supplierState', v))}
+            {F('Supplier address', ed.supplierAddress, v => setF('supplierAddress', v), { wide: true })}
+            {F('Supplier GST jurisdiction (Range / Division / Commissionerate)', ed.supplierJurisdiction, v => setF('supplierJurisdiction', v), { wide: true })}
+            {F('Officer designation (letter addressed to)', ed.supplierOfficer, v => setF('supplierOfficer', v), { ph: 'The Superintendent of Central Tax' })}
+            {F('Supplier PO no.', ed.poNo, v => setF('poNo', v))}{F('PO date', ed.poDate, v => setF('poDate', v), { type: 'date' })}{F('Delivery at port by', ed.poDelivery, v => setF('poDelivery', v), { type: 'date' })}
+            {F('CHA / Forwarder', ed.cha, v => setF('cha', v))}{F('CHA contact (name / phone / e-mail)', ed.chaContact, v => setF('chaContact', v))}
+            {F('CHA / port delivery address', ed.chaAddress, v => setF('chaAddress', v), { wide: true })}
+            {F('Marks & numbers', ed.marks, v => setF('marks', v))}{F('Packing', ed.packing, v => setF('packing', v))}
+          </div></div>
+
+        <div style={card}><div style={{ fontWeight: 700, marginBottom: 8, color: '#1E2A4A' }}>Shipment & proof of export</div>
+          <div style={row}>
+            {F('Supplier invoice no.', ed.supInvNo, v => setF('supInvNo', v))}{F('Supplier invoice date (90-day clock)', ed.supInvDate, v => setF('supInvDate', v), { type: 'date' })}{F('E-way bill no.', ed.ewayNo, v => setF('ewayNo', v))}
+            {F('Shipping bill no.', ed.sbNo, v => setF('sbNo', v))}{F('Shipping bill date', ed.sbDate, v => setF('sbDate', v), { type: 'date' })}{F('LEO date', ed.leoDate, v => setF('leoDate', v), { type: 'date' })}
+            {F('EGM no.', ed.egmNo, v => setF('egmNo', v))}{F('EGM date', ed.egmDate, v => setF('egmDate', v), { type: 'date' })}{F('Bill of lading no.', ed.blNo, v => setF('blNo', v))}{F('B/L date', ed.blDate, v => setF('blDate', v), { type: 'date' })}
+            {F('e-BRC / FIRC no.', ed.brcNo, v => setF('brcNo', v))}{F('e-BRC date', ed.brcDate, v => setF('brcDate', v), { type: 'date' })}
+          </div></div>
+
+        <div style={card}><div style={{ fontWeight: 700, marginBottom: 8, color: '#1E2A4A' }}>Checklist ({EXP_CHECKLIST.filter(([k]) => (ed.check || {})[k]).length}/{EXP_CHECKLIST.length})</div>
+          {EXP_CHECKLIST.map(([k, l], i) => <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid #F0ECE0', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!(ed.check || {})[k]} onChange={e => setEd(p => ({ ...p, check: { ...(p.check || {}), [k]: e.target.checked }, checkDate: { ...(p.checkDate || {}), [k]: e.target.checked ? ((p.checkDate || {})[k] || today) : '' } }))} />
+            <span style={{ flex: 1 }}>{i + 1}. {l}</span>
+            <input type="date" value={(ed.checkDate || {})[k] || ''} onChange={e => setEd(p => ({ ...p, checkDate: { ...(p.checkDate || {}), [k]: e.target.value } }))} style={{ ...inp, width: 150 }} /></label>)}
+          <div style={{ marginTop: 10 }}>{F('Notes', ed.notes, v => setF('notes', v), { wide: true, area: true })}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const regRows = list.map(r => { const d = expDays(r.supInvDate), done = EXP_CHECKLIST.filter(([k]) => (r.check || {})[k]).length, exported = !!(r.sbNo && (r.egmNo || (r.check || {}).egm)); return { r, d, done, exported }; });
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <h2 className="serif" style={{ ...styles.h1, flex: 1, margin: 0 }}>Export Orders</h2>
+        {canEdit && <button onClick={() => setEd(blank())} style={styles.primaryBtn}><Plus size={14} /> New export order</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>{[['orders', 'Export orders'], ['register', '90-day register'], ['profile', 'Exporter profile']].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ padding: '6px 14px', borderRadius: 18, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '1.5px solid ' + (tab === k ? '#1E2A4A' : '#DDD'), background: tab === k ? '#1E2A4A' : '#fff', color: tab === k ? '#fff' : '#666' }}>{l}</button>)}</div>
+      {(!prof.iec || !prof.epcNo) && tab !== 'profile' && <div style={{ ...card, background: '#FFF8E1', borderColor: '#F2D48A', fontSize: 13 }}>Exporter profile is incomplete (IEC / EPC registration). These print on the PO and the GST officer letter — fill them once in <b>Exporter profile</b>.</div>}
+      {tab === 'orders' && (list.length === 0 ? <div style={styles.emptyBox}>No export orders yet. Click “New export order”, pick the won quotation, the supplier and the port — the five export documents are generated from it.</div> :
+        <div style={{ display: 'grid', gap: 8 }}>{regRows.map(({ r, d, done, exported }) => (
+          <div key={r.id} style={{ ...card, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 14px' }}>
+            <div style={{ flex: 1, minWidth: 240 }}><div style={{ fontWeight: 700, color: '#1E2A4A' }}>{r.number} · {r.buyer}{r.buyerCountry ? ' (' + r.buyerCountry + ')' : ''}</div>
+              <div style={{ fontSize: 12, color: '#777' }}>{[r.woNo, r.piNo, r.supplier && 'Supplier ' + r.supplier, r.poNo].filter(Boolean).join(' · ')} · {cur(r)} {m2(tot(r).val)}</div></div>
+            <span style={{ fontSize: 12, fontWeight: 700, color: exported ? '#1A7A3E' : d && d.left < 0 ? '#B5453A' : d && d.left <= 15 ? '#B26B00' : '#555' }}>{exported ? '✔ Exported' : d ? (d.left >= 0 ? d.left + ' days left' : Math.abs(d.left) + ' days overdue') : 'Awaiting supplier invoice'}</span>
+            <span style={{ fontSize: 12, color: '#555' }}>Checklist {done}/{EXP_CHECKLIST.length}</span>
+            <button onClick={() => setEd({ ...r })} style={styles.ghostBtn}><Pencil size={13} /> Open</button>
+            {userRole === 'admin' && <button onClick={() => { if (window.confirm('Delete export order ' + r.number + '?')) setExportOrders(prev => (prev || []).map(x => x.id === r.id ? { ...x, deleted: true } : x)); }} style={styles.iconBtn}><Trash2 size={14} color="#B5453A" /></button>}
+          </div>))}</div>)}
+      {tab === 'register' && (
+        <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 10 }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+          <thead><tr>{['Export order', 'Buyer', 'Supplier / GSTIN', 'Supplier inv. / date', '90-day due', 'Status', 'Shipping bill', 'EGM', 'Proof to supplier', 'Proof to officer', 'e-BRC'].map(h => <th key={h} style={{ ...th, fontSize: 11 }}>{h}</th>)}</tr></thead>
+          <tbody>{regRows.sort((a, b) => (a.exported - b.exported) || ((a.d ? a.d.left : 9999) - (b.d ? b.d.left : 9999))).map(({ r, d, exported }) => <tr key={r.id} onClick={() => setEd({ ...r })} style={{ cursor: 'pointer' }}>
+            <td style={td}>{r.number}</td><td style={td}>{r.buyer}</td><td style={td}>{r.supplier}<div style={{ fontSize: 10.5, color: '#888' }}>{r.supplierGstin}</div></td>
+            <td style={td}>{r.supInvNo}<div style={{ fontSize: 10.5, color: '#888' }}>{r.supInvDate}</div></td><td style={td}>{d ? d.due : '—'}</td>
+            <td style={{ ...td, fontWeight: 700, color: exported ? '#1A7A3E' : d && d.left < 0 ? '#B5453A' : d && d.left <= 15 ? '#B26B00' : '#555' }}>{exported ? 'Exported' : d ? (d.left >= 0 ? d.left + ' d left' : 'OVERDUE ' + Math.abs(d.left) + ' d') : 'Not started'}</td>
+            <td style={td}>{[r.sbNo, r.sbDate].filter(Boolean).join(' · ') || '—'}</td><td style={td}>{[r.egmNo, r.egmDate].filter(Boolean).join(' · ') || '—'}</td>
+            <td style={td}>{(r.checkDate || {}).proofSup || '—'}</td><td style={td}>{(r.checkDate || {}).proofOfficer || '—'}</td><td style={td}>{[r.brcNo, r.brcDate].filter(Boolean).join(' · ') || '—'}</td></tr>)}</tbody></table></div>)}
+      {tab === 'profile' && (
+        <div style={card}><div style={{ fontSize: 12.5, color: '#666', marginBottom: 10 }}>Filled once — printed on every Export PI, supplier PO and GST officer letter.</div>
+          <div style={row}>
+            {F('IEC (Import Export Code)', prof.iec, v => setProf('iec', v))}
+            {F('Export Promotion Council / Commodity Board', prof.epc, v => setProf('epc', v), { ph: 'e.g. EEPC India' })}
+            {F('EPC / RCMC registration no.', prof.epcNo, v => setProf('epcNo', v))}{F('RCMC valid till', prof.epcValid, v => setProf('epcValid', v), { type: 'date' })}
+            {F('AD code (bank)', prof.adCode, v => setProf('adCode', v))}{F('SWIFT code', prof.swift, v => setProf('swift', v))}
+            {F('Default port of loading', prof.port, v => setProf('port', v), { ph: 'Nhava Sheva (JNPT), Mumbai — INNSA1' })}
+            {F('Default CHA / forwarder', prof.cha, v => setProf('cha', v))}
+          </div></div>)}
+    </div>
+  );
+}
+
+
 function MachineLogView({ logs = [], setLogs, assets = [], productionOrders = [], setFmWorkOrders, pmSchedules = [], fmWorkOrders = [], userRole }) {
   const canEdit = !['sales', 'accounts'].includes(userRole);
   const iso = new Date().toISOString().slice(0, 10);
@@ -8229,7 +8501,7 @@ function ConvertDropdown({ doc, onConvert }) {
 
 // Which views belong to each section (for auto-expand when child is active)
 const SECTION_VIEWS = {
-  sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders'],
+  sales:       ['customers', 'enquiries', 'documents', 'channelpartners', 'serviceorders', 'exportorders'],
   accounts:    ['pettycash', 'vouchers', 'gstr1', 'gstr3b', 'vatreport', 'taxreport'],
   purchase:    ['vendors', 'grn', 'purchasereq'],
   stores:      ['stock', 'stockledger', 'bincard', 'items', 'storeissue', 'verticalrack', 'wip', 'drumstock', 'fgaccept'],
@@ -8249,8 +8521,8 @@ const SECTION_VIEWS = {
 
 // Which views each biz-type accordion "owns" (for auto-open on navigation)
 const BIZ_SECTION_VIEWS = {
-  trading:       ['customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
-  manufacturing: ['stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
+  trading:       ['exportorders','customers','enquiries','channelpartners','pettycash','vouchers','gstr1','gstr3b','vatreport','taxreport','vendors','grn','stock','stockledger','bincard','items','storeissue','verticalrack','audit','purchasereq'],
+  manufacturing: ['exportorders','stdbom','ordertracker','productspec','routinetest','assetregister','pmschedules','fmworkorders','fmspareparts','cabledesign','wip','drumstock','fgaccept','machinelog','metalrecon','incomingqa','calibration','customers','enquiries','vendors','serviceorders','vendoreval','grn','rawmaterials','stock','stockledger','bincard','items','storeissue','partsmaster','engdocs','bom','productionorders','isoprinciples','deptprocedures','inprocessqa','qatesting','capa','internalaudit','mis','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq','investors','boshortage','fatsat','tds'],
   service:       ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','scopeofwork','mepbom','pettycash','vouchers','gstr1','gstr3b','vatreport','audit','purchasereq'],
   fmamc:         ['customers','enquiries','vendors','grn','stock','stockledger','bincard','items','storeissue','fmkpi','assetregister','pmschedules','fmworkorders','amccontracts','fmspareparts','siteprojects','tender','activityplanner','rabilling','subcontractors','hse','tcommissioning','handover','dailyupdates','progressboard','clientmaterials','siteattendance','evaluation','mepreports','mepbom','scopeofwork','pettycash','vouchers','audit','purchasereq'],
   hr:            ['employees','payroll','siteattendance','offerletter','warnletter','termletter'],
@@ -8525,6 +8797,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <NavBtn id="enquiries"       label="Enquiries"         icon={FileSignature} />
                 <NavBtn id="channelpartners" label="Channel Partners"  icon={Briefcase} />
                 <CreateBtn docKey="quotation"    bizType="trading" />
+                <NavBtn id="exportorders" label="Export Orders (0.1% GST)" icon={Truck} />
                 <CreateBtn docKey="invoice"      bizType="trading" />
                 <CreateBtn docKey="creditnote"   bizType="trading" />
                 <CreateBtn docKey="delivery"     bizType="trading" />
@@ -8560,6 +8833,7 @@ function Sidebar({ view, setView, setActiveDoc, startNewDoc, syncStatus, user, o
                 <SubLabel label="Sales" />
                 <NavBtn id="customers"     label="Customers" icon={Users} />
                 <CreateBtn docKey="quotation"  bizType="manufacturing" />
+                <NavBtn id="exportorders" label="Export Orders (0.1% GST)" icon={Truck} />
                 <CreateBtn docKey="invoice"    bizType="manufacturing" />
                 <CreateBtn docKey="creditnote" bizType="manufacturing" />
 
@@ -9281,7 +9555,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 08-Nov-E</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-A</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -32231,6 +32505,7 @@ export default function App() {
   const [boShortages,      _setBOS]        = useState([]);
   const [cableDesigns,     _setCD]         = useState([]);
   const [machineLogs,      _setML]         = useState([]);
+  const [exportOrders,     _setEXO]        = useState([]);
   const [trackRef,         setTrackRef]    = useState('');
   const [fatReports,       _setFAT]        = useState([]);
   const [tdsSheets,        _setTDS]        = useState([]);
@@ -32454,6 +32729,7 @@ export default function App() {
       _setBOS(data.boShortages || []);
       _setCD(data.cableDesigns || []);
       _setML(data.machineLogs || []);
+      _setEXO(data.exportOrders || []);
       _setFAT(data.fatReports || []);
       _setTDS(data.tdsSheets || []);
     }, (err) => {
@@ -32560,6 +32836,7 @@ export default function App() {
   const setBoShortages      = mkSet(_setBOS,   'boShortages');
   const setCableDesigns     = mkSet(_setCD,    'cableDesigns');
   const setMachineLogs      = mkSet(_setML,    'machineLogs');
+  const setExportOrders     = mkSet(_setEXO,   'exportOrders');
   const setFatReports       = mkSet(_setFAT,   'fatReports');
   const setTdsSheets        = mkSet(_setTDS,   'tdsSheets');
   const setAssets           = mkSet(_setAssets,'assets');
@@ -32904,7 +33181,7 @@ export default function App() {
       clientMaterials, projectDocuments, resources, manpowerLogs, variations, dlpDefects, serviceHistory, siteAttendance, labourGroups, holidayCalendar, evaluations, capaRecords, internalAudits,
       vendorEvals, tenders, subcontractors, assets, pmSchedules, fmWorkOrders,
       amcContracts, fmSpareParts, hseRecords, raBillings, tcChecklists,
-      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns, machineLogs,
+      handoverDocs, auditDocs, rackStore, mepBoms, investors, profitShares, boShortages, fatReports, tdsSheets, cableDesigns, machineLogs, exportOrders,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -32981,6 +33258,7 @@ export default function App() {
     if (backup.boShortages)     setBoShortages(backup.boShortages);
     if (backup.cableDesigns)    setCableDesigns(backup.cableDesigns);
     if (backup.machineLogs)     setMachineLogs(backup.machineLogs);
+    if (backup.exportOrders)    setExportOrders(backup.exportOrders);
     if (backup.fatReports)      setFatReports(backup.fatReports);
     if (backup.tdsSheets)       setTdsSheets(backup.tdsSheets);
     alert('✅ Data restored successfully! All your records are back.');
@@ -33016,6 +33294,7 @@ export default function App() {
       ['BO shortages', boShortages, setBoShortages],
       ['Cable designs', cableDesigns, setCableDesigns],
       ['Machine logs', machineLogs, setMachineLogs],
+      ['Export orders', exportOrders, setExportOrders],
       ['FAT/SAT reports', fatReports, setFatReports],
       ['Technical data sheets', tdsSheets, setTdsSheets],
     ];
@@ -34256,6 +34535,8 @@ export default function App() {
         return <>{(() => { const _po = scopeList(productionOrders, 'manufacturing'); return <StoresAcceptView embedded productionOrders={_po} setProductionOrders={scopeSet(setProductionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} setStockLedger={setStockLedger} userRole={userRole} businessInfo={businessInfo} currentBizType={sessionContext || effectiveBizContext || 'manufacturing'} />; })()}<DrumStockView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} setView={setView} /></>;
       case 'metalrecon':
         return <MetalReconView productionOrders={scopeList(productionOrders, 'manufacturing')} boms={boms} cableDesigns={cableDesigns} storeIssues={storeIssues} items={sessionContext ? items.filter(it => (it.bizType || bizDefault) === sessionContext) : items} stockLedger={stockLedger} setView={setView} />;
+      case 'exportorders':
+        return <ExportOrderView exportOrders={sessionContext ? exportOrders.filter(x => (x.bizType || bizDefault) === sessionContext) : exportOrders} setExportOrders={(next) => setExportOrders(prev => { const all = Array.isArray(prev) ? prev : []; const v = typeof next === 'function' ? next(sessionContext ? all.filter(x => (x.bizType || bizDefault) === sessionContext) : all) : next; if (!sessionContext) return v; const others = all.filter(x => (x.bizType || bizDefault) !== sessionContext); return [...others, ...(v || []).map(x => x && !x.bizType ? { ...x, bizType: sessionContext } : x)]; })} documents={sessionDocs} customers={sessionContext ? customers.filter(c => (c.bizType || bizDefault) === sessionContext) : customers} vendors={sessionContext ? vendors.filter(v => (v.bizType || bizDefault) === sessionContext) : vendors} items={items} businessInfo={businessInfo} setBusinessInfo={setBusinessInfo} userRole={userRole} />;
       case 'machinelog':
         return <MachineLogView logs={scopeList(machineLogs, 'manufacturing')} setLogs={scopeSet(setMachineLogs, 'manufacturing')} assets={scopeList(assets, 'fmamc')} productionOrders={scopeList(productionOrders, 'manufacturing')} setFmWorkOrders={scopeSet(setFmWorkOrders, 'fmamc')} pmSchedules={scopeList(pmSchedules, 'fmamc')} fmWorkOrders={scopeList(fmWorkOrders, 'fmamc')} userRole={userRole} />;
       case 'boshortage':
