@@ -411,10 +411,6 @@ function DocPrintOverlay({ onClose, filename, businessInfo, children, wide = fal
   return (
     <>
       {autoWide && <style>{`
-@media print { .doc-offscreen { position: static !important; left: auto !important; width: auto !important; } }
-
-.doc-preview-mode .print-area .no-print { display: none !important; }
-.doc-preview-mode .print-area input, .doc-preview-mode .print-area select, .doc-preview-mode .print-area textarea { pointer-events: none; border-color: transparent !important; background: transparent !important; box-shadow: none !important; resize: none; appearance: none; -webkit-appearance: none; }
 @media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>}
       {/* Letterhead edge-to-edge + footer pinned to page bottom (same rules as the
          main document editor, so every print across the app looks identical). */}
@@ -7623,7 +7619,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
     <div style={{ textAlign: 'center', fontSize: 15.5, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, textTransform: 'uppercase', padding: '6px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A' }}>{t}</div>
     <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 6, fontSize: 12 }}><tbody><tr><td style={{ padding: '2px 0' }}><b>{noLabel || 'No.'}:</b> {no}</td><td style={{ padding: '2px 0', textAlign: 'right' }}><b>Date:</b> {fmtDate(date)}</td></tr></tbody></table>
   </div>);
-  const KV = ({ rows, cols = 1 }) => { const rr = rows.filter(r => r[1]); if (!rr.length) return null; if (cols === 2) { const pairs = []; for (let i = 0; i < rr.length; i += 2) pairs.push([rr[i], rr[i + 1]]); return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>{pairs.map((pr, i) => <tr key={i}>{pr.map((c, j) => c ? <React.Fragment key={j}><td style={{ ...td, width: '17%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{c[0]}</td><td style={{ ...td, width: '33%' }}>{c[1]}</td></React.Fragment> : <td key={j} colSpan={2} style={td} />)}</tr>)}</tbody></table>; } return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>{rr.map(([k, v]) => <tr key={k}><td style={{ ...td, width: '30%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>; };
+  const KV = ({ rows, cols = 1 }) => { const rr = rows.filter(r => r[1]); if (!rr.length) return null; if (cols === 2) { const pairs = []; for (let i = 0; i < rr.length; i += 2) pairs.push([rr[i], rr[i + 1]]); return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{pairs.map((pr, i) => <tr key={i}>{pr.map((c, j) => c ? <React.Fragment key={j}><td style={{ ...td, width: '17%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{c[0]}</td><td style={{ ...td, width: '33%' }}>{c[1]}</td></React.Fragment> : <td key={j} colSpan={2} style={td} />)}</tr>)}</tbody></table>; } return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody>{rr.map(([k, v]) => <tr key={k}><td style={{ ...td, width: '30%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>; };
   const Party = ({ blocks }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody><tr>{blocks.map(([title, lines], i) => <td key={i} style={{ ...td, verticalAlign: 'top', padding: '7px 9px' }}><div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6D3B', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 3 }}>{title}</div>{lines.filter(Boolean).map((l, k) => <div key={k} style={{ fontSize: 11.5, fontWeight: k === 0 ? 700 : 400, lineHeight: 1.45 }}>{l}</div>)}</td>)}</tr></tbody></table>;
   const Sec = ({ t }) => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: 0.6, borderBottom: '1px solid #9AA6BF', padding: '2px 0', margin: '10px 0 6px' }}>{t}</div>;
   const Sign = ({ forName, left }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 26 }}><tbody><tr><td style={{ width: '50%', fontSize: 11.5, verticalAlign: 'bottom', color: '#444' }}>{left || ''}</td><td style={{ textAlign: 'center', fontSize: 12, verticalAlign: 'bottom' }}><div style={{ height: 46 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4, display: 'inline-block', minWidth: 230 }}>For <b>{forName}</b><br />Authorised Signatory</div></td></tr></tbody></table>;
@@ -9597,7 +9593,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-D</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-E</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -34716,6 +34712,10 @@ export default function App() {
         @media print { button { white-space: normal; } }
       `}</style>
       <style>{`
+@media print { .doc-offscreen { position: static !important; left: auto !important; width: auto !important; } }
+
+.doc-preview-mode .print-area .no-print { display: none !important; }
+.doc-preview-mode .print-area input, .doc-preview-mode .print-area select, .doc-preview-mode .print-area textarea { pointer-events: none; border-color: transparent !important; background: transparent !important; box-shadow: none !important; resize: none; appearance: none; -webkit-appearance: none; }
 .dock-panel > div { width: 100% !important; max-width: none !important; max-height: none !important; border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; overflow: visible !important; }
 .dock-panel > div > div:first-child { position: sticky; top: 0; z-index: 3; }
 
