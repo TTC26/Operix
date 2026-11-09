@@ -7613,79 +7613,85 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
   };
   const m2 = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const cur = (r) => r.currency || 'USD';
+  const fmtDate = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '-' + m[2] + '-' + m[1] : (d || ''); };
 
   // ── print documents ──
   const th = { border: '1px solid #555', padding: '5px 7px', background: '#EEF1F7', fontSize: 11.5, textAlign: 'left' };
   const td = { border: '1px solid #777', padding: '5px 7px', fontSize: 11.5, verticalAlign: 'top' };
-  const H = ({ t, no, date }) => <div style={{ marginBottom: 10 }}><div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1 }}>{t}</div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 6 }}><span><b>No.:</b> {no}</span><span><b>Date:</b> {date}</span></div></div>;
-  const KV = ({ rows }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}><tbody>{rows.filter(r => r[1]).map(([k, v]) => <tr key={k}><td style={{ ...td, width: '34%', fontWeight: 700, background: '#FAFAF7' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>;
-  const Sign = ({ forName }) => <div style={{ marginTop: 34, display: 'flex', justifyContent: 'flex-end' }}><div style={{ textAlign: 'center', minWidth: 220, fontSize: 12 }}><div style={{ height: 44 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>For {forName}<br />Authorised Signatory</div></div></div>;
+  // professional document blocks (shared by all five export documents)
+  const H = ({ t, no, date, noLabel }) => (<div style={{ marginBottom: 12 }}>
+    <div style={{ textAlign: 'center', fontSize: 15.5, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, textTransform: 'uppercase', padding: '6px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A' }}>{t}</div>
+    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 6, fontSize: 12 }}><tbody><tr><td style={{ padding: '2px 0' }}><b>{noLabel || 'No.'}:</b> {no}</td><td style={{ padding: '2px 0', textAlign: 'right' }}><b>Date:</b> {fmtDate(date)}</td></tr></tbody></table>
+  </div>);
+  const KV = ({ rows, cols = 1 }) => { const rr = rows.filter(r => r[1]); if (!rr.length) return null; if (cols === 2) { const pairs = []; for (let i = 0; i < rr.length; i += 2) pairs.push([rr[i], rr[i + 1]]); return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>{pairs.map((pr, i) => <tr key={i}>{pr.map((c, j) => c ? <React.Fragment key={j}><td style={{ ...td, width: '17%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{c[0]}</td><td style={{ ...td, width: '33%' }}>{c[1]}</td></React.Fragment> : <td key={j} colSpan={2} style={td} />)}</tr>)}</tbody></table>; } return <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}><tbody>{rr.map(([k, v]) => <tr key={k}><td style={{ ...td, width: '30%', fontWeight: 700, background: '#F4F6FA', color: '#1E2A4A' }}>{k}</td><td style={td}>{v}</td></tr>)}</tbody></table>; };
+  const Party = ({ blocks }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12, tableLayout: 'fixed' }}><tbody><tr>{blocks.map(([title, lines], i) => <td key={i} style={{ ...td, verticalAlign: 'top', padding: '7px 9px' }}><div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A6D3B', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 3 }}>{title}</div>{lines.filter(Boolean).map((l, k) => <div key={k} style={{ fontSize: 11.5, fontWeight: k === 0 ? 700 : 400, lineHeight: 1.45 }}>{l}</div>)}</td>)}</tr></tbody></table>;
+  const Sec = ({ t }) => <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2A4A', textTransform: 'uppercase', letterSpacing: 0.6, borderBottom: '1px solid #9AA6BF', padding: '2px 0', margin: '10px 0 6px' }}>{t}</div>;
+  const Sign = ({ forName, left }) => <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 26 }}><tbody><tr><td style={{ width: '50%', fontSize: 11.5, verticalAlign: 'bottom', color: '#444' }}>{left || ''}</td><td style={{ textAlign: 'center', fontSize: 12, verticalAlign: 'bottom' }}><div style={{ height: 46 }} /><div style={{ borderTop: '1px solid #333', paddingTop: 4, display: 'inline-block', minWidth: 230 }}>For <b>{forName}</b><br />Authorised Signatory</div></td></tr></tbody></table>;
+  const Cond = ({ title, items }) => <div style={{ fontSize: 11.5, lineHeight: 1.55 }}><Sec t={title} /><ol style={{ margin: '0 0 0 18px', padding: 0 }}>{items.map((x, i) => <li key={i} style={{ marginBottom: 3, textAlign: 'justify' }}>{x}</li>)}</ol></div>;
   function DocBody({ r, kind }) {
     const t = tot(r), bn = businessInfo.name || '';
     const exporterRows = [['Exporter', bn + ', ' + (businessInfo.address || '')], ['GSTIN', businessInfo.gstin], ['IEC', prof.iec], ['Export Promotion Council', [prof.epc, prof.epcNo].filter(Boolean).join(' — Reg. No. ')], ['AD Code', prof.adCode]];
     if (kind === 'pi') return (<div>
-      <H t="EXPORT PROFORMA INVOICE" no={r.piNo} date={r.piDate} />
-      <KV rows={[...exporterRows, ['Buyer', [r.buyer, r.buyerAddress, r.buyerCountry].filter(Boolean).join(', ')], ['Buyer Tax ID', r.buyerTaxId], ['Buyer PO / Ref', r.buyerPO], ['Our Ref (WO / Quotation)', [r.woNo, r.quoteNo].filter(Boolean).join(' / ')], ['Port of Loading', r.portLoad], ['Port of Discharge', r.portDischarge], ['Final Destination', r.finalDest || r.buyerCountry], ['Incoterm (2020)', r.incoterm], ['Payment Terms', r.payTerms], ['Delivery', r.delivery]]} />
+      <H t="Export Proforma Invoice" no={r.piNo} date={r.piDate} noLabel="PI No." />
+      <Party blocks={[['Exporter', [bn, businessInfo.address, businessInfo.gstin && 'GSTIN: ' + businessInfo.gstin, prof.iec && 'IEC: ' + prof.iec, (prof.epc || prof.epcNo) && [prof.epc, prof.epcNo].filter(Boolean).join(' · RCMC ')]], ['Buyer (Consignee)', [r.buyer, r.buyerAddress, r.buyerCountry, r.buyerTaxId && 'Tax ID: ' + r.buyerTaxId]]]} />
+      <KV cols={2} rows={[['Buyer PO / Ref', r.buyerPO], ['Our Ref', [r.woNo, r.quoteNo].filter(Boolean).join(' / ')], ['Port of Loading', r.portLoad], ['Port of Discharge', r.portDischarge], ['Final Destination', r.finalDest || r.buyerCountry], ['Incoterm 2020', r.incoterm], ['Payment Terms', r.payTerms], ['Delivery', r.delivery], ['Country of Origin', 'India'], ['Currency', cur(r)]]} />
       <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Description of goods', 'HS Code', 'Qty', 'Unit', 'Rate (' + cur(r) + ')', 'Amount (' + cur(r) + ')'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.rate))}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.rate))}</td></tr>)}
           <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total {r.incoterm} value ({cur(r)})</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(t.val)}</td></tr></tbody></table>
-      <div style={{ fontSize: 11.5, marginTop: 8 }}>Amount in words: {typeof numToWordsIntl === 'function' ? numToWordsIntl(Math.round(t.val)) : ''} {cur(r)} only.</div>
-      <div style={{ fontSize: 11.5, marginTop: 8 }}><b>Bank details:</b> {businessInfo.bankName || ''} {businessInfo.bankAccount ? '· A/c ' + businessInfo.bankAccount : ''} {businessInfo.ifsc ? '· IFSC ' + businessInfo.ifsc : ''} {prof.swift ? '· SWIFT ' + prof.swift : ''}</div>
-      <div style={{ fontSize: 11.5, marginTop: 6 }}>Supply meant for export. Country of origin of goods: India. This proforma invoice is not a tax invoice.</div>
-      {r.notes ? <div style={{ fontSize: 11.5, marginTop: 6 }}><b>Notes:</b> {r.notes}</div> : null}
-      <Sign forName={bn} />
+      <div><div style={{ fontSize: 11.5, marginTop: 8, padding: '6px 8px', border: '1px solid #9AA6BF', background: '#FAFBFD' }}><b>Amount in words:</b> {cur(r)} {typeof numToWordsIntl === 'function' ? numToWordsIntl(Math.round(t.val)) : ''} only</div>
+      <KV rows={[['Beneficiary bank', [businessInfo.bankName, businessInfo.bankBranch].filter(Boolean).join(', ')], ['Account no.', businessInfo.bankAccount], ['IFSC / SWIFT', [businessInfo.ifsc, prof.swift].filter(Boolean).join(' / ')], ['AD code', prof.adCode]]} />
+      <div style={{ fontSize: 11, color: '#444', textAlign: 'justify' }}>Supply meant for export. This proforma invoice is not a tax invoice; the commercial invoice will be issued at the time of shipment.{r.notes ? ' ' + r.notes : ''}</div>
+      <Sign forName={bn} left="Accepted by Buyer: ____________________" /></div>
     </div>);
     if (kind === 'po') return (<div>
-      <H t="PURCHASE ORDER — SUPPLY FOR EXPORT (CONCESSIONAL GST 0.1%)" no={r.poNo} date={r.poDate} />
-      <KV rows={[['To (Supplier)', [r.supplier, r.supplierAddress].filter(Boolean).join(', ')], ['Supplier GSTIN', r.supplierGstin], ['Buyer (Merchant Exporter)', bn + ', ' + (businessInfo.address || '')], ['Merchant Exporter GSTIN', businessInfo.gstin], ['IEC', prof.iec], ['Registered with (EPC / Board)', [prof.epc, prof.epcNo].filter(Boolean).join(' — Reg. No. ')], ['Export Order Ref', [r.number, r.woNo, r.piNo].filter(Boolean).join(' / ')], ['Deliver directly to', r.portLoad + (r.cha ? ' — c/o ' + r.cha + (r.chaAddress ? ', ' + r.chaAddress : '') : '')], ['Delivery date', r.poDelivery]]} />
+      <H t="Purchase Order — Supply for Export (Concessional GST 0.1%)" no={r.poNo} date={r.poDate} noLabel="PO No." />
+      <Party blocks={[['Supplier', [r.supplier || '________________________', r.supplierAddress, r.supplierGstin && 'GSTIN: ' + r.supplierGstin]], ['Buyer — Merchant Exporter', [bn, businessInfo.address, businessInfo.gstin && 'GSTIN: ' + businessInfo.gstin, prof.iec && 'IEC: ' + prof.iec, (prof.epc || prof.epcNo) && [prof.epc, prof.epcNo].filter(Boolean).join(' · RCMC ')]]]} />
+      <KV cols={2} rows={[['Export order', r.number], ['WO / PI', [r.woNo, r.piNo].filter(Boolean).join(' / ')], ['Deliver directly to', r.portLoad], ['Delivery by', r.poDelivery ? fmtDate(r.poDelivery) : ''], ['CHA / Forwarder', [r.cha, r.chaAddress].filter(Boolean).join(', ')], ['GST', t.intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%']]} />
       <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Description', 'HSN', 'Qty', 'Unit', 'Rate (₹)', 'Taxable value (₹)'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty}</td><td style={td}>{it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.supRate))}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.supRate))}</td></tr>)}
           <tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>Taxable value</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.supVal)}</td></tr>
           {t.intra ? <><tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>CGST @ 0.05%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.cgst)}</td></tr><tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>SGST @ 0.05%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.cgst)}</td></tr></> : <tr><td colSpan={6} style={{ ...td, textAlign: 'right' }}>IGST @ 0.1%</td><td style={{ ...td, textAlign: 'right' }}>{m2(t.igst)}</td></tr>}
           <tr><td colSpan={6} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total (₹)</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(t.supTotal)}</td></tr></tbody></table>
-      <div style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}><b>Conditions (concessional rate for supply to merchant exporter):</b>
-        <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
-          <li>Supply is at the concessional rate of {t.intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%'} for export by the merchant exporter named above.</li>
-          <li>Your tax invoice must be raised on {bn} (GSTIN {businessInfo.gstin || '—'}) and must state that the goods are supplied for export at the concessional rate.</li>
-          <li>Goods must be moved <b>directly from your premises to {r.portLoad}</b> (or a registered warehouse as advised) — not to our premises.</li>
-          <li>Please send copies of your tax invoice and e-way bill to us immediately on dispatch; your GSTIN and invoice number will be shown in our shipping bill.</li>
-          <li>We will export the goods within 90 days of your tax invoice and send you proof of export (shipping bill and EGM details).</li>
-          <li>A copy of this purchase order is being provided to your jurisdictional GST officer.</li>
-        </ol></div>
-      <Sign forName={bn} />
+      <div><Cond title="Conditions — concessional rate for supply to merchant exporter" items={[
+          'Supply is at the concessional rate of ' + (t.intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%') + ' for export by the merchant exporter named above.',
+          'Your tax invoice must be raised on ' + bn + ' (GSTIN ' + (businessInfo.gstin || '—') + ') and must state that the goods are supplied for export at the concessional rate.',
+          'Goods must be moved directly from your premises to ' + r.portLoad + ' (or a registered warehouse as advised) — not to our premises.',
+          'Send copies of your tax invoice and e-way bill to us on the day of dispatch; your GSTIN and invoice number will be shown in our shipping bill.',
+          'We will export the goods within 90 days of your tax invoice and send you proof of export (shipping bill and EGM details).',
+          'A copy of this purchase order is being provided to your jurisdictional GST officer.']} />
+      <Sign forName={bn} left="Supplier acceptance: ____________________" /></div>
     </div>);
     if (kind === 'letter') return (<div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ref: {r.poNo}/GST</span><span>Date: {r.poDate}</span></div>
-      <div style={{ marginTop: 12 }}>To,<br />{r.supplierOfficer || 'The Jurisdictional GST Officer'}<br />{r.supplierJurisdiction || '(Range / Division / Commissionerate of the supplier)'}</div>
-      <div style={{ marginTop: 12 }}><b>Sub: Intimation of purchase order for procurement of goods at concessional GST rate for export — supplier {r.supplier || ''} (GSTIN {r.supplierGstin || '—'})</b></div>
-      <div style={{ marginTop: 10 }}>Sir / Madam,</div>
-      <p>We, {bn} (GSTIN {businessInfo.gstin || '—'}, IEC {prof.iec || '—'}), registered with {prof.epc || '—'}{prof.epcNo ? ' under Reg. No. ' + prof.epcNo : ''}, are a merchant exporter. We have placed the enclosed purchase order No. {r.poNo} dated {r.poDate} on {r.supplier || 'the supplier'}, {r.supplierAddress || ''}, for procurement of the goods listed below at the concessional rate of GST for export.</p>
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 10px' }}><thead><tr>{['Sl', 'Description', 'HSN', 'Qty', 'Taxable value (₹)'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={td}>{i + 1}</td><td style={td}>{it.desc}</td><td style={td}>{it.hsn}</td><td style={{ ...td, textAlign: 'right' }}>{it.qty} {it.unit}</td><td style={{ ...td, textAlign: 'right' }}>{m2(expN(it.qty) * expN(it.supRate))}</td></tr>)}</tbody></table>
-      <p>The goods will be moved directly from the supplier's place of business to {r.portLoad} for export, and will be exported within 90 days from the date of the supplier's tax invoice. The supplier's GSTIN and tax invoice number will be indicated in the shipping bill, and a copy of the shipping bill with proof of export will be furnished to the supplier and to your office.</p>
-      <p>This is submitted for your kind information and records.</p>
-      <div style={{ marginTop: 8 }}>Encl.: Copy of purchase order No. {r.poNo}</div>
-      <Sign forName={bn} />
+      <H t="Intimation to Jurisdictional GST Officer" no={r.poNo + '/GST'} date={r.poDate} noLabel="Ref" />
+      <div style={{ marginTop: 4 }}>To,<br /><b>{r.supplierOfficer || 'The Jurisdictional GST Officer'}</b><br />{r.supplierJurisdiction || '(Range / Division / Commissionerate of the supplier)'}</div>
+      <div style={{ marginTop: 12, padding: '6px 9px', borderLeft: '3px solid #1E2A4A', background: '#F4F6FA' }}><b>Sub:</b> Intimation of purchase order for procurement of goods at concessional GST rate for export — supplier {r.supplier || '________'} (GSTIN {r.supplierGstin || '________'})</div>
+      <div style={{ marginTop: 12 }}>Respected Sir / Madam,</div>
+      <p style={{ textAlign: 'justify', margin: '8px 0' }}>We, <b>{bn}</b> (GSTIN {businessInfo.gstin || '—'}, IEC {prof.iec || '—'}), registered with {prof.epc || '—'}{prof.epcNo ? ' under RCMC No. ' + prof.epcNo : ''}, are a merchant exporter. We have placed the enclosed purchase order No. <b>{r.poNo}</b> dated {fmtDate(r.poDate)} on <b>{r.supplier || 'the supplier'}</b>{r.supplierAddress ? ', ' + r.supplierAddress : ''}, for procurement of the following goods at the concessional rate of GST for export:</p>
+      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 10px' }}><thead><tr>{['Sl', 'Description of goods', 'HSN', 'Quantity', 'Taxable value (₹)'].map((h, i) => <th key={h} style={{ ...th, textAlign: i >= 3 ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+        <tbody>{(r.items || []).map((it, i) => <tr key={it.id}><td style={{ ...td, width: 30 }}>{i + 1}</td><td style={td}>{it.desc}</td><td style={{ ...td, width: 70 }}>{it.hsn}</td><td style={{ ...td, textAlign: 'right', width: 90 }}>{it.qty} {it.unit}</td><td style={{ ...td, textAlign: 'right', width: 110 }}>{m2(expN(it.qty) * expN(it.supRate))}</td></tr>)}
+          <tr><td colSpan={4} style={{ ...td, textAlign: 'right', fontWeight: 700 }}>Total taxable value</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{m2(tot(r).supVal)}</td></tr></tbody></table>
+      <p style={{ textAlign: 'justify', margin: '8px 0' }}>The goods will be moved directly from the supplier's place of business to <b>{r.portLoad}</b> for export and will be exported within 90 days from the date of the supplier's tax invoice. The supplier's GSTIN and tax invoice number will be indicated in the shipping bill, and a copy of the shipping bill with proof of export will be furnished to the supplier and to your office.</p>
+      <p style={{ margin: '8px 0' }}>This is submitted for your kind information and records.</p>
+      <div>Thanking you,<br />Yours faithfully,</div>
+      <Sign forName={bn} left={'Encl.: Copy of purchase order No. ' + r.poNo} />
     </div>);
     if (kind === 'dispatch') return (<div>
-      <H t="DISPATCH INSTRUCTIONS — DIRECT TO PORT" no={r.poNo + '/DI'} date={today} />
-      <div style={{ fontSize: 12, marginBottom: 8 }}>To: <b>{r.supplier}</b>, {r.supplierAddress}</div>
-      <KV rows={[['Against our PO', r.poNo + ' dt. ' + r.poDate], ['Export order', [r.number, r.woNo].filter(Boolean).join(' / ')], ['Deliver to (port)', r.portLoad], ['CHA / Forwarder (consignee at port)', [r.cha, r.chaAddress].filter(Boolean).join(', ')], ['CHA contact', r.chaContact], ['Final buyer / destination', [r.buyer, r.finalDest || r.buyerCountry].filter(Boolean).join(' — ')], ['Marks & numbers', r.marks], ['Packing', r.packing]]} />
-      <div style={{ fontSize: 12, lineHeight: 1.7 }}><b>Instructions:</b>
-        <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
-          <li>Dispatch the goods <b>directly to the port / CHA above</b>. Do not send them to {bn}'s premises.</li>
-          <li>Raise the tax invoice on {bn} (GSTIN {businessInfo.gstin || '—'}) at {tot(r).intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%'}, stating "Supply for export at concessional rate".</li>
-          <li>The e-way bill must show the place of delivery as the port address; ship-to = CHA / port, bill-to = {bn}.</li>
-          <li>Send to us and to the CHA, by e-mail on the day of dispatch: tax invoice, e-way bill, packing list, LR / transport receipt and test certificates.</li>
-          <li>Each drum / package must carry the marks & numbers above and the drum number as per the packing list.</li>
-        </ol></div>
-      <Sign forName={bn} />
+      <H t="Dispatch Instructions — Direct to Port" no={r.poNo + '/DI'} date={today} noLabel="Ref" />
+      <Party blocks={[['To (Supplier)', [r.supplier || '________________________', r.supplierAddress, r.supplierGstin && 'GSTIN: ' + r.supplierGstin]], ['Deliver to (Port / CHA)', [r.portLoad, r.cha && 'c/o ' + r.cha, r.chaAddress, r.chaContact]]]} />
+      <KV cols={2} rows={[['Against PO', r.poNo + ' dt. ' + fmtDate(r.poDate)], ['Export order', [r.number, r.woNo].filter(Boolean).join(' / ')], ['Final buyer', r.buyer], ['Destination', r.finalDest || r.buyerCountry || r.portDischarge], ['Marks & numbers', r.marks], ['Packing', r.packing], ['Deliver by', r.poDelivery ? fmtDate(r.poDelivery) : ''], ['GST on invoice', tot(r).intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%']]} />
+      <div><Cond title="Instructions" items={[
+          'Dispatch the goods directly to the port / CHA above. Do not send them to ' + bn + "'s premises.",
+          'Raise the tax invoice on ' + bn + ' (GSTIN ' + (businessInfo.gstin || '—') + ') at ' + (tot(r).intra ? 'CGST 0.05% + SGST 0.05%' : 'IGST 0.1%') + ', stating "Supply for export at concessional rate".',
+          'The e-way bill must show the port address as the place of delivery: ship-to = CHA / port, bill-to = ' + bn + '.',
+          'On the day of dispatch, e-mail to us and to the CHA: tax invoice, e-way bill, packing list, LR / transport receipt and test certificates.',
+          'Each drum / package must carry the marks & numbers above and its drum number as per the packing list.']} />
+      <Sign forName={bn} /></div>
     </div>);
     // checklist
     const dd = expDays(r.supInvDate);
     return (<div>
-      <H t="EXPORT DOCUMENT CHECKLIST" no={r.number} date={today} />
-      <KV rows={[['Buyer', r.buyer + (r.buyerCountry ? ', ' + r.buyerCountry : '')], ['Export PI', r.piNo], ['Supplier / PO', r.supplier + ' / ' + r.poNo], ['Supplier invoice', [r.supInvNo, r.supInvDate].filter(Boolean).join(' dt. ')], ['90-day export deadline', dd ? dd.due + ' (' + (dd.left >= 0 ? dd.left + ' days left' : Math.abs(dd.left) + ' days overdue') + ')' : 'starts from supplier invoice date'], ['Shipping bill', [r.sbNo, r.sbDate].filter(Boolean).join(' dt. ')], ['LEO / EGM', [r.leoDate, r.egmNo, r.egmDate].filter(Boolean).join(' / ')], ['Bill of lading', [r.blNo, r.blDate].filter(Boolean).join(' dt. ')], ['e-BRC / FIRC', [r.brcNo, r.brcDate].filter(Boolean).join(' dt. ')]]} />
+      <H t="Export Document Checklist" no={r.number} date={today} noLabel="Export Order" />
+      <KV cols={2} rows={[['Buyer', r.buyer + (r.buyerCountry ? ', ' + r.buyerCountry : '')], ['Export PI', r.piNo], ['Supplier / PO', r.supplier + ' / ' + r.poNo], ['Supplier invoice', [r.supInvNo, r.supInvDate].filter(Boolean).join(' dt. ')], ['90-day export deadline', dd ? dd.due + ' (' + (dd.left >= 0 ? dd.left + ' days left' : Math.abs(dd.left) + ' days overdue') + ')' : 'starts from supplier invoice date'], ['Shipping bill', [r.sbNo, r.sbDate].filter(Boolean).join(' dt. ')], ['LEO / EGM', [r.leoDate, r.egmNo, r.egmDate].filter(Boolean).join(' / ')], ['Bill of lading', [r.blNo, r.blDate].filter(Boolean).join(' dt. ')], ['e-BRC / FIRC', [r.brcNo, r.brcDate].filter(Boolean).join(' dt. ')]]} />
       <table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Sl', 'Step', 'Done', 'Date'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>{EXP_CHECKLIST.map(([k, l], i) => <tr key={k}><td style={td}>{i + 1}</td><td style={td}>{l}</td><td style={{ ...td, textAlign: 'center', fontWeight: 700, color: (r.check || {})[k] ? '#1A7A3E' : '#B5453A' }}>{(r.check || {})[k] ? '✔' : '—'}</td><td style={td}>{(r.checkDate || {})[k] || ''}</td></tr>)}</tbody></table>
     </div>);
@@ -9591,7 +9597,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-C</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-D</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -9789,6 +9795,12 @@ function MEPInvoicePicker({ siteProjects, siteActivities, progressUpdates, onClo
 
 function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOrderAction, onTrackOrder, releasedDrums = [], onPickDrums, onQuoteOutcome, onConvertToMfg, doc, setDoc, customers, vendors, items, businessInfo, userRole, onSave, onDeleteDoc, onCancel, onAddCustomer, onAddVendor, onConvert, onOpenDoc, documents = [], siteActivities = [], siteProjects = [], progressUpdates = [], purchaseReqs = [] }) {
   const [docPreview, setDocPreview] = useState(false);
+  // Ctrl+P / Cmd+P on a document → the professional document print (not the raw screen)
+  useEffect(() => {
+    const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && String(e.key).toLowerCase() === 'p') { const b = document.getElementById('doc-print-btn'); if (b) { e.preventDefault(); e.stopPropagation(); b.click(); } } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   // Manufacturing: sales documents pick only finished products (and services); purchase documents never pick finished products.
   const pickItems = (() => {
     const mfg = (doc.bizType || '') === 'manufacturing';
