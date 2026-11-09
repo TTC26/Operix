@@ -9596,7 +9596,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-J</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-M</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -17247,8 +17247,8 @@ function parseTdsPages(pages) {
     const ps = !sizes.length ? (text.match(/^[ \t]*(\d+)\s*C(?:ORE)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm\s*[²2]?|sq\.?\s*mm)[ \t]*$/im) || text.split('\n').slice(0, 25).join('\n').match(/^\s*(\d+)\s*C(?:ORE)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm|sq)/im)) : null;
     const pKey = ps ? ps[1] + 'x' + ps[2] : '';
     const cols = sizes.length ? sizes.map(() => ({ v: {}, imp: [] }))
-      : pKey ? ((carry && carry._pk === pKey) ? [carry] : [{ v: { _ncores: ps[1], area: ps[2] }, imp: [], _pk: pKey }])
-      : (carry ? [carry] : [{ v: {}, imp: [] }]);
+      : pKey ? ((carry && carry._pk === pKey) ? [carry] : [{ v: { _ncores: ps[1], area: ps[2] }, imp: [], _pk: pKey, _page: pi }])
+      : (carry ? [carry] : [{ v: {}, imp: [], _page: pi }]);
     // 1) logical lines: numbered items; continuation lines joined (single-size sheets only)
     const items = []; let sec = carry ? carry._sec || '' : '';
     text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
@@ -17326,7 +17326,7 @@ function parseTdsPages(pages) {
     }
     if (v.scDur && /^one$/i.test(String(v.scDur).trim())) v.scDur = '1';
     delete v._type; delete v._ncores;
-    return { v, imp: imp.filter(k => !k.startsWith('_')), label: (n ? n + 'C x ' + area : 'sheet') + (code ? ' ' + code : '') };
+    return { page: c._page, v, imp: imp.filter(k => !k.startsWith('_')), label: (n ? n + 'C x ' + area : 'sheet') + (code ? ' ' + code : '') };
   });
 }
 
@@ -17340,11 +17340,17 @@ async function pdfToTextPages(file, onStatus) {
   }
   const buf = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-  const pages = [];
+  const pages = [], meta = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     say('Reading page ' + i + ' of ' + pdf.numPages + '…');
     const page = await pdf.getPage(i);
     const tc = await page.getTextContent();
+    try {
+      const vp1 = page.getViewport({ scale: 1 }), rowsP = {};
+      tc.items.forEach(it => { if (!it.str || !it.str.trim() || !it.transform) return; const y = it.transform[5], key = Math.round(y / 2); (rowsP[key] = rowsP[key] || []).push(it); });
+      const lines = Object.values(rowsP).map(arr => { arr.sort((a, b) => a.transform[4] - b.transform[4]); const y = Math.min(...arr.map(a => a.transform[5])), h = Math.max(...arr.map(a => a.height || 8)); return { text: arr.map(a => a.str).join(' ').replace(/\s+/g, ' ').trim(), top: vp1.height - (y + h), bottom: vp1.height - y + 1, x0: Math.min(...arr.map(a => a.transform[4])), x1: Math.max(...arr.map(a => a.transform[4] + (a.width || 0))) }; }).sort((a, b) => a.top - b.top);
+      meta[i - 1] = { W: vp1.width, H: vp1.height, lines };
+    } catch (e) {}
     let txt = '';
     if (tc.items.some(it => it.hasEOL)) txt = tc.items.map(it => (it.str || '') + (it.hasEOL ? '\n' : (it.str && !/\s$/.test(it.str) ? ' ' : ''))).join('');
     else {
@@ -17363,7 +17369,38 @@ async function pdfToTextPages(file, onStatus) {
     }
     pages.push(txt);
   }
+  pages.meta = meta; pages.pdf = pdf;
   return pages;
+}
+// Cut the product cross-section drawing out of a supplier TDS page: the band between the cable heading
+// (+ its description lines) and the top of the particulars table, white margins trimmed.
+async function cropTdsPicture(pdf, pageIdx, m) {
+  try {
+    if (!pdf || !m || !m.lines) return '';
+    const L = m.lines;
+    const head = L.find(l => /^(no\.?|s\.?\s*no\.?|sl\.?\s*no\.?)\s+(particulars|parameter)/i.test(l.text));
+    const size = L.find(l => /^\d+\s*C(?:ORE)?\s*[xX×]\s*[\d.,]+\s*(mm|sq)/i.test(l.text));
+    if (!head || !size || head.top <= size.bottom) return '';
+    let prev = size.bottom;
+    for (const l of L) { if (l.top <= size.bottom) continue; if (l.top - prev < 8) prev = Math.max(prev, l.bottom); else break; }
+    const top = prev + 2, bot = head.top - 6;
+    if (bot - top < 40) return '';
+    const page = await pdf.getPage(pageIdx + 1), sc = 2.2, vp = page.getViewport({ scale: sc });
+    const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const y0 = Math.max(0, Math.floor(top * sc)), y1 = Math.min(cv.height, Math.ceil(bot * sc)), hh = y1 - y0;
+    const data = ctx.getImageData(0, y0, cv.width, hh).data;
+    let minX = cv.width, maxX = -1, minY = hh, maxY = -1;
+    for (let y = 0; y < hh; y += 2) for (let x = 0; x < cv.width; x += 2) { const k = (y * cv.width + x) * 4; if (data[k] < 235 || data[k + 1] < 235 || data[k + 2] < 235) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; } }
+    if (maxX < 0 || maxY - minY < 30) return '';
+    const pad = 8, cx0 = Math.max(0, minX - pad), cy0 = Math.max(0, minY - pad), cw = Math.min(cv.width - cx0, maxX - minX + 2 * pad), ch = Math.min(hh - cy0, maxY - minY + 2 * pad);
+    const outW = Math.min(900, cw), outH = Math.round(ch * outW / cw);
+    const out = document.createElement('canvas'); out.width = outW; out.height = outH;
+    const oc = out.getContext('2d'); oc.fillStyle = '#fff'; oc.fillRect(0, 0, outW, outH);
+    oc.drawImage(cv, cx0, y0 + cy0, cw, ch, 0, 0, outW, outH);
+    return out.toDataURL('image/jpeg', 0.82);
+  } catch (e) { console.warn('TDS picture crop failed', e); return ''; }
 }
 
 // ─── Cable cross-section drawing generated from the TDS values (drawing not to scale) ───
@@ -17444,18 +17481,35 @@ function TDSCableSVG({ v = {}, height = 190 }) {
   );
 }
 
+// cores × area of a cable from any wording: "3C x 6", "3 CORE X 6.0", "2,5SQMM X 19CORE", "25 sq.mm x 3 core"
+function cableSizeOf(txt) {
+  const t = String(txt || '').replace(/(\d),(\d)/g, '$1.$2');
+  let m = t.match(/(\d+)\s*C(?:ORE)?S?\s*[xX×*]\s*(\d+(?:\.\d+)?)/i);
+  if (m) return { cores: +m[1], area: +m[2] };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(?:SQ\.?\s*MM|MM2|MM²|SQMM|SQ)\s*[xX×*]\s*(\d+)\s*C(?:ORE)?/i);
+  if (m) return { cores: +m[2], area: +m[1] };
+  return null;
+}
+// the customer quotation that contains this cable (won first, then latest)
+function quoteForTds(v, quotes = []) {
+  const z = cableSizeOf(v.cores) || (v.area ? { cores: +(String(v.cores || '').match(/\d+/) || [0])[0], area: +v.area } : null);
+  if (!z || !z.cores || !z.area) return null;
+  const hits = (quotes || []).filter(q => q && q.status !== 'deleted' && (q.items || []).some(it => { const c = cableSizeOf(it.name); return c && c.cores === z.cores && Math.abs(c.area - z.area) < 0.01; }));
+  hits.sort((a, b) => ((b.outcome === 'won') - (a.outcome === 'won')) || String(b.date || '').localeCompare(String(a.date || '')));
+  return hits[0] || null;
+}
 function TDSPrintBody({ rec, part = 'single' }) {
   // part: 'single' = stand-alone sheet; 'section' = one cable inside a combined TDS document (no repeated main heading)
   const v = rec.v || {}, secs = tdsRows(v);
   const th = { border: '1px solid #3E4C6B', padding: '4px 6px', fontSize: 10.5, background: '#1E2A4A', color: '#fff', textAlign: 'left', fontWeight: 700 };
   const td = { border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5, verticalAlign: 'top', lineHeight: 1.35 };
-  const meta = [['TDS No.', rec.number], ['Document No.', rec.docNo], ['Customer', rec.customer || 'MARKET'], rec.refDoc ? ['Reference', rec.refDoc] : null, ['Date', rec.date]].filter(Boolean);
+  const meta = [['TDS No.', rec.number], ['Document No.', rec.docNo], ['Customer', rec.customer || 'MARKET'], rec.refDoc ? ['Reference', [rec.woNo, rec.refDoc].filter(Boolean).join(' / ')] : null, ['Date', rec.date]].filter(Boolean);
   return (
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#111' }}>
       {part === 'single' && <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 6 }}>TECHNICAL DATA SHEET</div>}
       <div style={{ background: '#F1F4FA', border: '1px solid #9AA3B5', borderLeft: '4px solid #1E2A4A', padding: '5px 8px', fontSize: 12.5, fontWeight: 700, color: '#1E2A4A', marginBottom: 4 }}>{v.title}</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6, tableLayout: 'fixed' }}><tbody><tr>{meta.map(([k, val]) => <td key={k} style={{ border: '1px solid #9AA3B5', padding: '3px 6px', fontSize: 10.5 }}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}</tr></tbody></table>
-      {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff' }}><TDSCableSVG v={v} height={170} /></div>}
+      {!v.hideDrawing && <div style={{ border: '1px solid #9AA3B5', padding: '4px 8px', marginBottom: 6, background: '#fff', textAlign: 'center' }}>{v.picture && !v.useGenerated ? <img src={v.picture} alt="Cable cross-section" style={{ maxWidth: '100%', maxHeight: 230, display: 'inline-block' }} /> : <TDSCableSVG v={v} height={170} />}</div>}
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup><col style={{ width: '7%' }} /><col style={{ width: '41%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '33%' }} /></colgroup>
         <thead><tr><th style={th}>S. No.</th><th style={th}>Parameter / Characteristic</th><th style={{ ...th, textAlign: 'center' }}>Specified</th><th style={{ ...th, textAlign: 'center' }}>Unit</th><th style={{ ...th, textAlign: 'center' }}>Committed Values</th></tr></thead>
@@ -17484,7 +17538,7 @@ function TDSCombinedPrint({ recs = [] }) {
     <div style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
       <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1E2A4A', letterSpacing: 1.5, padding: '4px 0', borderTop: '2px solid #1E2A4A', borderBottom: '2px solid #1E2A4A', marginBottom: 8 }}>TECHNICAL DATA SHEETS</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, tableLayout: 'fixed' }}><tbody><tr>
-        {[['Document No.', f.docNo], ['Customer', f.customer || 'MARKET'], ['Reference', f.refDoc || '—'], ['Date', f.date], ['No. of sheets', recs.length]].map(([k, val]) => <td key={k} style={td}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
+        {[['Document No.', f.docNo], ['Customer', f.customer || 'MARKET'], ['Reference', [f.woNo, f.refDoc].filter(Boolean).join(' / ') || '—'], ['Date', f.date], ['No. of sheets', recs.length]].map(([k, val]) => <td key={k} style={td}><span style={{ color: '#5A6478' }}>{k}</span><br /><b>{val}</b></td>)}
       </tr></tbody></table>
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup><col style={{ width: '7%' }} /><col style={{ width: '22%' }} /><col style={{ width: '71%' }} /></colgroup>
@@ -17509,6 +17563,13 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
       setImpBusy('Opening ' + file.name + '…');
       const pages = await pdfToTextPages(file, setImpBusy);
       const found = parseTdsPages(pages).filter(r => r.imp.length >= 3);
+      for (let fi = 0; fi < found.length; fi++) {
+        const r = found[fi];
+        if (r.page == null || !pages.meta || !pages.meta[r.page]) continue;
+        setImpBusy('Taking the product picture for ' + r.label + ' (' + (fi + 1) + '/' + found.length + ')…');
+        const pic = await cropTdsPicture(pages.pdf, r.page, pages.meta[r.page]);
+        if (pic) { r.v.picture = pic; r.v.pictureSrc = file.name + ' p.' + (r.page + 1); r.imp.push('picture'); }
+      }
       setImpBusy('');
       if (!found.length) { alert('Could not find TDS values in this PDF.\n\nIt may be an image with poor quality, or a layout the reader does not know yet. Create the TDS with “New TDS” and a preset instead.'); return; }
       const base0 = all.filter(r => (r.number || '').includes('TDS/' + fyNow() + '/')).length;
@@ -17516,7 +17577,9 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
         const preset = Object.values(TDS_PRESETS).find(pv => pv.cores && r.v.cores && pv.cores.replace(/\s/g, '').toUpperCase() === r.v.cores.replace(/\s/g, '').toUpperCase() && (!r.v.code || !pv.code || pv.code === r.v.code)) || {};
         const v = { ...TDS_BASE, ...preset, ...r.v, _imp: r.imp, _src: file.name };
         v.hasInner = !!(r.v.innerMat || r.v.innerMin || r.v.innerDia) || (!!r.v.hasArmour && preset.hasInner !== false);
-        return { id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: withCo('TDS/IMS/F01'), date: today, customer: 'MARKET', customerId: '', refDoc: '', notes: '', v, imported: true, importBatch: file.name, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
+        const q = quoteForTds(v, quotes);
+        const lk = q ? quoteLink(q) : {};
+        return { ...lk, id: Date.now().toString() + '-' + i, number: dn('TDS', base0 + i + 1), docNo: withCo('TDS/IMS/F01'), date: today, customer: lk.customer || 'MARKET', customerId: lk.customerId || '', refDoc: lk.refDoc || '', woNo: lk.woNo || '', notes: '', v, imported: true, importBatch: file.name, bizType: currentBizType, createdAt: new Date(Date.now() + i).toISOString() };
       });
       if (recs.length === 1) { setEditing(recs[0]); return; }
       setTdsSheets(prev => [...recs, ...(Array.isArray(prev) ? prev : [])]);
@@ -17538,8 +17601,20 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
   function pickPreset(name) { if (!name) return; setEditing(e => ({ ...e, v: { ...TDS_BASE, ...TDS_PRESETS[name] } })); }
   function pickQuote(id) {
     const d = quotes.find(x => x.id === id); if (!d) { setEditing(e => ({ ...e, refDoc: '' })); return; }
+    setEditing(e => ({ ...e, ...quoteLink(d) }));
+  }
+  // quotation → TDS: reference (WO / quotation no.) and customer name, taken from the quotation itself
+  function quoteLink(d) {
     const c = (customers || []).find(x => x.id === d.customerId);
-    setEditing(e => ({ ...e, refDoc: d.number || '', customerId: d.customerId || '', customer: (c && c.name) || d.customerName || e.customer }));
+    const name = (c && c.name) || (d.customerSnapshot && d.customerSnapshot.name) || d.customerName || '';
+    return { refDoc: d.number || '', woNo: d.woNo || '', customerId: d.customerId || '', customer: name || 'MARKET' };
+  }
+  function linkPicked(id) {
+    const d = quotes.find(x => x.id === id); if (!d) return;
+    const ids = Object.keys(picked).filter(k => picked[k]); if (!ids.length) { alert('Tick the TDS rows first.'); return; }
+    const lk = quoteLink(d);
+    setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => ids.includes(x.id) ? { ...x, ...lk, updatedAt: new Date().toISOString() } : x));
+    alert('✅ ' + ids.length + ' TDS linked to ' + d.number + (d.woNo ? ' (' + d.woNo + ')' : '') + ' — customer ' + lk.customer + '.');
   }
   function save() {
     if (!editing.v.title) { alert('Enter the sheet title.'); return; }
@@ -17577,7 +17652,7 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
             <div><label style={lbl}>From Quotation (optional)</label>
               <select style={inp} value={(quotes.find(d => d.number === e.refDoc) || {}).id || ''} onChange={ev => pickQuote(ev.target.value)}>
                 <option value="">— none —</option>
-                {quotes.map(d => <option key={d.id} value={d.id}>{d.number}</option>)}
+                {quotes.map(d => <option key={d.id} value={d.id}>{(d.woNo ? d.woNo + ' · ' : '') + d.number + ' · ' + ((d.customerSnapshot && d.customerSnapshot.name) || '')}</option>)}
               </select></div>
             <div><label style={lbl}>Load a standard cable</label>
               <select style={inp} value="" onChange={ev => pickPreset(ev.target.value)}>
@@ -17604,7 +17679,15 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
             <div style={{ width: '100%', border: '1px solid #EAE6DB', borderRadius: 10, padding: '8px 10px', marginBottom: 10, background: '#FCFBF8' }}>
               <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#1E2A4A', marginBottom: 6 }}><input type="checkbox" checked={!v.hideDrawing} onChange={ev => setV('hideDrawing', !ev.target.checked)} /> Print cable cross-section drawing (generated from cores, size, insulation, sheath, armour and colours above)</label>
-              {!v.hideDrawing && <TDSCableSVG v={v} height={170} />}
+              {!v.hideDrawing && <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6, fontSize: 12 }}>
+                {v.picture ? <>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="radio" checked={!v.useGenerated} onChange={() => setV('useGenerated', false)} /> Product picture {v.pictureSrc ? <span style={{ color: '#888' }}>({v.pictureSrc})</span> : null}</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="radio" checked={!!v.useGenerated} onChange={() => setV('useGenerated', true)} /> Generated drawing</label>
+                  <button type="button" onClick={() => { if (window.confirm('Remove the product picture?')) { setV('picture', ''); setV('pictureSrc', ''); } }} style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12, color: '#B5453A' }}>Remove picture</button>
+                </> : <span style={{ color: '#888' }}>No product picture — the drawing is generated from the values.</span>}
+                <label style={{ ...styles.ghostBtn, padding: '3px 10px', fontSize: 12, cursor: 'pointer' }}>{v.picture ? '↻ Replace picture' : '⬆ Upload picture'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={ev => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (!f) return; const rd = new FileReader(); rd.onload = () => { const im = new Image(); im.onload = () => { const w = Math.min(900, im.width), h = Math.round(im.height * w / im.width); const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(im, 0, 0, w, h); setV('picture', c.toDataURL('image/jpeg', 0.82)); setV('pictureSrc', f.name); setV('useGenerated', false); }; im.src = rd.result; }; rd.readAsDataURL(f); }} /></label>
+              </div>}
+              {!v.hideDrawing && (v.picture && !v.useGenerated ? <div style={{ textAlign: 'center', border: '1px solid #EEE', background: '#fff' }}><img src={v.picture} alt="product" style={{ maxWidth: '100%', maxHeight: 230 }} /></div> : <TDSCableSVG v={v} height={170} />)}
             </div>
             <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: '#1E2A4A', width: '100%', marginBottom: 4 }}><input type="checkbox" checked={!!v.showBlank} onChange={ev => setV('showBlank', ev.target.checked)} /> Print rows that have no value (shown as “—”). Off = only filled rows are printed.</label>
             <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1E2A4A' }}>“Specified” column — limit type</div>
@@ -17646,6 +17729,8 @@ function TDSView({ businessInfo, userRole, currentBizType = 'manufacturing', isM
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}><input type="checkbox" checked={allOn} onChange={() => setPicked(p => { const n = { ...p }; list.forEach(r => { if (allOn) delete n[r.id]; else n[r.id] = true; }); return n; })} /> Select all shown ({list.length})</label>
           <span style={{ color: '#666' }}>{sel.length} selected</span>
           <button disabled={!sel.length} onClick={() => setPrintRec(sel)} style={{ ...styles.primaryBtn, opacity: sel.length ? 1 : 0.5 }}><Printer size={14} /> Print selected ({sel.length}) — one document</button>
+          {canEdit && <button onClick={() => { const tgt = (sel.length ? sel : list.filter(r => !r.refDoc || !r.customer || r.customer === 'MARKET')); let n = 0; const upd = {}; tgt.forEach(r => { const q = quoteForTds(r.v || {}, quotes); if (q) { upd[r.id] = quoteLink(q); n++; } }); if (!n) { alert('No quotation found containing these cable sizes.'); return; } setTdsSheets(prev => (Array.isArray(prev) ? prev : []).map(x => upd[x.id] ? { ...x, ...upd[x.id] } : x)); alert('✅ ' + n + ' of ' + tgt.length + ' TDS linked to the customer quotation that contains the same cable size.'); }} style={styles.ghostBtn} title="Find the quotation that has the same cable (cores × size) and set its customer, quotation no. and WO">🔗 Auto-link to customer quotation{sel.length ? ' (' + sel.length + ')' : ''}</button>}
+          {sel.length > 0 && canEdit && <select value="" onChange={ev => linkPicked(ev.target.value)} style={{ ...inp, width: 'auto', minWidth: 260 }} title="Set quotation / WO reference and customer on the ticked TDS"><option value="">🔗 Link selected to quotation…</option>{quotes.map(d => <option key={d.id} value={d.id}>{(d.woNo ? d.woNo + ' · ' : '') + d.number + ' · ' + ((d.customerSnapshot && d.customerSnapshot.name) || '')}</option>)}</select>}
           {sel.length > 0 && <button onClick={() => setPicked({})} style={{ border: 'none', background: 'none', color: '#888', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}>Clear</button>}
         </div>); })()}
       {list.length === 0 && <div style={{ color: '#888780', padding: 30, textAlign: 'center', background: '#fff', border: '1px solid #EAE6DB', borderRadius: 12 }}>No technical data sheets yet. Click “New TDS”, pick a standard cable preset and edit the values.</div>}
