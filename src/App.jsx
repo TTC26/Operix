@@ -7511,6 +7511,40 @@ function machineHealth(machineId, pmSchedules = [], fmWorkOrders = [], days = 90
 const PM_LABEL = { overdue: ['PM overdue', '#B5453A'], due: ['PM due ≤ 7 d', '#E07B00'], ok: ['PM ok', '#1A7A3E'], none: ['No PM plan', '#999'] };
 
 // ─── Export Orders (merchant export): Export PI · Supplier PO @0.1% GST · GST officer letter · Dispatch instructions · Checklist & 90-day register ───
+// Global sea / air / ICD ports — "Name, Country — UN/LOCODE". Used by every port field (type to filter, or type your own).
+const WORLD_PORTS = [
+  // India — sea
+  'Nhava Sheva (JNPT), Mumbai, India — INNSA1', 'Mumbai Port, India — INBOM1', 'Mundra, India — INMUN1', 'Kandla (Deendayal), India — INIXY1', 'Pipavav, India — INPAV1', 'Hazira, India — INHZA1',
+  'Chennai, India — INMAA1', 'Kattupalli, India — INKAT1', 'Ennore (Kamarajar), India — INENR1', 'Tuticorin (V.O. Chidambaranar), India — INTUT1', 'Cochin, India — INCOK1', 'Vizhinjam, India — INVZJ1',
+  'Visakhapatnam, India — INVTZ1', 'Krishnapatnam, India — INKRI1', 'Kakinada, India — INKAK1', 'Paradip, India — INPRT1', 'Kolkata, India — INCCU1', 'Haldia, India — INHAL1', 'Mangalore, India — INIXE1', 'Goa (Mormugao), India — INMRM1',
+  // India — ICD / air
+  'ICD Tughlakabad, Delhi, India — INTKD6', 'ICD Patparganj, Delhi, India — INPPG6', 'ICD Dadri, India — INDER6', 'ICD Whitefield, Bangalore, India — INWFD6', 'ICD Irugur, Coimbatore, India — INCOK6', 'ICD Tiruppur, India — INTUP6', 'ICD Sabarmati, Ahmedabad, India — INSBI6', 'ICD Hyderabad, India — INSNF6', 'ICD Ludhiana, India — INLDH6', 'ICD Nagpur, India — INNGP6',
+  'Chennai Air Cargo, India — INMAA4', 'Mumbai Air Cargo, India — INBOM4', 'Delhi Air Cargo, India — INDEL4', 'Bengaluru Air Cargo, India — INBLR4', 'Hyderabad Air Cargo, India — INHYD4', 'Kolkata Air Cargo, India — INCCU4', 'Tiruchirappalli Air Cargo, India — INTRZ4', 'Coimbatore Air Cargo, India — INCJB4',
+  // Middle East
+  'Jebel Ali, Dubai, UAE — AEJEA', 'Port Rashid, Dubai, UAE — AEPRA', 'Khalifa Port, Abu Dhabi, UAE — AEKHL', 'Sharjah (Khalid), UAE — AESHJ', 'Khor Fakkan, UAE — AEKLF', 'Fujairah, UAE — AEFJR', 'Dubai Air Cargo (DXB), UAE — AEDXB',
+  'Dammam (King Abdulaziz), Saudi Arabia — SADMM', 'Jeddah Islamic Port, Saudi Arabia — SAJED', 'Riyadh Dry Port, Saudi Arabia — SARUH', 'King Abdullah Port, Saudi Arabia — SAKAC', 'Jubail, Saudi Arabia — SAJUB',
+  'Sohar, Oman — OMSOH', 'Muscat (Sultan Qaboos), Oman — OMMCT', 'Salalah, Oman — OMSLL', 'Duqm, Oman — OMDQM', 'Hamad Port, Qatar — QAHMD', 'Doha, Qatar — QADOH', 'Khalifa Bin Salman, Bahrain — BHKBS', 'Shuwaikh, Kuwait — KWSWK', 'Shuaiba, Kuwait — KWSAA',
+  'Umm Qasr, Iraq — IQUQR', 'Bandar Abbas, Iran — IRBND', 'Aqaba, Jordan — JOAQJ', 'Haifa, Israel — ILHFA', 'Ashdod, Israel — ILASH', 'Beirut, Lebanon — LBBEY', 'Aden, Yemen — YEADE',
+  // South Asia
+  'Colombo, Sri Lanka — LKCMB', 'Hambantota, Sri Lanka — LKHBA', 'Chittagong, Bangladesh — BDCGP', 'Mongla, Bangladesh — BDMGL', 'Dhaka (ICD Kamalapur), Bangladesh — BDDAC', 'Birgunj ICD, Nepal — NPBIR', 'Kathmandu, Nepal — NPKTM', 'Male, Maldives — MVMLE', 'Karachi, Pakistan — PKKHI', 'Port Qasim, Pakistan — PKBQM', 'Thimphu / Phuentsholing, Bhutan — BTPHU',
+  // South-East & East Asia
+  'Singapore — SGSIN', 'Port Klang, Malaysia — MYPKG', 'Penang, Malaysia — MYPEN', 'Tanjung Pelepas, Malaysia — MYTPP', 'Laem Chabang, Thailand — THLCH', 'Bangkok, Thailand — THBKK', 'Ho Chi Minh City (Cat Lai), Vietnam — VNSGN', 'Haiphong, Vietnam — VNHPH', 'Jakarta (Tanjung Priok), Indonesia — IDJKT', 'Surabaya, Indonesia — IDSUB', 'Manila, Philippines — PHMNL', 'Yangon, Myanmar — MMRGN', 'Phnom Penh, Cambodia — KHPNH',
+  'Shanghai, China — CNSHA', 'Ningbo, China — CNNGB', 'Shenzhen (Yantian), China — CNYTN', 'Shekou, China — CNSHK', 'Guangzhou (Nansha), China — CNNSA', 'Qingdao, China — CNTAO', 'Tianjin (Xingang), China — CNTXG', 'Xiamen, China — CNXMN', 'Dalian, China — CNDLC', 'Hong Kong — HKHKG',
+  'Busan, South Korea — KRPUS', 'Incheon, South Korea — KRINC', 'Tokyo, Japan — JPTYO', 'Yokohama, Japan — JPYOK', 'Kobe, Japan — JPUKB', 'Nagoya, Japan — JPNGO', 'Osaka, Japan — JPOSA', 'Kaohsiung, Taiwan — TWKHH', 'Keelung, Taiwan — TWKEL',
+  // Africa
+  'Mombasa, Kenya — KEMBA', 'Dar es Salaam, Tanzania — TZDAR', 'Zanzibar, Tanzania — TZZNZ', 'Kampala (via Mombasa), Uganda — UGKLA', 'Djibouti — DJJIB', 'Berbera, Somaliland — SOBBO', 'Port Sudan, Sudan — SDPZU', 'Beira, Mozambique — MZBEW', 'Maputo, Mozambique — MZMPM', 'Nacala, Mozambique — MZMNC',
+  'Durban, South Africa — ZADUR', 'Cape Town, South Africa — ZACPT', 'Port Elizabeth (Ngqura), South Africa — ZAZBA', 'Walvis Bay, Namibia — NAWVB', 'Lagos (Apapa), Nigeria — NGAPP', 'Lagos (Tin Can), Nigeria — NGTIN', 'Onne, Nigeria — NGONN', 'Tema, Ghana — GHTEM', 'Abidjan, Ivory Coast — CIABJ', 'Lome, Togo — TGLFW', 'Cotonou, Benin — BJCOO', 'Dakar, Senegal — SNDKR', 'Douala, Cameroon — CMDLA', 'Luanda, Angola — AOLAD', 'Port Louis, Mauritius — MUPLU', 'Toamasina, Madagascar — MGTMM', 'Victoria, Seychelles — SCPOV',
+  'Alexandria, Egypt — EGALY', 'Port Said, Egypt — EGPSD', 'Sokhna, Egypt — EGSOK', 'Casablanca, Morocco — MACAS', 'Tanger Med, Morocco — MAPTM', 'Algiers, Algeria — DZALG', 'Tunis (Rades), Tunisia — TNRDS', 'Tripoli, Libya — LYTIP',
+  // Europe
+  'Rotterdam, Netherlands — NLRTM', 'Antwerp-Bruges, Belgium — BEANR', 'Hamburg, Germany — DEHAM', 'Bremerhaven, Germany — DEBRV', 'Felixstowe, UK — GBFXT', 'Southampton, UK — GBSOU', 'London Gateway, UK — GBLGP', 'Le Havre, France — FRLEH', 'Marseille (Fos), France — FRFOS', 'Valencia, Spain — ESVLC', 'Barcelona, Spain — ESBCN', 'Algeciras, Spain — ESALG', 'Genoa, Italy — ITGOA', 'La Spezia, Italy — ITSPE', 'Gioia Tauro, Italy — ITGIT', 'Piraeus, Greece — GRPIR', 'Istanbul (Ambarli), Turkey — TRAMR', 'Mersin, Turkey — TRMER', 'Izmit, Turkey — TRIZT', 'Gdansk, Poland — PLGDN', 'Gothenburg, Sweden — SEGOT', 'Aarhus, Denmark — DKAAR', 'Constanta, Romania — ROCND', 'Koper, Slovenia — SIKOP', 'Novorossiysk, Russia — RUNVS', 'St Petersburg, Russia — RULED', 'Dublin, Ireland — IEDUB',
+  // Americas
+  'New York / New Jersey, USA — USNYC', 'Savannah, USA — USSAV', 'Charleston, USA — USCHS', 'Norfolk, USA — USORF', 'Houston, USA — USHOU', 'Miami, USA — USMIA', 'Los Angeles, USA — USLAX', 'Long Beach, USA — USLGB', 'Oakland, USA — USOAK', 'Seattle, USA — USSEA', 'Chicago (rail), USA — USCHI',
+  'Vancouver, Canada — CAVAN', 'Montreal, Canada — CAMTR', 'Toronto, Canada — CATOR', 'Halifax, Canada — CAHAL', 'Manzanillo, Mexico — MXZLO', 'Veracruz, Mexico — MXVER', 'Colon, Panama — PAONX', 'Balboa, Panama — PABLB', 'Cartagena, Colombia — COCTG', 'Callao, Peru — PECLL', 'San Antonio, Chile — CLSAI', 'Valparaiso, Chile — CLVAP', 'Santos, Brazil — BRSSZ', 'Paranagua, Brazil — BRPNG', 'Buenos Aires, Argentina — ARBUE', 'Montevideo, Uruguay — UYMVD', 'Guayaquil, Ecuador — ECGYE', 'Kingston, Jamaica — JMKIN', 'Port of Spain, Trinidad — TTPOS',
+  // Oceania
+  'Sydney (Botany), Australia — AUSYD', 'Melbourne, Australia — AUMEL', 'Brisbane, Australia — AUBNE', 'Fremantle, Australia — AUFRE', 'Adelaide, Australia — AUADL', 'Auckland, New Zealand — NZAKL', 'Tauranga, New Zealand — NZTRG', 'Suva, Fiji — FJSUV', 'Port Moresby, Papua New Guinea — PGPOM',
+];
+
+const portCodeOf = (v) => { const m = String(v || '').match(/—\s*([A-Z]{5}\d?)\s*$/); return m ? m[1] : String(v || '').trim(); };
 const EXP_CHECKLIST = [
   ['piSent', 'Export Proforma Invoice sent to buyer'],
   ['advance', 'Advance / LC received (payment terms met)'],
@@ -7685,7 +7719,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
             {F('Buyer country', ed.buyerCountry, v => setF('buyerCountry', v))}{F('Buyer VAT / Tax ID', ed.buyerTaxId, v => setF('buyerTaxId', v))}{F('Buyer PO / Ref', ed.buyerPO, v => setF('buyerPO', v))}
             {F('Buyer address', ed.buyerAddress, v => setF('buyerAddress', v), { wide: true })}
             {F('Currency', ed.currency, v => setF('currency', v.toUpperCase()))}{F('Exchange rate (₹ per 1)', ed.fx, v => setF('fx', v), { type: 'number' })}{F('Incoterm', ed.incoterm, v => setF('incoterm', v), { ph: 'FOB / CIF / CFR' })}
-            {F('Port of loading', ed.portLoad, v => setF('portLoad', v))}{F('Port of discharge', ed.portDischarge, v => setF('portDischarge', v))}{F('Final destination', ed.finalDest, v => setF('finalDest', v))}
+            {F('Port of loading', ed.portLoad, v => setF('portLoad', v), { list: 'world-ports', ph: 'Type city / port / code…' })}{F('Port of discharge', ed.portDischarge, v => setF('portDischarge', v), { list: 'world-ports', ph: 'Type city / port / code…' })}{F('Final destination', ed.finalDest, v => setF('finalDest', v), { list: 'world-ports' })}
             {F('Payment terms', ed.payTerms, v => setF('payTerms', v))}{F('Delivery', ed.delivery, v => setF('delivery', v))}{F('Export PI no.', ed.piNo, v => setF('piNo', v))}{F('PI date', ed.piDate, v => setF('piDate', v), { type: 'date' })}
           </div></div>
 
@@ -7774,7 +7808,7 @@ function ExportOrderView({ exportOrders = [], setExportOrders, documents = [], c
             {F('Export Promotion Council / Commodity Board', prof.epc, v => setProf('epc', v), { ph: 'e.g. EEPC India' })}
             {F('EPC / RCMC registration no.', prof.epcNo, v => setProf('epcNo', v))}{F('RCMC valid till', prof.epcValid, v => setProf('epcValid', v), { type: 'date' })}
             {F('AD code (bank)', prof.adCode, v => setProf('adCode', v))}{F('SWIFT code', prof.swift, v => setProf('swift', v))}
-            {F('Default port of loading', prof.port, v => setProf('port', v), { ph: 'Nhava Sheva (JNPT), Mumbai — INNSA1' })}
+            {F('Default port of loading', prof.port, v => setProf('port', v), { ph: 'Nhava Sheva (JNPT), Mumbai — INNSA1', list: 'world-ports' })}
             {F('Default CHA / forwarder', prof.cha, v => setProf('cha', v))}
           </div></div>)}
     </div>
@@ -9557,7 +9591,7 @@ function SidebarFooter({ syncStatus, unreadCount, onShowNotifications, view }) {
       </button>
       <div style={styles.syncBox}>
         {syncStatus === 'syncing' && <><Cloud size={14} color="#A9B0C9" /><span>Syncing…</span></>}
-        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-B</span></>}
+        {syncStatus === 'synced'  && <><Cloud size={14} color="#7FBF96" /><span>Synced</span><span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }} title="App build">· build 09-Nov-C</span></>}
         {syncStatus === 'error'   && <><CloudOff size={14} color="#E08A7D" /><span>Sync error</span></>}
         {syncStatus === 'idle'    && <><Cloud size={14} color="#A9B0C9" /><span>Connecting…</span></>}
       </div>
@@ -10164,7 +10198,7 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                       {/_lut$/.test(doc.supplyType) && fld('LUT ARN', 'lutArn')}
                       {fld('Shipping bill no.', 'shipBillNo')}
                       {fld('Shipping bill date', 'shipBillDate', '', 'date')}
-                      {fld('Port code', 'portCode', 'INMAA1')}
+                      <div style={{ ...styles.formGroup, flex: '1 1 200px', minWidth: 180 }}><label style={styles.label}>Port code</label><input list="world-ports" value={doc.portCode || ''} placeholder="Type port / city — e.g. Chennai" onChange={(e) => update('portCode', portCodeOf(e.target.value))} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} /></div>
                       {fld('Destination country', 'destCountry')}
                       {fld('Incoterm', 'incoterm', 'FOB / CIF / EXW')}
                       {fld('Currency', 'exCurrency', 'USD')}
@@ -10293,11 +10327,11 @@ function DocEditor({ dispatchCheck = null, costCheck = [], bomMissing = [], onOr
                 <div style={{ display: 'flex', gap: 12 }}>
                   <div style={{ ...styles.formGroup, flex: 1 }}>
                     <label style={styles.label}>Port of loading</label>
-                    <input value={doc.portOfLoading || ''} onChange={(e) => update('portOfLoading', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="e.g. Mumbai" />
+                    <input list="world-ports" value={doc.portOfLoading || ''} onChange={(e) => update('portOfLoading', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="e.g. Mumbai" />
                   </div>
                   <div style={{ ...styles.formGroup, flex: 1 }}>
                     <label style={styles.label}>Port of discharge</label>
-                    <input value={doc.portOfDischarge || ''} onChange={(e) => update('portOfDischarge', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="e.g. Dubai (Jebel Ali)" />
+                    <input list="world-ports" value={doc.portOfDischarge || ''} onChange={(e) => update('portOfDischarge', e.target.value)} style={{ ...styles.input, ...(isEditable ? {} : styles.inputReadOnly) }} readOnly={!isEditable} placeholder="e.g. Dubai (Jebel Ali)" />
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 12 }}>
@@ -34764,6 +34798,7 @@ export default function App() {
         )}
       </button>
 
+      <datalist id="world-ports">{WORLD_PORTS.map(pt => <option key={pt} value={pt} />)}</datalist>
       <div style={styles.main} className="app-main">
         {trialDaysLeft !== null && trialDaysLeft > 0 && !isSubscribed && !isTestAccount && (
           <TrialBanner daysLeft={trialDaysLeft} onUpgrade={() => setView('settings')} />
