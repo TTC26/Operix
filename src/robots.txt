@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+
+Sitemap: https://bi-zvora.vercel.app/sitemap.xml
