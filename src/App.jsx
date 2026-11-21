@@ -960,8 +960,8 @@ function buildZohoDocPrint(o) {
   }
   if (doc.notes) left += '<div class="zlbl" style="margin-top:6px">Notes</div><div class="zps">' + nl(doc.notes) + '</div>';
   let qrBlock = '';
-  if (!isPL) {
-    const qrTxt = ['DOC:' + (t.label || doc.type) + ' ' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.gstin || bi.name || ''), 'TO:' + ((party && (party.gstin || party.taxId)) || (party && party.name) || ''), 'AMT:' + Math.round(totals.grandTotal || 0)].join('|');
+  {
+    const qrTxt = ['DOC:' + (t.label || doc.type) + ' ' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.gstin || bi.name || ''), 'TO:' + ((party && (party.gstin || party.taxId)) || (party && party.name) || ''), isPL ? 'PKGS:' + items.reduce((a, it) => a + (Number(it.packages) || 0), 0) + '|GW:' + items.reduce((a, it) => a + (Number(it.grossWeight) || 0), 0).toFixed(2) : 'AMT:' + Math.round(totals.grandTotal || 0)].join('|');
     const svg = qrSvg(qrTxt, 84);
     if (svg) qrBlock = '<div style="flex:none;text-align:center;margin-left:10px"><div style="border:1px solid #000;padding:2px;line-height:0">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div>';
   }
@@ -1179,6 +1179,9 @@ function buildOverseasQuotePrint(o) {
   const sealOn = (bi.seal || bi.signature) && bi.printSeal !== false;
   const sealHtml = sealOn ? '<div style="height:54px;display:flex;align-items:center;gap:10px">' + (bi.seal ? '<img src="' + bi.seal + '" style="height:52px;max-width:80px;object-fit:contain">' : '') + (bi.signature ? '<img src="' + bi.signature + '" style="height:38px;max-width:100px;object-fit:contain">' : '') + '</div>' : '<div style="height:34px"></div>';
   B('<div class="ov-sign"><div class="ov-p">We hope our offer is in line with your requirements. Please feel free to contact us for any clarification.</div><div>Thanking you and assuring you of our best services,</div><div style="font-weight:700;margin-top:4px">For ' + esc(bi.name) + '</div>' + sealHtml + '<div style="font-weight:700">Authorized Signatory</div>' + (doc.ovSignName ? '<div>' + esc(doc.ovSignName) + '</div>' : '') + '<div>' + esc(doc.ovSignDesig || 'MD') + '</div>' + (_sigContact ? '<div>Mob: ' + esc(_sigContact) + '</div>' : '') + '</div>');
+
+  { const _q = qrSvg(['OFFER:' + (doc.number || ''), 'DT:' + (doc.date || ''), 'FROM:' + (bi.name || ''), 'TO:' + ((party && party.name) || ''), 'AMT:' + cur + ' ' + Math.round(total)].join('|'), 84);
+    if (_q) B('<div style="display:flex;justify-content:flex-end;margin-top:10px"><div style="text-align:center"><div style="border:1px solid #000;padding:2px;line-height:0;display:inline-block">' + _q + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div></div>'); }
 
   return { blocks, thead: '', tblOpen: '', css: OV_CSS + '.bd{border:none !important;padding:3mm 14mm 0 !important;font-size:10.5px;}body{font-family:Arial,Helvetica,sans-serif !important;}',
     pgf: (bi.name || '') + ' | Offer Ref: ' + (doc.number || '') + (doc.ovRevision ? ' (' + doc.ovRevision + ')' : '') + ' | Page {p} of {n}', watermark: doc.status === 'deleted' ? 'DELETED' : (doc.status === 'draft' ? 'DRAFT' : '') };
@@ -10446,6 +10449,14 @@ const MONTHS = [
 ];
 
 // ─── Employees ────────────────────────────────────────────────────────────────
+// QR code on letters (same generator as tax invoices) — injected just before the closing tags
+function _letterQrHtml(html, parts) {
+  const svg = qrSvg(parts.filter(Boolean).join('|'), 76);
+  if (!svg) return html;
+  const blk = '<div style="max-width:780px;margin:0 auto;padding:0 60px 24px;display:flex;justify-content:flex-end"><div style="text-align:center"><div style="border:1px solid #000;padding:2px;line-height:0;display:inline-block">' + svg + '</div><div style="font-size:8.5px;color:#444;margin-top:2px">Scan to verify</div></div></div>';
+  const k = html.lastIndexOf('</body>');
+  return k < 0 ? html + blk : html.slice(0, k) + blk + html.slice(k);
+}
 /* ── HR Letters — Warning & Termination ─────────────────────────────────── */
 function printHRLetter(letter, emp, businessInfo) {
   const biz   = businessInfo || {};
@@ -10525,7 +10536,7 @@ ${isDraft ? '<div class="draft-watermark">DRAFT</div>' : ''}
   ${isDraft ? '<p style="text-align:center;color:#999;font-size:11px;margin-top:24px">— DRAFT — Not for official use —</p>' : ''}
 </div></body></html>`;
 
-  printLetterFromHtml(html, biz, { fitOne: true });
+  printLetterFromHtml(_letterQrHtml(html, ['LETTER:' + title, 'REF:' + refNo, 'DT:' + (letter.issueDate || date), 'FROM:' + (biz.name || ''), 'TO:' + ((emp && emp.name) || '')]), biz, { fitOne: true });
 }
 
 
@@ -10599,7 +10610,7 @@ ${ol.additionalTerms ? `<h3>Additional Terms</h3><p style="white-space:pre-line"
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Acceptance<br/>${ol.candidateName}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz, { fitOne: true });
+  printLetterFromHtml(_letterQrHtml(html, ['OFFER LETTER', 'DT:' + date, 'FROM:' + (biz.name || ''), 'TO:' + (ol.candidateName || ol.name || ''), 'CTC:' + Math.round(gross)]), biz, { fitOne: true });
 }
 
 function OfferLetterView({ offerLetters, setHrLetters, employees, userRole, businessInfo }) {
@@ -11257,7 +11268,7 @@ function printOfferLetter(emp, businessInfo) {
   <div class="sig-box"><div style="height:48px"></div><div class="sig-line">Employee Acceptance<br/>${emp.name}</div></div>
 </div>
 </div></body></html>`;
-  printLetterFromHtml(html, biz, { fitOne: true });
+  printLetterFromHtml(_letterQrHtml(html, ['OFFER LETTER', 'DT:' + date, 'FROM:' + (biz.name || ''), 'TO:' + ((emp && emp.name) || ''), 'CTC:' + Math.round(gross)]), biz, { fitOne: true });
 }
 
 function EmployeesView({ employees, allEmployees, setEmployees, userRole, businessInfo, currentBizType = 'trading' }) {
@@ -18969,6 +18980,10 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
 
     // Same framed print engine as every other document: header/footer (letterhead or logo) on every
     // page, content flows page by page, nothing hidden behind the header/footer.
+    // QR code (same generator as tax invoices): contract no · date · parties · value
+    const _qrTxt = ['CONTRACT:' + (c.number || ''), 'DT:' + (c.date || ''), 'FROM:' + (bi?.name || bi?.companyName || ''), 'TO:' + (c.customerSnapshot?.name || ''), 'AMT:' + Math.round(Number(totalVal) || 0)].join('|');
+    const _qrSvg = qrSvg(_qrTxt, 84);
+    const contractQrHTML = _qrSvg ? '<div style="margin-top:24px;display:flex;justify-content:flex-end"><div style="text-align:center"><div style="border:1px solid #000;padding:2px;line-height:0;display:inline-block">' + _qrSvg + '</div><div style="font-size:9px;color:#444;margin-top:2px">Scan to verify · ' + (c.number || '') + '</div></div></div>' : '';
     const inner = `<div class="page">
       <div style="text-align:center;margin-bottom:20px;">
         <div style="font-size:17px;font-weight:700;letter-spacing:2px;color:#1E2A4A;text-transform:uppercase;">CONTRACT AGREEMENT</div>
@@ -18984,6 +18999,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
       ${milestoneTable}
       ${termsHTML}
       ${sigBlock}
+      ${contractQrHTML}
     </div>`;
     printLetterFromHtml('<!DOCTYPE html><html><body>' + inner + '</body></html>',
       { ...bi, ...(useLH ? {} : { printHeader: 'logo' }), ...(useSeal ? {} : { printSeal: false }) },
@@ -19101,7 +19117,7 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
             {terms.items.map((item, i) => {
               return (
                 <div key={i} style={{ marginBottom: 14 }}>
-                  {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{i + 1}. {item.title}</div>}
+                  {item.title && <div style={{ fontWeight: 700, color:'#1E2A4A', marginBottom:4 }}>{/^\s*\d+(\.\d+)*[.)]?\s/.test(item.title) ? '' : (i + 1) + '. '}{item.title}</div>}
                   <div style={{ marginLeft: item.title ? 16 : 0, lineHeight: 1.9 }}>
                     <ClauseBody text={item.text} prefix={!item.title ? `${i+1}. ` : ''} />
                   </div>
@@ -19122,6 +19138,10 @@ function ContractPrint({ contract: c, businessInfo: bi, termsLibrary, onBack }) 
             </div>
           ))}
         </div>
+        {(() => {
+          const _sv = qrSvg(['CONTRACT:' + (c.number || ''), 'DT:' + (c.date || ''), 'FROM:' + (bi.name || bi.companyName || ''), 'TO:' + (c.customerSnapshot?.name || ''), 'AMT:' + Math.round(Number(totalVal) || 0)].join('|'), 84);
+          return _sv ? <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}><div style={{ textAlign: 'center' }}><div style={{ border: '1px solid #000', padding: 2, lineHeight: 0, display: 'inline-block' }} dangerouslySetInnerHTML={{ __html: _sv }} /><div style={{ fontSize: 9, color: '#444', marginTop: 2 }}>Scan to verify · {c.number}</div></div></div> : null;
+        })()}
         </div>{/* end inner content */}
         {effLHF && <div style={{ background:'#fff', width:'100%', height:130, overflow:'hidden' }}><img src={effLHF} alt="letterpad footer" style={{ width:'100%', height:130, objectFit:'cover', objectPosition:'center', display:'block' }} /></div>}
       </div>
@@ -19365,7 +19385,7 @@ function PartnerAgreement({ partner: p, termsLibrary, businessInfo: bi, document
             <div style={{ fontWeight: 700, fontSize: 13, color: '#1E2A4A', marginBottom: 12, textTransform: 'uppercase' }}>Terms & Conditions</div>
             {terms.items.map((item, i) => (
               <div key={i} style={{ marginBottom: 12 }}>
-                {item.title && <div style={{ fontWeight: 700 }}>{i + 1}. {item.title}</div>}
+                {item.title && <div style={{ fontWeight: 700 }}>{/^\s*\d+(\.\d+)*[.)]?\s/.test(item.title) ? '' : (i + 1) + '. '}{item.title}</div>}
                 <div style={{ marginLeft: item.title ? 16 : 0 }}><ClauseBody text={item.text} prefix={!item.title ? `${i + 1}. ` : ''} /></div>
               </div>
             ))}
